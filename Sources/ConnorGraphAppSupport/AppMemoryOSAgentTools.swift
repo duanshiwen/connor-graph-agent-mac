@@ -430,25 +430,25 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
 
 public struct MemoryOSExpandL4Tool: AgentTool {
     public let name = "memory_os_expand_l4"
-    public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Use this for neighborhood context around a known entity; for complete class membership/list questions, use memory_os_l4_instances instead. Expansion hits are context and do not replace evidence validation."
+    public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Accepts entity name (not ID) — internally resolves to the matching L4 entity. Use this for neighborhood context around a known entity; for complete class membership/list questions, use memory_os_l4_instances instead. Expansion hits are context and do not replace evidence validation."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
-        "entityID": .string(description: "L4 entity id to expand from."),
-        "depth": .number(description: "Traversal depth. Defaults to 1, capped at 5."),
-        "limit": .number(description: "Maximum expansion hits. Defaults to 20.")
-    ], required: ["entityID"])
+        "entityName": .string(description: "L4 entity name to expand from."),
+        "depth": .number(description: "Traversal depth. Defaults to 5, capped at 10."),
+        "limit": .number(description: "Maximum expansion hits. Defaults to 200.")
+    ], required: ["entityName"])
 
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let entityID = arguments.string("entityID"), !entityID.isEmpty else {
-            throw AgentToolError.invalidArguments("entityID is required")
+        guard let entityName = arguments.string("entityName"), !entityName.isEmpty else {
+            throw AgentToolError.invalidArguments("entityName is required")
         }
-        let depth = max(1, min(arguments.int("depth") ?? 1, 5))
-        let limit = max(1, min(arguments.int("limit") ?? 20, 100))
-        let hits = try facade.expandMemoryOSL4(entityID: entityID, depth: depth, limit: limit)
+        let depth = max(1, min(arguments.int("depth") ?? 5, 10))
+        let limit = max(1, min(arguments.int("limit") ?? 200, 500))
+        let hits = try facade.expandMemoryOSL4(entityName: entityName, depth: depth, limit: limit)
         let rows = hits.map { hit -> [String: Any] in
             [
                 "recordID": hit.recordID,
@@ -460,9 +460,9 @@ public struct MemoryOSExpandL4Tool: AgentTool {
                 "score": hit.score
             ]
         }
-        let payload: [String: Any] = ["entityID": entityID, "depth": depth, "hitCount": hits.count, "hits": rows]
+        let payload: [String: Any] = ["entityName": entityName, "depth": depth, "hitCount": hits.count, "hits": rows]
         let json = try Self.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 expansion returned \(hits.count) hit(s) from \(entityID) at depth \(depth).", contentJSON: json, citations: hits.map(\.recordID))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 expansion returned \(hits.count) hit(s) from \(entityName) at depth \(depth).", contentJSON: json, citations: hits.map(\.recordID))
     }
 
     private static func renderJSON(_ object: [String: Any]) throws -> String {
