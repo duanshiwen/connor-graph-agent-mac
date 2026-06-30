@@ -18,10 +18,10 @@ import ConnorGraphAppSupport
 
     #expect(summaries.count == 1)
     #expect(summaries[0].accepted)
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
+    // LLM writes L2/L3/L4 directly via tool calls — mock executor does not simulate tool calls,
+    // so no L2 statements are created. Verify L1 cleanup and queue completion instead.
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "0")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l0_provenance_objects;").first?.first == "2")
-    #expect(try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now).isEmpty)
     #expect(try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now).isEmpty)
 }
 
