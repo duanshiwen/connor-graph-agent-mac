@@ -9,7 +9,7 @@ import ConnorGraphMemory
         captureEventIDs: ["capture-1", "capture-2"],
         provenanceObjectIDs: ["prov-1", "prov-2"],
         sourceSpanIDs: ["span-1"],
-        prompt: "Perform L1 unified projection into MemoryOSL1UnifiedProjectionOutput.",
+        prompt: "Process L1 cached events. Write L2 entity-centered working memory, L3 reusable knowledge candidates, and L4 stable entities.",
         metadata: ["event_count": "2"]
     )
     let executor = RecordingMemoryOSBackgroundExecutor(response: MemoryOSBackgroundModelResponse(
@@ -26,10 +26,9 @@ import ConnorGraphMemory
     #expect(request.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(request.artifactType == "memory_os_l1_unified_projection")
     #expect(request.prompt.contains("capture-1"))
-    #expect(request.prompt.contains("MemoryOSL1UnifiedProjectionOutput"))
-    #expect(request.prompt.contains("L2 operational facts") || request.prompt.contains("L2 operational"))
+    #expect(request.prompt.contains("L2 entity-centered working memory"))
     #expect(request.prompt.contains("L3 reusable knowledge candidates"))
-    #expect(request.prompt.contains("stable L4 entity/concept projections"))
+    #expect(request.prompt.contains("L4 stable entities"))
     #expect(result.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(result.artifactType == "memory_os_l1_unified_projection")
     #expect(result.rawArtifactJSON.contains("operationalEntities"))

@@ -5,13 +5,13 @@ import ConnorGraphMemory
 
 @Suite("Memory OS Background Tool Contract Tests")
 struct MemoryOSBackgroundToolContractTests {
-    @Test func l1WorkerRequestIncludesSearchAndReadProvenanceTools() throws {
+    @Test func l1WorkerRequestIncludesReadAndWriteTools() throws {
         let draft = MemoryOSL1UnifiedProjectionJobDraft(
             id: "job-l1-tools",
             captureEventIDs: ["cap-1"],
             provenanceObjectIDs: ["prov-1"],
             sourceSpanIDs: ["span-1"],
-            prompt: "Extract L2 facts."
+            prompt: "Process L1 cached events."
         )
         let executor = ToolRecordingMemoryOSBackgroundExecutor(response: MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}"))
 
@@ -19,14 +19,19 @@ struct MemoryOSBackgroundToolContractTests {
 
         let request = try #require(executor.requests.first)
         let toolNames = request.availableTools.map(\.name)
-        #expect(toolNames.contains("memory_os_search"))
+        // Read tools
+        #expect(toolNames.contains("memory_os_context"))
         #expect(toolNames.contains("memory_os_read_provenance"))
         #expect(toolNames.contains("memory_os_expand_l4"))
+        // Write tools
+        #expect(toolNames.contains("memory_os_l2_update_entities"))
+        #expect(toolNames.contains("memory_os_update_current_user_profile"))
+        #expect(toolNames.contains("memory_os_l3_update_beliefs"))
+        #expect(toolNames.contains("memory_os_l4_update_entities"))
         #expect(request.prompt.contains("Available tools"))
-        #expect(request.prompt.contains("memory_os_search"))
-        #expect(request.prompt.contains("memory_os_read_provenance"))
-        #expect(request.prompt.contains("Must use memory_os_search before deciding whether emitted L2 facts are new, duplicates, or refinements"))
-        #expect(request.prompt.contains("Record search-backed judgment"))
+        #expect(request.prompt.contains("memory_os_context"))
+        #expect(request.prompt.contains("memory_os_l2_update_entities"))
+        #expect(request.prompt.contains("memory_os_update_current_user_profile"))
     }
 
     @Test func toolDescriptorsCarrySchemasAndUsagePolicies() throws {
