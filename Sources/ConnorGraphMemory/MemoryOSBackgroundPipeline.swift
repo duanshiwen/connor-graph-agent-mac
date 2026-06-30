@@ -218,12 +218,14 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Person feature extraction policy:
         - Extract explicitly evidenced current-user and other-person features when they are useful future operational memory: preference, dislike, habit, goal, stable_trait, communication_preference, knowledge_background, interaction_guidance, personal_context, constraint.
         - Current-user profile_preference facts: use memory_os_update_current_user_profile with factType = profile_preference.
-        - Other-person profile facts: use memory_os_l2_update_entities. Only write when identity is clearly resolved from evidence.
+        - Other-person profile facts: use memory_os_l2_update_entities. Only write when identity is clearly resolved from evidence. Use SAME_AS for identity relations, NOT IDENTITY.
         - Weak one-off observations, jokes, transient emotions, and assistant guesses should not be written as stable traits.
         - Do not infer medical, psychological, or sensitive identity diagnoses.
 
         Allowed L2 predicates / GraphPredicate raw values:
         \(Self.allowedPredicateGuide())
+
+        ⚠️ IMPORTANT: Only use the exact raw values listed above (e.g., SAME_AS, NOT IDENTITY). Do not invent or abbreviate relation names. If unsure, use RELATED_TO.
 
         \(MemoryOSL4RelationPromptGuide.render())
 
