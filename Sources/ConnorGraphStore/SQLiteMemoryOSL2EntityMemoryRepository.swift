@@ -72,7 +72,7 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
     }
 
     private func loadAllEntities() throws -> [MemoryOSL2StoredEntity] {
-        let rows = try store.query(sql: "SELECT id, node_type, name, summary, metadata_json FROM memory_l2_nodes ORDER BY name ASC")
+        let rows = try store.query(sql: "SELECT id, node_type, name, summary, metadata_json, COALESCE(created_at, '') FROM memory_l2_nodes ORDER BY name ASC")
         return try rows.map { row in
             let metadata = try store.decode([String: String].self, row[4])
             return MemoryOSL2StoredEntity(
@@ -81,14 +81,15 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
                 type: row[1],
                 aliases: Self.splitStoredAliases(metadata["aliases"] ?? ""),
                 summary: row[3],
-                statements: []
+                statements: [],
+                createdAt: row[5]
             )
         }
     }
 
     private func loadStatements(for entity: MemoryOSL2StoredEntity) throws -> MemoryOSL2StoredEntity {
         let rows = try store.query(sql: """
-        SELECT s.id, s.text, s.predicate, COALESCE(o.name, ''), s.metadata_json
+        SELECT s.id, s.text, s.predicate, COALESCE(o.name, ''), s.metadata_json, COALESCE(s.committed_at, '')
         FROM memory_l2_statements s
         LEFT JOIN memory_l2_nodes o ON o.id = s.object_id
         WHERE s.subject_id = \(store.quote(entity.id))
@@ -100,7 +101,8 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
                 text: row[1],
                 relation: row[2],
                 connectedEntityName: row[3].isEmpty ? nil : row[3],
-                metadata: try store.decode([String: String].self, row[4])
+                metadata: try store.decode([String: String].self, row[4]),
+                committedAt: row[5]
             )
         }
         var copy = entity
