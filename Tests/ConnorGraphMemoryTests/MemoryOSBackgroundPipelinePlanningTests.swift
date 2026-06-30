@@ -26,7 +26,7 @@ import ConnorGraphMemory
     #expect(jobs.first?.sourceSpanIDs == ["span-0", "span-1"])
     #expect(jobs.first?.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(jobs.first?.prompt.contains("L2 entity-centered working memory") == true)
-    #expect(jobs.first?.prompt.contains("search existing L2") == true)
+    #expect(jobs.first?.prompt.contains("memory_os_context") == true)
 }
 
 @Test func l1UnifiedProjectionPlannerDoesNotCreateJobsBelowThreshold() throws {
