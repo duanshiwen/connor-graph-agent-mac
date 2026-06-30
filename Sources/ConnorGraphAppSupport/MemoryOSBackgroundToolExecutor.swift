@@ -137,9 +137,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                     .replacingOccurrences(of: "-", with: "_")
                     .replacingOccurrences(of: " ", with: "_")
                     .uppercased()
-                guard let predicate = GraphPredicate(rawValue: normalized) else {
-                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("Unsupported relation: \(rawRelation)")
-                }
+                let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
                 let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: factType, predicate: predicate, anchor: anchor, now: now)
                 let summary = try facade.projectAndRecordLLMArtifact(rawContent: artifactJSON, modelID: "memory_os_update_current_user_profile", processingRunID: context.runID, artifactType: "memory_os_current_user_fact_update", schemaName: "MemoryOSL1UnifiedProjectionOutput", now: now)
                 artifactIDs.append(summary.artifactID)
