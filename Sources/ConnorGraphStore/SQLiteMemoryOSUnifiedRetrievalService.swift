@@ -1,6 +1,5 @@
 import Foundation
 import ConnorGraphCore
-import ConnorGraphCore
 
 public enum MemoryOSRetrievalLayer: String, Sendable, Codable, Equatable, Hashable, CaseIterable {
     case l0 = "L0"
@@ -260,11 +259,13 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     }
 
     private func ftsQuery(_ text: String) -> String {
-        let normalized = normalizedFTSTerms(text)
-        return normalized.isEmpty ? text : normalized.joined(separator: " OR ")
+        let terms = expandedSearchTerms(text)
+        return FTS5QuerySanitizer.sanitizeTerms(terms)
     }
 
-    private func normalizedFTSTerms(_ text: String) -> [String] {
+    /// Expand search text into terms with domain-specific synonyms.
+    /// All output terms are plain strings; FTS5 quoting is handled by FTS5QuerySanitizer.
+    private func expandedSearchTerms(_ text: String) -> [String] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 

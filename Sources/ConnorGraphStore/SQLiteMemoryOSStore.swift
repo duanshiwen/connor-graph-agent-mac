@@ -346,7 +346,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func searchStatementsFTS(query: String, limit: Int = 20) throws -> [String] {
-        try queryStrings(sql: "SELECT statement_id FROM memory_l2_statements_fts WHERE memory_l2_statements_fts MATCH \(quote(query)) LIMIT \(limit)")
+        try queryStrings(sql: "SELECT statement_id FROM memory_l2_statements_fts WHERE memory_l2_statements_fts MATCH \(quote(ftsSafeMatch(query))) LIMIT \(limit)")
     }
 
     // MARK: - L3
@@ -425,7 +425,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
-        try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(quote(query)) LIMIT \(limit)")
+        try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(quote(ftsSafeMatch(query))) LIMIT \(limit)")
     }
 
     // MARK: - Production operations
