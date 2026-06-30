@@ -230,7 +230,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         \(MemoryOSL4RelationPromptGuide.render())
 
         Tool usage summary:
-        - memory_os_context(query) — Search L2/L3/L4 before writing. Use to check for duplicates and existing context.
+        - memory_os_context(query) — Search L2/L3/L4 before writing. Use to check for duplicates and existing context. NOT needed for current-user facts (use memory_os_update_current_user_profile directly).
         - memory_os_l2_update_entities(entities[]) — Write L2 entities and statements. Each entity needs name (required), type, aliases, summary, and statements[].
         - memory_os_update_current_user_profile(facts[]) — MANDATORY for current-user facts. Each fact needs statement, factType, and relation.
         - memory_os_l3_update_beliefs(beliefs[]) — Write L3 knowledge. Each belief needs statement (required), domain, relatedEntityNames.
