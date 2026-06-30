@@ -51,10 +51,17 @@ struct ConnorCLI {
         case "delete":
             guard let id = args.dropFirst().first else { return try encode(["error": "missing_task_id"], encoder: encoder) }
             return try encode(try stack.deleteTask(id: id, reason: "cli"), encoder: encoder)
+        case "purge":
+            guard let id = args.dropFirst().first else { return try encode(["error": "missing_task_id"], encoder: encoder) }
+            return try encode(try stack.purgeTask(id: id, reason: "cli"), encoder: encoder)
+        case "rename":
+            guard let id = args.dropFirst().first else { return try encode(["error": "missing_task_id"], encoder: encoder) }
+            guard let newName = args.dropFirst().dropFirst().first else { return try encode(["error": "missing_new_name"], encoder: encoder) }
+            return try encode(try stack.renameTask(id: id, newName: newName), encoder: encoder)
         case "session":
             return try routeSessionTasks(args: Array(args.dropFirst()), stack: stack, encoder: encoder)
         default:
-            return try encode(["error": "unknown_tasks_command", "usage": "connor tasks list"], encoder: encoder)
+            return try encode(["error": "unknown_tasks_command", "usage": "connor tasks list|show|stop|restore|delete|purge|rename"], encoder: encoder)
         }
     }
 
