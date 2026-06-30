@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-29 00:36 GMT+8  
+文档更新时间：2026-06-30 11:30 GMT+8  
 定位：本 README 只记录当前架构、边界、运行布局和开发约束，不作为历史 changelog。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -259,48 +259,9 @@ System prompts are deliberately minimal: only context retrieval and user profile
 
 Connor Memory OS is the production memory boundary. It is not a graph editor, dashboard or direct LLM-write surface.
 
-Layer contract:
-
-- **L0 Provenance Vault**：raw evidence objects and spans. Immutable.
-- **L1 Capture Ledger / Processing Queue**：durable capture events and operational queue state. Processed L1 events are physically deleted after accepted projection because L0 remains durable evidence.
-- **L2 Operational Memory**：entity-centered working memory extracted from validated evidence. L2 stores entities with aliases, types, and append-only statements. L2 does not require evidence span IDs for statement creation. L2 operations are exposed to both LLM tools and CLI through a shared service (`MemoryOSL2EntityMemoryService`).
-- **L3 Knowledge Layer**：reusable theories, claims, frameworks, patterns, standards, processes, SOPs and decision bases. L3 uses a simplified belief model (statement, domain, related object names). L3 is populated through LLM direct write tools, not an automated L2→L3 synthesis pipeline.
-- **L4 Stable Entity / Concept Layer**：relaxed stable anchors for people, projects, organizations, work objects and concepts. L4 uses a controlled entity type vocabulary (`MemoryOSEntityType`); unsupported LLM-provided labels are normalized to `unknown` instead of schema-expanding one-off types. L4 does not use LLM-provided confidence or required evidence spans as relation acceptance gates. See `Docs/MemoryOS/L4RelaxedEntityGraph.md`.
-
-Write path:
-
-1. Chat messages, browser selections and native-source evidence enter through `AppMemoryOSFacade`.
-2. Raw evidence is preserved as L0/L1.
-3. LLMs propose structured artifacts or entity updates.
-4. L2 accepts entity updates and statements through `memory_os_l2_find_entities` / `memory_os_l2_update_entities` tools. L2 does not require evidence fields.
-5. L3 accepts direct writes through `memory_os_l3_write_beliefs` tool.
-6. L4 accepts direct writes through `memory_os_l4_write_entities` tool. L4 projections from L1 also go through artifact validation and controlled type normalization.
-
-Background AI jobs:
-
-- `memory.l1.unified_projection`：groups pending L1 captures and projects operational facts into L2 plus relaxed stable entity facts into L4.
-
-Important rules:
-
-- High confidence alone never promotes L2 facts to L3.
-- L4 normalizes raw LLM entity type labels into a controlled vocabulary; unsupported labels become `unknown`.
-- L4 does not use LLM-provided confidence or required evidence spans as relation gates.
-- L4 relation validation keeps structural checks (subject/object existence, known predicates, self-loop rejection, endpoint type sanity) but not confidence/evidence gates.
-- L4 expansion scoring uses predicate weight and graph depth decay, not LLM-provided confidence.
-- Historical semantic records are append-only; currentness is derived by query/current-view logic (newer validAt → newer committedAt → deterministic id).
-- L2 statements do not require evidence span IDs; the L1→L2 prompt emphasizes fact-first extraction with entity names and relation types.
-
-LLM-facing Memory OS tools:
-
-```text
-memory_os_context          Retrieve Memory OS context package for current conversation
-memory_os_read_record      Read a single Memory OS record by layer and ID
-memory_os_l2_find_entities Find L2 entities by names/aliases
-memory_os_l2_update_entities  Upsert L2 entities and append statements
-memory_os_l3_write_beliefs    Direct-write L3 beliefs
-memory_os_l4_write_entities   Direct-write L4 entities and relations
-memory_os_provenance      Read provenance object with optional span detail
-```
+- Five-layer architecture: L0 Provenance → L1 Capture → L2 Operational → L3 Knowledge → L4 Stable Entities.
+- LLM-facing tools: `memory_os_context`, `memory_os_read_record`, `memory_os_l2_find_entities`, `memory_os_l2_update_entities`, `memory_os_l3_write_beliefs`, `memory_os_l4_write_entities`, `memory_os_provenance`.
+- Full architecture, layer contract, data models, write path, retrieval, ObserveLog and background pipeline → see **Section 6. Memory OS**.
 
 ### Skills, Tasks and Automation
 
@@ -319,7 +280,259 @@ memory_os_provenance      Read provenance object with optional span detail
 
 ---
 
-## 6. Search Kernel
+## 6. Memory OS
+
+Memory OS is the cognitive infrastructure backbone of Connor. It is **not** a graph editor, dashboard or direct LLM-write surface.
+
+### 6.1 Layer Architecture
+
+| Layer | Name | Responsibility | Mutability | Data Model |
+|-------|------|---------------|------------|------------|
+| **L0** | Provenance Vault | Raw evidence objects and spans | **Immutable** | `MemoryOSProvenanceObject`, `MemoryOSProvenanceSpan` |
+| **L1** | Capture Ledger / Queue | Durable capture events + operational queue state | Processed items deleted after accepted projection (L0 remains durable evidence) | `MemoryOSCaptureEvent`, `MemoryOSQueueItem` |
+| **L2** | Operational Memory | Entity-centered working memory extracted from validated evidence | Append-only statements | `MemoryOSNode`, `MemoryOSStatement` |
+| **L3** | Knowledge Layer | Reusable theories, claims, frameworks, patterns, standards, SOPs, decision bases | Direct-write by LLM | `MemoryOSBelief` |
+| **L4** | Stable Entity / Concept | Relaxed stable anchors for people, projects, organizations, work objects and concepts | Upsert with time-versioning | `MemoryOSEntity`, `MemoryOSEntityStatement` |
+
+L4 uses a controlled entity type vocabulary (`MemoryOSEntityType`); unsupported LLM-provided labels are normalized to `unknown` instead of schema-expanding one-off types. See `Docs/MemoryOS/L4RelaxedEntityGraph.md`.
+
+Read semantics: **query-time current view derivation** — historical semantic records are append-only; currentness is derived by newer validAt → newer committedAt → deterministic id.
+
+```text
+                ┌─────────────────────────────────────┐
+                │           SwiftUI Shell             │
+                │  (chat, sidebar, browser, settings) │
+                └──────────────┬──────────────────────┘
+                               │
+                ┌──────────────▼──────────────────────┐
+                │     AppMemoryOSFacade (write gate)  │
+                └──────┬───────────────────┬──────────┘
+                       │                   │
+           ┌───────────▼───┐       ┌───────▼──────────┐
+           │  LLM Tools    │       │ Background Jobs  │
+           │  (7 tools)    │       │ (unified proj.)  │
+           └───┬───┬───┬───┘       └───────┬──────────┘
+               │   │   │                   │
+    ┌──────────▼┐  │  ┌▼──────────┐  ┌─────▼──────┐
+    │    L0     │  │  │  L3       │  │L1→L2+L4   │
+    │(immutable)│  │  │(beliefs)  │  │projection  │
+    └────┬──────┘  │  └───────────┘  └──┬────┬────┘
+         │         │                    │    │
+    ┌────▼────┐    │              ┌─────▼┐ ┌─▼────┐
+    │   L1    │    │              │  L2  │ │  L4  │
+    │ (queue) │    └──────────────┤(nodes│ │(ent.)│
+    └─────────┘                   │ stmts│ │relat)│
+                                  └──────┘ └──────┘
+```
+
+### 6.2 Data Models
+
+**L0/L1 models** (`MemoryOSDomain.swift`):
+
+```swift
+// L0: immutable provenance
+MemoryOSProvenanceObject  // sourceType, sourceID, title, content, contentHash (SHA256),
+                          // occurredAt, ingestedAt, sessionID, workObjectID, confidentiality,
+                          // status. Immutable after creation.
+MemoryOSProvenanceSpan    // provenanceObjectID, startOffset, endOffset, text. Points to
+                          // a slice within the provenance object.
+
+// L1: capture events + queue
+MemoryOSCaptureEvent      // provenanceObjectID, eventType, occurredAt, tokenEstimate,
+                          // processingState (pending→leased→processing→succeeded|failed|deadLetter)
+MemoryOSQueueItem         // kind, status, priority, payloadJSON, attemptCount, maxAttempts,
+                          // nextRunAt, lockedAt/By, leaseExpiresAt, idempotencyKey, payloadHash
+```
+
+**L2 models** (`MemoryOSDomain.swift`, `MemoryOSL2EntityMemoryService.swift`):
+
+```swift
+// L2: operational working memory
+MemoryOSNode              // id, stableKey, nodeType, name, summary. Entity anchor in working memory.
+MemoryOSStatement         // id, subjectID, predicate, objectID?, text, assertionKind (observed/inferred/summarized),
+                          // confidence, validAt, committedAt, evidenceSpanIDs, sourceArtifactID.
+                          // Temporal: append-only; currentness derived by query-time logic.
+
+// L2 simplified entity model (for LLM tool interface)
+MemoryOSL2StoredEntity    // id, name, type, aliases[], summary, statements[]
+MemoryOSL2StoredStatement // id, text, relation, connectedEntityName, metadata
+```
+
+**L3 models**:
+
+```swift
+// L3: reusable knowledge beliefs
+MemoryOSBelief            // id, statement, domain (normalized discipline domain),
+                          // relatedObjectNames (deduplicated, normalized). Domain aliases:
+                          // "cs"→"computer-science", "ai"/"ml"→"artificial-intelligence",
+                          // "software"→"software-engineering", "memory-os"→"knowledge-management"
+```
+
+**L4 models** (`MemoryOSDomain.swift`):
+
+```swift
+// L4: stable entities and entity statements
+MemoryOSEntity            // id, stableKey (scope:type:name), entityType (controlled vocab),
+                          // name, aliases[], summary, confidence, createdAt, updatedAt, validFrom?
+MemoryOSEntityStatement   // id, entityID, predicate (MemoryOSL4RelationPredicate),
+                          // objectEntityID?, text, assertionKind, confidence,
+                          // validAt, committedAt, evidenceSpanIDs, sourceArtifactID
+```
+
+**L4 Controlled Entity Type Vocabulary** (`MemoryOSEntityType` — 41 types):
+
+```text
+person, organization, group, role, population, place, facility, spatial_object,
+concept, theory, framework, discipline, standard, language, metric, identifier_scheme,
+creative_work, document, dataset, software, product, media_object, website,
+project, event, process, decision, task, rule, agreement,
+physical_object, device, vehicle, biological_entity, medical_entity, chemical_entity,
+economic_entity, award, unknown
+```
+
+Raw LLM labels go through `normalizeRawType()` with 80+ aliases (e.g. `human`→`person`, `company`→`organization`, `method`→`framework`, `app`→`software`, `policy`→`rule`, `workflow`→`process`). Unmatched labels become `unknown`.
+
+**L4 Relation Predicates** (`MemoryOSL4RelationPredicate` — 80+ predicates, 12 categories):
+
+| Category | Predicates (selected) | Retrieval Weight Range |
+|----------|-----------------------|-----------------------|
+| **Identity** | `SAME_AS`, `ALIAS_OF`, `EQUIVALENT_TO`, `EXACT_MATCH`, `CLOSE_MATCH` | 0.88 – 1.0 |
+| **Taxonomy** | `INSTANCE_OF`, `SUBCLASS_OF`, `BROADER_THAN`, `NARROWER_THAN` | 0.9 |
+| **Composition** | `HAS_PART`, `PART_OF`, `CONTAINS`, `MEMBER_OF`, `OVERLAPS_WITH` | 0.8 |
+| **Dependency** | `DEPENDS_ON`, `REQUIRES`, `ENABLES`, `PREVENTS`, `CONSTRAINS` | 0.72 – 0.8 |
+| **Capability** | `SUPPORTS_CAPABILITY`, `IMPLEMENTS`, `USES` | 0.72 – 0.75 |
+| **Applicability** | `APPLIES_TO`, `USED_FOR`, `SPECIALIZES`, `GENERALIZES`, `FIELD_OF_WORK`, `IN_INDUSTRY` | 0.7 – 0.75 |
+| **Provenance** | `DERIVED_FROM`, `BASED_ON`, `SUPPORTED_BY`, `CITES`, `QUOTES`, `GENERATED_BY`, `VALIDATED_BY`, `ATTRIBUTED_TO` | 0.68 – 0.75 |
+| **Governance** | `DECIDES`, `GOVERNS`, `COMPLIES_WITH`, `VIOLATES`, `REPLACES`, `SUPERSEDES`, `DEPRECATES` | 0.72 |
+| **Causality** | `CAUSES`, `INFLUENCES`, `MITIGATES`, `RISKS` | 0.65 – 0.7 |
+| **Contribution** | `CREATED_BY`, `MAINTAINED_BY`, `OWNED_BY`, `RESPONSIBLE_FOR`, `CONTRIBUTED_BY`, `REVIEWED_BY`, `AUTHORED_BY`, `DEVELOPED_BY`, `FOUNDED_BY`, `WORKS_ON` | 0.68 |
+| **Location** | `LOCATED_IN`, `HAS_LOCATION`, `HAS_COORDINATE` | 0.58 – 0.7 |
+| **Reference** | `DIFFERENT_FROM`, `OPPOSITE_OF`, `RELATED_TO`, `ASSOCIATED_WITH`, `ABOUT`, `MENTIONS` | 0.4 – 0.62 |
+
+Each predicate has four properties: **category** (1 of 12), **inverse** (optional reverse predicate, e.g. `HAS_PART`↔`PART_OF`), **isSymmetric** (e.g. `SAME_AS`, `RELATED_TO`), **isTransitive** (e.g. `SUBCLASS_OF`, `PART_OF`, `LOCATED_IN`, `DEPENDS_ON`).
+
+### 6.3 LLM Interface (7 tools)
+
+LLM-facing Memory OS tools, registered in `AppMemoryOSAgentTools.swift`:
+
+| Tool | Layer | Description |
+|------|-------|-------------|
+| `memory_os_context` | All | Retrieve Memory OS context package for current conversation (retrieval + context building) |
+| `memory_os_read_record` | All | Read a single Memory OS record by layer and ID |
+| `memory_os_l2_find_entities` | L2 | Find L2 working-memory entities by exact name or alias |
+| `memory_os_l2_update_entities` | L2 | Upsert L2 entities and append statements; entity names split/dedup/upsert; connected entities auto-created |
+| `memory_os_l3_write_beliefs` | L3 | Direct-write L3 beliefs (bypasses promotion policy; domain + statement validated) |
+| `memory_os_l4_write_entities` | L4 | Direct-write L4 entities and relations; entity type normalized via `MemoryOSEntityType.normalizeRawType()`; structural validation applied |
+| `memory_os_provenance` | L0 | Read provenance object with optional span detail |
+
+### 6.4 Write Path
+
+```text
+Chat messages ─────────┐
+Browser selections ────┤
+Native source evidence ┤   ┌─────────────────────────┐
+Source events ─────────┼──▶│   AppMemoryOSFacade     │
+Attachments ───────────┘   │   (write gate / facade) │
+                           └────┬──────────┬─────────┘
+                                │          │
+                    ┌───────────▼───┐  ┌───▼───────────────┐
+                    │ LLM Tools     │  │ Background AI Job │
+                    │ (7 tools)     │  │ unified_projection│
+                    └──┬──┬──┬──┬───┘  └──┬────────┬───────┘
+                       │  │  │  │         │        │
+              ┌────────▼┐ │  │ ┌▼───────┐ │  ┌─────▼────┐
+              │  L0/L1  │ │  │ │  L3    │ │  │ L2+L4   │
+              │(evidence│ │  │ │(belief)│ │  │(projec.)│
+              └────┬────┘ │  │ └────────┘ │  └─────────┘
+                   │      │  │            │
+              ┌────▼────┐ │  └────────────│──── L4 direct write
+              │   L1    │ │               │
+              │ (queue)─│─┘               │
+              └────┬────┘                 │
+                   │                      │
+                   ▼                      ▼
+           ┌───────────────┐    ┌──────────────────┐
+           │ L1→L2+L4      │    │ Artifact         │
+           │ Unified Proj. │───▶│ Validation +     │
+           │ (background)  │    │ Type Normalization│
+           └───────────────┘    └──────────────────┘
+```
+
+Key write-path rules:
+
+- High confidence alone never promotes L2 facts to L3.
+- L4 normalizes raw LLM entity type labels into a controlled vocabulary; unsupported labels become `unknown`.
+- L4 does not use LLM-provided confidence or required evidence spans as relation gates.
+- L4 relation validation keeps structural checks (subject/object existence, known predicates, self-loop rejection, endpoint type sanity) but not confidence/evidence gates.
+- L4 expansion scoring uses predicate weight and graph depth decay, not LLM-provided confidence.
+- Historical semantic records are append-only; currentness is derived by query/current-view logic (newer validAt → newer committedAt → deterministic id).
+- L2 statements do not require evidence span IDs; the L1→L2 prompt emphasizes fact-first extraction with entity names and relation types.
+
+### 6.5 Retrieval & Context System
+
+**Hybrid retrieval** — merged ranking across lexical (FTS), semantic (vector) and graph (L4 neighborhood expansion) retrieval modes.
+
+**Context building pipeline** (`MemoryOSContextBuilder`, `MemoryOSContextModels.swift`):
+
+1. Multi-layer retrieval collects relevant records from L0–L4.
+2. Context builder assembles: blocks, entity cards, relation cards, evidence snippets.
+3. Budget-trimmed to configured limits.
+4. Rendered as a `MemoryOSContextPackage` — the LLM's interface to memory.
+
+`MemoryOSContextPackage` contains: executive summary, context text, blocks, entity cards, relation cards, evidence cards, diagnostics, raw retrieval trace, suggested next actions, budget report, quality signals (relevance score, evidence coverage, relation coverage).
+
+Budget defaults: max 8,000 characters, 16 blocks, 10 entity cards, 24 relation cards, 8 evidence cards, 3 evidence refs per block.
+
+**Roles & priorities** (descending):
+
+| Role | Priority | Trigger |
+|------|----------|---------|
+| `currentUserProfile` | 100 | taskIntent == `.currentUserPersonalization` |
+| `conflict` | 95 | conflicting facts in retrieval set |
+| `projectState` | 90 | project-related retrieval |
+| `operationalFact` | 80 | L2 hits |
+| `relation` | 75 | L4 relation hits |
+| `stableEntity` | 70 | L4 entity hits |
+| `reusableKnowledge` | 65 | L3 hits |
+| `evidence` | 60 | L0/L1 hits |
+| `uncertainty` | 50 | low-confidence retrieval |
+| `historicalContext` | 40 | stale temporal records |
+| `nextStepHint` | 30 | suggested next actions |
+
+**Task intents** (`MemoryOSTaskIntent`): `answerQuestion`, `continueConversation`, `updateProject`, `debugCode`, `planWork`, `summarizeMemory`, `verifyClaim`, `resolveEntity`, `listInstances`, `explainRelationship`, `currentUserPersonalization`, `auto`.
+
+### 6.6 ObserveLog (Rolling Buffer)
+
+`ObserveLog.swift` — lightweight short-term buffer for observations that may be worth absorbing into Memory OS.
+
+| Field | Values / Notes |
+|-------|---------------|
+| Kinds (8) | `operation`, `tool_event`, `insight`, `fragment`, `observation`, `candidate_fact`, `decision_hint`, `user_preference` |
+| Sources (7) | `user`, `agent`, `tool`, `import`, `search`, `system` |
+| Statuses (4) | `active`, `promoted`, `dismissed`, `expired` |
+| Retention | 30 days default |
+| Expiring-soon window | 3 days before expiry |
+| System task | Daily sweep of expired entries |
+| Promotion path | Entry can be promoted to Memory OS node via `promoted(toNodeID:)` |
+
+### 6.7 Background Pipeline
+
+**Trigger conditions** (`MemoryOSL1ProcessingTriggerPolicy`):
+- Pending capture events ≥ 100 (`pendingCountThreshold`), **or**
+- Oldest pending event age ≥ 24h (`pendingAgeThreshold`), **or**
+- Manual trigger via CLI.
+
+**Job types** (`MemoryOSBackgroundJobKind`):
+- `memory.l1.unified_projection` — groups pending L1 captures and projects operational facts into L2 + relaxed stable entity facts into L4.
+- `memory.l1.synthesize_knowledge` — knowledge candidate synthesis (L2 candidates → L3 beliefs).
+
+**Time-block builder** (`MemoryOSTimeBlockBuilder`): target token limit 60k, hard limit 80k; splits on day boundaries and 3-hour gaps.
+
+**Execution tracking** (`MemoryOSBackgroundRunDomain.swift`): full message/tool-call history per run. `MemoryOSBackgroundRunRecord` (run lifecycle), `MemoryOSBackgroundMessageRecord` (messages), `MemoryOSBackgroundToolCallRecord` (tool calls). Supports idempotency keys, max 3 retries, dead-letter queue.
+
+---
+
+## 7. Search Kernel
 
 The Rust-based Tantivy embedded search kernel (`SearchKernel/`) is compiled as an in-process C-ABI sidecar. It is not a server, daemon or HTTP service.
 
@@ -340,7 +553,7 @@ Build scripts:
 
 ---
 
-## 7. UI Guidelines
+## 8. UI Guidelines
 
 Connor is a native macOS app.
 
@@ -357,7 +570,7 @@ User-facing copy should use the "康纳同学" voice: warm, precise, local-first
 
 ---
 
-## 8. Development Commands
+## 9. Development Commands
 
 From the repository root:
 
@@ -385,7 +598,7 @@ find Sources Tests -name '*.swift' | wc -l
 
 ---
 
-## 9. Code Quality Checklist
+## 10. Code Quality Checklist
 
 Before claiming a change is complete:
 
@@ -405,7 +618,7 @@ Before claiming a change is complete:
 
 ---
 
-## 10. Deferred / Non-goals
+## 11. Deferred / Non-goals
 
 - Remote daemon or cloud sync
 - Public API server
@@ -421,6 +634,6 @@ Before claiming a change is complete:
 
 ---
 
-## 11. License
+## 12. License
 
 See [LICENSE](LICENSE).
