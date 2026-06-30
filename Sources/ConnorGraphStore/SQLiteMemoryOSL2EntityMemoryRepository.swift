@@ -48,17 +48,9 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
         if !existing.isEmpty {
             return MemoryOSL2StatementActionSummary(text: text, action: "skipped_duplicate")
         }
-        let connectedID: String?
-        if let connectedName = statement.connectedEntity?.nilIfBlank {
-            let upsert = try upsertEntity(MemoryOSL2EntityUpdate(name: connectedName, type: statement.connectedEntityType, aliases: nil, summary: nil), aliases: [])
-            connectedID = upsert.entity.id
-        } else {
-            connectedID = nil
-        }
+        let connectedID: String? = nil
         let metadata = [
-            "l2_fact_type": statement.factType,
-            "polarity": statement.polarity,
-            "originalPhrase": statement.originalPhrase
+            "l2_fact_type": statement.factType
         ].compactMapValues { $0?.nilIfBlank }
         let now = Date()
         let memoryStatement = MemoryOSStatement(

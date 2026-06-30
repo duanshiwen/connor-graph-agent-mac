@@ -192,7 +192,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Write one complete natural-language statement per fact; statement text is the semantic authority.
         - Predicate/relation is a routing and retrieval handle, not the full semantics.
         - Choose the most precise GraphPredicate when clear; use RELATED_TO when useful but uncertain.
-        - Preserve negation, exclusion, rejection, cancellation, postponement, and supersession with metadata.polarity and metadata.originalPhrase when applicable.
+        - Preserve negation, exclusion, rejection, cancellation, postponement, and supersession directly in the statement text when applicable.
         - If a new fact refines an old fact, append a refinement statement rather than overwriting history.
         - If identity, ownership, time, or object boundary is ambiguous, mark ambiguity in metadata/warnings instead of guessing.
 
@@ -253,10 +253,10 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         L2 entity tool contract:
         - Use memory_os_l2_find_entities(names) to check existing L2 entities by exact name/alias. Provide likely aliases in one string separated by comma, Chinese comma, dunhao, semicolon, or newline.
         - Use memory_os_l2_update_entities(entities[]) to update L2 working memory in batches.
-        - For update statements, provide text, optional relation, optional connectedEntity, optional connectedEntityType, optional factType, optional polarity, and optional originalPhrase.
+        - For update statements, provide text, optional relation, and optional factType.
         - If relation is uncertain, omit it or use RELATED_TO.
         - Do not create entities for every noun phrase; create or update only objects likely to be useful future retrieval anchors.
-        - Preserve negative or exclusion semantics explicitly. Example: text = "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。", factType = decision, polarity = exclude, originalPhrase = "不去贫民窟".
+        - Preserve negative or exclusion semantics directly in the statement text.
 
         Current-user dedicated fact write tool note:
         - Outside this L1 artifact, when using memory_os_update_current_user_profile, provide only facts[].statement, facts[].factType, and facts[].relation.
@@ -287,11 +287,11 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Class-specific extraction cues:
         - profile_preference: Extract when evidence states or strongly shows a person's preference, dislike, habit, goal, stable trait, communication preference, interaction guidance, knowledge background, emotional-support preference, personal constraint, or stable personal context. Anchor first-person user-authored evidence to current_user only when authorship is supported. Anchor other-person profile facts only when identity is resolved. Do not extract transient moods, jokes, weak one-off observations, politeness, or assistant psychological guesses as stable profile facts.
         - project_state: Extract when evidence updates the current state, scope, milestone, requirement, constraint, design direction, active context, open problem, or known limitation of a work_object. Anchor to the most specific work_object or project phase. Prefer project_state over implementation when the fact is about product/project direction rather than code/runtime behavior.
-        - task_commitment: Extract when someone commits to do something, asks for follow-up, creates a TODO, assigns responsibility, sets a due date, completes, cancels, or postpones work. Anchor to the responsible person or relevant work_object depending on retrieval need. Use polarity/status metadata for completion, cancellation, or deferment when applicable.
+        - task_commitment: Extract when someone commits to do something, asks for follow-up, creates a TODO, assigns responsibility, sets a due date, completes, cancels, or postpones work. Anchor to the responsible person or relevant work_object depending on retrieval need.
         - calendar_time: Extract when evidence contains a schedule, event time, deadline, time block, conflict, start/end time, recurrence, or temporal coordination. Anchor to the event or time_expression. Do not confuse vague narrative time with actionable calendar/time memory.
         - communication: Extract when evidence is about a message, email, chat, RSS item, sender, recipient, mention, request, reply, topic, or communication-derived action. Anchor to the message/document/person/work_object most likely to be searched later. Preserve sender/recipient/topic metadata when available.
         - source_document: Extract when evidence describes an attachment, document, webpage, transcript, citation, source item, answer, or provenance relationship. Anchor to the document/artifact/source item. Do not duplicate full source content; L0 remains the evidence store.
-        - decision: Extract when evidence states a selected option, explicit decision, rejection, approval, rationale, owner, supersession, or tradeoff conclusion. Anchor to the work_object, person, event, or decision topic. Always preserve negative decisions and rejected options when operationally important. Use polarity = affirm/exclude/reject/cancel/defer/supersede as appropriate.
+        - decision: Extract when evidence states a selected option, explicit decision, rejection, approval, rationale, owner, supersession, or tradeoff conclusion. Anchor to the work_object, person, event, or decision topic. Always preserve negative decisions and rejected options in the statement text when operationally important.
         - implementation: Extract when evidence concerns code, architecture, runtime behavior, dependency, module relation, bug, fix, feature, test result, migration, API contract, or implementation status. Anchor to the work_object, module, file, component, feature, or repository. Prefer implementation over project_state when the fact is about actual code/runtime/test behavior.
         - environment_config: Extract when evidence concerns local environment, branch, toolchain, credential boundary, config, permission mode, workspace path, OS/runtime version, deployment fact, or command environment. Anchor to the environment, work_object, repository, or config object. Drop ephemeral command output unless it changes future operation.
         - relationship: Extract when evidence establishes or updates a relation between people, projects, organizations, concepts, locations, documents, artifacts, events, or work_objects. Anchor to the relation's most retrievable subject. Use a precise predicate when available; otherwise RELATED_TO.
