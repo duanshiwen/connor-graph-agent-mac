@@ -18,11 +18,13 @@ public struct MemoryOSBackgroundToolExecutionContext: Sendable, Equatable {
 public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, CustomStringConvertible {
     case toolNotAllowed(String)
     case invalidArguments(String)
+    case toolExecutionFailed(String)
 
     public var description: String {
         switch self {
         case .toolNotAllowed(let name): "toolNotAllowed: \(name)"
         case .invalidArguments(let message): "invalidArguments: \(message)"
+        case .toolExecutionFailed(let message): "toolExecutionFailed: \(message)"
         }
     }
 }
@@ -53,6 +55,17 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
         let args = try Arguments(json: call.argumentsJSON)
         switch call.name {
+        case "memory_os_context":
+            let rawQuery = try args.requiredString("query")
+            let terms = rawQuery.split(separator: ";").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            guard !terms.isEmpty else {
+                throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("query contained no valid search terms")
+            }
+            let items = try facade.memoryOSFlatContext(terms: terms)
+            let json = try JSONSerialization.data(withJSONObject: items)
+            let jsonString = String(data: json, encoding: .utf8) ?? "[]"
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: jsonString, contentText: "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", ")).", citations: [])
+
         case "memory_os_search":
             let query = try args.requiredString("query")
             let layers = args.stringArray("layers") ?? ["L2", "L3", "L4"]
