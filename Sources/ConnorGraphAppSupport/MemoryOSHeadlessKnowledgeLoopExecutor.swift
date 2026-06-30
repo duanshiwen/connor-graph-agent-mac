@@ -151,10 +151,12 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 log("Sending \(messages.count) messages to model...")
                 let response = try model.complete(MemoryOSBackgroundLoopModelRequest(runID: runID, job: request, messages: messages, availableTools: request.availableTools))
                 mergedMetadata.merge(response.metadata) { _, new in new }
-                if !response.assistantText.isEmpty || !response.toolCalls.isEmpty {
-                    let joinedToolNames = response.toolCalls.map(\.name).joined(separator: ",")
+                let calls = Array(response.toolCalls.prefix(configuration.maxToolCallsPerIteration))
+
+                if !response.assistantText.isEmpty || !calls.isEmpty {
+                    let joinedToolNames = calls.map(\.name).joined(separator: ",")
                     let truncatedToolName = String(joinedToolNames.prefix(64))
-                    let memoryOSToolCalls: [MemoryOSBackgroundToolCall]? = response.toolCalls.isEmpty ? nil : response.toolCalls.map { MemoryOSBackgroundToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
+                    let memoryOSToolCalls: [MemoryOSBackgroundToolCall]? = calls.isEmpty ? nil : calls.map { MemoryOSBackgroundToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
                     let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName, toolCalls: memoryOSToolCalls)
                     messages.append(assistantMessage)
                     try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
@@ -180,7 +182,6 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                     ]) { _, new in new })
                 }
 
-                let calls = Array(response.toolCalls.prefix(configuration.maxToolCallsPerIteration))
                 if calls.isEmpty { throw MemoryOSHeadlessKnowledgeLoopError.missingFinalArtifact }
                 log("Tool calls: \(calls.map(\.name).joined(separator: ", "))")
                 for call in calls {
