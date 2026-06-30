@@ -372,7 +372,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             content: content,
             occurredAt: occurredAt,
             sessionID: sessionID,
-            metadata: metadata
+            metadata: metadata.merging(["source_kind": role == "assistant" ? "assistant_message" : "chat_message"]) { current, _ in current }
         ))
         try repository.save(result)
         _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL1Capture(now: occurredAt)
