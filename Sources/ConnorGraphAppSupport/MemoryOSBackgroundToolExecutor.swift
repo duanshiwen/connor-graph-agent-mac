@@ -18,17 +18,20 @@ public struct MemoryOSBackgroundToolExecutionContext: Sendable, Equatable {
 public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, CustomStringConvertible {
     case toolNotAllowed(String)
     case invalidArguments(String)
+    case toolExecutionFailed(String)
 
     public var description: String {
         switch self {
         case .toolNotAllowed(let name): "toolNotAllowed: \(name)"
         case .invalidArguments(let message): "invalidArguments: \(message)"
+        case .toolExecutionFailed(let message): "toolExecutionFailed: \(message)"
         }
     }
 }
 
 public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public static let defaultAllowedToolNames: Set<String> = [
+        "memory_os_context",
         "memory_os_search",
         "memory_os_read_record",
         "memory_os_read_provenance",
@@ -53,6 +56,25 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
         let args = try Arguments(json: call.argumentsJSON)
         switch call.name {
+        case "memory_os_context":
+            let rawQuery = try args.requiredString("query")
+            let terms = rawQuery.split(separator: ";").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            guard !terms.isEmpty else {
+                throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("query contained no valid search terms")
+            }
+            let items = try facade.memoryOSFlatContext(terms: terms)
+            let json = try JSONSerialization.data(withJSONObject: items)
+            let jsonString = String(data: json, encoding: .utf8) ?? "[]"
+            let readableText: String
+            if items.isEmpty {
+                readableText = "Memory OS context returned 0 items for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
+            } else {
+                let header = "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
+                let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+                readableText = "\(header)\n\n\(body)"
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: jsonString, contentText: readableText, citations: [])
+
         case "memory_os_search":
             let query = try args.requiredString("query")
             let layers = args.stringArray("layers") ?? ["L2", "L3", "L4"]
@@ -60,7 +82,20 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let retrievalLayers = layers.compactMap { MemoryOSRetrievalLayer(rawValue: $0.uppercased()) }
             let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: query, layers: retrievalLayers.isEmpty ? [.l2, .l3, .l4] : retrievalLayers, limit: limit))
             let json = facade.store.json(hits)
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: json, contentText: "Returned \(hits.count) Memory OS hits for \"\(query)\".", citations: hits.map(\.recordID))
+            let readableText: String
+            if hits.isEmpty {
+                readableText = "Returned 0 Memory OS hits for \"\(query)\"."
+            } else {
+                let header = "Returned \(hits.count) Memory OS hits for \"\(query)\"."
+                let body = hits.enumerated().map { i, hit -> String in
+                    var parts = ["\(i + 1). [\(hit.layer.rawValue)] \(hit.title)"]
+                    if !hit.summary.isEmpty { parts.append("   Summary: \(hit.summary)") }
+                    if !hit.matchedText.isEmpty && hit.matchedText != hit.summary { parts.append("   Matched: \(hit.matchedText)") }
+                    return parts.joined(separator: "\n")
+                }.joined(separator: "\n\n")
+                readableText = "\(header)\n\n\(body)"
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: json, contentText: readableText, citations: hits.map(\.recordID))
 
         case "memory_os_read_record":
             let layer = try args.requiredString("layer")
@@ -82,13 +117,27 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             if hits.isEmpty {
                 return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: "{}", contentText: "No L4 entity found matching '\(entityName)'.", citations: [])
             }
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(hits), contentText: "Expanded L4 entity '\(entityName)' to depth \(depth).", citations: hits.map(\.recordID))
+            let header = "Expanded L4 entity '\(entityName)' to depth \(depth): \(hits.count) hit(s)."
+            let body = hits.enumerated().map { i, hit -> String in
+                return "\(i + 1). \(hit.sourceEntityID) --[\(hit.predicate)]--> \(hit.relatedEntityID ?? "(self)") | \(hit.text) (depth: \(hit.depth))"
+            }.joined(separator: "\n")
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(hits), contentText: "\(header)\n\n\(body)", citations: hits.map(\.recordID))
 
         case "memory_os_l4_find_entity":
             let text = try args.requiredString("text")
             let limit = args.int("limit") ?? 20
             let graph = try facade.findMemoryOSL4Entity(text: text, limit: limit)
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(graph), contentText: "Found L4 entity candidates for \"\(text)\".", citations: [])
+            let readableText: String
+            if graph.nodes.isEmpty {
+                readableText = "Found 0 L4 entity candidates for \"\(text)\"."
+            } else {
+                let header = "Found \(graph.nodes.count) L4 entity candidate(s) for \"\(text)\"."
+                let body = graph.nodes.enumerated().map { i, node -> String in
+                    return "\(i + 1). [\(node.kind)] \(node.title): \(node.summary.isEmpty ? "(no summary)" : node.summary)"
+                }.joined(separator: "\n")
+                readableText = "\(header)\n\n\(body)"
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(graph), contentText: readableText, citations: [])
 
         case "memory_os_l4_neighbors":
             let entityID = try args.requiredString("entityID")
@@ -96,7 +145,20 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let predicates = args.stringArray("predicates") ?? []
             let limit = args.int("limit") ?? 100
             let graph = try facade.queryMemoryOSL4Neighbors(entityID: entityID, direction: direction, predicates: predicates, limit: limit)
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(graph), contentText: "Read L4 neighbors for \(entityID).", citations: [entityID])
+            let nodeMap = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0) })
+            let readableText: String
+            if graph.edges.isEmpty {
+                readableText = "L4 neighbors for \(entityID): 0 edges."
+            } else {
+                let header = "L4 neighbors for \(entityID): \(graph.edges.count) edge(s)."
+                let body = graph.edges.enumerated().map { i, edge -> String in
+                    let sourceName = nodeMap[edge.sourceID]?.title ?? edge.sourceID
+                    let targetName = nodeMap[edge.targetID]?.title ?? edge.targetID
+                    return "\(i + 1). \(sourceName) --[\(edge.predicate)]--> \(targetName)"
+                }.joined(separator: "\n")
+                readableText = "\(header)\n\n\(body)"
+            }
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(graph), contentText: readableText, citations: [entityID])
 
         case "memory_os_l2_update_entities":
             let requestData = try JSONSerialization.data(withJSONObject: args.jsonCompatible(), options: [.sortedKeys])
@@ -123,9 +185,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                     .replacingOccurrences(of: "-", with: "_")
                     .replacingOccurrences(of: " ", with: "_")
                     .uppercased()
-                guard let predicate = GraphPredicate(rawValue: normalized) else {
-                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("Unsupported relation: \(rawRelation)")
-                }
+                let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
                 let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: factType, predicate: predicate, anchor: anchor, now: now)
                 let summary = try facade.projectAndRecordLLMArtifact(rawContent: artifactJSON, modelID: "memory_os_update_current_user_profile", processingRunID: context.runID, artifactType: "memory_os_current_user_fact_update", schemaName: "MemoryOSL1UnifiedProjectionOutput", now: now)
                 artifactIDs.append(summary.artifactID)

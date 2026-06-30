@@ -1,0 +1,16 @@
+#!/bin/bash
+# Connor Memory OS CLI - Fast wrapper
+# Usage: connor-memory <command> [args...]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+BINARY="$PROJECT_DIR/.build/debug/connor"
+
+# Check if binary exists
+if [ ! -f "$BINARY" ]; then
+    echo "Binary not found. Building..."
+    cd "$PROJECT_DIR" && swift build
+fi
+
+# Run the command
+exec "$BINARY" memory "$@"

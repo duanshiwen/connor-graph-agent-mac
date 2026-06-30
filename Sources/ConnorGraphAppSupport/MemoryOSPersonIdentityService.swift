@@ -80,6 +80,12 @@ public struct MemoryOSPersonIdentityService: Sendable {
     private static let profileContextMaxRows = 200
 
     public func currentUserProfileContext(store: SQLiteMemoryOSStore, now: Date = Date()) throws -> [String] {
+        // Check cache first
+        let cache = MemoryOSQueryCache.shared
+        if let cached = cache.getCachedProfile() {
+            return cached
+        }
+        
         guard let anchor = try resolveCurrentUserAnchor(store: store) else {
             return ["[profile] No current_user identity anchor exists."]
         }
@@ -100,6 +106,9 @@ public struct MemoryOSPersonIdentityService: Sendable {
             lines.append(statement.text)
         }
 
+        // Cache the result
+        cache.setCachedProfile(lines)
+        
         return lines
     }
 

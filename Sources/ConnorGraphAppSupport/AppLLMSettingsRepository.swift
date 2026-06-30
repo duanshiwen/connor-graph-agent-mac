@@ -381,6 +381,14 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         "llm-connection-\(connectionID)-oauth"
     }
 
+    /// CLI 环境专用的 settingsRepository，使用正确的 suite name 访问应用的 LLM 配置
+    public static func cliRepository() -> AppLLMSettingsRepository {
+        let appDomain = Bundle.main.bundleIdentifier ?? "com.shiwen.connor-graph-agent-mac"
+        let suite = UserDefaults(suiteName: appDomain) ?? .standard
+        let settingsStore = UserDefaultsLLMSettingsStore(userDefaults: suite)
+        return AppLLMSettingsRepository(settingsStore: settingsStore)
+    }
+
     public func loadSettings() throws -> AppLLMSettings {
         if let raw = settingsStore.string(forKey: Keys.connections), let data = raw.data(using: .utf8) {
             let decoded = try JSONDecoder().decode([AppLLMConnectionConfig].self, from: data)

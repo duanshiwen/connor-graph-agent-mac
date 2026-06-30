@@ -15,7 +15,7 @@ public enum MemoryOSDebugAIRunTranscriptRenderer {
         guard !result.queueRuns.isEmpty else {
             lines.append("No runnable background AI jobs were found.")
             lines.append("")
-            lines.append("Tip: enqueue jobs first, e.g. `swift run connor memory pipeline plan-l1` or `plan-l2`.")
+            lines.append("Tip: enqueue jobs first, e.g. `swift run connor memory pipeline plan-l1`.\nPending L1 events: `swift run connor memory l1 pending`.")
             return lines.joined(separator: "\n")
         }
 

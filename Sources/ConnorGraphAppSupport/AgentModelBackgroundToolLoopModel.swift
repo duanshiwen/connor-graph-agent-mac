@@ -38,7 +38,6 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
         return MemoryOSBackgroundLoopModelResponse(
             assistantText: response.text ?? "",
             toolCalls: response.toolCalls.map(Self.memoryOSToolCall),
-            finalArtifactJSON: Self.extractFinalArtifactJSON(from: response.text, toolCalls: response.toolCalls),
             metadata: metadata
         )
     }
@@ -49,7 +48,8 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
             role: agentRole(message.role),
             content: message.content,
             toolCallID: message.toolCallID,
-            name: message.toolName
+            name: message.toolName,
+            toolCalls: message.toolCalls?.map { AgentToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
         )
     }
 
@@ -106,13 +106,6 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
             return .object(properties: properties, required: properties.keys.sorted())
         }
         return .string(description: String(describing: value))
-    }
-
-    private static func extractFinalArtifactJSON(from text: String?, toolCalls: [AgentToolCall]) -> String? {
-        guard toolCalls.isEmpty, let text else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("{") && trimmed.hasSuffix("}") else { return nil }
-        return trimmed
     }
 
     private func runBlocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {

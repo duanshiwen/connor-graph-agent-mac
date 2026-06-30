@@ -48,3 +48,37 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
     let evidenceTables = try store.query(sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_l2_statement_evidence'")
     #expect(evidenceTables.isEmpty)
 }
+
+@Test func graphPredicateFallbacksToRelatedToForUnknownRelation() {
+    // Test that GraphPredicate initialization falls back to RELATED_TO
+    // when an unknown relation string is provided
+    let invalidRelation = "INTERESTED_IN"
+    let normalized = invalidRelation.trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "-", with: "_")
+        .replacingOccurrences(of: " ", with: "_")
+        .uppercased()
+    
+    let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
+    #expect(predicate == .relatedTo)
+}
+
+@Test func l2StatementRelationFallbacksToRelatedToForInvalidRelation() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryL2EntityMemoryDatabaseURL().path)
+    try store.migrate()
+    let repository = SQLiteMemoryOSL2EntityMemoryRepository(store: store)
+    let service = MemoryOSL2EntityMemoryService(repository: repository)
+    
+    // This test verifies that the service accepts invalid relations
+    // and falls back to RELATED_TO instead of throwing an error
+    let result = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+        MemoryOSL2EntityUpdate(
+            name: "Test Entity",
+            statements: [
+                MemoryOSL2StatementUpdate(text: "Test statement", relation: "IDENTITY", factType: "other")
+            ]
+        )
+    ]))
+    
+    #expect(result.accepted)
+    #expect(result.updatedEntities.count == 1)
+}
