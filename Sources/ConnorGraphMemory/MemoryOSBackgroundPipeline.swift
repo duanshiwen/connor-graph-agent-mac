@@ -210,6 +210,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Current user and person boundary:
         - The current user is the human operating this Connor installation. First-person references from user-authored evidence (I, me, my, 我, 我的) indicate the current user when source metadata supports that authorship.
         - When a fact is about the current user, you MUST use memory_os_update_current_user_profile instead of memory_os_l2_update_entities. Do NOT call memory_os_context first for current-user facts — the tool handles everything automatically.
+        - For current-user facts relation: Use PREFERS for preferences/interests, ABOUT for topic relations, RELATED_TO as fallback. Do NOT invent relation names like INTERESTED_IN.
         - Do not create L2 entities named "user", "用户", "当前用户", "profile", "me", "I", or similar generic words for the current user.
         - Do not treat assistant-authored assumptions, suggestions, interpretations, or guesses as current-user facts unless the user explicitly confirms them.
         - Other named or described people use memory_os_l2_update_entities, not the current_user tool.
