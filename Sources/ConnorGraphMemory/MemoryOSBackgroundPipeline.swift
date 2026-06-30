@@ -508,7 +508,15 @@ public struct MemoryOSBackgroundToolResult: Sendable, Codable, Equatable {
 
 public enum MemoryOSBackgroundToolCatalog {
     public static func l1UnifiedProjectionTools() -> [MemoryOSBackgroundToolDescriptor] {
-        [contextTool(), expandL4Tool(usage: "Use memory_os_expand_l4 when L4 entity identity, duplicate concept detection, or relation context is necessary for grounded L1 projection."), readProvenanceTool()]
+        [
+            contextTool(),
+            expandL4Tool(usage: "Use memory_os_expand_l4 when L4 entity identity, duplicate concept detection, or relation context is necessary for grounded L1 processing."),
+            readProvenanceTool(),
+            l2UpdateEntitiesTool(),
+            updateCurrentUserProfileTool(),
+            l3UpdateBeliefsTool(),
+            l4UpdateEntitiesTool()
+        ]
     }
 
     public static func l2ToKnowledgeTools() -> [MemoryOSBackgroundToolDescriptor] {
@@ -529,9 +537,9 @@ public enum MemoryOSBackgroundToolCatalog {
         \(rendered)
 
         Tool-use rules:
-        - Tool results are retrieval context, not final memory truth.
-        - Do not invent evidence if a tool does not return enough context.
-        - Do not output tool calls in the final artifact JSON.
+        - Use read tools to search existing memory before writing.
+        - Use write tools to directly update L2/L3/L4 memory. Do not output JSON artifacts for projection.
+        - When identifying current-user facts, use memory_os_update_current_user_profile instead of memory_os_l2_update_entities.
         - Prefer `memory_os_context` for entity disambiguation and duplicate detection; its relation cards reveal graph context that keyword search cannot provide.
         - When `memory_os_context` returns entity cards with multiple incoming relations, scan them to resolve ambiguous entity names through their connections.
         """
@@ -570,6 +578,42 @@ public enum MemoryOSBackgroundToolCatalog {
             description: "Read exact L0 provenance object or span content when raw evidence is required.",
             inputSchemaJSON: "{\"provenanceObjectID\":\"string\",\"spanID\":\"string|null\"}",
             usagePolicy: "Use when a prompt preview is insufficient, exact raw evidence is required, or an evidence citation needs validation."
+        )
+    }
+
+    private static func l2UpdateEntitiesTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_l2_update_entities",
+            description: "Write L2 entity-centered working memory. Upserts entities by name and appends statements.",
+            inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"aliases?\":\"string\",\"summary?\":\"string\",\"statements\":[{\"text\":\"string\",\"relation?\":\"GraphPredicate\",\"factType?\":\"string\"}]}]}",
+            usagePolicy: "Use for general L2 entity writes (non-current-user). Search memory_os_context first to check for existing entities. Use for work objects, people, events, documents, implementation facts, relationships."
+        )
+    }
+
+    private static func updateCurrentUserProfileTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_update_current_user_profile",
+            description: "Write current-user-scoped L2 fact statements. Automatically handles current_user anchor, timestamps, and projection.",
+            inputSchemaJSON: "{\"facts\":[{\"statement\":\"string\",\"factType\":\"string\",\"relation\":\"GraphPredicate\"}]}",
+            usagePolicy: "MANDATORY for current-user facts. When evidence identifies the human operator (first-person references with source support), use this tool instead of memory_os_l2_update_entities. Only provide statement, factType, and relation."
+        )
+    }
+
+    private static func l3UpdateBeliefsTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_l3_update_beliefs",
+            description: "Write L3 reusable knowledge statements directly. Use for cross-session knowledge, theories, frameworks, standards, SOPs.",
+            inputSchemaJSON: "{\"beliefs\":[{\"statement\":\"string\",\"domain?\":\"string\",\"relatedEntityNames?\":\"string\"}]}",
+            usagePolicy: "Only write after all four promotion filters pass: signal_quality, reuse_scope, novelty, structurability. Search L3/L4 first for duplicates. Include discipline domain for each belief."
+        )
+    }
+
+    private static func l4UpdateEntitiesTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_l4_update_entities",
+            description: "Write L4 stable entities and typed entity-to-entity relations. Entities are upserted by name+type.",
+            inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"domain?\":\"string\",\"summary?\":\"string\",\"aliases?\":\"string\"}],\"relations\":[{\"subjectName\":\"string\",\"predicate\":\"L4Predicate\",\"objectName\":\"string\",\"text?\":\"string\"}]}",
+            usagePolicy: "Search L4 first to check for existing entities. Create conceptEntities only when the concept has a stable name, useful summary, clear type, and future retrieval value. Use controlled entity types."
         )
     }
 }
