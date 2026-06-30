@@ -182,7 +182,26 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                     ]) { _, new in new })
                 }
 
-                if calls.isEmpty { throw MemoryOSHeadlessKnowledgeLoopError.missingFinalArtifact }
+                if calls.isEmpty {
+                    // LLM returned text with no tool calls. If it previously executed
+                    // tool calls successfully, treat this as a natural-language summary
+                    // of completed work — not an error.
+                    if toolCallCount > 0 {
+                        log("\n✅ LLM completed work with \(toolCallCount) tool calls, returning text summary.")
+                        run.status = .succeeded
+                        run.finishedAt = now()
+                        run.iterationCount = iteration
+                        run.toolCallCount = toolCallCount
+                        run.metadata = mergedMetadata
+                        try store.save(backgroundRun: run)
+                        return MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}", metadata: mergedMetadata.merging([
+                            "background_run_id": runID,
+                            "tool_trace_count": String(toolCallCount),
+                            "stateless_batch": "true"
+                        ]) { _, new in new })
+                    }
+                    throw MemoryOSHeadlessKnowledgeLoopError.missingFinalArtifact
+                }
                 log("Tool calls: \(calls.map(\.name).joined(separator: ", "))")
                 for call in calls {
                     let toolStartedAt = now()
