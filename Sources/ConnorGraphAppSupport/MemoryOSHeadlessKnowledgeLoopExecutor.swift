@@ -57,13 +57,11 @@ public struct MemoryOSBackgroundLoopModelRequest: Sendable, Equatable {
 public struct MemoryOSBackgroundLoopModelResponse: Sendable, Equatable {
     public var assistantText: String
     public var toolCalls: [MemoryOSBackgroundToolCall]
-    public var finalArtifactJSON: String?
     public var metadata: [String: String]
 
-    public init(assistantText: String = "", toolCalls: [MemoryOSBackgroundToolCall] = [], finalArtifactJSON: String? = nil, metadata: [String: String] = [:]) {
+    public init(assistantText: String = "", toolCalls: [MemoryOSBackgroundToolCall] = [], metadata: [String: String] = [:]) {
         self.assistantText = assistantText
         self.toolCalls = toolCalls
-        self.finalArtifactJSON = finalArtifactJSON
         self.metadata = metadata
     }
 }
@@ -76,13 +74,11 @@ public protocol MemoryOSBackgroundToolLoopModel: Sendable {
 public enum MemoryOSHeadlessKnowledgeLoopError: Error, Sendable, Equatable, CustomStringConvertible {
     case exceededMaxIterations(Int)
     case exceededMaxRunDuration(Int)
-    case missingFinalArtifact
 
     public var description: String {
         switch self {
         case .exceededMaxIterations(let value): "exceededMaxIterations: \(value)"
         case .exceededMaxRunDuration(let value): "exceededMaxRunDuration: \(value)"
-        case .missingFinalArtifact: "missingFinalArtifact"
         }
     }
 }
@@ -167,40 +163,19 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                     }
                 }
 
-                if let artifact = response.finalArtifactJSON {
-                    log("\n✅ Final artifact received (\(artifact.count) chars)")
+                if calls.isEmpty {
+                    log("\n✅ LLM completed (\(toolCallCount) tool calls total).")
                     run.status = .succeeded
                     run.finishedAt = now()
                     run.iterationCount = iteration
                     run.toolCallCount = toolCallCount
                     run.metadata = mergedMetadata
                     try store.save(backgroundRun: run)
-                    return MemoryOSBackgroundModelResponse(rawArtifactJSON: artifact, metadata: mergedMetadata.merging([
+                    return MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}", metadata: mergedMetadata.merging([
                         "background_run_id": runID,
                         "tool_trace_count": String(toolCallCount),
                         "stateless_batch": "true"
                     ]) { _, new in new })
-                }
-
-                if calls.isEmpty {
-                    // LLM returned text with no tool calls. If it previously executed
-                    // tool calls successfully, treat this as a natural-language summary
-                    // of completed work — not an error.
-                    if toolCallCount > 0 {
-                        log("\n✅ LLM completed work with \(toolCallCount) tool calls, returning text summary.")
-                        run.status = .succeeded
-                        run.finishedAt = now()
-                        run.iterationCount = iteration
-                        run.toolCallCount = toolCallCount
-                        run.metadata = mergedMetadata
-                        try store.save(backgroundRun: run)
-                        return MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}", metadata: mergedMetadata.merging([
-                            "background_run_id": runID,
-                            "tool_trace_count": String(toolCallCount),
-                            "stateless_batch": "true"
-                        ]) { _, new in new })
-                    }
-                    throw MemoryOSHeadlessKnowledgeLoopError.missingFinalArtifact
                 }
                 log("Tool calls: \(calls.map(\.name).joined(separator: ", "))")
                 for call in calls {
