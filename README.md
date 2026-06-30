@@ -11,7 +11,7 @@ Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package
 
 ## 1. Product Boundaries
 
-Connor 当前坚持这些主权边界：
+Connor 当前坚持这些主权边界：  
 
 - **Session OS** owns sessions, runs, journals, approvals, branches, restore snapshots and Session Capsules.
 - **Policy Engine** owns permissions, approvals, audit and execution gates.
