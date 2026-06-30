@@ -79,3 +79,24 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
     let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
     #expect(predicate == .relatedTo)
 }
+
+@Test func l2StatementRelationFallbacksToRelatedToForInvalidRelation() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryL2EntityMemoryDatabaseURL().path)
+    try store.migrate()
+    let repository = SQLiteMemoryOSL2EntityMemoryRepository(store: store)
+    let service = MemoryOSL2EntityMemoryService(repository: repository)
+    
+    // This test verifies that the service accepts invalid relations
+    // and falls back to RELATED_TO instead of throwing an error
+    let result = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+        MemoryOSL2EntityUpdate(
+            name: "Test Entity",
+            statements: [
+                MemoryOSL2StatementUpdate(text: "Test statement", relation: "IDENTITY", factType: "other")
+            ]
+        )
+    ]))
+    
+    #expect(result.accepted)
+    #expect(result.updatedEntities.count == 1)
+}
