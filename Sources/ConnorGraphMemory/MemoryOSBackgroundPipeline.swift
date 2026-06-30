@@ -234,7 +234,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - memory_os_l3_update_beliefs(beliefs[]) — Write L3 knowledge. Each belief needs statement (required), domain, relatedEntityNames.
         - memory_os_l4_update_entities(entities[], relations[]) — Write L4 entities and relations.
         - memory_os_search(query) — Search external data sources (email, calendar, RSS, browser history) for evidence.
-        - memory_os_expand_l4(entityID, depth, limit) — Expand L4 entity graph for disambiguation.
+        - memory_os_expand_l4(entityName, depth, limit) — Expand L4 entity graph for disambiguation. Accepts entity name; internally resolves to matching L4 entity.
         - Do not create entities for every noun phrase; create or update only objects likely to be useful future retrieval anchors.
         - Preserve negative or exclusion semantics directly in the statement text.
 
@@ -510,8 +510,8 @@ public enum MemoryOSBackgroundToolCatalog {
     private static func expandL4Tool(usage: String) -> MemoryOSBackgroundToolDescriptor {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_expand_l4",
-            description: "Expand a Memory OS L4 stable entity or concept by depth-limited graph traversal.",
-            inputSchemaJSON: "{\"entityID\":\"string\",\"depth\":\"number\",\"limit\":\"number\"}",
+            description: "Expand a Memory OS L4 stable entity or concept by depth-limited graph traversal. Accepts entity name (not ID) — internally resolves to the matching L4 entity.",
+            inputSchemaJSON: "{\"entityName\":\"string\",\"depth\":\"number\",\"limit\":\"number\"}",
             usagePolicy: usage
         )
     }
