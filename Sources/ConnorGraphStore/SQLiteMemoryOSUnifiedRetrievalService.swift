@@ -104,6 +104,12 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         let trimmed = entityName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
+        // Check cache first
+        let cache = MemoryOSQueryCache.shared
+        if let cached = cache.getCachedEntityExpansion(entityName: trimmed, depth: depth, limit: limit) {
+            return cached
+        }
+
         // Step 1: Try FTS5 for fast entity name lookup
         var entityID: String?
         let ftsResults = try store.searchEntitiesFTS(query: trimmed, limit: 5)
@@ -159,10 +165,15 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             }
             frontier = nextFrontier
         }
-        return Array(results.sorted { lhs, rhs in
+        let sorted = Array(results.sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
             return lhs.recordID < rhs.recordID
         }.prefix(limit))
+        
+        // Cache the result
+        MemoryOSQueryCache.shared.setCachedEntityExpansion(sorted, entityName: trimmed, depth: depth, limit: limit)
+        
+        return sorted
     }
 
     private func l4ExpansionScore(predicate rawValue: String, depth: Int) -> Double {
