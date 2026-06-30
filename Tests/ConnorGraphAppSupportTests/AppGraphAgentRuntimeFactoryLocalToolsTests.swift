@@ -356,7 +356,6 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_l4_neighbors"))
     #expect(!names.contains("memory_os_l4_instances"))
     #expect(!names.contains("memory_os_expand_l4"))
-    #expect(!names.contains("memory_os_query_graph"))
     #expect(!names.contains("memory_os_read_record"))
     #expect(!names.contains("memory_os_read_provenance"))
     #expect(!names.contains("memory_os_search"))

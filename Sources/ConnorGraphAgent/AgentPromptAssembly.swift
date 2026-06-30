@@ -101,7 +101,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
     ## Memory OS Architecture
     Memory OS is a layered background semantic memory system:
     - L0: Raw source content with provenance spans (immutable evidence vault)
-    - L1: Event processing queue and pipeline artifacts (capture ledger)
+    - L1: Cache buffer that accumulates events until threshold (≥100 events or ≥24h), then triggers L2/L3/L4 update; cleared after processing (L0 retains evidence)
     - L2: Entity-centered working memory with operational facts
     - L3: Reusable cross-session knowledge records
     - L4: Stable entity/concept graph with typed entity-to-entity relations

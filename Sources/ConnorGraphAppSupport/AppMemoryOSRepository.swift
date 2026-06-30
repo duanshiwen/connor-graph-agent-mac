@@ -28,22 +28,37 @@ public struct AppMemoryOSRepository: Sendable {
 public struct AppMemoryOSBackgroundRunSummary: Sendable, Equatable, Codable {
     public var expiredLeaseCount: Int
     public var projectionRunCount: Int
+    public var aiJobRunCount: Int
     public var healthStatus: MemoryOSHealthStatus
     public var checkedAt: Date
 
-    public init(expiredLeaseCount: Int, projectionRunCount: Int = 0, healthStatus: MemoryOSHealthStatus, checkedAt: Date = Date()) {
+    public init(expiredLeaseCount: Int, projectionRunCount: Int = 0, aiJobRunCount: Int = 0, healthStatus: MemoryOSHealthStatus, checkedAt: Date = Date()) {
         self.expiredLeaseCount = expiredLeaseCount
         self.projectionRunCount = projectionRunCount
+        self.aiJobRunCount = aiJobRunCount
         self.healthStatus = healthStatus
         self.checkedAt = checkedAt
     }
 }
 
+public struct BackgroundAIExecutorProvider: Sendable {
+    public var runAIBatch: @Sendable (AppMemoryOSFacade) throws -> Int
+
+    public init(runAIBatch: @escaping @Sendable (AppMemoryOSFacade) throws -> Int) {
+        self.runAIBatch = runAIBatch
+    }
+}
+
 public struct AppMemoryOSBackgroundJobRunner: Sendable {
     public var recoveryService: MemoryOSRecoveryService
+    public var aiExecutorProvider: BackgroundAIExecutorProvider?
 
-    public init(recoveryService: MemoryOSRecoveryService = MemoryOSRecoveryService()) {
+    public init(
+        recoveryService: MemoryOSRecoveryService = MemoryOSRecoveryService(),
+        aiExecutorProvider: BackgroundAIExecutorProvider? = nil
+    ) {
         self.recoveryService = recoveryService
+        self.aiExecutorProvider = aiExecutorProvider
     }
 
     public func shouldRecover(queueStatus: MemoryOSQueueStatus, leaseExpiresAt: Date?, now: Date = Date()) -> Bool {
@@ -52,10 +67,17 @@ public struct AppMemoryOSBackgroundJobRunner: Sendable {
 
     public func runOnce(facade: AppMemoryOSFacade, now: Date = Date()) throws -> AppMemoryOSBackgroundRunSummary {
         let projectionRuns = try facade.runProjectionQueueOnce(now: now)
+
+        var aiRunCount = 0
+        if let aiExecutorProvider {
+            aiRunCount = try aiExecutorProvider.runAIBatch(facade)
+        }
+
         let summary = try facade.operationalSummary(now: now)
         return AppMemoryOSBackgroundRunSummary(
             expiredLeaseCount: summary.expiredLeaseCount,
             projectionRunCount: projectionRuns.count,
+            aiJobRunCount: aiRunCount,
             healthStatus: summary.healthReport.status,
             checkedAt: now
         )

@@ -53,11 +53,7 @@ import ConnorGraphMemory
             statements: [
                 MemoryOSL2StatementUpdate(
                     text: "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。",
-                    connectedEntity: "《迟到的青春期》马尼拉一个月阶段",
-                    connectedEntityType: "work_object",
-                    factType: "decision",
-                    polarity: "exclude",
-                    originalPhrase: "不去贫民窟"
+                    factType: "decision"
                 )
             ]
         )
@@ -72,8 +68,8 @@ import ConnorGraphMemory
     #expect(stored[0].statements[0].relation == "RELATED_TO")
     #expect(stored[0].statements[0].metadata["l2_fact_type"] == "decision")
     #expect(stored[0].statements[0].metadata["factType"] == nil)
-    #expect(stored[0].statements[0].metadata["polarity"] == "exclude")
-    #expect(stored[0].statements[0].metadata["originalPhrase"] == "不去贫民窟")
+    #expect(stored[0].statements[0].metadata["polarity"] == nil)
+    #expect(stored[0].statements[0].metadata["originalPhrase"] == nil)
 }
 
 @Test func l2EntityMemoryRejectsInvalidFactTypeWithoutPartialWrite() throws {

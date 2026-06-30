@@ -157,17 +157,24 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         You are performing Connor Memory OS L1 unified projection.
 
         Layer semantics:
-        - L0 is the durable provenance layer and source of raw evidence.
-        - L1 is the active processing buffer / ordered memory sequence.
-        - L2 is entity-centered working memory, not an evidence store; L0 remains the durable provenance/evidence layer.
-        - L3 is reusable knowledge: standards, principles, frameworks, decision bases, processes and durable cognitive structures.
-        - L4 is stable entities, concept entities and durable entity/concept relations.
-        - A successful L1 unified projection clears the processed L1 buffer only after artifact acceptance; failures preserve L1 for retry or dead-letter review.
+        - L0: Immutable provenance vault. Raw evidence objects and spans are preserved permanently and never deleted.
+        - L1: Cache buffer. Accumulates user interactions, data-source events, and other raw inputs. L1 exists because processing each message individually loses cross-message context, while accumulating without processing loses timeliness. When the cache reaches its threshold (≥100 pending events or ≥24 hours since oldest pending event), a unified L2/L3/L4 update is triggered. After a successful update, the processed L1 events are cleared. L0 retains the original evidence.
+        - L2: Entity-centered operational working memory. Stores entities with aliases, types, summaries, and append-only statements.
+        - L3: Reusable cross-session knowledge: theories, frameworks, standards, SOPs, decision bases, and durable cognitive structures.
+        - L4: Stable entity/concept graph with controlled entity types and typed entity-to-entity relations.
+
+        Trigger and lifecycle:
+        - L1 events accumulate from chat messages, browser selections, native-source events (Mail/RSS/Calendar), and attachments.
+        - Processing triggers when: pending count ≥ 100, OR oldest pending event age ≥ 24 hours.
+        - Each trigger produces one L1 unified projection job. Events are batched by time proximity and token limits (≤30 events, ≤12k tokens per batch).
+        - After successful artifact acceptance and projection, the processed L1 events are physically deleted. L0 remains as permanent evidence.
+        - If the artifact is rejected or the job fails, L1 events are preserved for retry (up to 3 attempts) or dead-letter review.
 
         Goal:
-        - Produce L2 entity-centered working memory: important entities, aliases, summaries, and useful statements.
-        - Produce conservative L3 reusable knowledge candidates only when all promotion filters pass.
-        - Produce L4 stable entities, concept entities and durable relations when entity identity or concept structure is clear.
+        - From the cached L1 events, extract information and produce a structured MemoryOSL1UnifiedProjectionOutput artifact that will be projected into L2, L3, and L4.
+        - L2: Extract entity-centered operational facts and statements from the evidence.
+        - Produce L3 reusable knowledge candidates only when all four promotion filters pass (signal_quality, reuse_scope, novelty, structurability).
+        - L4: Produce stable entities, concept entities, and durable relations when entity identity or concept structure is clear.
         - Ignore noise, duplicates, transient wording and unsupported guesses.
         - You must search existing L2 entity-centered working memory before deciding whether an entity or statement is new, duplicate or a refinement.
         - You must search existing L3/L4 before emitting any L3 knowledge candidate, L4 stable entity, L4 concept entity, or L4 durable relation.
@@ -192,7 +199,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Write one complete natural-language statement per fact; statement text is the semantic authority.
         - Predicate/relation is a routing and retrieval handle, not the full semantics.
         - Choose the most precise GraphPredicate when clear; use RELATED_TO when useful but uncertain.
-        - Preserve negation, exclusion, rejection, cancellation, postponement, and supersession with metadata.polarity and metadata.originalPhrase when applicable.
+        - Preserve negation, exclusion, rejection, cancellation, postponement, and supersession directly in the statement text when applicable.
         - If a new fact refines an old fact, append a refinement statement rather than overwriting history.
         - If identity, ownership, time, or object boundary is ambiguous, mark ambiguity in metadata/warnings instead of guessing.
 
@@ -228,9 +235,9 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
 
         L1 unified output contract:
         - Output schema is MemoryOSL1UnifiedProjectionOutput JSON with operationalEntities, operationalStatements, evidenceSpans, knowledgeCandidates, conceptEntities, conceptRelations, promotionDecisions, warnings, confidence and metadata.
-        - operationalEntities and operationalStatements are the legacy/internal projection shape for the L2 entity-centered working-memory section.
-        - knowledgeCandidates are L3 candidates and must pass all promotion filters.
-        - conceptEntities and conceptRelations are the L4 stable concept/entity graph section.
+        - operationalEntities and operationalStatements form the L2 extraction shape: entity-centered operational memory that will be projected into L2 storage.
+        - knowledgeCandidates are L3 candidates and must pass all four promotion filters before inclusion.
+        - conceptEntities and conceptRelations are the L4 stable concept/entity graph section that will be projected into L4 storage.
         - Each operational statement must use a predicate from the allowed GraphPredicate raw values below.
         - Each operational statement should be a complete natural-language memory claim; statement text is the semantic authority, while predicates are retrieval/routing handles.
         - Use statement metadata to preserve extraction discipline and downstream routing.
@@ -251,19 +258,17 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         \(MemoryOSL4RelationPromptGuide.render())
 
         L2 entity tool contract:
+        - Use memory_os_context(query) to search existing L2/L3/L4 memory before deciding whether facts are new, duplicate, or refinements. Its relation cards reveal graph context that keyword search cannot provide.
         - Use memory_os_l2_find_entities(names) to check existing L2 entities by exact name/alias. Provide likely aliases in one string separated by comma, Chinese comma, dunhao, semicolon, or newline.
-        - Use memory_os_l2_update_entities(entities[]) to update L2 working memory in batches.
-        - For update statements, provide text, optional relation, optional connectedEntity, optional connectedEntityType, optional factType, optional polarity, and optional originalPhrase.
-        - If relation is uncertain, omit it or use RELATED_TO.
+        - Use memory_os_read_provenance(provenanceObjectID, spanID) when exact raw evidence from L0 is required.
+        - In this L1 projection artifact, you produce the structured output directly (not via tool calls). The output artifact will be projected into L2/L3/L4 storage by the projection service.
         - Do not create entities for every noun phrase; create or update only objects likely to be useful future retrieval anchors.
-        - Preserve negative or exclusion semantics explicitly. Example: text = "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。", factType = decision, polarity = exclude, originalPhrase = "不去贫民窟".
+        - Preserve negative or exclusion semantics directly in the statement text.
 
-        Current-user dedicated fact write tool note:
-        - Outside this L1 artifact, when using memory_os_update_current_user_profile, provide only facts[].statement, facts[].factType, and facts[].relation.
-        - Do not provide evidence, confidence, metadata, validAt, profileDimension, source, stability, sensitivity, observations, or mode to that tool.
-        - The tool owns current_user anchoring, metadata construction, timestamps, confidence defaults, and projection details.
-        - Use memory_os_update_current_user_profile for current-user-scoped facts when available and when the fact can be represented by statement + factType + relation.
-        - Use memory_os_l2_update_entities for general L2 entity memory, especially non-current-user anchors, connected entity updates, work objects, events, documents, implementation facts, environment facts, and relationships not scoped to current_user.
+        Current-user fact handling in this L1 artifact:
+        - In this L1 projection, current-user facts are encoded as operationalStatements with the current_user identity anchor (see Current user and person boundary above).
+        - In real-time conversation, the dedicated memory_os_update_current_user_profile tool handles current-user anchoring, metadata construction, timestamps, and projection details automatically.
+        - For general L2 entity memory in this artifact (non-current-user anchors, work objects, events, documents, implementation facts), produce operationalEntities and operationalStatements as usual.
 
         L2 fact taxonomy:
         - profile_preference: current-user profile facts and explicitly evidenced person profile facts, including preference, dislike, habit, goal, stable trait, stable personal context, knowledge background, communication preference, or personalized operating preference.
@@ -287,11 +292,11 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Class-specific extraction cues:
         - profile_preference: Extract when evidence states or strongly shows a person's preference, dislike, habit, goal, stable trait, communication preference, interaction guidance, knowledge background, emotional-support preference, personal constraint, or stable personal context. Anchor first-person user-authored evidence to current_user only when authorship is supported. Anchor other-person profile facts only when identity is resolved. Do not extract transient moods, jokes, weak one-off observations, politeness, or assistant psychological guesses as stable profile facts.
         - project_state: Extract when evidence updates the current state, scope, milestone, requirement, constraint, design direction, active context, open problem, or known limitation of a work_object. Anchor to the most specific work_object or project phase. Prefer project_state over implementation when the fact is about product/project direction rather than code/runtime behavior.
-        - task_commitment: Extract when someone commits to do something, asks for follow-up, creates a TODO, assigns responsibility, sets a due date, completes, cancels, or postpones work. Anchor to the responsible person or relevant work_object depending on retrieval need. Use polarity/status metadata for completion, cancellation, or deferment when applicable.
+        - task_commitment: Extract when someone commits to do something, asks for follow-up, creates a TODO, assigns responsibility, sets a due date, completes, cancels, or postpones work. Anchor to the responsible person or relevant work_object depending on retrieval need.
         - calendar_time: Extract when evidence contains a schedule, event time, deadline, time block, conflict, start/end time, recurrence, or temporal coordination. Anchor to the event or time_expression. Do not confuse vague narrative time with actionable calendar/time memory.
         - communication: Extract when evidence is about a message, email, chat, RSS item, sender, recipient, mention, request, reply, topic, or communication-derived action. Anchor to the message/document/person/work_object most likely to be searched later. Preserve sender/recipient/topic metadata when available.
         - source_document: Extract when evidence describes an attachment, document, webpage, transcript, citation, source item, answer, or provenance relationship. Anchor to the document/artifact/source item. Do not duplicate full source content; L0 remains the evidence store.
-        - decision: Extract when evidence states a selected option, explicit decision, rejection, approval, rationale, owner, supersession, or tradeoff conclusion. Anchor to the work_object, person, event, or decision topic. Always preserve negative decisions and rejected options when operationally important. Use polarity = affirm/exclude/reject/cancel/defer/supersede as appropriate.
+        - decision: Extract when evidence states a selected option, explicit decision, rejection, approval, rationale, owner, supersession, or tradeoff conclusion. Anchor to the work_object, person, event, or decision topic. Always preserve negative decisions and rejected options in the statement text when operationally important.
         - implementation: Extract when evidence concerns code, architecture, runtime behavior, dependency, module relation, bug, fix, feature, test result, migration, API contract, or implementation status. Anchor to the work_object, module, file, component, feature, or repository. Prefer implementation over project_state when the fact is about actual code/runtime/test behavior.
         - environment_config: Extract when evidence concerns local environment, branch, toolchain, credential boundary, config, permission mode, workspace path, OS/runtime version, deployment fact, or command environment. Anchor to the environment, work_object, repository, or config object. Drop ephemeral command output unless it changes future operation.
         - relationship: Extract when evidence establishes or updates a relation between people, projects, organizations, concepts, locations, documents, artifacts, events, or work_objects. Anchor to the relation's most retrievable subject. Use a precise predicate when available; otherwise RELATED_TO.
@@ -352,24 +357,27 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Do not create L4 entities for vague temporary phrases, one-off tasks, ephemeral UI wording, unsupported inferred categories, or purely stylistic wording.
 
         Workflow:
-        1. Read L1 events in chronological order.
-        2. Extract candidate operational facts per event for L2 using the direct classified fact extraction method: detect future-useful facts before creating entities.
-        3. Drop noise, transient wording, unsupported guesses and purely stylistic duplicates.
+        1. Read L1 events in chronological order. Each event contains a capture_event_id, event_type, source_kind, occurred_at, provenance_object_id, span_id, title, content_preview, token_estimate, and metadata.
+        2. For each event, extract candidate operational facts using the direct classified fact extraction method: identify future-useful facts before creating entities.
+        3. Drop noise, transient wording, unsupported guesses, and purely stylistic duplicates.
         4. Classify each retained fact into exactly one metadata.l2_fact_type.
         5. Select the minimal useful entity anchor for each retained fact.
         6. Write complete statement text and choose the most precise allowed relation/predicate.
-        7. Consolidate duplicate operational facts across events while preserving useful entity names, aliases, statement text and original wording.
+        7. Consolidate duplicate operational facts across events while preserving useful entity names, aliases, statement text, and original wording.
         8. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
-        9. L2 itself does not require evidence spans; keep provenance identifiers only as optional internal metadata when already available from L1/L0.
+        9. L2 does not require evidence spans; keep provenance identifiers only as optional internal metadata when already available from L1/L0.
         10. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every operational statement.
-        11. For L2, prefer memory_os_l2_find_entities and memory_os_l2_update_entities. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context. Prefer `memory_os_context` for this search — its relation cards reveal entity connections (e.g., "X is an instance of Y", "Z depends on W") that keyword search cannot provide.
+        11. Use `memory_os_context` to search existing L2/L3/L4 memory before deciding whether facts are new, duplicate, or refinements. Its relation cards reveal graph context that keyword search cannot provide.
 
         11a. Graph-Assisted Entity Resolution: When searching for existing entities, use the relation cards from `memory_os_context` to disambiguate. Two entities with similar names can be distinguished by their graph connections (e.g., "AgentOS" as a project vs "AgentOS" as a concept are differentiated by INSTANCE_OF vs SUBCLASS_OF relations). If L4 shows "AgentOS project INSTANCE_OF personal AI platform" and new evidence mentions "a personal AI platform called AgentOS", this is the SAME entity despite different wording — reuse it.
 
-        12. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters. Before accepting a knowledge candidate, check whether L4 graph relations already imply it: if "Framework X APPLIES_TO Domain Y" and "Domain Y STUDIED_BY Method Z" already exist, a candidate claiming "Framework X is relevant to Method Z" is implicit — flag it as a possible duplicate and explain in promotionDecisions. For accepted candidates, write a complete claim, choose exactly one non-empty discipline domain, optionally provide metadata.related_object_names containing durable L4 concept entity names or aliases, and record domain reasoning in promotionDecisions.
+        12. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters (signal_quality, reuse_scope, novelty, structurability). Before accepting a knowledge candidate, check whether L4 graph relations already imply it: if "Framework X APPLIES_TO Domain Y" and "Domain Y STUDIED_BY Method Z" already exist, a candidate claiming "Framework X is relevant to Method Z" is implicit — flag it as a possible duplicate and explain in promotionDecisions. For accepted candidates, write a complete claim, choose exactly one non-empty discipline domain, optionally provide metadata.related_object_names containing durable L4 concept entity names or aliases, and record domain reasoning in promotionDecisions.
 
         13. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted, reused, or rejected. When creating conceptRelations, prioritize cross-domain connections that bridge previously separate graph clusters. If A→B→C already exists, a new direct A→C relation has less value than a relation connecting two unrelated branches. Record the search-backed judgment in metadata or promotionDecisions.
+
         14. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
+
+        After this artifact is accepted and projected into L2/L3/L4, the processed L1 events will be cleared. L0 retains the original evidence permanently.
 
         L1 capture events are provided as an ordered JSON packet:
         \(Self.renderJSON(packet))
@@ -532,7 +540,7 @@ public enum MemoryOSBackgroundToolCatalog {
     private static func contextTool() -> MemoryOSBackgroundToolDescriptor {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_context",
-            description: "Search Connor Memory OS L1-L4 with natural-language terms and return entity cards (「name」(type): summary) and relation cards (source predicateLabel target) as a flat array. Prefer this over keyword search for entity disambiguation, duplicate detection, and cross-domain connection discovery.",
+            description: "Search Connor Memory OS L2-L4 with natural-language terms and return entity cards and relation cards as a flat array. Prefer this over keyword search for entity disambiguation, duplicate detection, and cross-domain connection discovery.",
             inputSchemaJSON: "{\"query\":\"string (search terms separated by ;)\"}",
             usagePolicy: "Must use memory_os_context before deciding whether emitted L2 facts are new/refinements and before creating or reusing L3/L4 candidates. Its relation cards reveal graph context that keyword search cannot. Record duplicate/novelty judgment in metadata or promotionDecisions."
         )
@@ -655,12 +663,14 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L1 unified projection"))
 
         Stage-specific tool policy:
-        - Prefer the provided L1 packet first.
-        - Use memory_os_read_provenance when exact raw evidence is required.
-        - Must use memory_os_search before deciding whether emitted L2 facts are new, duplicates, or refinements.
-        - Must use memory_os_search across L3/L4 before emitting or rejecting L3 knowledge candidates, L4 stable entities, L4 concept entities, or L4 durable relations.
+        - Prefer the provided L1 packet first. It contains the cached events that triggered this projection job.
+        - Use memory_os_read_provenance when exact raw evidence from L0 is required.
+        - Use memory_os_context (via memory_os_search) before deciding whether emitted L2 facts are new, duplicates, or refinements.
+        - Use memory_os_context across L3/L4 before emitting or rejecting L3 knowledge candidates, L4 stable entities, L4 concept entities, or L4 durable relations.
         - Record search-backed judgment in metadata or promotionDecisions: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
         - Use memory_os_expand_l4 for entity identity ambiguity, duplicate concept detection, or relation context.
+
+        After this artifact is accepted and projected, the processed L1 capture events will be physically deleted (L0 retains permanent evidence).
 
         Job contract:
         - job_id: \(draft.id)

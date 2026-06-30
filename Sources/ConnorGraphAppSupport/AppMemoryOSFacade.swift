@@ -247,10 +247,6 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try MemoryOSContextDeliveryService(store: store).flatContext(terms: terms)
     }
 
-    public func queryMemoryOSGraph(_ query: MemoryOSGraphQuery) throws -> MemoryOSGraphSubgraph {
-        try SQLiteMemoryOSGraphRetrievalService(store: store).queryGraph(query)
-    }
-
     public func findMemoryOSL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l2FindStatements(MemoryOSL2StatementFindQuery(text: text, subjectID: subjectID, predicates: predicates, limit: limit))
     }

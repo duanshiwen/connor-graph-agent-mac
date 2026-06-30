@@ -27,13 +27,15 @@ public struct MemoryOSL2EntityMemoryView: Codable, Sendable, Equatable {
     public var type: String
     public var summary: String
     public var statements: [MemoryOSL2StatementMemoryView]
+    public var updatedAt: String
 
-    public init(name: String, aliases: String = "", type: String = "entity", summary: String = "", statements: [MemoryOSL2StatementMemoryView] = []) {
+    public init(name: String, aliases: String = "", type: String = "entity", summary: String = "", statements: [MemoryOSL2StatementMemoryView] = [], updatedAt: String = "") {
         self.name = name
         self.aliases = aliases
         self.type = type
         self.summary = summary
         self.statements = statements
+        self.updatedAt = updatedAt
     }
 }
 
@@ -41,11 +43,13 @@ public struct MemoryOSL2StatementMemoryView: Codable, Sendable, Equatable {
     public var text: String
     public var relation: String
     public var connectedEntity: String?
+    public var committedAt: String
 
-    public init(text: String, relation: String = "RELATED_TO", connectedEntity: String? = nil) {
+    public init(text: String, relation: String = "RELATED_TO", connectedEntity: String? = nil, committedAt: String = "") {
         self.text = text
         self.relation = relation
         self.connectedEntity = connectedEntity
+        self.committedAt = committedAt
     }
 }
 
@@ -76,20 +80,12 @@ public struct MemoryOSL2EntityUpdate: Codable, Sendable, Equatable {
 public struct MemoryOSL2StatementUpdate: Codable, Sendable, Equatable {
     public var text: String
     public var relation: String?
-    public var connectedEntity: String?
-    public var connectedEntityType: String?
     public var factType: String?
-    public var polarity: String?
-    public var originalPhrase: String?
 
-    public init(text: String, relation: String? = nil, connectedEntity: String? = nil, connectedEntityType: String? = nil, factType: String? = nil, polarity: String? = nil, originalPhrase: String? = nil) {
+    public init(text: String, relation: String? = nil, factType: String? = nil) {
         self.text = text
         self.relation = relation
-        self.connectedEntity = connectedEntity
-        self.connectedEntityType = connectedEntityType
         self.factType = factType
-        self.polarity = polarity
-        self.originalPhrase = originalPhrase
     }
 }
 
@@ -134,14 +130,16 @@ public struct MemoryOSL2StoredEntity: Codable, Sendable, Equatable, Identifiable
     public var aliases: [String]
     public var summary: String
     public var statements: [MemoryOSL2StoredStatement]
+    public var updatedAt: String
 
-    public init(id: String = UUID().uuidString, name: String, type: String = "entity", aliases: [String] = [], summary: String = "", statements: [MemoryOSL2StoredStatement] = []) {
+    public init(id: String = UUID().uuidString, name: String, type: String = "entity", aliases: [String] = [], summary: String = "", statements: [MemoryOSL2StoredStatement] = [], updatedAt: String = "") {
         self.id = id
         self.name = name
         self.type = type
         self.aliases = aliases
         self.summary = summary
         self.statements = statements
+        self.updatedAt = updatedAt
     }
 }
 
@@ -165,13 +163,15 @@ public struct MemoryOSL2StoredStatement: Codable, Sendable, Equatable, Identifia
     public var relation: String
     public var connectedEntityName: String?
     public var metadata: [String: String]
+    public var committedAt: String
 
-    public init(id: String = UUID().uuidString, text: String, relation: String = "RELATED_TO", connectedEntityName: String? = nil, metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, text: String, relation: String = "RELATED_TO", connectedEntityName: String? = nil, metadata: [String: String] = [:], committedAt: String = "") {
         self.id = id
         self.text = text
         self.relation = relation
         self.connectedEntityName = connectedEntityName
         self.metadata = metadata
+        self.committedAt = committedAt
     }
 }
 
@@ -227,8 +227,9 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
                 type: entity.type,
                 summary: entity.summary,
                 statements: entity.statements.map { statement in
-                    MemoryOSL2StatementMemoryView(text: statement.text, relation: statement.relation, connectedEntity: statement.connectedEntityName)
-                }
+                    MemoryOSL2StatementMemoryView(text: statement.text, relation: statement.relation, connectedEntity: statement.connectedEntityName, committedAt: statement.committedAt)
+                },
+                updatedAt: entity.updatedAt
             )
         }
         let message = views.isEmpty ? "No exact L2 entity match found by name or alias. Try likely aliases or original names." : "Found exact L2 matches by name or alias."
@@ -265,11 +266,7 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
         MemoryOSL2StatementUpdate(
             text: statement.text,
             relation: try normalizeRelation(statement.relation),
-            connectedEntity: statement.connectedEntity,
-            connectedEntityType: statement.connectedEntityType,
-            factType: try normalizeFactType(statement.factType),
-            polarity: statement.polarity,
-            originalPhrase: statement.originalPhrase
+            factType: try normalizeFactType(statement.factType)
         )
     }
 
@@ -333,15 +330,10 @@ public final class InMemoryMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMem
             return MemoryOSL2StatementActionSummary(text: text, action: "skipped_duplicate")
         }
         let metadata = [
-            "l2_fact_type": statement.factType,
-            "polarity": statement.polarity,
-            "originalPhrase": statement.originalPhrase
+            "l2_fact_type": statement.factType
         ].compactMapValues { $0?.nilIfBlank }
-        current.statements.append(MemoryOSL2StoredStatement(text: text, relation: statement.relation?.nilIfBlank ?? "RELATED_TO", connectedEntityName: statement.connectedEntity?.nilIfBlank, metadata: metadata))
+        current.statements.append(MemoryOSL2StoredStatement(text: text, relation: statement.relation?.nilIfBlank ?? "RELATED_TO", connectedEntityName: nil, metadata: metadata))
         entitiesByID[current.id] = current
-        if let connectedName = statement.connectedEntity?.nilIfBlank {
-            _ = try upsertEntity(MemoryOSL2EntityUpdate(name: connectedName, type: statement.connectedEntityType, aliases: nil, summary: nil, statements: []), aliases: [])
-        }
         return MemoryOSL2StatementActionSummary(text: text, action: "added")
     }
 
