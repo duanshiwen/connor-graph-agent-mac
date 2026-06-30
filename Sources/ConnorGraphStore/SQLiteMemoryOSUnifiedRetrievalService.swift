@@ -104,25 +104,32 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         let trimmed = entityName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        // Resolve entity name → ID (exact match first, then fuzzy)
-        let quoted = store.quote(trimmed)
-        let like = store.quote("%\(trimmed)%")
-        let resolved = try store.query(sql: """
-            SELECT e.id FROM memory_l4_entities e
-            LEFT JOIN memory_l4_entity_aliases a ON a.entity_id = e.id
-            WHERE e.id = \(quoted) OR e.stable_key = \(quoted) OR e.name = \(quoted)
-               OR e.name LIKE \(like) OR a.alias = \(quoted) OR a.alias LIKE \(like)
-            ORDER BY CASE
-              WHEN e.id = \(quoted) THEN 100
-              WHEN e.stable_key = \(quoted) THEN 95
-              WHEN e.name = \(quoted) THEN 90
-              WHEN EXISTS (SELECT 1 FROM memory_l4_entity_aliases a2 WHERE a2.entity_id = e.id AND a2.alias = \(quoted)) THEN 85
-              WHEN e.name LIKE \(like) THEN 50
-              ELSE 25
-            END DESC
-            LIMIT 1
-            """)
-        guard let entityID = resolved.first?.first, !entityID.isEmpty else { return [] }
+        // Step 1: Try FTS5 for fast entity name lookup
+        var entityID: String?
+        let ftsResults = try store.searchEntitiesFTS(query: trimmed, limit: 5)
+        if let firstFTS = ftsResults.first {
+            entityID = firstFTS
+        } else {
+            // Step 2: Fallback to exact match on id/stable_key/name, then LIKE for aliases
+            let quoted = store.quote(trimmed)
+            let like = store.quote("%\(trimmed)%")
+            let resolved = try store.query(sql: """
+                SELECT e.id FROM memory_l4_entities e
+                LEFT JOIN memory_l4_entity_aliases a ON a.entity_id = e.id
+                WHERE e.id = \(quoted) OR e.stable_key = \(quoted) OR e.name = \(quoted)
+                   OR a.alias = \(quoted) OR a.alias LIKE \(like)
+                ORDER BY CASE
+                  WHEN e.id = \(quoted) THEN 100
+                  WHEN e.stable_key = \(quoted) THEN 95
+                  WHEN e.name = \(quoted) THEN 90
+                  WHEN EXISTS (SELECT 1 FROM memory_l4_entity_aliases a2 WHERE a2.entity_id = e.id AND a2.alias = \(quoted)) THEN 85
+                  ELSE 25
+                END DESC
+                LIMIT 1
+                """)
+            entityID = resolved.first?.first
+        }
+        guard let entityID, !entityID.isEmpty else { return [] }
 
         var results: [MemoryOSL4ExpansionHit] = []
         var frontier: Set<String> = [entityID]
