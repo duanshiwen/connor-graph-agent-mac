@@ -208,7 +208,8 @@ public enum AppMemoryOSCLIRouter {
                 kind: kind,
                 limit: limit,
                 model: model,
-                configuration: MemoryOSBackgroundToolLoopConfiguration(maxToolIterations: maxToolIterations, maxToolResultBytes: maxToolResultBytes)
+                configuration: MemoryOSBackgroundToolLoopConfiguration(maxToolIterations: maxToolIterations, maxToolResultBytes: maxToolResultBytes),
+                logHandler: { message in print(message) }
             )
         } else {
             result = try inspector.debugRunNextBackgroundAI(kind: kind, limit: limit)
@@ -217,7 +218,7 @@ public enum AppMemoryOSCLIRouter {
         case "json":
             return try encode(result, encoder: encoder)
         case "text":
-            return MemoryOSDebugAIRunTranscriptRenderer.render(result)
+            return "\n" + MemoryOSDebugAIRunTranscriptRenderer.render(result)
         default:
             return try encode(MemoryOSCLIError(error: "unknown_debug_run_format", usage: "connor memory pipeline debug-run-next [--format text|json]"), encoder: encoder)
         }

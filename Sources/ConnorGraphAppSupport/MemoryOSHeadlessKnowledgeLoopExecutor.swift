@@ -85,25 +85,30 @@ public enum MemoryOSHeadlessKnowledgeLoopError: Error, Sendable, Equatable, Cust
     }
 }
 
+public typealias MemoryOSLoopLogHandler = @Sendable (_ message: String) -> Void
+
 public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToolLoopModel>: MemoryOSBackgroundModelExecutor, @unchecked Sendable {
     public var model: Model
     public var toolExecutor: MemoryOSBackgroundToolExecutor
     public var store: SQLiteMemoryOSStore
     public var configuration: MemoryOSBackgroundToolLoopConfiguration
     public var now: @Sendable () -> Date
+    public var logHandler: MemoryOSLoopLogHandler?
 
     public init(
         model: Model,
         toolExecutor: MemoryOSBackgroundToolExecutor,
         store: SQLiteMemoryOSStore,
         configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(),
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        logHandler: MemoryOSLoopLogHandler? = nil
     ) {
         self.model = model
         self.toolExecutor = toolExecutor
         self.store = store
         self.configuration = configuration
         self.now = now
+        self.logHandler = logHandler
     }
 
     public func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
@@ -123,6 +128,9 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         )
         try store.save(backgroundRun: run)
 
+        log("Starting background AI run: job=\(request.jobID) kind=\(request.kind) model=\(model.modelID)")
+        log("Prompt length: \(request.prompt.count) chars, tools: \(request.availableTools.map(\.name).joined(separator: ", "))")
+
         var messages: [MemoryOSBackgroundLoopMessage] = [
             MemoryOSBackgroundLoopMessage(role: .user, content: request.prompt)
         ]
@@ -137,6 +145,8 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 if Int(now().timeIntervalSince(startedAt)) > configuration.maxRunDurationSeconds {
                     throw MemoryOSHeadlessKnowledgeLoopError.exceededMaxRunDuration(configuration.maxRunDurationSeconds)
                 }
+                log("--- Iteration \(iteration) ---")
+                log("Sending \(messages.count) messages to model...")
                 let response = try model.complete(MemoryOSBackgroundLoopModelRequest(runID: runID, job: request, messages: messages, availableTools: request.availableTools))
                 mergedMetadata.merge(response.metadata) { _, new in new }
                 if !response.assistantText.isEmpty || !response.toolCalls.isEmpty {
@@ -144,9 +154,14 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                     messages.append(assistantMessage)
                     try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
                     sequence += 1
+                    if !response.assistantText.isEmpty {
+                        log("Assistant response (\(response.assistantText.count) chars):")
+                        log(capped(response.assistantText))
+                    }
                 }
 
                 if let artifact = response.finalArtifactJSON {
+                    log("\n✅ Final artifact received (\(artifact.count) chars)")
                     run.status = .succeeded
                     run.finishedAt = now()
                     run.iterationCount = iteration
@@ -162,10 +177,12 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
 
                 let calls = Array(response.toolCalls.prefix(configuration.maxToolCallsPerIteration))
                 if calls.isEmpty { throw MemoryOSHeadlessKnowledgeLoopError.missingFinalArtifact }
+                log("Tool calls: \(calls.map(\.name).joined(separator: ", "))")
                 for call in calls {
                     let toolStartedAt = now()
                     toolCallCount += 1
                     do {
+                        log("  → \(call.name)(\(truncateJSON(call.argumentsJSON, max: 200)))")
                         let result = try toolExecutor.execute(call, context: MemoryOSBackgroundToolExecutionContext(runID: runID, iteration: iteration))
                         let resultJSON = capped(result.contentJSON)
                         try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, resultJSON: resultJSON, status: .succeeded, startedAt: toolStartedAt, finishedAt: now(), metadata: ["citations": result.citations.joined(separator: ",")]))
@@ -174,7 +191,9 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                         messages.append(toolMessage)
                         try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: toolMessage.id, runID: runID, sequence: sequence, role: toolMessage.role, content: toolMessage.content, toolCallID: call.id, toolName: call.name, metadata: ["iteration": String(iteration)]))
                         sequence += 1
+                        log("  ← Result: \(result.contentText.prefix(200))")
                     } catch {
+                        log("  ✗ Tool error: \(error)")
                         try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, status: .failed, startedAt: toolStartedAt, finishedAt: now(), errorMessage: String(describing: error)))
                         throw error
                     }
@@ -203,5 +222,14 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         if value.count <= configuration.maxToolResultBytes { return value }
         let index = value.index(value.startIndex, offsetBy: configuration.maxToolResultBytes)
         return String(value[..<index])
+    }
+
+    private func log(_ message: String) {
+        logHandler?(message)
+    }
+
+    private func truncateJSON(_ json: String, max: Int) -> String {
+        guard json.count > max else { return json }
+        return String(json.prefix(max)) + "..."
     }
 }
