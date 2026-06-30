@@ -150,7 +150,9 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 let response = try model.complete(MemoryOSBackgroundLoopModelRequest(runID: runID, job: request, messages: messages, availableTools: request.availableTools))
                 mergedMetadata.merge(response.metadata) { _, new in new }
                 if !response.assistantText.isEmpty || !response.toolCalls.isEmpty {
-                    let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: response.toolCalls.map(\.name).joined(separator: ","))
+                    let joinedToolNames = response.toolCalls.map(\.name).joined(separator: ",")
+                    let truncatedToolName = String(joinedToolNames.prefix(64))
+                    let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName)
                     messages.append(assistantMessage)
                     try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
                     sequence += 1
