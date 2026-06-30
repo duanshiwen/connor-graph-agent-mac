@@ -548,8 +548,8 @@ public enum MemoryOSBackgroundToolCatalog {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_l2_update_entities",
             description: "Write L2 entity-centered working memory. Upserts entities by name and appends statements.",
-            inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"aliases?\":\"string\",\"summary?\":\"string\",\"statements\":[{\"text\":\"string\",\"relation?\":\"GraphPredicate\",\"factType?\":\"string\"}]}]}",
-            usagePolicy: "Use for general L2 entity writes (non-current-user). Search memory_os_context first to check for existing entities. Use for work objects, people, events, documents, implementation facts, relationships."
+            inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"aliases?\":\"string\",\"summary?\":\"string\",\"statements\":[{\"text\":\"string\",\"relation?\":\"GraphPredicate (e.g., RELATED_TO, ABOUT, SAME_AS)\",\"factType?\":\"string\"}]}]}",
+            usagePolicy: "Use for general L2 entity writes (non-current-user). Search memory_os_context first to check for existing entities. Use for work objects, people, events, documents, implementation facts, relationships. Invalid relations will fallback to RELATED_TO."
         )
     }
 
