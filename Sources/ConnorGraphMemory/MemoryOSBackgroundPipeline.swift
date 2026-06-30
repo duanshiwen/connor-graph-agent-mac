@@ -226,7 +226,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Allowed L2 predicates / GraphPredicate raw values:
         \(Self.allowedPredicateGuide())
 
-        ⚠️ IMPORTANT: Only use the exact raw values listed above (e.g., SAME_AS, NOT IDENTITY). Do not invent or abbreviate relation names. If unsure, use RELATED_TO.
+        ⚠️ IMPORTANT: Only use the exact raw values listed above (e.g., SAME_AS, NOT IDENTITY). Do not invent or abbreviate relation names. If unsure, use RELATED_TO. Invalid relations will automatically fallback to RELATED_TO.
 
         \(MemoryOSL4RelationPromptGuide.render())
 
