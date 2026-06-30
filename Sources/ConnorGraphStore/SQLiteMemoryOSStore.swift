@@ -338,6 +338,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l2_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l2_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
         try enqueueSearchIndexChange(layer: "L2", recordID: statement.id)
+        
+        // Invalidate L2 cache
+        MemoryOSQueryCache.shared.invalidateL2()
+        // Also invalidate profile cache if this is a current_user statement
+        if statement.metadata["person_role"] == "current_user" || statement.subjectID.contains("current-user") {
+            MemoryOSQueryCache.shared.invalidateProfile()
+        }
     }
 
     public func saveProjectionBatch(_ batch: MemoryOSProjectionBatch) throws {
@@ -442,6 +449,9 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l4_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l4_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate.rawValue)), \(quote(statement.text)))")
         try enqueueSearchIndexChange(layer: "L4", recordID: statement.id)
+        
+        // Invalidate L4 cache
+        MemoryOSQueryCache.shared.invalidateL4()
     }
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
