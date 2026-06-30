@@ -227,9 +227,10 @@ public enum AppMemoryOSCLIRouter {
         let paths = try AppStoragePaths.live()
         try paths.ensureDirectoryHierarchy()
         let graphStore = try AppGraphBootstrapper(paths: paths).bootstrapStore()
+        let settingsRepository = AppLLMSettingsRepository.cliRepository()
         let factory = AppGraphAgentRuntimeFactory(
             store: graphStore,
-            settingsRepository: AppLLMSettingsRepository(),
+            settingsRepository: settingsRepository,
             storagePaths: paths
         )
         return AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
