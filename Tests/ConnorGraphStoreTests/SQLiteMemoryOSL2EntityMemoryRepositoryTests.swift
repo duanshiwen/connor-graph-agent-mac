@@ -48,3 +48,21 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
     let evidenceTables = try store.query(sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_l2_statement_evidence'")
     #expect(evidenceTables.isEmpty)
 }
+
+@Test func sqliteL2EntityMemoryRejectsInvalidRelation() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryL2EntityMemoryDatabaseURL().path)
+    try store.migrate()
+    let repository = SQLiteMemoryOSL2EntityMemoryRepository(store: store)
+    let service = MemoryOSL2EntityMemoryService(repository: repository)
+
+    #expect(throws: MemoryOSL2EntityMemoryValidationError.self) {
+        try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+            MemoryOSL2EntityUpdate(
+                name: "Test Entity",
+                statements: [
+                    MemoryOSL2StatementUpdate(text: "Test statement", relation: "IDENTITY", factType: "other")
+                ]
+            )
+        ]))
+    }
+}
