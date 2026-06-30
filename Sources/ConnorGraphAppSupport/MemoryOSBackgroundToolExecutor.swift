@@ -31,6 +31,7 @@ public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, Cu
 
 public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public static let defaultAllowedToolNames: Set<String> = [
+        "memory_os_context",
         "memory_os_search",
         "memory_os_read_record",
         "memory_os_read_provenance",
