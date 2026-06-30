@@ -249,7 +249,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
         )
     }
 
-    public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date()) throws -> MemoryOSCLIDebugAIRunResult {
+    public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date(), logHandler: MemoryOSLoopLogHandler? = nil) throws -> MemoryOSCLIDebugAIRunResult {
         let effectiveLimit = safeLimit(limit)
         let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
         let plannedCandidates = try executableKinds.flatMap { executableKind in
@@ -262,13 +262,15 @@ public struct AppMemoryOSCLIInspector: Sendable {
             return MemoryOSCLIDebugAIRunResult(status: "no_runnable_jobs", command: "memory pipeline debug-run-next", requestedKind: kind, requestedLimit: effectiveLimit, queueRuns: [])
         }
 
+        logHandler?("Found \(plannedCandidates.count) runnable job(s). Starting execution...\n")
         let facade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
         let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
             model: model,
             toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
             store: store,
             configuration: configuration,
-            now: { now }
+            now: { now },
+            logHandler: logHandler
         )
         let summaries = try facade.runBackgroundAIQueueOnce(executor: executor, limit: effectiveLimit, now: now, kinds: executableKinds)
         let queueRuns = try plannedCandidates.enumerated().map { index, candidate in
