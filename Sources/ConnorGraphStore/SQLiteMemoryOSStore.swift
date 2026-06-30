@@ -76,6 +76,10 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("PRAGMA synchronous = NORMAL;")
         try execute("PRAGMA busy_timeout = 5000;")
         try execute("PRAGMA temp_store = MEMORY;")
+        // Performance optimizations
+        try execute("PRAGMA cache_size = -40000;")  // 40MB cache (negative = KB)
+        try execute("PRAGMA mmap_size = 268435456;")  // 256MB memory-mapped I/O
+        try execute("PRAGMA page_size = 4096;")
     }
 
     public func migrate() throws {
@@ -87,6 +91,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
         VALUES (\(Self.currentSchemaVersion), 'memory_os_background_run_trace_schema', \(quote(iso(Date()))), '{}')
         """)
+        // Optimize indexes after migration
+        try execute("PRAGMA optimize;")
     }
 
     public func schemaUserVersion() throws -> Int {
