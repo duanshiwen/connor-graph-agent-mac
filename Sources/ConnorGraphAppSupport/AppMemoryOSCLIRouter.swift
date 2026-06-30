@@ -42,6 +42,10 @@ public enum AppMemoryOSCLIRouter {
             return try encode(try inspector.search(query: query, layers: optionValue("--layers", in: args).map(splitCSV) ?? [], limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "search-index":
             return try routeSearchIndex(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
+        case "queue":
+            return try encode(try inspector.queue(limit: intOption("--limit", in: args, default: 20), status: optionValue("--status", in: args), kind: optionValue("--kind", in: args)), encoder: encoder)
+        case "l1-history":
+            return try encode(try inspector.l1History(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "runs":
             return try encode(try inspector.runs(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "run":
@@ -51,7 +55,7 @@ public enum AppMemoryOSCLIRouter {
         case "pipeline":
             return try routePipeline(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         default:
-            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|context|l0|l1|l2|l3|l4|search-index|queue|runs|run|pipeline"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|context|l0|l1|l2|l3|l4|search-index|queue|runs|run|pipeline|l1-history"), encoder: encoder)
         }
     }
 
