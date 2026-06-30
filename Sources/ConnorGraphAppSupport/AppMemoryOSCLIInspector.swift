@@ -198,10 +198,11 @@ public struct AppMemoryOSCLIInspector: Sendable {
     }
 
     public func l1History(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        let l1Kinds = MemoryOSBackgroundJobKind.l1ExecutableRawValues.map { store.quote($0) }.joined(separator: ", ")
         let rows = try rows(sql: """
             SELECT id, kind, status, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, error_code, error_message, created_at, updated_at
             FROM memory_l1_processing_queue
-            WHERE kind = 'memory.l1.unified_projection'
+            WHERE kind IN (\(l1Kinds))
             ORDER BY created_at DESC
             LIMIT \(safeLimit(limit))
             """, columns: ["id", "kind", "status", "attempt_count", "max_attempts", "next_run_at", "locked_at", "locked_by", "lease_expires_at", "error_code", "error_message", "created_at", "updated_at"])
