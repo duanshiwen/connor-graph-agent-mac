@@ -27,15 +27,15 @@ public struct MemoryOSL2EntityMemoryView: Codable, Sendable, Equatable {
     public var type: String
     public var summary: String
     public var statements: [MemoryOSL2StatementMemoryView]
-    public var createdAt: String
+    public var updatedAt: String
 
-    public init(name: String, aliases: String = "", type: String = "entity", summary: String = "", statements: [MemoryOSL2StatementMemoryView] = [], createdAt: String = "") {
+    public init(name: String, aliases: String = "", type: String = "entity", summary: String = "", statements: [MemoryOSL2StatementMemoryView] = [], updatedAt: String = "") {
         self.name = name
         self.aliases = aliases
         self.type = type
         self.summary = summary
         self.statements = statements
-        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -130,16 +130,16 @@ public struct MemoryOSL2StoredEntity: Codable, Sendable, Equatable, Identifiable
     public var aliases: [String]
     public var summary: String
     public var statements: [MemoryOSL2StoredStatement]
-    public var createdAt: String
+    public var updatedAt: String
 
-    public init(id: String = UUID().uuidString, name: String, type: String = "entity", aliases: [String] = [], summary: String = "", statements: [MemoryOSL2StoredStatement] = [], createdAt: String = "") {
+    public init(id: String = UUID().uuidString, name: String, type: String = "entity", aliases: [String] = [], summary: String = "", statements: [MemoryOSL2StoredStatement] = [], updatedAt: String = "") {
         self.id = id
         self.name = name
         self.type = type
         self.aliases = aliases
         self.summary = summary
         self.statements = statements
-        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -229,7 +229,7 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
                 statements: entity.statements.map { statement in
                     MemoryOSL2StatementMemoryView(text: statement.text, relation: statement.relation, connectedEntity: statement.connectedEntityName, committedAt: statement.committedAt)
                 },
-                createdAt: entity.createdAt
+                updatedAt: entity.updatedAt
             )
         }
         let message = views.isEmpty ? "No exact L2 entity match found by name or alias. Try likely aliases or original names." : "Found exact L2 matches by name or alias."

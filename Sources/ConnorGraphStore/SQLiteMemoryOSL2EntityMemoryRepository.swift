@@ -72,7 +72,7 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
     }
 
     private func loadAllEntities() throws -> [MemoryOSL2StoredEntity] {
-        let rows = try store.query(sql: "SELECT id, node_type, name, summary, metadata_json, COALESCE(created_at, '') FROM memory_l2_nodes ORDER BY name ASC")
+        let rows = try store.query(sql: "SELECT id, node_type, name, summary, metadata_json, COALESCE(updated_at, '') FROM memory_l2_nodes ORDER BY name ASC")
         return try rows.map { row in
             let metadata = try store.decode([String: String].self, row[4])
             return MemoryOSL2StoredEntity(
@@ -82,7 +82,7 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
                 aliases: Self.splitStoredAliases(metadata["aliases"] ?? ""),
                 summary: row[3],
                 statements: [],
-                createdAt: row[5]
+                updatedAt: row[5]
             )
         }
     }
