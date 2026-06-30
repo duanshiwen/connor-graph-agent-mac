@@ -24,8 +24,7 @@ struct TaskManagementRepositoryTests {
 
         let tasks = ConnorTaskDefinition.systemDefaults(now: now)
 
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-l2" } == false)
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l2-to-knowledge" } == false)
+        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-knowledge" } == false)
         #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" } == false)
     }
 
@@ -37,8 +36,7 @@ struct TaskManagementRepositoryTests {
 
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 100))
 
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-l2" } == false)
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l2-to-knowledge" } == false)
+        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-knowledge" } == false)
         #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" } == false)
         #expect(tasks.contains { $0.id == "system.calendar.account.calendar-account-a.refresh" })
     }

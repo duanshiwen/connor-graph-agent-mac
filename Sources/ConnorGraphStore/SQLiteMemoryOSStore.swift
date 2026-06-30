@@ -76,6 +76,10 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("PRAGMA synchronous = NORMAL;")
         try execute("PRAGMA busy_timeout = 5000;")
         try execute("PRAGMA temp_store = MEMORY;")
+        // Performance optimizations
+        try execute("PRAGMA cache_size = -40000;")  // 40MB cache (negative = KB)
+        try execute("PRAGMA mmap_size = 268435456;")  // 256MB memory-mapped I/O
+        try execute("PRAGMA page_size = 4096;")
     }
 
     public func migrate() throws {
@@ -87,6 +91,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
         VALUES (\(Self.currentSchemaVersion), 'memory_os_background_run_trace_schema', \(quote(iso(Date()))), '{}')
         """)
+        // Optimize indexes after migration
+        try execute("PRAGMA optimize;")
     }
 
     public func schemaUserVersion() throws -> Int {
@@ -314,6 +320,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l2_nodes_fts WHERE node_id = \(quote(node.id));")
         try execute("INSERT INTO memory_l2_nodes_fts(node_id, node_type, name, summary) VALUES (\(quote(node.id)), \(quote(node.nodeType)), \(quote(node.name)), \(quote(node.summary)))")
         try enqueueSearchIndexChange(layer: "L2", recordID: node.id)
+        
+        // Invalidate L2 cache
+        MemoryOSQueryCache.shared.invalidateL2()
+        // Also invalidate profile cache if this is a current_user node
+        if node.id.contains("current-user") || node.metadata["person_role"] == "current_user" {
+            MemoryOSQueryCache.shared.invalidateProfile()
+        }
     }
 
     public func upsert(statement: MemoryOSStatement) throws {
@@ -325,6 +338,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l2_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l2_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
         try enqueueSearchIndexChange(layer: "L2", recordID: statement.id)
+        
+        // Invalidate L2 cache
+        MemoryOSQueryCache.shared.invalidateL2()
+        // Also invalidate profile cache if this is a current_user statement
+        if statement.metadata["person_role"] == "current_user" || statement.subjectID.contains("current-user") {
+            MemoryOSQueryCache.shared.invalidateProfile()
+        }
     }
 
     public func saveProjectionBatch(_ batch: MemoryOSProjectionBatch) throws {
@@ -346,7 +366,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func searchStatementsFTS(query: String, limit: Int = 20) throws -> [String] {
-        try queryStrings(sql: "SELECT statement_id FROM memory_l2_statements_fts WHERE memory_l2_statements_fts MATCH \(quote(query)) LIMIT \(limit)")
+        try queryStrings(sql: "SELECT statement_id FROM memory_l2_statements_fts WHERE memory_l2_statements_fts MATCH \(FTS5QuerySanitizer.sanitizeTerm(query)) LIMIT \(limit)")
     }
 
     // MARK: - L3
@@ -396,6 +416,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l4_entities_fts WHERE entity_id = \(quote(entity.id));")
         try execute("INSERT INTO memory_l4_entities_fts(entity_id, entity_type, name, aliases, summary) VALUES (\(quote(entity.id)), \(quote(entity.entityType)), \(quote(entity.name)), \(quote(entity.aliases.joined(separator: " "))), \(quote(entity.summary)))")
         try enqueueSearchIndexChange(layer: "L4", recordID: entity.id)
+        
+        // Invalidate L4 cache
+        MemoryOSQueryCache.shared.invalidateL4()
+        // Also invalidate profile cache if this is a current_user entity
+        if entity.metadata["person_role"] == "current_user" || entity.metadata["stable_key"] == "current_user" {
+            MemoryOSQueryCache.shared.invalidateProfile()
+        }
     }
 
     public func entity(id: String) throws -> MemoryOSEntity? {
@@ -422,10 +449,24 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l4_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l4_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate.rawValue)), \(quote(statement.text)))")
         try enqueueSearchIndexChange(layer: "L4", recordID: statement.id)
+        
+        // Invalidate L4 cache
+        MemoryOSQueryCache.shared.invalidateL4()
     }
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
-        try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(quote(query)) LIMIT \(limit)")
+        // Check cache first
+        let cache = MemoryOSQueryCache.shared
+        if let cached = cache.getCachedFTSSearch(query: query, limit: limit) {
+            return cached
+        }
+        
+        let results = try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(FTS5QuerySanitizer.sanitizeTerm(query)) LIMIT \(limit)")
+        
+        // Cache the result
+        cache.setCachedFTSSearch(results, query: query, limit: limit)
+        
+        return results
     }
 
     // MARK: - Production operations

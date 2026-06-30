@@ -43,6 +43,20 @@ public struct TaskManagementStack: Sendable {
         try repository.deleteTask(id: id, reason: reason)
     }
 
+    @discardableResult
+    public func purgeTask(id: String, reason: String? = nil) throws -> ConnorTaskDefinition {
+        try repository.purgeTaskDefinition(id: id, reason: reason)
+        return try repository.loadTask(id: id) ?? ConnorTaskDefinition(id: id, name: "(purged)", origin: .system, trigger: ConnorTaskTrigger(kind: .scheduled), target: ConnorTaskTarget(targetKind: "unknown", targetID: "", operationName: ""), lifecycle: ConnorTaskLifecycle(status: .deleted), metadata: ConnorTaskMetadata())
+    }
+
+    public func renameTask(id: String, newName: String) throws -> ConnorTaskDefinition {
+        guard var task = try repository.loadTask(id: id) else { throw AppTaskManagementError.taskNotFound(id) }
+        task.name = newName
+        task.updatedAt = Date()
+        try repository.saveTask(task)
+        return task
+    }
+
     public func recordRun(_ record: ConnorTaskRunRecord) throws {
         try repository.appendRunRecord(record)
         _ = try repository.updateLifecycleFromRunRecord(record)

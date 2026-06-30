@@ -256,4 +256,14 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("memory_os_expand_l4"))
     }
 
+    @Test func l1PromptClarifiesCurrentUserDoesNotNeedContextCheck() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Do NOT call memory_os_context first for current-user facts"))
+        #expect(prompt.contains("memory_os_update_current_user_profile directly"))
+        #expect(prompt.contains("Skip for current-user facts"))
+    }
+
 }

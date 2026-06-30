@@ -209,7 +209,8 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
 
         Current user and person boundary:
         - The current user is the human operating this Connor installation. First-person references from user-authored evidence (I, me, my, 我, 我的) indicate the current user when source metadata supports that authorship.
-        - When a fact is about the current user, you MUST use memory_os_update_current_user_profile instead of memory_os_l2_update_entities.
+        - When a fact is about the current user, you MUST use memory_os_update_current_user_profile instead of memory_os_l2_update_entities. Do NOT call memory_os_context first for current-user facts — the tool handles everything automatically.
+        - For current-user facts relation: Use PREFERS for preferences/interests, ABOUT for topic relations, RELATED_TO as fallback. Do NOT invent relation names like INTERESTED_IN.
         - Do not create L2 entities named "user", "用户", "当前用户", "profile", "me", "I", or similar generic words for the current user.
         - Do not treat assistant-authored assumptions, suggestions, interpretations, or guesses as current-user facts unless the user explicitly confirms them.
         - Other named or described people use memory_os_l2_update_entities, not the current_user tool.
@@ -218,17 +219,19 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Person feature extraction policy:
         - Extract explicitly evidenced current-user and other-person features when they are useful future operational memory: preference, dislike, habit, goal, stable_trait, communication_preference, knowledge_background, interaction_guidance, personal_context, constraint.
         - Current-user profile_preference facts: use memory_os_update_current_user_profile with factType = profile_preference.
-        - Other-person profile facts: use memory_os_l2_update_entities. Only write when identity is clearly resolved from evidence.
+        - Other-person profile facts: use memory_os_l2_update_entities. Only write when identity is clearly resolved from evidence. Use SAME_AS for identity relations, NOT IDENTITY.
         - Weak one-off observations, jokes, transient emotions, and assistant guesses should not be written as stable traits.
         - Do not infer medical, psychological, or sensitive identity diagnoses.
 
         Allowed L2 predicates / GraphPredicate raw values:
         \(Self.allowedPredicateGuide())
 
+        ⚠️ IMPORTANT: Only use the exact raw values listed above (e.g., SAME_AS, NOT IDENTITY). Do not invent or abbreviate relation names. If unsure, use RELATED_TO. Invalid relations will automatically fallback to RELATED_TO.
+
         \(MemoryOSL4RelationPromptGuide.render())
 
         Tool usage summary:
-        - memory_os_context(query) — Search L2/L3/L4 before writing. Use to check for duplicates and existing context.
+        - memory_os_context(query) — Search L2/L3/L4 before writing. Use to check for duplicates and existing context. NOT needed for current-user facts (use memory_os_update_current_user_profile directly).
         - memory_os_l2_update_entities(entities[]) — Write L2 entities and statements. Each entity needs name (required), type, aliases, summary, and statements[].
         - memory_os_update_current_user_profile(facts[]) — MANDATORY for current-user facts. Each fact needs statement, factType, and relation.
         - memory_os_l3_update_beliefs(beliefs[]) — Write L3 knowledge. Each belief needs statement (required), domain, relatedEntityNames.
@@ -328,7 +331,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         6. Write complete statement text and choose the most precise allowed relation/predicate.
         7. Consolidate duplicate operational facts across events.
         8. If a fact refines an existing L2 fact, append a refinement statement rather than overwriting.
-        9. Search memory_os_context before writing to check for duplicates and existing context.
+        9. Search memory_os_context before writing to check for duplicates and existing context. Skip for current-user facts (go directly to step 10).
         10. Current-user facts → memory_os_update_current_user_profile.
         11. Other L2 facts → memory_os_l2_update_entities.
         12. L3 knowledge (after all four promotion filters pass) → memory_os_l3_update_beliefs.
@@ -545,8 +548,8 @@ public enum MemoryOSBackgroundToolCatalog {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_l2_update_entities",
             description: "Write L2 entity-centered working memory. Upserts entities by name and appends statements.",
-            inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"aliases?\":\"string\",\"summary?\":\"string\",\"statements\":[{\"text\":\"string\",\"relation?\":\"GraphPredicate\",\"factType?\":\"string\"}]}]}",
-            usagePolicy: "Use for general L2 entity writes (non-current-user). Search memory_os_context first to check for existing entities. Use for work objects, people, events, documents, implementation facts, relationships."
+            inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"aliases?\":\"string\",\"summary?\":\"string\",\"statements\":[{\"text\":\"string\",\"relation?\":\"GraphPredicate (e.g., RELATED_TO, ABOUT, SAME_AS)\",\"factType?\":\"string\"}]}]}",
+            usagePolicy: "Use for general L2 entity writes (non-current-user). Search memory_os_context first to check for existing entities. Use for work objects, people, events, documents, implementation facts, relationships. Invalid relations will fallback to RELATED_TO."
         )
     }
 
@@ -554,8 +557,8 @@ public enum MemoryOSBackgroundToolCatalog {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_update_current_user_profile",
             description: "Write current-user-scoped L2 fact statements. Automatically handles current_user anchor, timestamps, and projection.",
-            inputSchemaJSON: "{\"facts\":[{\"statement\":\"string\",\"factType\":\"string\",\"relation\":\"GraphPredicate\"}]}",
-            usagePolicy: "MANDATORY for current-user facts. When evidence identifies the human operator (first-person references with source support), use this tool instead of memory_os_l2_update_entities. Only provide statement, factType, and relation."
+            inputSchemaJSON: "{\"facts\":[{\"statement\":\"string\",\"factType\":\"string\",\"relation\":\"GraphPredicate (e.g., PREFERS, ABOUT, RELATED_TO)\"}]}",
+            usagePolicy: "MANDATORY for current-user facts. When evidence identifies the human operator (first-person references with source support), use this tool instead of memory_os_l2_update_entities. Only provide statement, factType, and relation. For interests/preferences, use PREFERS. For topic relations, use ABOUT. Invalid relations will fallback to RELATED_TO."
         )
     }
 

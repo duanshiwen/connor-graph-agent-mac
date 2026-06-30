@@ -315,6 +315,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
             SELECT d.document_json FROM native_search_fts f
             JOIN native_search_docs d ON d.id = f.id
             """
+            // SAFETY: matchQuery is sanitized by NativeSourceSearchFTSQueryBuilder (letters/digits only)
             clauses.append("native_search_fts MATCH ?")
             bindings.append(.text(matchQuery))
         } else {

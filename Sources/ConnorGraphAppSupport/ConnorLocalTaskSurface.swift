@@ -59,6 +59,8 @@ public enum ConnorTaskCLICommandID: String, Codable, Sendable, Equatable, Hashab
     case taskStop
     case taskRestore
     case taskDelete
+    case taskPurge
+    case taskRename
     case taskRuns
     case sessionTaskList
     case sessionTaskRecoverable
@@ -183,6 +185,8 @@ public enum ConnorLocalTaskSurfaceCatalog {
         .init(id: .taskStop, name: "tasks stop", usage: "connor tasks stop <task-id>", summary: "Stop a task.", riskLevel: .stateChanging, examples: ["connor tasks stop system.calendar.account.calendar-account-macos-eventkit.refresh"], apiRoute: .taskStop),
         .init(id: .taskRestore, name: "tasks restore", usage: "connor tasks restore <task-id>", summary: "Restore a stopped task.", riskLevel: .stateChanging, examples: ["connor tasks restore system.calendar.account.calendar-account-macos-eventkit.refresh"], apiRoute: .taskRestore),
         .init(id: .taskDelete, name: "tasks delete", usage: "connor tasks delete <task-id>", summary: "Soft-delete a user or AI task.", riskLevel: .stateChanging, examples: ["connor tasks delete ai.summary-task"], apiRoute: .taskDelete),
+        .init(id: .taskPurge, name: "tasks purge", usage: "connor tasks purge <task-id>", summary: "Permanently remove a task (including protected system tasks).", riskLevel: .stateChanging, examples: ["connor tasks purge system.memory-os.plan-l1-to-knowledge"]),
+        .init(id: .taskRename, name: "tasks rename", usage: "connor tasks rename <task-id> <new-name>", summary: "Rename a task.", riskLevel: .stateChanging, examples: ["connor tasks rename system.memory-os.plan-l1-to-knowledge \"Memory OS: L1 Event Processing\""], apiRoute: .taskRuns),
         .init(id: .taskRuns, name: "tasks runs", usage: "connor tasks runs <task-id>", summary: "List task runs.", examples: ["connor tasks runs system.calendar.account.calendar-account-macos-eventkit.refresh"], apiRoute: .taskRuns),
         .init(id: .sessionTaskList, name: "tasks session list", usage: "connor tasks session list <session-id>", summary: "List session-scoped background tasks.", examples: ["connor tasks session list session-1"], apiRoute: .sessionTasks),
         .init(id: .sessionTaskRecoverable, name: "tasks session recoverable", usage: "connor tasks session recoverable <session-id>", summary: "List recoverable session-scoped background tasks.", examples: ["connor tasks session recoverable session-1"], apiRoute: .sessionRecoverableTasks),

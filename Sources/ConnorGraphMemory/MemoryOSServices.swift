@@ -64,7 +64,8 @@ public struct MemoryOSIngestionService: Sendable {
         let hash = SHA256.hash(data: Data(input.content.utf8)).map { String(format: "%02x", $0) }.joined()
         let object = MemoryOSProvenanceObject(sourceType: input.sourceType, sourceID: input.sourceID, title: input.title, content: input.content, contentHash: hash, occurredAt: input.occurredAt, ingestedAt: now, sessionID: input.sessionID, workObjectID: input.workObjectID, metadata: input.metadata)
         let span = MemoryOSProvenanceSpan(provenanceObjectID: object.id, startOffset: 0, endOffset: input.content.count, text: input.content, metadata: input.metadata)
-        let event = MemoryOSCaptureEvent(provenanceObjectID: object.id, eventType: input.sourceType.rawValue, occurredAt: input.occurredAt, tokenEstimate: max(1, input.content.count / 4), metadata: input.metadata.merging(["span_id": span.id]) { current, _ in current })
+        let contentPreview = input.content.count > 200 ? String(input.content.prefix(200)) + "..." : input.content
+        let event = MemoryOSCaptureEvent(provenanceObjectID: object.id, eventType: input.sourceType.rawValue, occurredAt: input.occurredAt, tokenEstimate: max(1, input.content.count / 4), metadata: input.metadata.merging(["span_id": span.id, "content_preview": contentPreview, "title": input.title]) { current, _ in current })
         return MemoryOSIngestionResult(decision: decision, provenanceObject: object, span: span, captureEvent: event)
     }
 }

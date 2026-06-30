@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import ConnorGraphCore
+import ConnorGraphCore
 import ConnorGraphMemory
 
 public enum PersistedSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
@@ -652,27 +653,21 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     }
 
     public func searchEntitiesFTS(query text: String, graphID: String, limit: Int) throws -> [GraphEntity] {
-        let match = ftsMatchQuery(text)
-        let ids = try query(sql: "SELECT entity_id FROM graph_entities_fts WHERE graph_entities_fts MATCH \(quote(match)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        let match = FTS5QuerySanitizer.sanitizeTerm(text)
+        let ids = try query(sql: "SELECT entity_id FROM graph_entities_fts WHERE graph_entities_fts MATCH \(match) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try entity(id: $0) }
     }
 
     public func searchStatementsFTS(query text: String, graphID: String, limit: Int) throws -> [GraphStatement] {
-        let match = ftsMatchQuery(text)
-        let ids = try query(sql: "SELECT statement_id FROM graph_statements_fts WHERE graph_statements_fts MATCH \(quote(match)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        let match = FTS5QuerySanitizer.sanitizeTerm(text)
+        let ids = try query(sql: "SELECT statement_id FROM graph_statements_fts WHERE graph_statements_fts MATCH \(match) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try statement(id: $0) }
     }
 
     public func searchEpisodesFTS(query text: String, graphID: String, limit: Int) throws -> [GraphEpisodeV3] {
-        let match = ftsMatchQuery(text)
-        let ids = try query(sql: "SELECT episode_id FROM graph_episodes_fts WHERE graph_episodes_fts MATCH \(quote(match)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        let match = FTS5QuerySanitizer.sanitizeTerm(text)
+        let ids = try query(sql: "SELECT episode_id FROM graph_episodes_fts WHERE graph_episodes_fts MATCH \(match) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try episode(id: $0) }
-    }
-
-    private func ftsMatchQuery(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "\"\"" }
-        return "\"" + trimmed.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
     // MARK: - Agent Sessions
