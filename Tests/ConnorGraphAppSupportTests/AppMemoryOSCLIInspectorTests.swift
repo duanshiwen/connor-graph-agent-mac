@@ -453,7 +453,7 @@ struct AppMemoryOSCLIInspectorTests {
         let inspector = AppMemoryOSCLIInspector(store: store)
         let encoder = memoryOSCLITestEncoder()
 
-        let updateJSON = #"{"entities":[{"name":"《迟到的青春期》","type":"work_object","aliases":"迟到的青春期, Late Puberty","statements":[{"text":"《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。","connectedEntity":"《迟到的青春期》马尼拉一个月阶段","connectedEntityType":"work_object","factType":"decision","polarity":"exclude","originalPhrase":"不去贫民窟"}]}]}"#
+        let updateJSON = #"{"entities":[{"name":"《迟到的青春期》","type":"work_object","aliases":"迟到的青春期, Late Puberty","statements":[{"text":"《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。","factType":"decision"}]}]}"#
         let update = try AppMemoryOSCLIRouter.route(args: ["l2", "update-entities", "--json", updateJSON], inspector: inspector, encoder: encoder)
         let find = try AppMemoryOSCLIRouter.route(args: ["l2", "find-entities", "Late Puberty"], inspector: inspector, encoder: encoder)
         let oldFind = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳"], inspector: inspector, encoder: encoder)
