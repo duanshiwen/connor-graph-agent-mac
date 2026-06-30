@@ -22,10 +22,23 @@ public struct MemoryOSL2FindEntitiesTool: AgentTool {
         }
         let result = try facade.findMemoryOSL2Entities(MemoryOSL2FindEntitiesRequest(names: names))
         let json = try Self.renderJSON(result)
+        let readableText: String
+        if result.matches.isEmpty {
+            readableText = result.message
+        } else {
+            let header = "Found \(result.matches.count) Memory OS L2 entity match(es)."
+            let body = result.matches.enumerated().map { i, match -> String in
+                var parts = ["\(i + 1). \(match.name) [\(match.type)]: \(match.summary.isEmpty ? "(no summary)" : match.summary)"]
+                if !match.aliases.isEmpty { parts.append("   Aliases: \(match.aliases)") }
+                for stmt in match.statements.prefix(5) { parts.append("   - \(stmt.text)") }
+                return parts.joined(separator: "\n")
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: result.matches.isEmpty ? result.message : "Found \(result.matches.count) Memory OS L2 entity match(es).",
+            contentText: readableText,
             contentJSON: json,
             citations: []
         )
@@ -147,10 +160,18 @@ public struct MemoryOSContextTool: AgentTool {
         }
         let items = try facade.memoryOSFlatContext(terms: terms)
         let json = try Self.renderJSON(items)
+        let readableText: String
+        if items.isEmpty {
+            readableText = "Memory OS context returned 0 items for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
+        } else {
+            let header = "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
+            let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", ")).",
+            contentText: readableText,
             contentJSON: json,
             citations: []
         )
@@ -209,7 +230,21 @@ public struct MemoryOSSearchTool: AgentTool {
         }
         let payload: [String: Any] = ["query": queryText, "hitCount": hits.count, "hits": rows]
         let json = try Self.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Memory OS search returned \(hits.count) hit(s) across \(layers.map(\.rawValue).joined(separator: ",")).", contentJSON: json, citations: hits.map(\.recordID))
+        let readableText: String
+        if hits.isEmpty {
+            readableText = "Memory OS search returned 0 hits for \"\(queryText)\" across \(layers.map(\.rawValue).joined(separator: ", "))."
+        } else {
+            let header = "Memory OS search returned \(hits.count) hit(s) for \"\(queryText)\" across \(layers.map(\.rawValue).joined(separator: ", "))."
+            let body = hits.enumerated().map { i, hit -> String in
+                var parts = ["\(i + 1). [\(hit.layer.rawValue)] \(hit.title)"]
+                if !hit.summary.isEmpty { parts.append("   Summary: \(hit.summary)") }
+                if !hit.matchedText.isEmpty && hit.matchedText != hit.summary { parts.append("   Matched: \(hit.matchedText)") }
+                parts.append("   Score: \(String(format: "%.2f", hit.score))")
+                return parts.joined(separator: "\n")
+            }.joined(separator: "\n\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: hits.map(\.recordID))
     }
 
     private func parseLayers(_ values: [SendableJSONValue]?) -> [MemoryOSRetrievalLayer] {
@@ -237,10 +272,18 @@ public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let lines = try facade.currentUserProfileContext()
         let json = try Self.renderJSON(lines)
+        let readableText: String
+        if lines.isEmpty {
+            readableText = "Retrieved current_user profile with 0 facts."
+        } else {
+            let header = "Retrieved current_user profile with \(lines.count) fact(s)."
+            let body = lines.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Retrieved current_user profile with \(lines.count) fact(s).",
+            contentText: readableText,
             contentJSON: json,
             citations: []
         )
@@ -462,7 +505,17 @@ public struct MemoryOSExpandL4Tool: AgentTool {
         }
         let payload: [String: Any] = ["entityName": entityName, "depth": depth, "hitCount": hits.count, "hits": rows]
         let json = try Self.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 expansion returned \(hits.count) hit(s) from \(entityName) at depth \(depth).", contentJSON: json, citations: hits.map(\.recordID))
+        let readableText: String
+        if hits.isEmpty {
+            readableText = "L4 expansion returned 0 hits from \(entityName) at depth \(depth)."
+        } else {
+            let header = "L4 expansion returned \(hits.count) hit(s) from \(entityName) at depth \(depth)."
+            let body = hits.enumerated().map { i, hit -> String in
+                return "\(i + 1). \(hit.sourceEntityID) --[\(hit.predicate)]--> \(hit.relatedEntityID ?? "(self)") | \(hit.text) (depth: \(hit.depth), score: \(String(format: "%.2f", hit.score)))"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: hits.map(\.recordID))
     }
 
     private static func renderJSON(_ object: [String: Any]) throws -> String {
@@ -493,7 +546,22 @@ public struct MemoryOSL2FindStatementsTool: AgentTool {
         let subgraph = try facade.findMemoryOSL2Statements(text: text, subjectID: subjectID, predicates: predicates, limit: limit)
         let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["query": text, "subjectID": subjectID ?? "", "predicates": predicates])
         let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L2 statement query returned \(subgraph.edges.count) edge(s).", contentJSON: json, citations: subgraph.edges.map(\.id) + subgraph.evidenceRefs)
+        let nodeMap = Dictionary(uniqueKeysWithValues: subgraph.nodes.map { ($0.id, $0) })
+        let readableText: String
+        if subgraph.edges.isEmpty {
+            readableText = "L2 statement query returned 0 edges."
+        } else {
+            let header = "L2 statement query returned \(subgraph.edges.count) edge(s)."
+            let body = subgraph.edges.enumerated().map { i, edge -> String in
+                let sourceName = nodeMap[edge.sourceID]?.title ?? edge.sourceID
+                let targetName = nodeMap[edge.targetID]?.title ?? edge.targetID
+                let stmtText = edge.metadata["text"] ?? ""
+                let suffix = stmtText.isEmpty ? "" : " | \(stmtText)"
+                return "\(i + 1). \(sourceName) --[\(edge.predicate)]--> \(targetName)\(suffix)"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: subgraph.edges.map(\.id) + subgraph.evidenceRefs)
     }
 }
 
@@ -521,7 +589,18 @@ public struct MemoryOSL3ExpandBeliefTool: AgentTool {
         let subgraph = try facade.expandMemoryOSL3Belief(beliefID: beliefID, topic: domain, text: text, limit: limit)
         let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["beliefID": beliefID ?? "", "domain": domain ?? "", "query": text ?? ""])
         let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L3 statement expansion returned \(subgraph.nodes.count) node(s).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+        let readableText: String
+        if subgraph.nodes.isEmpty {
+            readableText = "L3 statement expansion returned 0 nodes."
+        } else {
+            let header = "L3 statement expansion returned \(subgraph.nodes.count) node(s)."
+            let body = subgraph.nodes.enumerated().map { i, node -> String in
+                let domainInfo = node.metadata["domain"].map { " (domain: \($0))" } ?? ""
+                return "\(i + 1). [\(node.kind)] \(node.title)\(domainInfo): \(node.summary.isEmpty ? "(no summary)" : node.summary)"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
     }
 }
 
@@ -538,7 +617,17 @@ public struct MemoryOSL3ListDomainsTool: AgentTool {
         let domains = try facade.listMemoryOSL3Domains()
         let data = try JSONEncoder().encode(["domains": domains])
         let json = String(data: data, encoding: .utf8) ?? "{}"
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L3 has \(domains.count) discipline domain(s).", contentJSON: json, citations: domains.map(\.domain))
+        let readableText: String
+        if domains.isEmpty {
+            readableText = "L3 has 0 discipline domains."
+        } else {
+            let header = "L3 has \(domains.count) discipline domain(s)."
+            let body = domains.enumerated().map { i, d in
+                "\(i + 1). \(d.domain): \(d.beliefCount) belief(s)"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: domains.map(\.domain))
     }
 }
 
@@ -560,7 +649,17 @@ public struct MemoryOSL4FindEntityTool: AgentTool {
         let subgraph = try facade.findMemoryOSL4Entity(text: text, limit: limit)
         let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["query": text])
         let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 entity find returned \(subgraph.nodes.count) node(s) for \(text).", contentJSON: json, citations: subgraph.nodes.map(\.id))
+        let readableText: String
+        if subgraph.nodes.isEmpty {
+            readableText = "L4 entity find returned 0 nodes for \(text)."
+        } else {
+            let header = "L4 entity find returned \(subgraph.nodes.count) node(s) for \(text)."
+            let body = subgraph.nodes.enumerated().map { i, node -> String in
+                return "\(i + 1). [\(node.kind)] \(node.title): \(node.summary.isEmpty ? "(no summary)" : node.summary)"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: subgraph.nodes.map(\.id))
     }
 }
 
@@ -586,7 +685,20 @@ public struct MemoryOSL4NeighborsTool: AgentTool {
         let subgraph = try facade.queryMemoryOSL4Neighbors(entityID: entityID, direction: direction, predicates: predicates, limit: limit)
         let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["entityID": entityID, "direction": direction.rawValue, "predicates": predicates])
         let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 neighbors query returned \(subgraph.edges.count) edge(s) for \(entityID).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+        let nodeMap = Dictionary(uniqueKeysWithValues: subgraph.nodes.map { ($0.id, $0) })
+        let readableText: String
+        if subgraph.edges.isEmpty {
+            readableText = "L4 neighbors query returned 0 edges for \(entityID)."
+        } else {
+            let header = "L4 neighbors query returned \(subgraph.edges.count) edge(s) for \(entityID)."
+            let body = subgraph.edges.enumerated().map { i, edge -> String in
+                let sourceName = nodeMap[edge.sourceID]?.title ?? edge.sourceID
+                let targetName = nodeMap[edge.targetID]?.title ?? edge.targetID
+                return "\(i + 1). \(sourceName) --[\(edge.predicate)]--> \(targetName)"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
     }
 }
 
@@ -648,7 +760,22 @@ public struct MemoryOSL4InstancesTool: AgentTool {
             "explanation": subgraph.explanation
         ]
         let json = try Self.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 instances query returned \(subgraph.edges.count) instance edge(s) for \(classIDs.joined(separator: ", ")).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+        let nodeMap = Dictionary(uniqueKeysWithValues: subgraph.nodes.map { ($0.id, $0) })
+        let readableText: String
+        if subgraph.edges.isEmpty {
+            readableText = "L4 instances query returned 0 instance edges for \(classIDs.joined(separator: ", "))."
+        } else {
+            let header = "L4 instances query returned \(subgraph.edges.count) instance edge(s) for \(classIDs.joined(separator: ", "))."
+            let body = subgraph.edges.enumerated().map { i, edge -> String in
+                let sourceName = nodeMap[edge.sourceID]?.title ?? edge.sourceID
+                let targetName = nodeMap[edge.targetID]?.title ?? edge.targetID
+                let summary = nodeMap[edge.targetID]?.summary ?? ""
+                let suffix = summary.isEmpty ? "" : " | \(summary)"
+                return "\(i + 1). \(sourceName) --[\(edge.predicate)]--> \(targetName)\(suffix)"
+            }.joined(separator: "\n")
+            readableText = "\(header)\n\n\(body)"
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: readableText, contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
     }
 
     private func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
@@ -680,10 +807,31 @@ public struct MemoryOSReadRecordTool: AgentTool {
         guard let layer = arguments.string("layer"), !layer.isEmpty else { throw AgentToolError.invalidArguments("layer is required") }
         guard let recordID = arguments.string("recordID"), !recordID.isEmpty else { throw AgentToolError.invalidArguments("recordID is required") }
         let json = try facade.readMemoryOSRecordJSON(layer: layer, recordID: recordID)
+        let readableText: String
+        if let data = json.data(using: .utf8),
+           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let record = payload["record"] as? [String: Any] {
+            var parts = ["Read Memory OS \(layer.uppercased()) record \(recordID)."]
+            if let name = record["name"] as? String, !name.isEmpty { parts.append("Name: \(name)") }
+            if let title = record["title"] as? String, !title.isEmpty { parts.append("Title: \(title)") }
+            if let text = record["text"] as? String, !text.isEmpty { parts.append("Text: \(text)") }
+            if let statement = record["statement"] as? String, !statement.isEmpty { parts.append("Statement: \(statement)") }
+            if let summary = record["summary"] as? String, !summary.isEmpty { parts.append("Summary: \(summary)") }
+            if let content = record["content"] as? String, !content.isEmpty { parts.append("Content: \(content)") }
+            if let predicate = record["predicate"] as? String, !predicate.isEmpty { parts.append("Predicate: \(predicate)") }
+            if let subjectID = record["subjectID"] as? String, !subjectID.isEmpty { parts.append("Subject: \(subjectID)") }
+            if let objectID = record["objectID"] as? String, !objectID.isEmpty { parts.append("Object: \(objectID)") }
+            if let entityType = record["entityType"] as? String, !entityType.isEmpty { parts.append("Entity type: \(entityType)") }
+            if let domain = record["domain"] as? String, !domain.isEmpty { parts.append("Domain: \(domain)") }
+            if let confidence = record["confidence"] as? Double { parts.append("Confidence: \(String(format: "%.2f", confidence))") }
+            readableText = parts.joined(separator: "\n")
+        } else {
+            readableText = "Read Memory OS \(layer.uppercased()) record \(recordID)."
+        }
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Read Memory OS \(layer.uppercased()) record \(recordID).",
+            contentText: readableText,
             contentJSON: json,
             citations: [recordID]
         )
@@ -707,10 +855,27 @@ public struct MemoryOSReadProvenanceTool: AgentTool {
         guard let provenanceObjectID = arguments.string("provenanceObjectID"), !provenanceObjectID.isEmpty else { throw AgentToolError.invalidArguments("provenanceObjectID is required") }
         let spanID = arguments.string("spanID")
         let json = try facade.readMemoryOSProvenanceJSON(provenanceObjectID: provenanceObjectID, spanID: spanID)
+        let readableText: String
+        if let data = json.data(using: .utf8),
+           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var parts: [String]
+            if spanID?.isEmpty == false {
+                parts = ["Read Memory OS L0 provenance object \(provenanceObjectID) span \(spanID ?? "")."]
+            } else {
+                parts = ["Read Memory OS L0 provenance object \(provenanceObjectID)."]
+            }
+            if let title = payload["title"] as? String, !title.isEmpty { parts.append("Title: \(title)") }
+            if let content = payload["content"] as? String, !content.isEmpty { parts.append("Content: \(content)") }
+            if let sourceType = payload["sourceType"] as? String, !sourceType.isEmpty { parts.append("Source type: \(sourceType)") }
+            if let span = payload["span"] as? [String: Any], let text = span["text"] as? String, !text.isEmpty { parts.append("Span text: \(text)") }
+            readableText = parts.joined(separator: "\n")
+        } else {
+            readableText = spanID?.isEmpty == false ? "Read Memory OS L0 provenance object \(provenanceObjectID) span \(spanID ?? "")." : "Read Memory OS L0 provenance object \(provenanceObjectID)."
+        }
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: spanID?.isEmpty == false ? "Read Memory OS L0 provenance object \(provenanceObjectID) span \(spanID ?? "")." : "Read Memory OS L0 provenance object \(provenanceObjectID).",
+            contentText: readableText,
             contentJSON: json,
             citations: [provenanceObjectID, spanID ?? ""].filter { !$0.isEmpty }
         )
