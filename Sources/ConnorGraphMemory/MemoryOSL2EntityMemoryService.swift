@@ -279,13 +279,10 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
         return normalized
     }
 
-    private static func normalizeRelation(_ raw: String?) throws -> String {
+    private static func normalizeRelation(_ raw: String?) -> String {
         guard let value = raw?.nilIfBlank else { return GraphPredicate.relatedTo.rawValue }
         let normalized = value.uppercased()
-        guard GraphPredicate(rawValue: normalized) != nil else {
-            throw MemoryOSL2EntityMemoryValidationError.invalidRelation(value: value, allowed: allowedRelations)
-        }
-        return normalized
+        return GraphPredicate(rawValue: normalized)?.rawValue ?? GraphPredicate.relatedTo.rawValue
     }
 }
 
