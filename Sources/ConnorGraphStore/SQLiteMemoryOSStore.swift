@@ -314,6 +314,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l2_nodes_fts WHERE node_id = \(quote(node.id));")
         try execute("INSERT INTO memory_l2_nodes_fts(node_id, node_type, name, summary) VALUES (\(quote(node.id)), \(quote(node.nodeType)), \(quote(node.name)), \(quote(node.summary)))")
         try enqueueSearchIndexChange(layer: "L2", recordID: node.id)
+        
+        // Invalidate L2 cache
+        MemoryOSQueryCache.shared.invalidateL2()
+        // Also invalidate profile cache if this is a current_user node
+        if node.id.contains("current-user") || node.metadata["person_role"] == "current_user" {
+            MemoryOSQueryCache.shared.invalidateProfile()
+        }
     }
 
     public func upsert(statement: MemoryOSStatement) throws {
@@ -396,6 +403,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("DELETE FROM memory_l4_entities_fts WHERE entity_id = \(quote(entity.id));")
         try execute("INSERT INTO memory_l4_entities_fts(entity_id, entity_type, name, aliases, summary) VALUES (\(quote(entity.id)), \(quote(entity.entityType)), \(quote(entity.name)), \(quote(entity.aliases.joined(separator: " "))), \(quote(entity.summary)))")
         try enqueueSearchIndexChange(layer: "L4", recordID: entity.id)
+        
+        // Invalidate L4 cache
+        MemoryOSQueryCache.shared.invalidateL4()
+        // Also invalidate profile cache if this is a current_user entity
+        if entity.metadata["person_role"] == "current_user" || entity.metadata["stable_key"] == "current_user" {
+            MemoryOSQueryCache.shared.invalidateProfile()
+        }
     }
 
     public func entity(id: String) throws -> MemoryOSEntity? {
@@ -425,7 +439,18 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
-        try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(FTS5QuerySanitizer.sanitizeTerm(query)) LIMIT \(limit)")
+        // Check cache first
+        let cache = MemoryOSQueryCache.shared
+        if let cached = cache.getCachedFTSSearch(query: query, limit: limit) {
+            return cached
+        }
+        
+        let results = try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(FTS5QuerySanitizer.sanitizeTerm(query)) LIMIT \(limit)")
+        
+        // Cache the result
+        cache.setCachedFTSSearch(results, query: query, limit: limit)
+        
+        return results
     }
 
     // MARK: - Production operations
