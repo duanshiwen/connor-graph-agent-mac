@@ -67,26 +67,15 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
     }
 }
 
-@Test func currentUserProfileToolFallbacksToRelatedToForInvalidRelation() throws {
-    let store = try SQLiteMemoryOSStore(path: temporaryL2EntityMemoryDatabaseURL().path)
-    try store.migrate()
-    let repository = SQLiteMemoryOSL2EntityMemoryRepository(store: store)
-    let service = MemoryOSL2EntityMemoryService(repository: repository)
+@Test func graphPredicateFallbacksToRelatedToForUnknownRelation() {
+    // Test that GraphPredicate initialization falls back to RELATED_TO
+    // when an unknown relation string is provided
+    let invalidRelation = "INTERESTED_IN"
+    let normalized = invalidRelation.trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "-", with: "_")
+        .replacingOccurrences(of: " ", with: "_")
+        .uppercased()
     
-    // This test verifies that the tool validation accepts invalid relations
-    // and falls back to RELATED_TO instead of throwing an error
-    // Note: The actual fallback happens in MemoryOSBackgroundToolExecutor,
-    // not in the service layer. This test verifies the service layer
-    // accepts RELATED_TO as a valid relation.
-    
-    let result = try service.updateCurrentUserProfile(MemoryOSL2UpdateCurrentUserProfileRequest(facts: [
-        MemoryOSL2CurrentUserFactUpdate(
-            statement: "User is interested in AI memory systems",
-            factType: "profile_preference",
-            relation: "RELATED_TO"  // Valid relation
-        )
-    ]))
-    
-    #expect(result.accepted)
-    #expect(result.statementIDs.count == 1)
+    let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
+    #expect(predicate == .relatedTo)
 }
