@@ -197,6 +197,21 @@ public struct AppMemoryOSCLIInspector: Sendable {
         try store.backgroundToolCalls(runID: runID)
     }
 
+    public func l1History(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        let rows = try rows(sql: """
+            SELECT id, kind, status, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, error_code, error_message, created_at, updated_at
+            FROM memory_l1_processing_queue
+            WHERE kind = 'memory.l1.unified_projection'
+            ORDER BY created_at DESC
+            LIMIT \(safeLimit(limit))
+            """, columns: ["id", "kind", "status", "attempt_count", "max_attempts", "next_run_at", "locked_at", "locked_by", "lease_expires_at", "error_code", "error_message", "created_at", "updated_at"])
+        return try rows.map { row in
+            var values = row.values
+            values["context_text"] = try queueContextText(for: row)
+            return MemoryOSCLIRow(values: values)
+        }
+    }
+
     public func pipelinePolicy() -> MemoryOSCLIPipelinePolicy {
         let l1 = MemoryOSL1ProcessingTriggerPolicy()
         return MemoryOSCLIPipelinePolicy(
