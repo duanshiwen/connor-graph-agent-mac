@@ -34,7 +34,11 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         "memory_os_read_provenance",
         "memory_os_expand_l4",
         "memory_os_l4_find_entity",
-        "memory_os_l4_neighbors"
+        "memory_os_l4_neighbors",
+        "memory_os_l2_update_entities",
+        "memory_os_update_current_user_profile",
+        "memory_os_l3_update_beliefs",
+        "memory_os_l4_update_entities"
     ]
 
     public var facade: AppMemoryOSFacade
@@ -71,11 +75,17 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: json, contentText: "Read L0 provenance \(provenanceObjectID).", citations: [provenanceObjectID] + [spanID].compactMap { $0 })
 
         case "memory_os_expand_l4":
-            let entityID = try args.requiredString("entityID")
+            let entityName = try args.requiredString("entityName")
             let depth = args.int("depth") ?? 1
             let limit = args.int("limit") ?? 20
+            // Resolve entity name → ID via findMemoryOSL4Entity
+            let found = try facade.findMemoryOSL4Entity(text: entityName, limit: 1)
+            guard let node = found.nodes.first else {
+                return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: "{}", contentText: "No L4 entity found matching '\(entityName)'. Try a different search term.", citations: [])
+            }
+            let entityID = node.id
             let hits = try facade.expandMemoryOSL4(entityID: entityID, depth: depth, limit: limit)
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(hits), contentText: "Expanded L4 entity \(entityID) to depth \(depth).", citations: [entityID] + hits.map(\.recordID))
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(hits), contentText: "Expanded L4 entity '\(entityName)' (ID: \(entityID)) to depth \(depth).", citations: [entityID] + hits.map(\.recordID))
 
         case "memory_os_l4_find_entity":
             let text = try args.requiredString("text")
@@ -91,9 +101,131 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let graph = try facade.queryMemoryOSL4Neighbors(entityID: entityID, direction: direction, predicates: predicates, limit: limit)
             return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(graph), contentText: "Read L4 neighbors for \(entityID).", citations: [entityID])
 
+        case "memory_os_l2_update_entities":
+            let requestData = try JSONSerialization.data(withJSONObject: args.jsonCompatible(), options: [.sortedKeys])
+            let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: requestData)
+            let result = try facade.updateMemoryOSL2Entities(request)
+            let resultData = try JSONEncoder().encode(result)
+            let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Updated \(result.updatedEntities.count) L2 entit(ies).", citations: [])
+
+        case "memory_os_update_current_user_profile":
+            let facts = try args.requiredArray("facts")
+            let now = Date()
+            let anchor = try facade.ensureCurrentUserAnchor(now: now)
+            var statementIDs: [String] = []
+            var artifactIDs: [String] = []
+            for (index, factValue) in facts.enumerated() {
+                guard let factObj = factValue as? [String: Any],
+                      let statement = factObj["statement"] as? String, !statement.isEmpty,
+                      let factType = factObj["factType"] as? String, !factType.isEmpty,
+                      let rawRelation = factObj["relation"] as? String, !rawRelation.isEmpty else {
+                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("facts[\(index)] must have statement, factType, and relation")
+                }
+                let normalized = rawRelation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "-", with: "_")
+                    .replacingOccurrences(of: " ", with: "_")
+                    .uppercased()
+                guard let predicate = GraphPredicate(rawValue: normalized) else {
+                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("Unsupported relation: \(rawRelation)")
+                }
+                let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: factType, predicate: predicate, anchor: anchor, now: now)
+                let summary = try facade.projectAndRecordLLMArtifact(rawContent: artifactJSON, modelID: "memory_os_update_current_user_profile", processingRunID: context.runID, artifactType: "memory_os_current_user_fact_update", schemaName: "MemoryOSL1UnifiedProjectionOutput", now: now)
+                artifactIDs.append(summary.artifactID)
+                guard summary.accepted else {
+                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("Current user fact rejected: \(summary.issues.map(\.message).joined(separator: "; "))")
+                }
+                statementIDs.append(contentsOf: try facade.l2StatementIDs(sourceArtifactID: summary.artifactID))
+            }
+            let payload: [String: Any] = ["accepted": true, "statementCount": statementIDs.count, "artifactCount": artifactIDs.count]
+            let resultData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Updated current_user profile with \(statementIDs.count) statement(s).", citations: statementIDs + artifactIDs)
+
+        case "memory_os_l3_update_beliefs":
+            let beliefsArray = try args.requiredArray("beliefs")
+            let beliefs = try JSONDecoder().decode([MemoryOSL3BeliefInput].self, from: try JSONSerialization.data(withJSONObject: beliefsArray, options: [.sortedKeys]))
+            let result = try facade.writeMemoryOSL3Beliefs(beliefs)
+            let resultData = try JSONEncoder().encode(result)
+            let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Created \(result.createdBeliefCount) L3 belief(s).", citations: [])
+
+        case "memory_os_l4_update_entities":
+            let entitiesArray = args.array("entities") ?? []
+            let relationsArray = args.array("relations") ?? []
+            let entities = try JSONDecoder().decode([MemoryOSL4EntityInput].self, from: try JSONSerialization.data(withJSONObject: entitiesArray, options: [.sortedKeys]))
+            let relations = try JSONDecoder().decode([MemoryOSL4RelationInput].self, from: try JSONSerialization.data(withJSONObject: relationsArray, options: [.sortedKeys]))
+            let result = try facade.writeMemoryOSL4Entities(entities: entities, relations: relations)
+            let resultData = try JSONEncoder().encode(result)
+            let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Created \(result.createdEntityCount) L4 entit(ies) and \(result.createdRelationCount) relation(s).", citations: [])
+
         default:
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
         }
+    }
+
+    private static func buildCurrentUserFactJSON(statement: String, factType: String, predicate: GraphPredicate, anchor: MemoryOSEntity, now: Date) throws -> String {
+        let localID = "current_user"
+        var statementMetadata: [String: String] = [
+            "l2_fact_type": factType,
+            "person_role": "current_user",
+            "person_resolution": "resolved",
+            "identity_anchor": "current_user",
+            "identity_anchor_id": anchor.id,
+            "source_stage": "background_pipeline"
+        ]
+        if factType == "profile_preference" {
+            statementMetadata["profile_dimension"] = "fact_statement"
+        }
+        let output = MemoryOSL1UnifiedProjectionOutput(
+            operationalEntities: [GraphStructuredExtractedEntity(
+                localID: localID,
+                name: "Current User",
+                entityKind: .personObject,
+                scope: .personal,
+                aliases: [],
+                summary: "The human currently operating this Connor installation.",
+                confidence: 0.99,
+                evidenceSpanIDs: [],
+                metadata: [
+                    "stable_key": "current_user",
+                    "person_role": "current_user",
+                    "role": "current_user",
+                    "identity_anchor_id": anchor.id,
+                    "identity_scope": "local_app_owner",
+                    "system_owned": "true",
+                    "protected_identity_anchor": "true"
+                ]
+            )],
+            operationalStatements: [GraphStructuredExtractedStatement(
+                explicitID: "current-user-fact-\(UUID().uuidString)",
+                subjectLocalID: localID,
+                predicate: predicate,
+                objectLocalID: localID,
+                statementText: statement,
+                confidence: 0.9,
+                validAt: now,
+                referenceTime: now,
+                evidenceSpanIDs: [],
+                metadata: statementMetadata
+            )],
+            evidenceSpans: [],
+            knowledgeCandidates: [],
+            conceptEntities: [],
+            conceptRelations: [],
+            promotionDecisions: [],
+            warnings: [],
+            metadata: [
+                "schema_purpose": "current_user_fact_update",
+                "person_role": "current_user",
+                "identity_anchor_id": anchor.id
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(output)
+        return String(data: data, encoding: .utf8) ?? "{}"
     }
 }
 
@@ -128,5 +260,20 @@ private struct Arguments {
         if let values = values[key] as? [Any] { return values.compactMap { $0 as? String } }
         if let value = values[key] as? String { return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
         return nil
+    }
+
+    func requiredArray(_ key: String) throws -> [Any] {
+        guard let values = values[key] as? [Any], !values.isEmpty else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("Missing required array: \(key)")
+        }
+        return values
+    }
+
+    func array(_ key: String) -> [Any]? {
+        values[key] as? [Any]
+    }
+
+    func jsonCompatible() -> [String: Any] {
+        values
     }
 }

@@ -568,15 +568,12 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 case let kind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(kind):
                     var draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
                     draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
-                    let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
-                    let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
-                    if summary.accepted {
-                        try deleteL1CaptureEvents(ids: draft.captureEventIDs)
-                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.projected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID], now: now)
-                    } else {
-                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.artifact_rejected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID, "issue_count": String(summary.issues.count)], now: now)
-                    }
-                    summaries.append(summary)
+                    _ = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+                    // LLM has written L2/L3/L4 directly via tool calls — clean up L1 events.
+                    try deleteL1CaptureEvents(ids: draft.captureEventIDs)
+                    try recordQueueSuccess(leased, now: now)
+                    try saveBackgroundJobAudit(eventType: "memory_os.background_job.completed", subjectID: leased.id, payload: ["event_count": String(draft.captureEventIDs.count)], now: now)
+                    summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: true))
                 default:
                     let failed = try recordQueueFailure(leased, errorCode: "unsupported_background_job_kind", errorMessage: "Unsupported Memory OS background job kind: \(leased.kind)", now: now)
                     summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "unsupported_background_job_kind", message: failed.errorMessage ?? leased.kind)]))
