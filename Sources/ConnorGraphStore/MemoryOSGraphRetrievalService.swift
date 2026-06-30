@@ -73,38 +73,6 @@ public struct MemoryOSGraphSubgraph: Sendable, Codable, Equatable {
     }
 }
 
-public enum MemoryOSGraphQueryIntent: String, Sendable, Codable, Equatable, CaseIterable {
-    case auto
-    case l2Statements
-    case l3Beliefs
-    case l4Entity
-    case l4Neighbors
-    case l4Instances
-    case evidence
-}
-
-public struct MemoryOSGraphQuery: Sendable, Codable, Equatable {
-    public var text: String
-    public var intent: MemoryOSGraphQueryIntent
-    public var entityID: String?
-    public var classEntityIDs: [String]
-    public var predicates: [String]
-    public var direction: MemoryOSGraphDirection
-    public var includeEvidence: Bool
-    public var limit: Int
-
-    public init(text: String = "", intent: MemoryOSGraphQueryIntent = .auto, entityID: String? = nil, classEntityIDs: [String] = [], predicates: [String] = [], direction: MemoryOSGraphDirection = .both, includeEvidence: Bool = false, limit: Int = 50) {
-        self.text = text
-        self.intent = intent
-        self.entityID = entityID
-        self.classEntityIDs = classEntityIDs
-        self.predicates = predicates
-        self.direction = direction
-        self.includeEvidence = includeEvidence
-        self.limit = limit
-    }
-}
-
 public struct MemoryOSEvidenceTraceQuery: Sendable, Codable, Equatable {
     public var spanIDs: [String]
     public var statementIDs: [String]
@@ -190,60 +158,6 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         self.store = store
     }
 
-    public func queryGraph(_ query: MemoryOSGraphQuery) throws -> MemoryOSGraphSubgraph {
-        let text = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let limit = min(max(query.limit, 1), 500)
-        let predicates = query.predicates.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        var subgraphs: [MemoryOSGraphSubgraph] = []
-
-        switch query.intent {
-        case .l2Statements:
-            subgraphs.append(try l2FindStatements(MemoryOSL2StatementFindQuery(text: text, predicates: predicates, limit: limit)))
-        case .l3Beliefs:
-            subgraphs.append(try l3ExpandBelief(MemoryOSL3BeliefExpandQuery(text: text, limit: min(limit, 100))))
-        case .l4Entity:
-            if !text.isEmpty { subgraphs.append(try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: min(limit, 100)))) }
-        case .l4Neighbors:
-            let entityID = try resolvedEntityID(explicit: query.entityID, text: text)
-            if let entityID {
-                subgraphs.append(try l4Neighbors(MemoryOSL4NeighborsQuery(entityID: entityID, direction: query.direction, predicates: predicates, limit: limit)))
-            }
-        case .l4Instances:
-            var classIDs = query.classEntityIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            if classIDs.isEmpty, !text.isEmpty {
-                let resolved = try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: 5))
-                subgraphs.append(resolved)
-                classIDs = resolved.nodes.map(\.id)
-            }
-            if !classIDs.isEmpty {
-                subgraphs.append(try l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classIDs, predicates: predicates.isEmpty ? [MemoryOSL4RelationPredicate.instanceOf.rawValue] : predicates, limit: limit)))
-            }
-        case .evidence:
-            if !text.isEmpty {
-                let statements = try l2FindStatements(MemoryOSL2StatementFindQuery(text: text, predicates: predicates, limit: limit))
-                subgraphs.append(statements)
-            }
-        case .auto:
-            if !text.isEmpty {
-                subgraphs.append(try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: min(10, limit))))
-                subgraphs.append(try l2FindStatements(MemoryOSL2StatementFindQuery(text: text, predicates: predicates, limit: min(50, limit))))
-                subgraphs.append(try l3ExpandBelief(MemoryOSL3BeliefExpandQuery(text: text, limit: min(20, limit))))
-            }
-        }
-
-        var merged = mergeSubgraphs(subgraphs, explanationPrefix: "Memory OS query_graph intent \(query.intent.rawValue)")
-        if query.includeEvidence || query.intent == .evidence {
-            let statementIDs = Set(merged.edges.filter { $0.layer == .l2 }.map(\.id) + merged.nodes.filter { $0.layer == .l2 }.map(\.id))
-            let beliefIDs = Set(merged.nodes.filter { $0.layer == .l3 }.map(\.id))
-            let trace = try traceEvidence(MemoryOSEvidenceTraceQuery(spanIDs: merged.evidenceRefs, statementIDs: Array(statementIDs), beliefIDs: Array(beliefIDs), limit: limit))
-            merged = mergeSubgraphs([merged, trace], explanationPrefix: "Memory OS query_graph intent \(query.intent.rawValue) with evidence trace")
-        }
-        if merged.nodes.isEmpty && merged.edges.isEmpty {
-            merged.explanation = "Memory OS query_graph intent \(query.intent.rawValue) returned no graph results."
-        }
-        return merged
-    }
-
     public func traceEvidence(_ query: MemoryOSEvidenceTraceQuery) throws -> MemoryOSGraphSubgraph {
         let limit = min(max(query.limit, 1), 500)
         var spanIDs = Set(query.spanIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
@@ -269,7 +183,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                     kind: "statement",
                     title: row[1],
                     summary: row[1],
-                    metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": row[5]]
+                    metadata: ["domain": row[2], "related_object_names": row[3], "updated_at": row[5]]
                 ))
             }
         }
@@ -336,7 +250,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             clauses.append("(s.text LIKE \(like) OR s.subject_id LIKE \(like) OR s.object_id LIKE \(like) OR s.predicate LIKE \(like))")
         }
         let rows = try store.query(sql: """
-        SELECT s.id, s.subject_id, s.predicate, COALESCE(s.object_id, ''), s.text, s.assertion_kind, s.confidence, s.valid_at, s.evidence_span_ids_json, COALESCE(n.node_type, ''), COALESCE(n.name, '')
+        SELECT s.id, s.subject_id, s.predicate, COALESCE(s.object_id, ''), s.text, s.assertion_kind, s.confidence, s.valid_at, s.evidence_span_ids_json, COALESCE(n.node_type, ''), COALESCE(n.name, ''), COALESCE(s.committed_at, '')
         FROM memory_l2_statements s
         LEFT JOIN memory_l2_nodes n ON n.id = s.subject_id
         WHERE \(clauses.joined(separator: " AND "))
@@ -362,7 +276,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[6]),
                 validAt: row[7],
-                metadata: ["statement_text": row[4], "assertion_kind": row[5]]
+                metadata: ["statement_text": row[4], "assertion_kind": row[5], "committed_at": row[11]]
             )
         }
         return MemoryOSGraphSubgraph(
@@ -400,7 +314,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 kind: "statement",
                 title: row[1],
                 summary: row[1],
-                metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": row[5]]
+                metadata: ["domain": row[2], "related_object_names": row[3], "updated_at": row[5]]
             )
         }
         return MemoryOSGraphSubgraph(
@@ -427,7 +341,8 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                  WHEN EXISTS (SELECT 1 FROM memory_l4_entity_aliases a WHERE a.entity_id = e.id AND a.alias = \(quoted)) THEN 85
                  WHEN e.name LIKE \(like) THEN 50
                  ELSE 25
-               END AS rank_score
+               END AS rank_score,
+               COALESCE(e.updated_at, '')
         FROM memory_l4_entities e
         LEFT JOIN memory_l4_entity_aliases a ON a.entity_id = e.id
         WHERE e.id = \(quoted)
@@ -440,7 +355,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         LIMIT \(limit)
         """)
         let nodes = rows.map { row in
-            MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1], title: row[2], summary: row[3], metadata: ["rank_score": row[4]])
+            MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1], title: row[2], summary: row[3], metadata: ["rank_score": row[4], "updated_at": row[5]])
         }
         return MemoryOSGraphSubgraph(nodes: nodes, explanation: "L4 entity find query: \(text); returned \(nodes.count) entity node(s).")
     }
@@ -453,7 +368,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         var statements: [[String]] = []
         if query.direction == .outgoing || query.direction == .both {
             statements += try store.query(sql: """
-            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'outgoing'
+            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'outgoing', COALESCE(s.committed_at, '')
             FROM memory_l4_entity_statements s
             WHERE s.entity_id = \(store.quote(entityID))\(predicateClause)
             ORDER BY s.committed_at DESC, s.id ASC
@@ -462,7 +377,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         }
         if query.direction == .incoming || query.direction == .both {
             statements += try store.query(sql: """
-            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'incoming'
+            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'incoming', COALESCE(s.committed_at, '')
             FROM memory_l4_entity_statements s
             WHERE s.object_entity_id = \(store.quote(entityID))\(predicateClause)
             ORDER BY s.committed_at DESC, s.id ASC
@@ -491,7 +406,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[6]),
                 validAt: row[7].isEmpty ? nil : row[7],
-                metadata: ["statement_text": row[4], "direction": row[8]].merging(relationMetadata) { current, _ in current }
+                metadata: ["statement_text": row[4], "direction": row[8], "committed_at": row[9]].merging(relationMetadata) { current, _ in current }
             )
         }
         return MemoryOSGraphSubgraph(nodes: nodes, edges: edges, evidenceRefs: Array(Set(evidenceRefs)).sorted(), provenanceRefs: [], explanation: "L4 neighbors query: entity \(entityID), direction \(query.direction.rawValue); returned \(edges.count) edge(s).")
@@ -508,17 +423,19 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         let limit = min(max(query.limit, 1), 1_000)
 
         let classRows = try store.query(sql: """
-        SELECT id, entity_type, name, summary
+        SELECT id, entity_type, name, summary, COALESCE(updated_at, '')
         FROM memory_l4_entities
         WHERE id IN (\(quotedClassIDs))
         ORDER BY id ASC
         """)
         let classNodes = classRows.map { row in
-            MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1].isEmpty ? "class" : row[1], title: row[2], summary: row[3], metadata: ["role": "class"])
+            var meta: [String: String] = ["role": "class"]
+            if !row[4].isEmpty { meta["updated_at"] = row[4] }
+            return MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1].isEmpty ? "class" : row[1], title: row[2], summary: row[3], metadata: meta)
         }
 
         let rows = try store.query(sql: """
-        SELECT e.id, e.entity_type, e.name, e.summary, s.id, s.predicate, s.object_entity_id, s.text, s.evidence_span_ids_json, s.confidence, s.valid_at
+        SELECT e.id, e.entity_type, e.name, e.summary, s.id, s.predicate, s.object_entity_id, s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, COALESCE(e.updated_at, ''), COALESCE(s.committed_at, '')
         FROM memory_l4_entity_statements s
         JOIN memory_l4_entities e ON e.id = s.entity_id
         WHERE s.predicate IN (\(quotedPredicates))
@@ -535,7 +452,9 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         for row in rows {
             let entityID = row[0]
             if seenNodes.insert(entityID).inserted {
-                nodes.append(MemoryOSGraphNode(id: entityID, layer: .l4, kind: row[1], title: row[2], summary: row[3], metadata: ["role": "instance"]))
+                var instanceMeta: [String: String] = ["role": "instance"]
+                if !row[11].isEmpty { instanceMeta["updated_at"] = row[11] }
+                nodes.append(MemoryOSGraphNode(id: entityID, layer: .l4, kind: row[1], title: row[2], summary: row[3], metadata: instanceMeta))
             }
             let evidence = (try? store.decode([String].self, row[8])) ?? []
             evidenceRefs.append(contentsOf: evidence)
@@ -548,7 +467,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[9]),
                 validAt: row[10].isEmpty ? nil : row[10],
-                metadata: ["statement_text": row[7]].merging(l4RelationMetadata(predicate: row[5])) { current, _ in current }
+                metadata: ["statement_text": row[7], "committed_at": row[12]].merging(l4RelationMetadata(predicate: row[5])) { current, _ in current }
             ))
         }
 
@@ -558,44 +477,6 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             evidenceRefs: Array(Set(evidenceRefs)).sorted(),
             provenanceRefs: [],
             explanation: "L4 instances query: predicates \(predicates.joined(separator: ",")) -> classes \(classIDs.joined(separator: ",")); returned \(rows.count) instance edge(s)."
-        )
-    }
-
-    private func resolvedEntityID(explicit: String?, text: String) throws -> String? {
-        let explicitID = explicit?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let explicitID, !explicitID.isEmpty { return explicitID }
-        guard !text.isEmpty else { return nil }
-        return try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: 1)).nodes.first?.id
-    }
-
-    private func mergeSubgraphs(_ subgraphs: [MemoryOSGraphSubgraph], explanationPrefix: String) -> MemoryOSGraphSubgraph {
-        var nodesByKey: [String: MemoryOSGraphNode] = [:]
-        var edgesByID: [String: MemoryOSGraphEdge] = [:]
-        var evidenceRefs = Set<String>()
-        var provenanceRefs = Set<String>()
-        var explanations: [String] = []
-        for subgraph in subgraphs {
-            for node in subgraph.nodes { nodesByKey["\(node.layer.rawValue):\(node.id)"] = node }
-            for edge in subgraph.edges { edgesByID[edge.id] = edge }
-            evidenceRefs.formUnion(subgraph.evidenceRefs)
-            provenanceRefs.formUnion(subgraph.provenanceRefs)
-            if !subgraph.explanation.isEmpty { explanations.append(subgraph.explanation) }
-        }
-        let nodes = nodesByKey.values.sorted { lhs, rhs in
-            if lhs.layer.rawValue != rhs.layer.rawValue { return lhs.layer.rawValue < rhs.layer.rawValue }
-            return lhs.id < rhs.id
-        }
-        let edges = edgesByID.values.sorted { lhs, rhs in
-            if lhs.layer.rawValue != rhs.layer.rawValue { return lhs.layer.rawValue < rhs.layer.rawValue }
-            return lhs.id < rhs.id
-        }
-        let suffix = explanations.isEmpty ? "" : " " + explanations.joined(separator: " ")
-        return MemoryOSGraphSubgraph(
-            nodes: nodes,
-            edges: edges,
-            evidenceRefs: Array(evidenceRefs).sorted(),
-            provenanceRefs: Array(provenanceRefs).sorted(),
-            explanation: "\(explanationPrefix) returned \(nodes.count) node(s), \(edges.count) edge(s).\(suffix)"
         )
     }
 
@@ -615,12 +496,12 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         guard !cleanIDs.isEmpty else { return [] }
         let quoted = cleanIDs.map(store.quote).joined(separator: ",")
         let rows = try store.query(sql: """
-        SELECT id, entity_type, name, summary
+        SELECT id, entity_type, name, summary, COALESCE(updated_at, '')
         FROM memory_l4_entities
         WHERE id IN (\(quoted))
         ORDER BY name ASC, id ASC
         """)
-        var nodes = rows.map { row in MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1], title: row[2], summary: row[3]) }
+        var nodes = rows.map { row in MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1], title: row[2], summary: row[3], metadata: row[4].isEmpty ? [:] : ["updated_at": row[4]]) }
         let known = Set(nodes.map(\.id))
         for missing in cleanIDs where !known.contains(missing) {
             nodes.append(MemoryOSGraphNode(id: missing, layer: .l4, kind: "external_or_literal", title: missing))

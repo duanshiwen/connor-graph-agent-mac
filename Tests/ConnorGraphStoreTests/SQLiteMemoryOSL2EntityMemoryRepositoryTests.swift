@@ -23,11 +23,7 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
             statements: [
                 MemoryOSL2StatementUpdate(
                     text: "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。",
-                    connectedEntity: "《迟到的青春期》马尼拉一个月阶段",
-                    connectedEntityType: "work_object",
-                    factType: "decision",
-                    polarity: "exclude",
-                    originalPhrase: "不去贫民窟"
+                    factType: "decision"
                 )
             ]
         )
@@ -39,7 +35,7 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
     #expect(result.matches[0].name == "《迟到的青春期》")
     #expect(result.matches[0].aliases == "迟到的青春期, Late Puberty")
     #expect(result.matches[0].statements[0].relation == "RELATED_TO")
-    #expect(result.matches[0].statements[0].connectedEntity == "《迟到的青春期》马尼拉一个月阶段")
+    #expect(result.matches[0].statements[0].connectedEntity == nil)
 
     let statementRows = try store.query(sql: "SELECT evidence_span_ids_json, metadata_json FROM memory_l2_statements")
     #expect(statementRows.count == 1)
@@ -47,8 +43,8 @@ private func temporaryL2EntityMemoryDatabaseURL(_ name: String = UUID().uuidStri
     let metadata = try store.decode([String: String].self, statementRows[0][1])
     #expect(metadata["l2_fact_type"] == "decision")
     #expect(metadata["factType"] == nil)
-    #expect(metadata["polarity"] == "exclude")
-    #expect(metadata["originalPhrase"] == "不去贫民窟")
+    #expect(metadata["polarity"] == nil)
+    #expect(metadata["originalPhrase"] == nil)
     let evidenceTables = try store.query(sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_l2_statement_evidence'")
     #expect(evidenceTables.isEmpty)
 }

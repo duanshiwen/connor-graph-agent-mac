@@ -405,46 +405,6 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("entity-1"))
     }
 
-    @Test func memoryOSCLIRouterRoutesQueryGraphCommand() throws {
-        let store = try makeMemoryOSCLIInspectorStore()
-        try seedMemoryOSCLIInspectorFixture(store: store)
-        let inspector = AppMemoryOSCLIInspector(store: store)
-        let encoder = memoryOSCLITestEncoder()
-
-        let output = try AppMemoryOSCLIRouter.route(args: ["query-graph", "Connor", "--intent", "auto", "--include-evidence", "--limit", "10"], inspector: inspector, encoder: encoder)
-
-        #expect(output.contains("entity-1"))
-        #expect(output.contains("stmt-1"))
-        #expect(output.contains("span-1"))
-        #expect(output.contains("object-1"))
-        #expect(output.contains("query_graph"))
-    }
-
-    @Test func memoryOSQueryGraphGoldenIntents() throws {
-        let store = try makeMemoryOSCLIInspectorStore()
-        try seedMemoryOSCLIInspectorFixture(store: store)
-        let now = Date(timeIntervalSince1970: 10_000)
-        try store.upsert(entity: MemoryOSEntity(id: "class-memory-system", stableKey: "class:memory-system", entityType: "class", name: "Memory System", aliases: ["记忆系统"], summary: "Memory system class", confidence: 0.9, createdAt: now, updatedAt: now))
-        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "entity-is-instance", entityID: "entity-1", predicate: .instanceOf, objectEntityID: "class-memory-system", text: "Connor Memory OS is an instance of Memory System.", confidence: 0.9, validAt: now, committedAt: now))
-        let inspector = AppMemoryOSCLIInspector(store: store)
-
-        let l2 = try inspector.queryGraph(text: "Connor", intent: .l2Statements, entityID: nil, classEntityIDs: [], predicates: ["describes"], direction: .both, includeEvidence: true, limit: 10)
-        #expect(l2.nodes.contains { $0.id == "stmt-1" && $0.layer == .l2 })
-        #expect(l2.edges.contains { $0.predicate == "evidenced_by" })
-        #expect(l2.nodes.contains { $0.id == "span-1" && $0.layer == .l0 })
-
-        let l3 = try inspector.queryGraph(text: "observable", intent: .l3Beliefs, entityID: nil, classEntityIDs: [], predicates: [], direction: .both, includeEvidence: true, limit: 10)
-        #expect(l3.nodes.contains { $0.id == "belief-1" && $0.layer == .l3 })
-        #expect(l3.edges.isEmpty)
-
-        let l4Entity = try inspector.queryGraph(text: "Memory OS", intent: .l4Entity, entityID: nil, classEntityIDs: [], predicates: [], direction: .both, includeEvidence: false, limit: 10)
-        #expect(l4Entity.nodes.contains { $0.id == "entity-1" && $0.layer == .l4 })
-
-        let l4Instances = try inspector.queryGraph(text: "记忆系统", intent: .l4Instances, entityID: nil, classEntityIDs: ["class-memory-system"], predicates: ["INSTANCE_OF"], direction: .both, includeEvidence: false, limit: 10)
-        #expect(l4Instances.nodes.contains { $0.id == "entity-1" && $0.layer == .l4 })
-        #expect(l4Instances.edges.contains { $0.id == "entity-is-instance" && $0.predicate == "INSTANCE_OF" })
-    }
-
     // trace evidence feature was removed - see git commit 'Delete memory_os_trace_evidence tool layer'
 
     @Test func memoryOSCLIRouterRoutesL2EntityCommands() throws {
@@ -453,7 +413,7 @@ struct AppMemoryOSCLIInspectorTests {
         let inspector = AppMemoryOSCLIInspector(store: store)
         let encoder = memoryOSCLITestEncoder()
 
-        let updateJSON = #"{"entities":[{"name":"《迟到的青春期》","type":"work_object","aliases":"迟到的青春期, Late Puberty","statements":[{"text":"《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。","connectedEntity":"《迟到的青春期》马尼拉一个月阶段","connectedEntityType":"work_object","factType":"decision","polarity":"exclude","originalPhrase":"不去贫民窟"}]}]}"#
+        let updateJSON = #"{"entities":[{"name":"《迟到的青春期》","type":"work_object","aliases":"迟到的青春期, Late Puberty","statements":[{"text":"《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。","factType":"decision"}]}]}"#
         let update = try AppMemoryOSCLIRouter.route(args: ["l2", "update-entities", "--json", updateJSON], inspector: inspector, encoder: encoder)
         let find = try AppMemoryOSCLIRouter.route(args: ["l2", "find-entities", "Late Puberty"], inspector: inspector, encoder: encoder)
         let oldFind = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳"], inspector: inspector, encoder: encoder)
