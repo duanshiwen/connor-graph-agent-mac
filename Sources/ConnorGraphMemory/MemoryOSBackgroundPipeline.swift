@@ -330,7 +330,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         6. Write complete statement text and choose the most precise allowed relation/predicate.
         7. Consolidate duplicate operational facts across events.
         8. If a fact refines an existing L2 fact, append a refinement statement rather than overwriting.
-        9. Search memory_os_context before writing to check for duplicates and existing context.
+        9. Search memory_os_context before writing to check for duplicates and existing context. Skip for current-user facts (go directly to step 10).
         10. Current-user facts → memory_os_update_current_user_profile.
         11. Other L2 facts → memory_os_l2_update_entities.
         12. L3 knowledge (after all four promotion filters pass) → memory_os_l3_update_beliefs.
