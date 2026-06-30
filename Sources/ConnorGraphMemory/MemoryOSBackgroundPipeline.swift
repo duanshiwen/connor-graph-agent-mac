@@ -297,7 +297,14 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         L3 discipline domain rules:
         - Every L3 belief should include a non-empty domain.
         - Domain means discipline classification (not a topic, project name, or entity name).
-        - Use lowercase kebab-case: software-engineering, computer-science, artificial-intelligence, information-systems, knowledge-management, psychology, cognitive-science, economics, management, sociology, philosophy, design, finance, general-knowledge, etc.
+        - Use lowercase kebab-case. Examples below are not exhaustive — choose the discipline that best classifies the knowledge, or create a new domain name if none fit.
+        - technology: software-engineering, computer-science, artificial-intelligence, data-science, information-systems, security, networking, devops, database, distributed-systems, mobile-development, frontend, backend, compiler, operating-systems, embedded-systems, cloud-computing
+        - science: mathematics, statistics, physics, chemistry, biology, medicine, neuroscience, environmental-science
+        - social-science: psychology, cognitive-science, sociology, economics, political-science, linguistics, anthropology, education, journalism
+        - business: management, marketing, finance, operations-research, product-management, strategy, entrepreneurship
+        - engineering: electrical-engineering, mechanical-engineering, civil-engineering, aerospace-engineering
+        - humanities: philosophy, history, law, ethics, creative-writing, music, art
+        - interdisciplinary: knowledge-management, design, systems-thinking, complexity-science, general-knowledge
         - Use general-knowledge only when no meaningful discipline can be determined.
 
         L3 related entity names rules:
