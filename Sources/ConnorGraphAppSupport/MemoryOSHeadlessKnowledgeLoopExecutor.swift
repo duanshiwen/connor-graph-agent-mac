@@ -28,13 +28,15 @@ public struct MemoryOSBackgroundLoopMessage: Codable, Sendable, Equatable, Ident
     public var content: String
     public var toolCallID: String?
     public var toolName: String?
+    public var toolCalls: [MemoryOSBackgroundToolCall]?
 
-    public init(id: String = UUID().uuidString, role: MemoryOSBackgroundMessageRole, content: String, toolCallID: String? = nil, toolName: String? = nil) {
+    public init(id: String = UUID().uuidString, role: MemoryOSBackgroundMessageRole, content: String, toolCallID: String? = nil, toolName: String? = nil, toolCalls: [MemoryOSBackgroundToolCall]? = nil) {
         self.id = id
         self.role = role
         self.content = content
         self.toolCallID = toolCallID
         self.toolName = toolName
+        self.toolCalls = toolCalls
     }
 }
 
@@ -152,7 +154,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 if !response.assistantText.isEmpty || !response.toolCalls.isEmpty {
                     let joinedToolNames = response.toolCalls.map(\.name).joined(separator: ",")
                     let truncatedToolName = String(joinedToolNames.prefix(64))
-                    let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName)
+                    let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName, toolCalls: response.toolCalls.isEmpty ? nil : response.toolCalls)
                     messages.append(assistantMessage)
                     try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
                     sequence += 1

@@ -49,7 +49,8 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
             role: agentRole(message.role),
             content: message.content,
             toolCallID: message.toolCallID,
-            name: message.toolName
+            name: message.toolName,
+            toolCalls: message.toolCalls?.map { AgentToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
         )
     }
 
