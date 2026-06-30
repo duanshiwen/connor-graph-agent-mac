@@ -183,7 +183,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                     kind: "statement",
                     title: row[1],
                     summary: row[1],
-                    metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": row[5]]
+                    metadata: ["domain": row[2], "related_object_names": row[3], "updated_at": row[5]]
                 ))
             }
         }
@@ -250,7 +250,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             clauses.append("(s.text LIKE \(like) OR s.subject_id LIKE \(like) OR s.object_id LIKE \(like) OR s.predicate LIKE \(like))")
         }
         let rows = try store.query(sql: """
-        SELECT s.id, s.subject_id, s.predicate, COALESCE(s.object_id, ''), s.text, s.assertion_kind, s.confidence, s.valid_at, s.evidence_span_ids_json, COALESCE(n.node_type, ''), COALESCE(n.name, '')
+        SELECT s.id, s.subject_id, s.predicate, COALESCE(s.object_id, ''), s.text, s.assertion_kind, s.confidence, s.valid_at, s.evidence_span_ids_json, COALESCE(n.node_type, ''), COALESCE(n.name, ''), COALESCE(s.committed_at, '')
         FROM memory_l2_statements s
         LEFT JOIN memory_l2_nodes n ON n.id = s.subject_id
         WHERE \(clauses.joined(separator: " AND "))
@@ -276,7 +276,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[6]),
                 validAt: row[7],
-                metadata: ["statement_text": row[4], "assertion_kind": row[5], "valid_at": row[7]]
+                metadata: ["statement_text": row[4], "assertion_kind": row[5], "committed_at": row[11]]
             )
         }
         return MemoryOSGraphSubgraph(
@@ -314,7 +314,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 kind: "statement",
                 title: row[1],
                 summary: row[1],
-                metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": row[5]]
+                metadata: ["domain": row[2], "related_object_names": row[3], "updated_at": row[5]]
             )
         }
         return MemoryOSGraphSubgraph(
@@ -368,19 +368,19 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         var statements: [[String]] = []
         if query.direction == .outgoing || query.direction == .both {
             statements += try store.query(sql: """
-            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'outgoing', COALESCE(s.valid_at, '')
+            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'outgoing', COALESCE(s.committed_at, '')
             FROM memory_l4_entity_statements s
             WHERE s.entity_id = \(store.quote(entityID))\(predicateClause)
-            ORDER BY s.valid_at DESC, s.id ASC
+            ORDER BY s.committed_at DESC, s.id ASC
             LIMIT \(limit)
             """)
         }
         if query.direction == .incoming || query.direction == .both {
             statements += try store.query(sql: """
-            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'incoming', COALESCE(s.valid_at, '')
+            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'incoming', COALESCE(s.committed_at, '')
             FROM memory_l4_entity_statements s
             WHERE s.object_entity_id = \(store.quote(entityID))\(predicateClause)
-            ORDER BY s.valid_at DESC, s.id ASC
+            ORDER BY s.committed_at DESC, s.id ASC
             LIMIT \(limit)
             """)
         }
@@ -406,7 +406,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[6]),
                 validAt: row[7].isEmpty ? nil : row[7],
-                metadata: ["statement_text": row[4], "direction": row[8], "valid_at": row[9]].merging(relationMetadata) { current, _ in current }
+                metadata: ["statement_text": row[4], "direction": row[8], "committed_at": row[9]].merging(relationMetadata) { current, _ in current }
             )
         }
         return MemoryOSGraphSubgraph(nodes: nodes, edges: edges, evidenceRefs: Array(Set(evidenceRefs)).sorted(), provenanceRefs: [], explanation: "L4 neighbors query: entity \(entityID), direction \(query.direction.rawValue); returned \(edges.count) edge(s).")
@@ -435,7 +435,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         }
 
         let rows = try store.query(sql: """
-        SELECT e.id, e.entity_type, e.name, e.summary, s.id, s.predicate, s.object_entity_id, s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, COALESCE(e.updated_at, ''), COALESCE(s.valid_at, '')
+        SELECT e.id, e.entity_type, e.name, e.summary, s.id, s.predicate, s.object_entity_id, s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, COALESCE(e.updated_at, ''), COALESCE(s.committed_at, '')
         FROM memory_l4_entity_statements s
         JOIN memory_l4_entities e ON e.id = s.entity_id
         WHERE s.predicate IN (\(quotedPredicates))
@@ -467,7 +467,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[9]),
                 validAt: row[10].isEmpty ? nil : row[10],
-                metadata: ["statement_text": row[7], "valid_at": row[12]].merging(l4RelationMetadata(predicate: row[5])) { current, _ in current }
+                metadata: ["statement_text": row[7], "committed_at": row[12]].merging(l4RelationMetadata(predicate: row[5])) { current, _ in current }
             ))
         }
 

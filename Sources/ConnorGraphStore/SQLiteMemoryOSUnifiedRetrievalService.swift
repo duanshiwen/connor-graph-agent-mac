@@ -171,7 +171,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
 
     private func searchL2(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
         try store.query(sql: """
-        SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.subject_id, bm25(memory_l2_statements_fts) AS rank, COALESCE(s.valid_at, '')
+        SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.subject_id, bm25(memory_l2_statements_fts) AS rank, COALESCE(s.committed_at, '')
         FROM memory_l2_statements_fts f
         JOIN memory_l2_statements s ON s.id = f.statement_id
         WHERE memory_l2_statements_fts MATCH \(store.quote(ftsQuery(text)))
@@ -179,7 +179,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         LIMIT \(limit)
         """).map { row in
             let evidence = (try? store.decode([String].self, row[3])) ?? []
-            return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]], metadata: ["valid_at": row[6]])
+            return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]], metadata: ["committed_at": row[6]])
         }
     }
 
@@ -203,7 +203,6 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
                 metadata: [
                     "domain": row[2],
                     "related_object_names": row[3],
-                    "created_at": row[4],
                     "updated_at": row[5]
                 ]
             )
@@ -223,7 +222,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         }
         if hits.count < limit {
             hits += try store.query(sql: """
-            SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, bm25(memory_l4_statements_fts) AS rank, COALESCE(s.valid_at, '')
+            SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, bm25(memory_l4_statements_fts) AS rank, COALESCE(s.committed_at, '')
             FROM memory_l4_statements_fts f
             JOIN memory_l4_entity_statements s ON s.id = f.statement_id
             WHERE memory_l4_statements_fts MATCH \(store.quote(ftsQuery(text)))
@@ -231,7 +230,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             LIMIT \(limit - hits.count)
             """).map { row in
                 let evidence = (try? store.decode([String].self, row[3])) ?? []
-                return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true, metadata: ["valid_at": row[7]])
+                return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true, metadata: ["committed_at": row[7]])
             }
         }
         return hits
