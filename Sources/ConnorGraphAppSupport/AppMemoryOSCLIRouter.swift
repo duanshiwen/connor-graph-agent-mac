@@ -191,7 +191,7 @@ public enum AppMemoryOSCLIRouter {
         case "plan-l1", "plan-l1-knowledge": return try encode(try inspector.planL1(), encoder: encoder)
         case "debug-run-next":
             return try routePipelineDebugRunNext(args: args, inspector: inspector, encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|debug-run-next"), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1|debug-run-next"), encoder: encoder)
         }
     }
 
