@@ -46,7 +46,7 @@ public struct AppLLMProviderHealthChecker: Sendable {
     public func testConnection() async -> AppLLMProviderHealthCheckResult {
         do {
             let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.defaultConnection else {
+            guard let connection = settings.defaultConnection ?? settings.connections.first else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "未配置 AI 连接。")
                 }
             switch connection.providerMode {

@@ -198,7 +198,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AnyAgentModelProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) else {
+            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.connections.first else {
                 return AnyAgentModelProvider(modelID: "missing-connection") { _ in
                     throw OpenAICompatibleProviderError.missingAPIKey
                 }
@@ -317,7 +317,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.defaultConnection else {
+            guard let connection = settings.defaultConnection ?? settings.connections.first else {
                     return AnyLLMProvider { _, _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
