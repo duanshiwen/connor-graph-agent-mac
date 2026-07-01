@@ -3909,6 +3909,9 @@ final class AppViewModel: NSObject, ObservableObject {
         let service = AppLLMConnectionSetupService(settingsRepository: llmSettingsRepository)
         let result = try await service.setupConnection(input)
         loadLLMSettings()
+        if llmConnectionConfigs.count == 1, let firstConnection = llmConnectionConfigs.first {
+            selectDefaultLLMConnection(firstConnection.id)
+        }
         rebuildNativeSessionManagerForActiveSession()
         await reloadLLMModelConnections()
         llmSettingsMessage = result.message
