@@ -807,6 +807,8 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
     var authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey
     var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
     var hidesEndpoint: Bool = false
+    /// Models in this list default to vision support enabled (explicitVisionSupport = true) when selected.
+    var defaultVisionModels: [String] = []
 
     var availableModels: [String] {
         if !supportedModels.isEmpty { return supportedModels }
@@ -830,7 +832,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey, defaultVisionModels: ["mimo-v2.5", "mimo-v2-omni"]),
         AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen3-coder-plus", "qwen3-vl-plus", "qwen3-vl-flash", "qwen3-omni-flash", "qwen3-asr-flash", "qwen3-tts-flash", "qwen-image-plus", "qwen-image-edit"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-seed-1-6-vision", "doubao-seed-1-6-embedding", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2.6", supportedModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-8k-vision-preview", "moonshot-v1-32k-vision-preview", "moonshot-v1-128k-vision-preview"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
@@ -1746,6 +1748,11 @@ struct AIConnectionSetupView: View {
                 .onChange(of: selectedModel) { _, newValue in
                     if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }
                     syncModelListFromSelection(fallbackModels: models)
+                    // Auto-suggest vision support when a known vision model is selected
+                    let preset = activeProviderPreset
+                    if !preset.defaultVisionModels.isEmpty {
+                        visionSupportOverride = preset.defaultVisionModels.contains(newValue) ? true : nil
+                    }
                 }
             }
             Text("可启用多个模型；测试连接时会使用当前可用的模型之一，新会话仍会使用你选择的默认模型。")
