@@ -2178,29 +2178,32 @@ struct AIConnectionSetupView: View {
 struct AIConnectionOnboardingView: View {
     var choose: (AIConnectionOnboardingOption) -> Void
     var cancel: () -> Void
+    var showBackButton: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button(action: cancel) {
-                    Label("返回", systemImage: "chevron.left")
-                        .font(SettingsListTypography.rowTitleSelected)
-                        .labelStyle(.titleAndIcon)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .contentShape(Capsule(style: .continuous))
+            if showBackButton {
+                HStack {
+                    Button(action: cancel) {
+                        Label("返回", systemImage: "chevron.left")
+                            .font(SettingsListTypography.rowTitleSelected)
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .contentShape(Capsule(style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                    )
+                    .help("返回上一页")
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                )
-                .help("返回上一页")
-                Spacer()
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
 
             Spacer(minLength: 42)
 

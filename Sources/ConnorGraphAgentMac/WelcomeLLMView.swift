@@ -6,41 +6,81 @@ import ConnorGraphAppSupport
 
 struct WelcomeLLMView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var setupOption: AIConnectionOnboardingOption?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                Spacer(minLength: 32)
-
-                VStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.tint)
-                    Text("欢迎使用康纳同学")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    Text("请配置 AI 连接以开始使用")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+        if let option = setupOption {
+            AIConnectionSetupView(
+                viewModel: viewModel,
+                option: option,
+                complete: {
+                    setupOption = nil
+                },
+                back: {
+                    setupOption = nil
+                },
+                cancel: {
+                    setupOption = nil
                 }
+            )
+        } else {
+            ScrollView {
+                VStack(spacing: 0) {
+                    WelcomeOnboardingContent(
+                        choose: { setupOption = $0 },
+                        canDismiss: !viewModel.llmConnectionConfigs.isEmpty,
+                        dismiss: { viewModel.showWelcomePlaceholder = false }
+                    )
+                }
+            }
+        }
+    }
+}
 
-                SettingsAISection(viewModel: viewModel)
-                    .frame(maxWidth: 520)
+private struct WelcomeOnboardingContent: View {
+    var choose: (AIConnectionOnboardingOption) -> Void
+    var canDismiss: Bool
+    var dismiss: () -> Void
 
-                Button {
-                    viewModel.showWelcomePlaceholder = false
-                } label: {
+    var body: some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 56)
+
+            VStack(spacing: 12) {
+                ConnorConnectionMark()
+                VStack(spacing: 14) {
+                    Text("欢迎使用康纳同学")
+                        .font(SettingsListTypography.header)
+                    Text("先选择一种连接方式，康纳同学会在下一步帮你完成配置。")
+                        .font(SettingsListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+            }
+
+            VStack(spacing: 14) {
+                ForEach(AIConnectionOnboardingOption.all) { option in
+                    AIConnectionOnboardingOptionRow(option: option) {
+                        choose(option)
+                    }
+                }
+            }
+            .frame(maxWidth: 760)
+
+            if canDismiss {
+                Button(action: dismiss) {
                     Label("开始使用", systemImage: "arrow.forward")
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(viewModel.llmConnectionConfigs.isEmpty)
-
-                Spacer(minLength: 32)
+                .padding(.top, 12)
             }
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 600)
+
+            Spacer(minLength: 56)
         }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 760)
     }
 }
