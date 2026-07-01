@@ -2738,6 +2738,25 @@ struct CraftSessionRow: View {
                     .foregroundStyle(secondaryTextColor)
             }
 
+
+            if row.kind == .note {
+                HStack(spacing: 4) {
+                    Text("📝 笔记")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color.accentColor.opacity(0.10))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
+                        )
+                }
+            }
+
             if !row.labels.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
