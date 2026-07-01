@@ -223,6 +223,77 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Weak one-off observations, jokes, transient emotions, and assistant guesses should not be written as stable traits.
         - Do not infer medical, psychological, or sensitive identity diagnoses.
 
+        Signal detection guide for person features:
+        - Explicit signals (extract with high confidence):
+          - Direct statements: "我喜欢...", "我不喜欢...", "我习惯...", "我总是...", "我从来不..."
+          - Self-identification: "我是个...的人", "我属于...类型"
+          - Expressed goals: "我希望...", "我的目标是...", "我打算..."
+          - Stated constraints: "我不能...", "我需要避免...", "因为...所以..."
+        - Implicit signals (extract when pattern is strong):
+          - Repeated choices: same type of option chosen 2+ times across sessions
+          - Consistent reactions: positive/negative response to similar stimuli
+          - Information-seeking patterns: repeatedly asking about specific topics
+          - Avoidance patterns: consistently skipping or declining certain options
+          - Time allocation: spending disproportionate time on specific activities
+          - Correction patterns: user corrects assistant in a domain → knowledge_background
+        - Behavioral signals (infer stable_trait only with 3+ observations):
+          - Decision speed: quick decisive vs deliberate analytical
+          - Detail orientation: requests more detail vs prefers summaries
+          - Risk tolerance: conservative choices vs adventurous exploration
+          - Social orientation: prefers solo vs collaborative approaches
+          - Planning style: structured systematic vs flexible adaptive
+
+        Temporal stability classification:
+        - stable_trait: Enduring personality characteristics. Require 3+ consistent observations across different contexts. Examples: introversion, perfectionism, analytical thinking. Write as profile_preference with stable_trait sub-type.
+        - evolving_preference: Preferences that show directional change over time. Track the trajectory, not just the latest state. Example: "increasingly prefers concise summaries over detailed explanations". Write with refinement statement if updating existing fact.
+        - transient_state: Current mood, temporary interest, situational preference. DO NOT write as stable fact. May note as context in statement text if operationally relevant, but mark as transient.
+        - recurring_pattern: Behaviors that appear periodically but not constantly. Example: "tends to be more creative in late-night sessions". Write cautiously with temporal qualifier in statement.
+
+        Big Five trait signals (for stable_trait extraction only):
+        - Openness: curiosity about new topics, creative requests, interest in abstract ideas, willingness to explore unfamiliar domains, appreciation for novel approaches.
+        - Conscientiousness: requests for organization/structure, attention to detail, preference for planning, follow-up on commitments, systematic approach to tasks.
+        - Extraversion: preference for collaborative work, social references, energy in group contexts, seeking external input, verbose communication style.
+        - Agreeableness: conflict avoidance, preference for harmony, accommodating language, consideration of others' perspectives, cooperative framing.
+        - Neuroticism: anxiety about outcomes, preference for reassurance, sensitivity to uncertainty, frequent checking/verification, worry about errors.
+        - Only extract Big Five traits when: (1) multiple consistent observations exist (3+ across different contexts), (2) the trait clearly influences operational behavior or communication patterns, (3) the observation is not explained by situational factors.
+        - Write as: "{person} exhibits {trait}: {specific evidence with context}."
+
+        Communication style signals:
+        - Verbosity preference: concise/brief ↔ detailed/comprehensive responses
+        - Formality level: casual/colloquial ↔ formal/professional language
+        - Language mixing: Chinese-English code-switching patterns, technical jargon density
+        - Structure preference: bullet points/structured ↔ narrative/flowing prose
+        - Emoji/symbol usage: frequent ↔ none, specific emoji preferences
+        - Question style: direct/closed ↔ open/exploratory questions
+        - Feedback style: brief acknowledgment ↔ detailed commentary
+        - Reading depth: skims highlights ↔ reads full content
+        - Response pace expectation: prefers immediate short answers ↔ willing to wait for comprehensive analysis
+        - Write as profile_preference with communication_preference sub-type.
+
+        Decision and information processing patterns:
+        - Decision speed: quick intuitive ↔ slow deliberate analysis
+        - Information appetite: prefers summary/highlights ↔ wants full detail and sources
+        - Risk orientation: conservative/cautious ↔ aggressive/exploratory
+        - Authority reliance: defers to experts/references ↔ trusts own judgment
+        - Option framing: prefers binary choices ↔ wants multiple alternatives
+        - Reversibility preference: prefers reversible decisions ↔ comfortable with commitment
+        - Confirmation need: single source sufficient ↔ cross-validates multiple sources
+        - Write as profile_preference with stable_trait or interaction_guidance sub-type. Only extract after observing pattern across 2+ decision contexts.
+
+        Preference evolution handling:
+        - When a new observation contradicts an existing profile_preference:
+          1. If the user explicitly states a change → UPDATE the existing fact with a refinement statement noting the change and approximate timing.
+          2. If the change is inferred from behavior → APPEND a new statement noting the observed shift, do not overwrite the original.
+          3. If the evidence is ambiguous → NOTE as a potential change but do not modify existing facts.
+        - Maintain historical trajectory in statement text: "{person} previously preferred X, now shows preference for Y (observed since {timeframe})."
+        - Do NOT delete previous preference records; append evolution statements.
+
+        Evidence threshold for person feature extraction:
+        - High confidence (write immediately): Explicit self-statement ("我是一个...的人", "I always...").
+        - Medium confidence (write with evidence qualifier): Strong behavioral pattern (2+ consistent observations in same direction), direct correction of assistant's assumption.
+        - Low confidence (do NOT write as stable fact): Single observation, ambiguous context, could be situational, assistant's inference without user confirmation, joking or hypothetical language.
+        - Confidence qualifier in statement text: When medium confidence, include evidence scope: "Based on {N} observations in {context}, {person} appears to..."
+
         Allowed L2 predicates / GraphPredicate raw values:
         \(Self.allowedPredicateGuide())
 
@@ -261,7 +332,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - The taxonomy is for L2 operational routing only; it is not a reason to promote a fact into L3.
 
         Class-specific extraction cues:
-        - profile_preference: Extract when evidence states or strongly shows a person's preference, dislike, habit, goal, stable trait, communication preference, interaction guidance, knowledge background, personal constraint, or stable personal context. Current-user facts → memory_os_update_current_user_profile. Other-person facts → memory_os_l2_update_entities (only when identity is resolved). Do not extract transient moods, jokes, weak one-off observations as stable facts.
+        - profile_preference: Extract when evidence states or strongly shows a person's preference, dislike, habit, goal, stable trait, communication preference, interaction guidance, knowledge background, personal constraint, or stable personal context. Current-user facts → memory_os_update_current_user_profile. Other-person facts → memory_os_l2_update_entities (only when identity is resolved). Do not extract transient moods, jokes, weak one-off observations as stable facts. Apply the signal detection guide, temporal stability classification, Big Five trait signals, communication style signals, decision and information processing patterns, preference evolution handling, and evidence threshold rules from the Person feature extraction policy above. Use the confidence qualifier in statement text when writing medium-confidence facts.
         - project_state: Extract when evidence updates the current state, scope, milestone, requirement, constraint, design direction, active context, open problem, or known limitation of a work_object. Prefer project_state over implementation when the fact is about product/project direction rather than code/runtime behavior.
         - task_commitment: Extract when someone commits to do something, asks for follow-up, creates a TODO, assigns responsibility, sets a due date, completes, cancels, or postpones work.
         - calendar_time: Extract when evidence contains a schedule, event time, deadline, time block, conflict, start/end time, recurrence, or temporal coordination. Do not confuse vague narrative time with actionable calendar/time memory.
@@ -281,6 +352,10 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Implementation: "{component/work_object} has implementation fact: {code/runtime/test/bug/fix/status detail}."
         - Source document: "{document/artifact} contains/describes/supports/answers: {specific content}."
         - Relationship: "{subject} is related to {object} by: {specific relationship}."
+        - Trait: "{person} exhibits stable trait: {trait description}, evidenced by {specific observations}."
+        - Communication: "{person} prefers communication style: {style description}."
+        - Decision style: "{person} tends toward decision pattern: {pattern description}."
+        - Evolution: "{person}'s preference for {topic} has evolved: {trajectory description}."
         - Avoid vague statements such as "This is important", "The user discussed X", or "There was a conversation about X" unless the conversation fact itself is the useful memory.
 
         Person/profile routing rules:
