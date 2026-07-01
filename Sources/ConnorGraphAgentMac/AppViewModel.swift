@@ -336,13 +336,13 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var pendingApprovals: [AgentPendingApproval] = []
     @Published var lastPromotionResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
-    @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = AppLLMSettings.default.connections
-    @Published var llmDefaultConnectionID: String = AppLLMSettings.default.defaultConnectionID
-    @Published var llmConnectionName: String = AppLLMSettings.default.defaultConnection.name
-    @Published var llmProviderMode: AppLLMProviderMode = AppLLMSettings.default.providerMode
-    @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
-    @Published var llmModel: String = AppLLMSettings.default.model
-    @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
+    @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = []
+    @Published var llmDefaultConnectionID: String = ""
+    @Published var llmConnectionName: String = ""
+    @Published var llmProviderMode: AppLLMProviderMode = .openAICompatible
+    @Published var llmBaseURLString: String = ""
+    @Published var llmModel: String = ""
+    @Published var llmSelectedModel: String = ""
     @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
@@ -3727,7 +3727,15 @@ final class AppViewModel: NSObject, ObservableObject {
     func loadLLMSettings() {
         do {
             let settings = try llmSettingsRepository.loadSettings()
-            let connection = settings.defaultConnection
+            guard let connection = settings.defaultConnection else {
+                llmConnectionConfigs = settings.connections
+                llmDefaultConnectionID = ""
+                llmConnectionName = ""
+                llmHasAPIKey = false
+                llmSettingsMessage = nil
+                llmHealthCheckMessage = nil
+                return
+            }
             llmConnectionConfigs = settings.connections
             llmDefaultConnectionID = settings.defaultConnectionID
             llmConnectionName = connection.name
@@ -3920,8 +3928,8 @@ final class AppViewModel: NSObject, ObservableObject {
         hasAPIKey: Bool
     ) -> AppLLMConnectionConfig {
         let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
-        let defaultBaseURL = providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : ""
-        let defaultModel = providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default"
+        let defaultBaseURL = providerMode == .openAICompatible ? "https://api.openai.com/v1" : ""
+        let defaultModel = providerMode == .openAICompatible ? "gpt-4o-mini" : "claude-sdk-default"
         let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? model! : defaultModel
         let normalizedSelectedModel = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? selectedModel! : AppLLMConnectionConfig.firstModel(in: normalizedModel)
         let connection = AppLLMConnectionConfig(
@@ -4094,7 +4102,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return existing
         }
         guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
-        let connection = settings.defaultConnection
+        guard let connection = settings.defaultConnection else { return nil }
         let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return nil }
         var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -4144,9 +4152,9 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
-            llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+            llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? llmSelectedModel
             llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-            llmProviderMode = settings?.providerMode ?? llmProviderMode
+            llmProviderMode = settings?.defaultConnection?.providerMode ?? llmProviderMode
             llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
         }
     }
@@ -4167,9 +4175,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
-        llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+        llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? llmSelectedModel
         llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-        llmProviderMode = settings?.providerMode ?? llmProviderMode
+        llmProviderMode = settings?.defaultConnection?.providerMode ?? llmProviderMode
         llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
 
         rebuildNativeSessionManagerForActiveSession()
