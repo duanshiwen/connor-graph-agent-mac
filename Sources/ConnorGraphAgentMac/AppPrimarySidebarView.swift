@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -16,6 +17,7 @@ struct CraftPrimarySidebarView: View {
     @State private var automationExpanded = true
     @State private var statusEditorRequest: StatusDefinitionEditorRequest?
     @State private var labelEditorRequest: LabelDefinitionEditorRequest?
+    @State private var isNoteImporterPresented = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -29,13 +31,25 @@ struct CraftPrimarySidebarView: View {
             .padding(.horizontal, 10)
             .padding(.top, 10)
 
-            Button {
-                viewModel.newNoteSession()
-                select(.agentChat)
+            Menu {
+                Button {
+                    viewModel.newNoteSession()
+                    select(.agentChat)
+                } label: {
+                    Label("新建笔记", systemImage: "note.text.badge.plus")
+                }
+                Button {
+                    isNoteImporterPresented = true
+                    select(.agentChat)
+                } label: {
+                    Label("导入笔记…", systemImage: "arrow.down.doc")
+                }
             } label: {
-                SidebarActionButtonLabel(title: "新建笔记", systemImage: "note.text.badge.plus", minHeight: 32)
+                SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
             }
-            .buttonStyle(SidebarActionButtonStyle())
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
 
             ScrollView {
@@ -156,6 +170,32 @@ struct CraftPrimarySidebarView: View {
                 }
             )
         }
+        .fileImporter(isPresented: $isNoteImporterPresented, allowedContentTypes: supportedNoteImportTypes, allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task {
+                    do {
+                        guard url.startAccessingSecurityScopedResource() else { return }
+                        defer { url.stopAccessingSecurityScopedResource() }
+                        let content = try String(contentsOf: url, encoding: .utf8)
+                        await MainActor.run {
+                            viewModel.importNoteSession(fileContents: content)
+                        }
+                    } catch {
+                        await MainActor.run {
+                            viewModel.errorMessage = "无法读取文件: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            case .failure:
+                break
+            }
+        }
+    }
+
+    private var supportedNoteImportTypes: [UTType] {
+        [.plainText, .text, UTType(filenameExtension: "md") ?? .text, UTType(filenameExtension: "markdown") ?? .text, UTType(filenameExtension: "txt") ?? .text]
     }
 
     private var countSourceSessions: [AgentSession] {
