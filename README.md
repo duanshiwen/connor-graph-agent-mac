@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-30 12:02 GMT+8  
+文档更新时间：2026-07-01 11:35 GMT+8  
 定位：本 README 只记录当前架构、边界、运行布局和开发约束，不作为历史 changelog。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -260,7 +260,7 @@ System prompts are deliberately minimal: only context retrieval and user profile
 Connor Memory OS is the production memory boundary. It is not a graph editor, dashboard or direct LLM-write surface.
 
 - Five-layer architecture: L0 Provenance → L1 Cache Buffer → L2 Operational → L3 Knowledge → L4 Stable Entities.
-- LLM-facing tools: `memory_os_context`, `memory_os_read_record`, `memory_os_l2_find_entities`, `memory_os_l2_update_entities`, `memory_os_l3_write_beliefs`, `memory_os_l4_write_entities`, `memory_os_provenance`.
+- LLM-facing tools: 17 total — 13 read tools (`memory_os_context`, `memory_os_search`, `memory_os_read_record`, `memory_os_read_provenance`, `memory_os_get_current_user_profile`, `memory_os_l2_find_entities`, `memory_os_l2_find_statements`, `memory_os_l3_expand_belief`, `memory_os_l3_list_domains`, `memory_os_l4_find_entity`, `memory_os_l4_neighbors`, `memory_os_l4_instances`, `memory_os_expand_l4`) and 4 write tools (`memory_os_l2_update_entities`, `memory_os_update_current_user_profile`, `memory_os_l3_update_beliefs`, `memory_os_l4_update_entities`).
 - Full architecture, layer contract, data models, write path, retrieval, ObserveLog and background pipeline → see **Section 6. Memory OS**.
 
 ### Skills, Tasks and Automation
@@ -310,7 +310,7 @@ Read semantics: **query-time current view derivation** — historical semantic r
                        │                   │
            ┌───────────▼───┐       ┌───────▼──────────┐
            │  LLM Tools    │       │ Background Jobs  │
-           │  (7 tools)    │       │ (unified proj.)  │
+           │  (17 tools)   │       │ (unified proj.)  │
            └───┬───┬───┬───┘       └───────┬──────────┘
                │   │   │                   │
     ┌──────────▼┐  │  ┌▼──────────┐  ┌─────▼──────┐
@@ -411,19 +411,36 @@ Raw LLM labels go through `normalizeRawType()` with 80+ aliases (e.g. `human`→
 
 Each predicate has four properties: **category** (1 of 12), **inverse** (optional reverse predicate, e.g. `HAS_PART`↔`PART_OF`), **isSymmetric** (e.g. `SAME_AS`, `RELATED_TO`), **isTransitive** (e.g. `SUBCLASS_OF`, `PART_OF`, `LOCATED_IN`, `DEPENDS_ON`).
 
-### 6.3 LLM Interface (7 tools)
+### 6.3 LLM Interface (17 tools)
 
 LLM-facing Memory OS tools, registered in `AppMemoryOSAgentTools.swift`:
 
+**Read tools (13):**
+
 | Tool | Layer | Description |
 |------|-------|-------------|
-| `memory_os_context` | All | Retrieve Memory OS context package for current conversation (retrieval + context building) |
+| `memory_os_context` | All | Multi-term search across L1–L4, returns flat natural-language memory items |
+| `memory_os_search` | All | Full-text search across L0–L4, returns ranked hits with title/summary/matchedText/score |
 | `memory_os_read_record` | All | Read a single Memory OS record by layer and ID |
+| `memory_os_read_provenance` | L0 | Read L0 provenance object with optional span detail |
+| `memory_os_get_current_user_profile` | L2 | Retrieve all current-user personalization facts as flat natural-language strings |
 | `memory_os_l2_find_entities` | L2 | Find L2 working-memory entities by exact name or alias |
+| `memory_os_l2_find_statements` | L2 | Find L2 statement edges by text, subject ID, and/or predicate filters |
+| `memory_os_l3_expand_belief` | L3 | Expand L3 beliefs by ID, domain, or text query |
+| `memory_os_l3_list_domains` | L3 | List all L3 discipline domains and belief counts |
+| `memory_os_l4_find_entity` | L4 | Find L4 entity nodes by exact ID, stable key, name, or alias |
+| `memory_os_l4_neighbors` | L4 | Query outgoing/incoming/both-direction L4 graph neighbors for a known entity ID |
+| `memory_os_l4_instances` | L4 | Query L4 graph for instances of one or more class entities (INSTANCE_OF) |
+| `memory_os_expand_l4` | L4 | Depth-limited L4 entity neighborhood expansion |
+
+**Write tools (4):**
+
+| Tool | Layer | Description |
+|------|-------|-------------|
 | `memory_os_l2_update_entities` | L2 | Upsert L2 entities and append statements; entity names split/dedup/upsert |
-| `memory_os_l3_write_beliefs` | L3 | Direct-write L3 beliefs (bypasses promotion policy; domain + statement validated) |
-| `memory_os_l4_write_entities` | L4 | Direct-write L4 entities and relations; entity type normalized via `MemoryOSEntityType.normalizeRawType()`; structural validation applied |
-| `memory_os_provenance` | L0 | Read provenance object with optional span detail |
+| `memory_os_update_current_user_profile` | L2 | Append current-user-scoped L2 fact statements |
+| `memory_os_l3_update_beliefs` | L3 | Direct-write L3 beliefs (bypasses promotion policy; domain + statement validated) |
+| `memory_os_l4_update_entities` | L4 | Direct-write L4 entities and relations; entity type normalized via `MemoryOSEntityType.normalizeRawType()`; structural validation applied |
 
 ### 6.4 Write Path
 
@@ -471,6 +488,8 @@ Key write-path rules:
 - L2 statements do not require evidence span IDs; the L1→L2 prompt emphasizes fact-first extraction with entity names and relation types.
 
 ### 6.5 Retrieval & Context System
+
+**Tool result delivery contract** — all Memory OS read tools return actual data in `contentText` (the field the LLM sees). The `contentJSON` field preserves the full structured payload for programmatic consumers (UI, debugging). `AgentToolResultGate.gatedContent()` selects `contentText` when non-empty; tools must not rely on `contentJSON` being visible to the LLM.
 
 **Hybrid retrieval** — merged ranking across lexical (FTS), semantic (vector) and graph (L4 neighborhood expansion) retrieval modes.
 
