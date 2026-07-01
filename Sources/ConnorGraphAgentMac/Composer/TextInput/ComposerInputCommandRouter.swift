@@ -81,8 +81,45 @@ final class ComposerInputCommandRouter {
     func handleDragOperation(_ pasteboard: NSPasteboard) -> Bool {
         let urls = pasteboardExtractor.fileURLs(from: pasteboard)
         guard !urls.isEmpty else { return false }
+
+        if configuration.isNoteMode {
+            // Note mode: text files → extract content; images → import; others → ignore
+            let textFiles = urls.filter { isPlainTextFile($0) }
+            let imageFiles = urls.filter { isImageFile($0) }
+            _ = urls.filter { !isPlainTextFile($0) && !isImageFile($0) }
+
+            if !textFiles.isEmpty {
+                let contents: [String] = textFiles.compactMap { url in
+                    guard url.startAccessingSecurityScopedResource() else { return nil }
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    return try? String(contentsOf: url, encoding: .utf8)
+                }
+                let combined = contents.joined(separator: "\n\n---\n\n")
+                if !combined.isEmpty {
+                    configuration.onTextFileDropped?(combined)
+                }
+            }
+
+            if !imageFiles.isEmpty {
+                configuration.onImportFiles(imageFiles)
+            }
+
+            return !textFiles.isEmpty || !imageFiles.isEmpty
+        }
+
+        // Normal mode: keep existing behavior
         configuration.onImportFiles(urls)
         return true
+    }
+
+    private func isPlainTextFile(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ["txt", "md", "markdown", "text", "json", "yaml", "yml", "csv", "log", "xml"].contains(ext)
+    }
+
+    private func isImageFile(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif", "heic", "heif"].contains(ext)
     }
 
     func handleReadSelection(from pasteboard: NSPasteboard) -> Bool {

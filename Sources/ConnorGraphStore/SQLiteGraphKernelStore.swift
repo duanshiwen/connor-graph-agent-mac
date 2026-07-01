@@ -356,6 +356,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'todo',
+            kind TEXT NOT NULL DEFAULT 'chat',
             labels_json TEXT NOT NULL DEFAULT '[]',
             is_archived INTEGER NOT NULL DEFAULT 0,
             is_flagged INTEGER NOT NULL DEFAULT 0,
@@ -365,6 +366,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         );
         """)
         try addColumnIfMissing(table: "agent_sessions", column: "status", definition: "TEXT NOT NULL DEFAULT 'todo'")
+        try addColumnIfMissing(table: "agent_sessions", column: "kind", definition: "TEXT NOT NULL DEFAULT 'chat'")
         try addColumnIfMissing(table: "agent_sessions", column: "labels_json", definition: "TEXT NOT NULL DEFAULT '[]'")
         try addColumnIfMissing(table: "agent_sessions", column: "is_archived", definition: "INTEGER NOT NULL DEFAULT 0")
         try addColumnIfMissing(table: "agent_sessions", column: "is_flagged", definition: "INTEGER NOT NULL DEFAULT 0")
@@ -675,14 +677,15 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     public func upsertSession(_ session: AgentSession) throws {
         try execute("""
         INSERT INTO agent_sessions
-        (id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json)
-        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote(session.governance.status.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))), \(quote(session.governance.deletedAt.map(iso))), \(quote(json(session.readState))))
+        (id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json)
+        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote(session.governance.status.rawValue)), \(quote(session.governance.kind.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))), \(quote(session.governance.deletedAt.map(iso))), \(quote(json(session.readState))))
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             messages_json = excluded.messages_json,
             created_at = excluded.created_at,
             updated_at = excluded.updated_at,
             status = excluded.status,
+            kind = excluded.kind,
             labels_json = excluded.labels_json,
             is_archived = excluded.is_archived,
             is_flagged = excluded.is_flagged,
@@ -693,7 +696,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     }
 
     public func session(id: String) throws -> AgentSession? {
-        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions WHERE id = \(quote(id))")
+        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions WHERE id = \(quote(id))")
         guard let row = rows.first else { return nil }
         return try decodeSession(row)
     }
@@ -705,7 +708,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         _ = includeArchived
         if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+        return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
     }
 
     public func sessions(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, includeDeleted: Bool = false, limit: Int = 100) throws -> [AgentSession] {
@@ -714,7 +717,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         if let archived { conditions.append("is_archived = \(archived ? 1 : 0)") }
         if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+        let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
         guard let labelID else { return sessions }
         return sessions.filter { session in session.governance.labels.contains { $0.id == labelID } }
     }
@@ -783,13 +786,14 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private func decodeSession(_ row: [String]) throws -> AgentSession {
         let governance = AgentSessionGovernanceMetadata(
             status: AgentSessionStatus(rawValue: row[safe: 5] ?? "") ?? .todo,
-            labels: try decode([AgentSessionLabel].self, row[safe: 6] ?? "[]"),
-            isArchived: (Int(row[safe: 7] ?? "0") ?? 0) != 0,
-            isFlagged: (Int(row[safe: 8] ?? "0") ?? 0) != 0,
-            archivedAt: try optionalDate(row[safe: 9] ?? ""),
-            deletedAt: try optionalDate(row[safe: 10] ?? "")
+            kind: AgentSessionKind(rawValue: row[safe: 6] ?? "chat") ?? .chat,
+            labels: try decode([AgentSessionLabel].self, row[safe: 7] ?? "[]"),
+            isArchived: (Int(row[safe: 8] ?? "0") ?? 0) != 0,
+            isFlagged: (Int(row[safe: 9] ?? "0") ?? 0) != 0,
+            archivedAt: try optionalDate(row[safe: 10] ?? ""),
+            deletedAt: try optionalDate(row[safe: 11] ?? "")
         )
-        let readStateJSON = row[safe: 11] ?? "{}"
+        let readStateJSON = row[safe: 12] ?? "{}"
         let readState = try decodeSessionReadState(readStateJSON, fallbackUpdatedAt: try date(row[4]))
         return AgentSession(
             id: row[0], title: row[1],
