@@ -1,5 +1,17 @@
 import Foundation
 
+public enum AgentSessionKind: String, Codable, Sendable, Equatable, CustomStringConvertible {
+    case chat
+    case note
+
+    public var description: String {
+        switch self {
+        case .chat: return "chat"
+        case .note: return "笔记"
+        }
+    }
+}
+
 public enum AgentSessionStatus: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
     case todo
     case inProgress = "in_progress"
@@ -113,6 +125,7 @@ public struct AgentSessionLabel: Codable, Sendable, Equatable, Identifiable, Has
 
 public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
     public var status: AgentSessionStatus
+    public var kind: AgentSessionKind
     public var labels: [AgentSessionLabel]
     public var isArchived: Bool
     public var isFlagged: Bool
@@ -121,6 +134,7 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
 
     public init(
         status: AgentSessionStatus = .todo,
+        kind: AgentSessionKind = .chat,
         labels: [AgentSessionLabel] = [],
         isArchived: Bool = false,
         isFlagged: Bool = false,
@@ -128,6 +142,7 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
         deletedAt: Date? = nil
     ) {
         self.status = status
+        self.kind = kind
         self.labels = labels
         self.isArchived = isArchived
         self.isFlagged = isFlagged
