@@ -198,7 +198,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AnyAgentModelProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.defaultConnection
+            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.connections.first else {
+                return AnyAgentModelProvider(modelID: "未找到连接，请先添加 AI 连接") { _ in
+                    throw OpenAICompatibleProviderError.missingAPIKey
+                }
+            }
             let effectiveProviderMode: AppLLMProviderMode
             let effectiveConnectionKind: AppLLMConnectionKind
             let effectiveModel: String
@@ -313,7 +317,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            let connection = settings.defaultConnection
+            guard let connection = settings.defaultConnection ?? settings.connections.first else {
+                    return AnyLLMProvider { _, _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
             switch connection.providerMode {
             case .openAIResponses:
                 guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
