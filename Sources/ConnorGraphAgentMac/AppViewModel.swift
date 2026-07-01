@@ -1915,6 +1915,9 @@ final class AppViewModel: NSObject, ObservableObject {
         browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
         isBrowserVisible = true
         selection = .agentChat
+        if browserWorkspaceSnapshotsBySessionID[sessionID] == nil {
+            browserTargetURLString = BrowserBuiltInPage.blankURLString
+        }
         if selectedChatSessionID != sessionID {
             selectChatSession(sessionID)
         }
