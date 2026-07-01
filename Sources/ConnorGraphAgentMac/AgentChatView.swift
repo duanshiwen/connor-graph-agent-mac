@@ -612,7 +612,9 @@ private struct AgentChatConversationView: View {
     private var isNoteModeBeforeFirstMessage: Bool {
         guard let sessionID = viewModel.selectedChatSessionID else { return false }
         let session = viewModel.chatSessions.first { $0.id == sessionID }
-        return session?.governance.kind == .note && (session?.messages.isEmpty ?? true)
+        guard session?.governance.kind == .note else { return false }
+        // 正在提交或已有消息 → 退出笔记全屏模式
+        return (session?.messages.isEmpty ?? true) && !viewModel.isSubmittingChat
     }
 
     var body: some View {
