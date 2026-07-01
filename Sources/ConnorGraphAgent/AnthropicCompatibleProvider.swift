@@ -19,6 +19,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
     public var maxTokens: Int
     public var requestTimeout: TimeInterval
     public var featureOptions: AnthropicCompatibleFeatureOptions
+    public var explicitVisionSupport: Bool?
 
     public init(
         baseURL: URL,
@@ -29,7 +30,8 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         extraHeaders: [String: String] = [:],
         maxTokens: Int = 4096,
         requestTimeout: TimeInterval = 300,
-        featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions()
+        featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions(),
+        explicitVisionSupport: Bool? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -40,6 +42,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         self.maxTokens = maxTokens
         self.requestTimeout = requestTimeout
         self.featureOptions = featureOptions
+        self.explicitVisionSupport = explicitVisionSupport
     }
 
     public init(
@@ -111,7 +114,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
 
     public var modelID: String { config.requestModel }
     public var capabilityProfile: AgentModelCapabilityProfile {
-        var profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: config.requestModel)
+        var profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: config.requestModel, explicitVisionSupport: config.explicitVisionSupport)
         profile.supportsStreaming = config.featureOptions.streamingEnabled
         return profile
     }

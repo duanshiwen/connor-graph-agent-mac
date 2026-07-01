@@ -1067,6 +1067,7 @@ struct AIConnectionSetupView: View {
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
+    @State private var visionSupportOverride: Bool? = nil // nil = auto-detect, true = force enable, false = force disable
 
     var body: some View {
         ScrollView {
@@ -1375,6 +1376,17 @@ struct AIConnectionSetupView: View {
                 }
                 aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
                     aiConnectionTextField("claude-sonnet-4-5", text: $selectedModel)
+                }
+                aiConnectionSettingsRow(title: "视觉输入", help: "默认自动检测模型是否支持图片。如果自动检测不准（如新模型），可手动覆盖。") {
+                    Picker("视觉输入", selection: $visionSupportOverride) {
+                        Text("自动检测").tag(nil as Bool?)
+                        Text("强制开启").tag(true as Bool?)
+                        Text("强制关闭").tag(false as Bool?)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.large)
+                    .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 }
             }
             .padding(.top, SettingsListLayout.spaceM)
@@ -1943,7 +1955,8 @@ struct AIConnectionSetupView: View {
                     validationModel: healthCheckModelForSubmit,
                     apiKey: apiKey,
                     anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
-                    openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft()
+                    openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft(),
+                    explicitVisionSupport: visionSupportOverride
                 )
                 _ = try await viewModel.setupLLMConnection(input)
                 await MainActor.run {

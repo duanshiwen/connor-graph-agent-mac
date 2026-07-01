@@ -118,10 +118,13 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var selectedModel: String
     public var hasAPIKey: Bool
     public var extraHTTPHeaders: [String: String]
+    /// Explicit override for vision support. When nil, capability is inferred from model name heuristics.
+    public var explicitVisionSupport: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
         case extraHTTPHeaders
+        case explicitVisionSupport
     }
 
     public init(
@@ -133,7 +136,8 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         model: String = "",
         selectedModel: String = "",
         hasAPIKey: Bool = false,
-        extraHTTPHeaders: [String: String] = [:]
+        extraHTTPHeaders: [String: String] = [:],
+        explicitVisionSupport: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -145,6 +149,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         self.selectedModel = normalizedSelectedModel.isEmpty ? Self.firstModel(in: model) : normalizedSelectedModel
         self.hasAPIKey = hasAPIKey
         self.extraHTTPHeaders = extraHTTPHeaders
+        self.explicitVisionSupport = explicitVisionSupport
     }
 
     public init(from decoder: Decoder) throws {
@@ -159,7 +164,8 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             model: try container.decodeIfPresent(String.self, forKey: .model) ?? "",
             selectedModel: try container.decodeIfPresent(String.self, forKey: .selectedModel) ?? "",
             hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
-            extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:]
+            extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:],
+            explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport)
         )
     }
 
@@ -557,7 +563,8 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
             reasoningEffort: thinkingLevel.openAIReasoningEffort,
-            includeEncryptedReasoning: thinkingLevel.openAIReasoningEffort != nil
+            includeEncryptedReasoning: thinkingLevel.openAIReasoningEffort != nil,
+            explicitVisionSupport: connection.explicitVisionSupport
         )
     }
 
@@ -584,7 +591,8 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             model: modelOverride ?? connection.effectiveModel,
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
-            reasoningEffort: nil
+            reasoningEffort: nil,
+            explicitVisionSupport: connection.explicitVisionSupport
         )
     }
 
@@ -612,7 +620,8 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             model: modelOverride ?? connection.effectiveModel,
             authHeaderKind: authHeaderKind,
             extraHeaders: extraHeaders,
-            featureOptions: AnthropicCompatibleFeatureOptions(thinking: thinkingLevel.anthropicThinking)
+            featureOptions: AnthropicCompatibleFeatureOptions(thinking: thinkingLevel.anthropicThinking),
+            explicitVisionSupport: connection.explicitVisionSupport
         )
     }
 }
