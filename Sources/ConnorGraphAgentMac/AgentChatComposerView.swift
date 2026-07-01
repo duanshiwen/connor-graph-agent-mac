@@ -102,7 +102,7 @@ struct AgentChatComposerView: View {
                     .frame(maxHeight: .infinity, alignment: .topLeading)
                     .background(Color.clear)
                 }
-                .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
+                .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: composerState.displayMode == .note ? .infinity : AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
                     attachmentButton
