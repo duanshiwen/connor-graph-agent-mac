@@ -635,7 +635,10 @@ private struct AgentChatConversationView: View {
 
             Group {
                 if noteFullscreen {
-                    Color.clear.frame(height: 0).hidden()
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: 0)
+                        .clipped()
+                        .allowsHitTesting(false)
                 } else if chatItems.isEmpty {
                     AgentChatEmptyStateView()
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
@@ -708,6 +711,7 @@ private struct AgentChatConversationView: View {
             .padding(.horizontal, 0)
             .padding(.top, noteFullscreen ? 0 : AgentChatLayout.spaceM)
             .padding(.bottom, noteFullscreen ? 0 : AgentChatLayout.spaceS)
+            .layoutPriority(noteFullscreen ? 1 : 0)
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
