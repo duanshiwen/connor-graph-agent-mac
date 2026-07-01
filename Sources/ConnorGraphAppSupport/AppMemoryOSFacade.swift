@@ -571,7 +571,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     _ = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     // LLM has written L2/L3/L4 directly via tool calls — clean up L1 events.
                     try deleteL1CaptureEvents(ids: draft.captureEventIDs)
-                    try recordQueueSuccess(leased, now: now)
+                    _ = try recordQueueSuccess(leased, now: now)
                     try saveBackgroundJobAudit(eventType: "memory_os.background_job.completed", subjectID: leased.id, payload: ["event_count": String(draft.captureEventIDs.count)], now: now)
                     summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: true))
                 default:
