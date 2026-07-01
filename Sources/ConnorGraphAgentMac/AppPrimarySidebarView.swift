@@ -29,6 +29,15 @@ struct CraftPrimarySidebarView: View {
             .padding(.horizontal, 10)
             .padding(.top, 10)
 
+            Button {
+                viewModel.newNoteSession()
+                select(.agentChat)
+            } label: {
+                SidebarActionButtonLabel(title: "新建笔记", systemImage: "note.text.badge.plus", minHeight: 32)
+            }
+            .buttonStyle(SidebarActionButtonStyle())
+            .padding(.horizontal, 10)
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
