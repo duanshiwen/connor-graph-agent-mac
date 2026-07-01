@@ -30,7 +30,7 @@ public struct AppChatSessionRepository: Sendable {
         try store.recentSessions(limit: limit, includeArchived: true)
     }
 
-    public func loadSessions(filter: AgentSessionListFilter, limit: Int = 100) throws -> [AgentSession] {
+    public func loadSessions(filter: AgentSessionListFilter, limit: Int = Int.max) throws -> [AgentSession] {
         switch filter {
         case .status(let status):
             try store.sessions(status: status, archived: nil, limit: limit)
