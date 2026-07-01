@@ -78,6 +78,65 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(loaded.updatedAt == originalUpdatedAt)
 }
 
+@Test func graphKernelStorePersistsNoteSessionKind() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    let session = AgentSession(
+        id: "note-session-1",
+        title: "未命名的笔记",
+        messages: [],
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 2_000),
+        governance: governance
+    )
+
+    try store.upsertSession(session)
+    let loaded = try #require(try store.session(id: "note-session-1"))
+
+    #expect(loaded.governance.kind == .note)
+    #expect(loaded.title == "未命名的笔记")
+}
+
+@Test func graphKernelStoreDefaultsChatSessionKind() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    let session = AgentSession(
+        id: "chat-session-1",
+        title: "New Chat",
+        messages: [],
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 2_000)
+    )
+
+    try store.upsertSession(session)
+    let loaded = try #require(try store.session(id: "chat-session-1"))
+
+    #expect(loaded.governance.kind == .chat)
+}
+
+@Test func graphKernelStorePersistsNoteSessionInRecentSessions() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    let noteSession = AgentSession(
+        id: "note-session-2",
+        title: "Another Note",
+        messages: [],
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 2_000),
+        governance: governance
+    )
+
+    try store.upsertSession(noteSession)
+    let allSessions = try store.recentSessions()
+    let loaded = try #require(allSessions.first { $0.id == "note-session-2" })
+
+    #expect(loaded.governance.kind == .note)
+}
+
 @Test func graphKernelStorePersistsAgentSessionMessagesInOrder() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
