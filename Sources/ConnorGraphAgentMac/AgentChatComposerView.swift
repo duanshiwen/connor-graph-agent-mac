@@ -284,7 +284,10 @@ struct AgentChatComposerView: View {
     }
 
     private var composerPlaceholder: String {
-        viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行"
+        if composerState.displayMode == .note {
+            return "写下你的笔记..."
+        }
+        return viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行"
     }
 
     @ViewBuilder

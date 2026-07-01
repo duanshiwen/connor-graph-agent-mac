@@ -4971,6 +4971,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     };
 
+    func importNoteSession(fileContents: String) {
+        newNoteSession()
+        guard let sessionID = selectedChatSessionID else { return }
+        chatInputDraftsBySessionID[sessionID] = fileContents
+        chatInput = fileContents
+    };
+
     func renameChatSession(_ sessionID: String, title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let chatSessionRepository else { return }
