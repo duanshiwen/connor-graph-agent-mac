@@ -609,6 +609,12 @@ private struct AgentChatConversationView: View {
         }
     }
 
+    private var isNoteModeBeforeFirstMessage: Bool {
+        guard let sessionID = viewModel.selectedChatSessionID else { return false }
+        let session = viewModel.chatSessions.first { $0.id == sessionID }
+        return session?.governance.kind == .note && (session?.messages.isEmpty ?? true)
+    }
+
     var body: some View {
         let timelineSnapshot = timelineItems
         let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot, insertsDateSeparators: true)
@@ -617,41 +623,46 @@ private struct AgentChatConversationView: View {
             sessionID: viewModel.selectedChatSessionID,
             revision: viewModel.selectedChatTranscriptRevision
         )
+        let noteFullscreen = isNoteModeBeforeFirstMessage
 
         VStack(spacing: 0) {
-            AgentChatConversationHeader(viewModel: viewModel)
-                .padding(.horizontal, AgentChatLayout.spaceL)
-                .padding(.top, AgentChatLayout.spaceS)
-                .padding(.bottom, AgentChatLayout.spaceL)
+            if !noteFullscreen {
+                AgentChatConversationHeader(viewModel: viewModel)
+                    .padding(.horizontal, AgentChatLayout.spaceL)
+                    .padding(.top, AgentChatLayout.spaceS)
+                    .padding(.bottom, AgentChatLayout.spaceL)
+            }
 
-            Group {
-                if chatItems.isEmpty {
-                    AgentChatEmptyStateView()
-                        .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
-                } else {
-                    CommercialChatViewport(
-                        dataSetID: chatDataSetID,
-                        items: chatItems,
-                        controller: chatViewportController,
-                        configuration: chatViewportConfiguration,
-                        hasOlderItems: hasOlderMessages,
-                        isLoadingOlderItems: isLoadingOlderMessages,
-                        onTopReached: {
-                            loadOlderMessagesIfNeeded(firstVisibleItemID: chatItems.first?.id, dataSetID: chatDataSetID)
-                        }
-                    ) { chatItem in
-                        if let item = chatItem.timelineItem {
-                            chatTimelineRow(item, latestProcessID: latestProcessID)
-                        } else if let unreadMarker = chatItem.unreadMarker {
-                            AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
-                        } else if let dateSeparator = chatItem.dateSeparator {
-                            AgentChatDateSeparatorRow(title: dateSeparator.title)
+            if !noteFullscreen {
+                Group {
+                    if chatItems.isEmpty {
+                        AgentChatEmptyStateView()
+                            .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
+                    } else {
+                        CommercialChatViewport(
+                            dataSetID: chatDataSetID,
+                            items: chatItems,
+                            controller: chatViewportController,
+                            configuration: chatViewportConfiguration,
+                            hasOlderItems: hasOlderMessages,
+                            isLoadingOlderItems: isLoadingOlderMessages,
+                            onTopReached: {
+                                loadOlderMessagesIfNeeded(firstVisibleItemID: chatItems.first?.id, dataSetID: chatDataSetID)
+                            }
+                        ) { chatItem in
+                            if let item = chatItem.timelineItem {
+                                chatTimelineRow(item, latestProcessID: latestProcessID)
+                            } else if let unreadMarker = chatItem.unreadMarker {
+                                AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
+                            } else if let dateSeparator = chatItem.dateSeparator {
+                                AgentChatDateSeparatorRow(title: dateSeparator.title)
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, AgentChatLayout.chatViewportHorizontalInset)
+                .padding(.vertical, AgentChatLayout.chatViewportVerticalInset)
             }
-            .padding(.horizontal, AgentChatLayout.chatViewportHorizontalInset)
-            .padding(.vertical, AgentChatLayout.chatViewportVerticalInset)
             .onAppear {
                 resetVisibleMessageWindow()
                 lastObservedSessionID = viewModel.selectedChatSessionID
@@ -695,8 +706,8 @@ private struct AgentChatConversationView: View {
                 isSessionInfoPresented: $isSessionInfoPresented
             )
             .padding(.horizontal, 0)
-            .padding(.top, AgentChatLayout.spaceM)
-            .padding(.bottom, AgentChatLayout.spaceS)
+            .padding(.top, noteFullscreen ? 0 : AgentChatLayout.spaceM)
+            .padding(.bottom, noteFullscreen ? 0 : AgentChatLayout.spaceS)
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
