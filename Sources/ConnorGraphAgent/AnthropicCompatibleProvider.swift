@@ -19,6 +19,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
     public var maxTokens: Int
     public var requestTimeout: TimeInterval
     public var featureOptions: AnthropicCompatibleFeatureOptions
+    public var explicitVisionSupport: Bool?
 
     public init(
         baseURL: URL,
@@ -29,7 +30,8 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         extraHeaders: [String: String] = [:],
         maxTokens: Int = 4096,
         requestTimeout: TimeInterval = 300,
-        featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions()
+        featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions(),
+        explicitVisionSupport: Bool? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -40,6 +42,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         self.maxTokens = maxTokens
         self.requestTimeout = requestTimeout
         self.featureOptions = featureOptions
+        self.explicitVisionSupport = explicitVisionSupport
     }
 
     public init(
@@ -111,7 +114,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
 
     public var modelID: String { config.requestModel }
     public var capabilityProfile: AgentModelCapabilityProfile {
-        var profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: config.requestModel)
+        var profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: config.requestModel, explicitVisionSupport: config.explicitVisionSupport)
         profile.supportsStreaming = config.featureOptions.streamingEnabled
         return profile
     }
@@ -138,14 +141,29 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         return LLMResponse(text: text, citations: context.items.map(\.sourceID))
     }
 
+    private static var visionDegradationWarning: String { "⚠️ 当前模型不支持图片输入，已自动发送文字内容。图片内容已忽略。" }
+
     public func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
         var client = httpClient
-        let httpRequest = try makeMessagesRequest(request)
-        let httpResponse = try await client.send(httpRequest)
-        if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
-            throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
+        do {
+            let httpRequest = try makeMessagesRequest(request)
+            let httpResponse = try await client.send(httpRequest)
+            if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
+                throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
+            }
+            return try parseMessagesResponse(httpResponse.body)
+        } catch AnthropicCompatibleProviderError.unsupportedVisionInput {
+            guard request.containsImageInput else { throw AnthropicCompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
+            let stripped = request.stripImageContent()
+            let httpRequest = try makeMessagesRequest(stripped)
+            let httpResponse = try await client.send(httpRequest)
+            if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
+                throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
+            }
+            var result = try parseMessagesResponse(httpResponse.body)
+            result.warnings.append(Self.visionDegradationWarning)
+            return result
         }
-        return try parseMessagesResponse(httpResponse.body)
     }
 
     public func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
@@ -157,23 +175,47 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                         continuation.finish()
                         return
                     }
-                    let httpRequest = try makeMessagesRequest(request, stream: true)
-                    let frames = try await sseClient.stream(httpRequest)
-                    let parser = AnthropicSSEParser()
-                    var accumulator = AnthropicStreamAccumulator()
-                    for try await frame in frames {
-                        for event in parser.parse(frame) {
-                            if case .error(let message) = event {
-                                continuation.finish(throwing: AnthropicCompatibleProviderError.streamError(message))
-                                return
-                            }
-                            if let mapped = accumulator.append(event) {
-                                continuation.yield(mapped)
+                    do {
+                        let httpRequest = try makeMessagesRequest(request, stream: true)
+                        let frames = try await sseClient.stream(httpRequest)
+                        let parser = AnthropicSSEParser()
+                        var accumulator = AnthropicStreamAccumulator()
+                        for try await frame in frames {
+                            for event in parser.parse(frame) {
+                                if case .error(let message) = event {
+                                    continuation.finish(throwing: AnthropicCompatibleProviderError.streamError(message))
+                                    return
+                                }
+                                if let mapped = accumulator.append(event) {
+                                    continuation.yield(mapped)
+                                }
                             }
                         }
+                        continuation.yield(.completed(accumulator.response()))
+                        continuation.finish()
+                    } catch AnthropicCompatibleProviderError.unsupportedVisionInput {
+                        guard request.containsImageInput else { throw AnthropicCompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
+                        let stripped = request.stripImageContent()
+                        let httpRequest = try makeMessagesRequest(stripped, stream: true)
+                        let frames = try await sseClient.stream(httpRequest)
+                        let parser = AnthropicSSEParser()
+                        var accumulator = AnthropicStreamAccumulator()
+                        for try await frame in frames {
+                            for event in parser.parse(frame) {
+                                if case .error(let message) = event {
+                                    continuation.finish(throwing: AnthropicCompatibleProviderError.streamError(message))
+                                    return
+                                }
+                                if let mapped = accumulator.append(event) {
+                                    continuation.yield(mapped)
+                                }
+                            }
+                        }
+                        var finalResponse = accumulator.response()
+                        finalResponse.warnings.append(Self.visionDegradationWarning)
+                        continuation.yield(.completed(finalResponse))
+                        continuation.finish()
                     }
-                    continuation.yield(.completed(accumulator.response()))
-                    continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }

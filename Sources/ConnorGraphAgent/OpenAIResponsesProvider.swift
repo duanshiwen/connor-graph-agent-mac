@@ -10,6 +10,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
     public var reasoningEffort: String?
     public var includeEncryptedReasoning: Bool
     public var requestTimeout: TimeInterval
+    public var explicitVisionSupport: Bool?
 
     public init(
         baseURL: URL,
@@ -19,7 +20,8 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil,
         includeEncryptedReasoning: Bool = false,
-        requestTimeout: TimeInterval = 300
+        requestTimeout: TimeInterval = 300,
+        explicitVisionSupport: Bool? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -29,6 +31,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
         self.reasoningEffort = reasoningEffort
         self.includeEncryptedReasoning = includeEncryptedReasoning
         self.requestTimeout = requestTimeout
+        self.explicitVisionSupport = explicitVisionSupport
     }
 
     public var requestModel: String {
@@ -46,7 +49,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
 
     public var modelID: String { config.requestModel }
     public var capabilityProfile: AgentModelCapabilityProfile {
-        AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: config.requestModel)
+        AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: config.requestModel, explicitVisionSupport: config.explicitVisionSupport)
     }
     public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
 
@@ -75,14 +78,29 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         )
     }
 
+    private static var visionDegradationWarning: String { "⚠️ 当前模型不支持图片输入，已自动发送文字内容。图片内容已忽略。" }
+
     public func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
         var client = httpClient
-        let httpRequest = try makeRequest(request, stream: false)
-        let response = try await client.send(httpRequest)
-        if response.statusCode < 200 || response.statusCode >= 300 {
-            throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: nil)
+        do {
+            let httpRequest = try makeRequest(request, stream: false)
+            let response = try await client.send(httpRequest)
+            if response.statusCode < 200 || response.statusCode >= 300 {
+                throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: nil)
+            }
+            return try OpenAIResponsesParser.parseResponse(response.body)
+        } catch OpenAICompatibleProviderError.unsupportedVisionInput {
+            guard request.containsImageInput else { throw OpenAICompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
+            let stripped = request.stripImageContent()
+            let httpRequest = try makeRequest(stripped, stream: false)
+            let response = try await client.send(httpRequest)
+            if response.statusCode < 200 || response.statusCode >= 300 {
+                throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: nil)
+            }
+            var result = try OpenAIResponsesParser.parseResponse(response.body)
+            result.warnings.append(Self.visionDegradationWarning)
+            return result
         }
-        return try OpenAIResponsesParser.parseResponse(response.body)
     }
 
     public func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
@@ -94,21 +112,42 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
                         continuation.finish()
                         return
                     }
-                    let httpRequest = try makeRequest(request, stream: true)
-                    let frames = try await sseClient.stream(httpRequest)
-                    var accumulator = OpenAIResponsesStreamAccumulator()
-                    for try await frame in frames {
-                        for payload in OpenAIResponsesSSEParser.payloads(from: frame) {
-                            guard payload != "[DONE]" else { continue }
-                            for event in try accumulator.append(payload: payload) {
-                                continuation.yield(event)
+                    do {
+                        let httpRequest = try makeRequest(request, stream: true)
+                        let frames = try await sseClient.stream(httpRequest)
+                        var accumulator = OpenAIResponsesStreamAccumulator()
+                        for try await frame in frames {
+                            for payload in OpenAIResponsesSSEParser.payloads(from: frame) {
+                                guard payload != "[DONE]" else { continue }
+                                for event in try accumulator.append(payload: payload) {
+                                    continuation.yield(event)
+                                }
                             }
                         }
+                        if let response = accumulator.completedResponse {
+                            continuation.yield(.completed(response))
+                        }
+                        continuation.finish()
+                    } catch OpenAICompatibleProviderError.unsupportedVisionInput {
+                        guard request.containsImageInput else { throw OpenAICompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
+                        let stripped = request.stripImageContent()
+                        let httpRequest = try makeRequest(stripped, stream: true)
+                        let frames = try await sseClient.stream(httpRequest)
+                        var accumulator = OpenAIResponsesStreamAccumulator()
+                        for try await frame in frames {
+                            for payload in OpenAIResponsesSSEParser.payloads(from: frame) {
+                                guard payload != "[DONE]" else { continue }
+                                for event in try accumulator.append(payload: payload) {
+                                    continuation.yield(event)
+                                }
+                            }
+                        }
+                        if var response = accumulator.completedResponse {
+                            response.warnings.append(Self.visionDegradationWarning)
+                            continuation.yield(.completed(response))
+                        }
+                        continuation.finish()
                     }
-                    if let response = accumulator.completedResponse {
-                        continuation.yield(.completed(response))
-                    }
-                    continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
