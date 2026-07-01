@@ -199,7 +199,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.connections.first else {
-                return AnyAgentModelProvider(modelID: "missing-connection") { _ in
+                return AnyAgentModelProvider(modelID: "未找到连接，请先添加 AI 连接") { _ in
                     throw OpenAICompatibleProviderError.missingAPIKey
                 }
             }
