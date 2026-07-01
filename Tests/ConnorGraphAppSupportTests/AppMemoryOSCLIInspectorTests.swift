@@ -351,7 +351,7 @@ struct AppMemoryOSCLIInspectorTests {
                 assistantText: "Searching before projection.",
                 toolCalls: [MemoryOSBackgroundToolCall(id: "tool-1", name: "memory_os_search", argumentsJSON: #"{"query":"Connor","layers":["L2","L3","L4"],"limit":5}"#)]
             ),
-            MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: try memoryOSCLIDebugEncodedL1Artifact(), metadata: ["final": "true"])
+            MemoryOSBackgroundLoopModelResponse(assistantText: try memoryOSCLIDebugEncodedL1Artifact(), metadata: ["final": "true"])
         ])
 
         let result = try inspector.debugRunNextBackgroundAI(
@@ -575,7 +575,7 @@ private final class MemoryOSCLIDebugScriptedLoopModel: MemoryOSBackgroundToolLoo
     }
 
     func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
-        guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: "{}") }
+        guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(assistantText: "{}") }
         return script.removeFirst()
     }
 }
