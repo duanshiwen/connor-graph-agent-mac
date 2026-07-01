@@ -4102,7 +4102,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return existing
         }
         guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
-        guard let connection = settings.defaultConnection else { return nil }
+        guard let connection = settings.defaultConnection ?? settings.connections.first else { return nil }
         let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return nil }
         var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
