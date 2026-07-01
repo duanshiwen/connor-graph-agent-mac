@@ -6405,6 +6405,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 errorMessage = nil
             } else {
                 let errorDescription = String(describing: error)
+                print("[NOTE-ERROR] submitChat failed: \(errorDescription)")
                 errorMessage = errorDescription
                 noteSessionUpdate(
                     sessionID: submittingSessionID,
