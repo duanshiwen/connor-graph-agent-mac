@@ -285,7 +285,16 @@ struct AgentChatComposerView: View {
                 onImportFiles: importComposerFiles,
                 onSlashCommand: handleSlashCommand,
                 onSkillPickerKeyCommand: handleSkillPickerKeyCommand,
-                onAttachmentImportError: handleAttachmentImportError
+                onAttachmentImportError: handleAttachmentImportError,
+                onTextFileDropped: { droppedText in
+                    if localChatInput.isEmpty {
+                        localChatInput = droppedText
+                    } else {
+                        localChatInput += "\n\n\(droppedText)"
+                    }
+                    viewModel.updateSelectedChatInputDraft(localChatInput)
+                },
+                isNoteMode: composerState.displayMode == .note
             )
 
             slashSkillPickerAnchor
