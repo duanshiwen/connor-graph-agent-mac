@@ -20,9 +20,13 @@ struct AppShellView: View {
     @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
-        HSplitView {
-            if isPrimarySidebarVisible {
-                CraftPrimarySidebarView(viewModel: viewModel, selection: selectionBinding)
+        Group {
+            if viewModel.showWelcomePlaceholder {
+                WelcomeLLMView(viewModel: viewModel)
+            } else {
+                HSplitView {
+                    if isPrimarySidebarVisible {
+                        CraftPrimarySidebarView(viewModel: viewModel, selection: selectionBinding)
                     .frame(
                         minWidth: AppShellLayout.primarySidebarMinWidth,
                         idealWidth: AppShellLayout.primarySidebarDefaultWidth,
@@ -48,6 +52,8 @@ struct AppShellView: View {
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
+        }
+        }
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
