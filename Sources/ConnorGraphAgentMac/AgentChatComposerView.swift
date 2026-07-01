@@ -75,14 +75,10 @@ struct AgentChatComposerView: View {
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if composerState.displayMode == .note {
-                            AgentComposerFormatBar(
-                                text: localChatInputBinding,
-                                selectionTracker: composerSelectionTracker,
-                                onInsertImage: { isImageImporterPresented = true }
-                            )
-                        }
+                        noteFormatBar
+                    }
 
-                        if !composerState.pendingAttachments.isEmpty {
+                    if !composerState.pendingAttachments.isEmpty {
                         AgentAttachmentShelfView(
                             attachments: composerState.pendingAttachments,
                             onPreview: { attachment in sendComposerAction(.previewAttachment(attachment)) },
@@ -323,6 +319,14 @@ struct AgentChatComposerView: View {
 
     private func handleAttachmentImportError(_ message: String) {
         sendComposerAction(.showAttachmentImportError(message))
+    }
+
+    private var noteFormatBar: some View {
+        AgentComposerFormatBar(
+            text: localChatInputBinding,
+            selectionTracker: composerSelectionTracker,
+            onInsertImage: { isImageImporterPresented = true }
+        )
     }
 
     private func handleImageImport(_ urls: [URL]) {

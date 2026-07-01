@@ -86,7 +86,7 @@ final class ComposerInputCommandRouter {
             // Note mode: text files → extract content; images → import; others → ignore
             let textFiles = urls.filter { isPlainTextFile($0) }
             let imageFiles = urls.filter { isImageFile($0) }
-            let otherFiles = urls.filter { !isPlainTextFile($0) && !isImageFile($0) }
+            _ = urls.filter { !isPlainTextFile($0) && !isImageFile($0) }
 
             if !textFiles.isEmpty {
                 let contents: [String] = textFiles.compactMap { url in
