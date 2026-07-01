@@ -150,6 +150,17 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
         self.deletedAt = deletedAt
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.status = try container.decodeIfPresent(AgentSessionStatus.self, forKey: .status) ?? .todo
+        self.kind = try container.decodeIfPresent(AgentSessionKind.self, forKey: .kind) ?? .chat
+        self.labels = try container.decodeIfPresent([AgentSessionLabel].self, forKey: .labels) ?? []
+        self.isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        self.isFlagged = try container.decodeIfPresent(Bool.self, forKey: .isFlagged) ?? false
+        self.archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
+        self.deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+    }
+
     public var isDeleted: Bool { deletedAt != nil }
 
     public static let `default` = AgentSessionGovernanceMetadata()
