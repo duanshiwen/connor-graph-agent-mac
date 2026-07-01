@@ -15,7 +15,7 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
                 assistantText: "I need to search existing memory first.",
                 toolCalls: [MemoryOSBackgroundToolCall(id: "tool-1", name: "memory_os_search", argumentsJSON: #"{"query":"stateless batch","layers":["L2","L3","L4"],"limit":5}"#)]
             ),
-            MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: #"{"warnings":[],"metadata":{"ok":"true"}}"#, metadata: ["final": "true"])
+            MemoryOSBackgroundLoopModelResponse(assistantText: #"{"warnings":[],"metadata":{"ok":"true"}}"#, metadata: ["final": "true"])
         ])
         let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
             model: model,
@@ -114,7 +114,7 @@ private final class ScriptedLoopModel: MemoryOSBackgroundToolLoopModel, @uncheck
     }
 
     func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
-        guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: "{}") }
+        guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(assistantText: "{}") }
         return script.removeFirst()
     }
 }
@@ -125,7 +125,7 @@ private final class CapturingLoopModel: MemoryOSBackgroundToolLoopModel, @unchec
 
     func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
         capturedInitialMessageContents.append(request.messages.map(\.content).joined(separator: "\n"))
-        return MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: "{}")
+        return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
     }
 }
 

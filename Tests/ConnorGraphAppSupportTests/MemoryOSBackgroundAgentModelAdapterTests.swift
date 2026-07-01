@@ -68,7 +68,6 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
         #expect(agentRequest.tools[0].description.contains("Usage policy"))
         #expect(response.assistantText == "I need to search.")
         #expect(response.toolCalls == [MemoryOSBackgroundToolCall(id: "call-1", name: "memory_os_search", argumentsJSON: "{\"query\":\"Connor\",\"limit\":5}")])
-        #expect(response.finalArtifactJSON == nil)
         #expect(response.metadata["model_id"] == "debug-model")
         #expect(response.metadata["model_supports_tool_calling"] == "true")
         #expect(response.metadata["provider_id"] == "test-provider")
@@ -88,7 +87,7 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
             availableTools: []
         ))
 
-        #expect(response.finalArtifactJSON == "{\"artifactType\":\"memory.l1.unified_projection\"}")
+        #expect(response.assistantText == "{\"artifactType\":\"memory.l1.unified_projection\"}")
     }
 }
 
