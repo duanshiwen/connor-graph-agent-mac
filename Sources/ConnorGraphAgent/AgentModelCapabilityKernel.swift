@@ -182,11 +182,13 @@ public enum AgentModelCapabilityKernel {
     }
 
     private static let nonVisionMarkers = [
-        "embedding", "embed", "rerank", "tts", "asr", "whisper", "image-edit", "image-editing", "image-generation", "text-to-image", "coder"
+        "embedding", "embed", "rerank", "tts", "asr", "whisper", "image-edit", "image-editing", "image-generation", "text-to-image", "coder",
+        "mimo-v2.5-pro" // Xiaomi MiMo V2.5 Pro / UltraSpeed: pure-text agent models, no vision
     ]
 
     private static let visionMarkers = [
-        "vision", "-vl", "_vl", "vl-", "vl_", "qwen-vl", "qwen3-vl", "omni", "gpt-4o", "gpt-4.1", "gpt-5", "claude", "gemini", "glm-4.5v", "glm-5v", "glm-4v", "minimax-vl", "pixtral"
+        "vision", "-vl", "_vl", "vl-", "vl_", "qwen-vl", "qwen3-vl", "omni", "gpt-4o", "gpt-4.1", "gpt-5", "claude", "gemini", "glm-4.5v", "glm-5v", "glm-4v", "minimax-vl", "pixtral",
+        "mimo-v2.5" // Xiaomi MiMo V2.5: native omnimodal model with image/video/audio support
     ]
 }
 
