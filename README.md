@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-07-01 11:35 GMT+8  
+文档更新时间：2026-07-01 22:00 GMT+8  
 定位：本 README 只记录当前架构、边界、运行布局和开发约束，不作为历史 changelog。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -188,6 +188,8 @@ Credentials and API keys must not be stored in JSON settings files. Use Keychain
 ## 5. Current Capability Areas
 
 ### Session OS
+
+- Note Sessions (kind = .note): notes are regular chat sessions with a `kind` flag distinguishing them from normal conversations. Before the first message, the composer enters full-screen mode with a Markdown formatting toolbar — attachment (paperclip) button is disabled, only image insertion is allowed. Text files can be drag-dropped to extract content directly into the composer. On first message, a system note instruction is injected prompting the LLM to summarize, identify domain, map relations, and suggest expansions. After the first response, the session reverts to normal chat mode. Note sessions display a "📝 笔记" badge in the session list; the kind tag is system-protected (not user-editable).
 
 - Session list, active state, soft deletion, run/event/audit persistence
 - Session-local workspace roots and primary root
