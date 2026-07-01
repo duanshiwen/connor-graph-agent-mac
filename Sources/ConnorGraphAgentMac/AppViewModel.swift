@@ -6245,13 +6245,23 @@ final class AppViewModel: NSObject, ObservableObject {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachmentsForSubmission = explicitAttachments ?? pendingAttachmentRefs
-        guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
+        print("[NOTE-DIAG] submitChat entered, prompt.isEmpty=\(prompt.isEmpty), prompt.length=\(prompt.count)")
+        print("[NOTE-DIAG] nativeSessionManager is nil: \(nativeSessionManager == nil)")
+        print("[NOTE-DIAG] submittingSessionIDs.contains(selected): \(submittingChatSessionIDs.contains(selectedChatSessionID ?? ""))")
+        guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else {
+            print("[NOTE-DIAG] GUARD FAILED: prompt empty and no attachments")
+            return nil
+        }
         guard var manager = nativeSessionManager else {
+            print("[NOTE-DIAG] GUARD FAILED: nativeSessionManager is nil")
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
         let submittingSessionID = manager.session.id
-        guard !submittingChatSessionIDs.contains(submittingSessionID) else { return nil }
+        guard !submittingChatSessionIDs.contains(submittingSessionID) else {
+            print("[NOTE-DIAG] GUARD FAILED: session already submitting, id=\(submittingSessionID)")
+            return nil
+        }
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[submittingSessionID] = liveBackend
         if clearComposer {
