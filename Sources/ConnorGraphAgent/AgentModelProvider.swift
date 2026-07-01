@@ -168,14 +168,16 @@ public struct AgentModelResponse: Sendable, Equatable {
     public var finishReason: AgentModelFinishReason
     public var rawResponseJSON: String?
     public var providerMetadata: AgentModelProviderMetadata?
+    public var warnings: [String]
 
-    public init(text: String?, toolCalls: [AgentToolCall] = [], usage: AgentModelUsage? = nil, finishReason: AgentModelFinishReason = .stop, rawResponseJSON: String? = nil, providerMetadata: AgentModelProviderMetadata? = nil) {
+    public init(text: String?, toolCalls: [AgentToolCall] = [], usage: AgentModelUsage? = nil, finishReason: AgentModelFinishReason = .stop, rawResponseJSON: String? = nil, providerMetadata: AgentModelProviderMetadata? = nil, warnings: [String] = []) {
         self.text = text
         self.toolCalls = toolCalls
         self.usage = usage
         self.finishReason = finishReason
         self.rawResponseJSON = rawResponseJSON
         self.providerMetadata = providerMetadata
+        self.warnings = warnings
     }
 
     public init(text: String?, toolCalls: [AgentToolCall], usage: AgentModelUsage?, finishReason: AgentModelFinishReason, rawResponseJSON: String?) {

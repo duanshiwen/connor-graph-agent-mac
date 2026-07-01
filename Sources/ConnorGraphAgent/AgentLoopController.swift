@@ -218,12 +218,23 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         try Task.checkCancellation()
                         modelRequest.messages = messages
                         modelRequest.tools = toolRegistry.definitions
-                        let modelResponse = try await completeModelRequest(
+                        var modelResponse = try await completeModelRequest(
                             modelRequest,
                             run: run,
                             continuation: continuation
                         )
                         try Task.checkCancellation()
+
+                        // Propagate degradation warnings to the user
+                        if !modelResponse.warnings.isEmpty {
+                            let warningText = modelResponse.warnings.joined(separator: "\n")
+                            if let existing = modelResponse.text, !existing.isEmpty {
+                                modelResponse.text = warningText + "\n\n" + existing
+                            } else {
+                                modelResponse.text = warningText
+                            }
+                        }
+
                         logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
 
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)

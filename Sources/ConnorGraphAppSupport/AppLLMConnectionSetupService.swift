@@ -18,6 +18,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind
     public var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var makeDefault: Bool
+    public var explicitVisionSupport: Bool?
 
     public init(
         id: String? = nil,
@@ -31,7 +32,8 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         oauthTokens: AppLLMOAuthTokens? = nil,
         anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
-        makeDefault: Bool = false
+        makeDefault: Bool = false,
+        explicitVisionSupport: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -45,6 +47,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.anthropicAuthHeaderKind = anthropicAuthHeaderKind
         self.openAIAPIKeyHeaderKind = openAIAPIKeyHeaderKind
         self.makeDefault = makeDefault
+        self.explicitVisionSupport = explicitVisionSupport
     }
 }
 
@@ -153,7 +156,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
-            extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind)
+            extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
+            explicitVisionSupport: input.explicitVisionSupport
         )
         try settingsRepository.saveConnection(connection, apiKey: suppliedAPIKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Responses 连接验证成功：\(health.model)")
@@ -182,7 +186,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
-            extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind)
+            extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
+            explicitVisionSupport: input.explicitVisionSupport
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Compatible 连接验证成功：\(health.model)")
@@ -281,7 +286,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
-            extraHTTPHeaders: [AppLLMSettingsRepository.anthropicAuthHeaderKindMetadataKey: input.anthropicAuthHeaderKind.rawValue]
+            extraHTTPHeaders: [AppLLMSettingsRepository.anthropicAuthHeaderKindMetadataKey: input.anthropicAuthHeaderKind.rawValue],
+            explicitVisionSupport: input.explicitVisionSupport
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "Anthropic Compatible 连接验证成功：\(health.model)")
