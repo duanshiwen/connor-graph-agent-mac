@@ -351,8 +351,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
     @Published var isAddingLLMConnection: Bool = false
-    @Published var llmModelConnections: [AppLLMModelConnection] = []
+    @Published var llmModelConnections: [AppLLMModelConnection] = [] {
+        didSet { updateWelcomeState() }
+    }
     @Published var isLoadingLLMModelConnections: Bool = false
+    @Published var showWelcomePlaceholder: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
@@ -2134,6 +2137,7 @@ final class AppViewModel: NSObject, ObservableObject {
         self.searchResults = []
         loadLLMSettings()
         Task { await reloadLLMModelConnections() }
+        updateWelcomeState()
         loadRuntimeSettings()
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         reloadProductOSRegistry()
@@ -3746,6 +3750,10 @@ final class AppViewModel: NSObject, ObservableObject {
         defer { isLoadingLLMModelConnections = false }
         let catalog = AppLLMModelCatalog(settingsRepository: llmSettingsRepository, httpClient: URLSessionAgentHTTPClient())
         llmModelConnections = await catalog.loadConnections()
+    }
+
+    func updateWelcomeState() {
+        showWelcomePlaceholder = llmModelConnections.isEmpty
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
