@@ -419,6 +419,10 @@ struct AgentChatComposerView: View {
 
     private func submitLocalChatInput() {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("[NOTE-DIAG] submitLocalChatInput called")
+        print("[NOTE-DIAG] prompt.isEmpty=\(prompt.isEmpty), length=\(prompt.count)")
+        print("[NOTE-DIAG] selectedSessionID=\(viewModel.selectedChatSessionID ?? "nil")")
+        print("[NOTE-DIAG] isSubmittingChat=\(viewModel.isSubmittingChat)")
         let displayPrompt = localChatInput
         let submittedText = localChatInput
         localChatInput = ""
