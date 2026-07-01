@@ -806,6 +806,30 @@ final class AppViewModel: NSObject, ObservableObject {
         return result
     }
 
+    /// 检查当前选中的模型是否支持图片输入
+    /// 基于模型 ID 的模式匹配，后续可接入模型 capabilities API
+    func currentModelSupportsImages() -> Bool {
+        let model = llmSelectedModel.lowercased()
+        // OpenAI 模型
+        if model.contains("gpt-4") || model.contains("gpt-4o") || model.contains("o1") || model.contains("o3") {
+            return true
+        }
+        // Anthropic 模型
+        if model.contains("claude-3") || model.contains("claude-4") || model.contains("claude-sonnet") || model.contains("claude-opus") || model.contains("claude-haiku") {
+            return true
+        }
+        // Gemini 模型
+        if model.contains("gemini-1.5") || model.contains("gemini-2") || model.contains("gemini-2.5") {
+            return true
+        }
+        // 已知不支持图片的模型
+        if model.contains("gpt-3.5") || model.contains("gpt-35") {
+            return false
+        }
+        // 默认：保留判断，假设不支持以免意外透传
+        return false
+    }
+
     func showAttachmentToast(title: String, message: String, systemImage: String = "exclamationmark.triangle") {
         let toast = AgentChatToast(title: title, message: message, systemImage: systemImage)
         attachmentToast = toast
