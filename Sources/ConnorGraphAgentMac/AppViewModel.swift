@@ -3753,7 +3753,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        showWelcomePlaceholder = llmModelConnections.isEmpty
+        // 只在连接列表为空时显示欢迎页，不在连接出现时自动关闭（由用户点击"开始使用"手动关闭）
+        if llmModelConnections.isEmpty {
+            showWelcomePlaceholder = true
+        }
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
