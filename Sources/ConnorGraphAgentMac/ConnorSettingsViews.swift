@@ -923,9 +923,9 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             tint: .primary,
             providerMode: .openAICompatible,
             connectionName: "Codex · ChatGPT Plus",
-            baseURLString: AppLLMSettings.default.baseURLString,
-            model: AppLLMSettings.default.model,
-            selectedModel: AppLLMSettings.default.effectiveModel,
+            baseURLString: "https://api.openai.com/v1",
+            model: "gpt-4o-mini",
+            selectedModel: "gpt-4o-mini",
             setupTitle: "连接 ChatGPT",
             setupSubtitle: "使用 ChatGPT Plus 订阅驱动康纳同学。",
             setupInstruction: "点击下方按钮使用 OpenAI 账号登录。登录完成后，康纳同学会自动验证并保存连接。",
@@ -1015,9 +1015,9 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             tint: .secondary,
             providerMode: .openAICompatible,
             connectionName: "其他提供商",
-            baseURLString: AppLLMSettings.default.baseURLString,
-            model: AppLLMSettings.default.model,
-            selectedModel: AppLLMSettings.default.effectiveModel,
+            baseURLString: "https://api.openai.com/v1",
+            model: "gpt-4o-mini",
+            selectedModel: "gpt-4o-mini",
             setupTitle: "连接其他提供商",
             setupSubtitle: "接入 Anthropic、AWS Bedrock、OpenRouter、Google 或其他兼容服务。",
             setupInstruction: "下一步将填写接口地址、模型和 API Key。",
@@ -2178,29 +2178,32 @@ struct AIConnectionSetupView: View {
 struct AIConnectionOnboardingView: View {
     var choose: (AIConnectionOnboardingOption) -> Void
     var cancel: () -> Void
+    var showBackButton: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button(action: cancel) {
-                    Label("返回", systemImage: "chevron.left")
-                        .font(SettingsListTypography.rowTitleSelected)
-                        .labelStyle(.titleAndIcon)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .contentShape(Capsule(style: .continuous))
+            if showBackButton {
+                HStack {
+                    Button(action: cancel) {
+                        Label("返回", systemImage: "chevron.left")
+                            .font(SettingsListTypography.rowTitleSelected)
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .contentShape(Capsule(style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                    )
+                    .help("返回上一页")
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                )
-                .help("返回上一页")
-                Spacer()
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
 
             Spacer(minLength: 42)
 
