@@ -72,6 +72,7 @@
 		9A17D0B100000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */; };
 		9A17D0B100000000000019 /* Sources/ConnorGraphAgentMac/SettingsSectionMessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000019 /* Sources/ConnorGraphAgentMac/SettingsSectionMessageStore.swift */; };
 		9A17D0B10000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift */; };
+		6D47A40000000000000AAA2 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D47A40000000000000AAA1 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift */; };
 		7C0C0DE10000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift */; };
 		7C0C0DE10000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift */; };
 		7C0C0DE10000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift */; };
@@ -161,6 +162,7 @@
 		9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000019 /* Sources/ConnorGraphAgentMac/SettingsSectionMessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SettingsSectionMessageStore.swift; sourceTree = "<group>"; };
 		9A17D0B00000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift; sourceTree = "<group>"; };
+		6D47A40000000000000AAA1 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WelcomeLLMView.swift; sourceTree = "<group>"; };
 		7C0C0DE00000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift; sourceTree = "<group>"; };
 		7C0C0DE00000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift; sourceTree = "<group>"; };
 		7C0C0DE00000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift; sourceTree = "<group>"; };
@@ -333,6 +335,7 @@
 				9A17D0B000000000000017 /* Sources/ConnorGraphAgentMac/SettingsShortcutsViews.swift */,
 				9A17D0B000000000000019 /* Sources/ConnorGraphAgentMac/SettingsSectionMessageStore.swift */,
 				9A17D0B00000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift */,
+				6D47A40000000000000AAA1 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift */,
 				9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */,
 				A00000000000000000000014 /* Products */,
 				A0000000000000000000002D /* AgentChatView.swift */,
@@ -530,6 +533,7 @@
 				9A17D0B100000000000017 /* Sources/ConnorGraphAgentMac/SettingsShortcutsViews.swift in Sources */,
 				9A17D0B100000000000019 /* Sources/ConnorGraphAgentMac/SettingsSectionMessageStore.swift in Sources */,
 				9A17D0B10000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift in Sources */,
+				6D47A40000000000000AAA2 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift in Sources */,
 				9A17D0B100000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

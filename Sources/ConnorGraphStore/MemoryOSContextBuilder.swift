@@ -274,8 +274,8 @@ public struct MemoryOSContextBuilder: Sendable {
     }
 
     private func makeNextActions(from hits: [MemoryOSRetrievalHit], evidence: [MemoryOSEvidenceContextCard]) -> [MemoryOSContextNextAction] {
-        var actions: [MemoryOSContextNextAction] = []
-        if let expandable = hits.first(where: { $0.canExpandDepth }), let entityID = expandable.entityRefs.first ?? Optional(expandable.recordID) {
+        let actions: [MemoryOSContextNextAction] = []
+        if let expandable = hits.first(where: { $0.canExpandDepth }), let _ = expandable.entityRefs.first ?? Optional(expandable.recordID) {
 
         }
         if !evidence.isEmpty {
