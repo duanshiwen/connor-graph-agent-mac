@@ -214,14 +214,29 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         try await completeWithTools(request)
     }
 
+    private static var visionDegradationWarning: String { "⚠️ 当前模型不支持图片输入，已自动发送文字内容。图片内容已忽略。" }
+
     public func completeWithTools(_ modelRequest: AgentModelRequest) async throws -> AgentModelResponse {
         var client = httpClient
-        let request = try makeToolCallingRequest(modelRequest)
-        let response = try await client.send(request)
-        if response.statusCode < 200 || response.statusCode >= 300 {
-            throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
+        do {
+            let request = try makeToolCallingRequest(modelRequest)
+            let response = try await client.send(request)
+            if response.statusCode < 200 || response.statusCode >= 300 {
+                throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
+            }
+            return try parseToolCallingResponse(response.body)
+        } catch OpenAICompatibleProviderError.unsupportedVisionInput {
+            guard modelRequest.containsImageInput else { throw OpenAICompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
+            let stripped = modelRequest.stripImageContent()
+            let request = try makeToolCallingRequest(stripped)
+            let response = try await client.send(request)
+            if response.statusCode < 200 || response.statusCode >= 300 {
+                throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
+            }
+            var result = try parseToolCallingResponse(response.body)
+            result.warnings.append(Self.visionDegradationWarning)
+            return result
         }
-        return try parseToolCallingResponse(response.body)
     }
 
     public func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
@@ -233,20 +248,41 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                         continuation.finish()
                         return
                     }
-                    let httpRequest = try makeToolCallingRequest(request, stream: true)
-                    let frames = try await sseClient.stream(httpRequest)
-                    var accumulator = OpenAIChatCompletionStreamAccumulator()
-                    for try await frame in frames {
-                        for payload in OpenAISSEParser.payloads(from: frame) {
-                            guard payload != "[DONE]" else { continue }
-                            let chunk = try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: Data(payload.utf8))
-                            for event in accumulator.append(chunk: chunk, rawJSON: payload) {
-                                continuation.yield(event)
+                    do {
+                        let httpRequest = try makeToolCallingRequest(request, stream: true)
+                        let frames = try await sseClient.stream(httpRequest)
+                        var accumulator = OpenAIChatCompletionStreamAccumulator()
+                        for try await frame in frames {
+                            for payload in OpenAISSEParser.payloads(from: frame) {
+                                guard payload != "[DONE]" else { continue }
+                                let chunk = try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: Data(payload.utf8))
+                                for event in accumulator.append(chunk: chunk, rawJSON: payload) {
+                                    continuation.yield(event)
+                                }
                             }
                         }
+                        continuation.yield(.completed(accumulator.response()))
+                        continuation.finish()
+                    } catch OpenAICompatibleProviderError.unsupportedVisionInput {
+                        guard request.containsImageInput else { throw OpenAICompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
+                        let stripped = request.stripImageContent()
+                        let httpRequest = try makeToolCallingRequest(stripped, stream: true)
+                        let frames = try await sseClient.stream(httpRequest)
+                        var accumulator = OpenAIChatCompletionStreamAccumulator()
+                        for try await frame in frames {
+                            for payload in OpenAISSEParser.payloads(from: frame) {
+                                guard payload != "[DONE]" else { continue }
+                                let chunk = try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: Data(payload.utf8))
+                                for event in accumulator.append(chunk: chunk, rawJSON: payload) {
+                                    continuation.yield(event)
+                                }
+                            }
+                        }
+                        var finalResponse = accumulator.response()
+                        finalResponse.warnings.append(Self.visionDegradationWarning)
+                        continuation.yield(.completed(finalResponse))
+                        continuation.finish()
                     }
-                    continuation.yield(.completed(accumulator.response()))
-                    continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
