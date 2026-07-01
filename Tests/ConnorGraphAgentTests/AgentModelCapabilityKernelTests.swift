@@ -74,6 +74,32 @@ import ConnorGraphAgent
     }
 }
 
+@Test func mimoV25AdvertisesVision() throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2.5")
+    #expect(profile.supportsVision)
+    #expect(profile.signals.contains(.modelNameHeuristic))
+}
+
+@Test func mimoV25ProDoesNotAdvertiseVision() throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2.5-pro")
+    #expect(profile.supportsVision == false)
+}
+
+@Test func mimoV25ProUltraSpeedDoesNotAdvertiseVision() throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2.5-pro-ultraspeed")
+    #expect(profile.supportsVision == false)
+}
+
+@Test func mimoV25TTSDoesNotAdvertiseVision() throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2.5-tts")
+    #expect(profile.supportsVision == false)
+}
+
+@Test func mimoV2OmniAdvertisesVision() throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2-omni")
+    #expect(profile.supportsVision)
+}
+
 @Test func visionSendDecisionAllowsImageRequestWhenVisionSupported() throws {
     let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "gpt-4o-mini")
     let request = AgentModelRequest(messages: [
