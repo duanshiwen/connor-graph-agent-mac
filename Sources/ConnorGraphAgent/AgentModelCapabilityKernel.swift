@@ -200,4 +200,27 @@ public extension AgentModelRequest {
             total + (message.contentParts?.filter { $0.kind == .imageDataURL }.count ?? 0)
         }
     }
+
+    /// 返回一个新请求，移除所有图片内容，保留纯文字。
+    /// 如果某条消息只有图片没有文字，保留一条占位提示。
+    func stripImageContent() -> AgentModelRequest {
+        var stripped = self
+        stripped.messages = messages.map { message in
+            guard let parts = message.contentParts,
+                  parts.contains(where: { $0.kind == .imageDataURL }) else {
+                return message
+            }
+            let textParts = parts.filter { $0.kind == .text }
+            var newMessage = message
+            if textParts.isEmpty {
+                newMessage.content = "[图片内容已忽略]"
+                newMessage.contentParts = nil
+            } else {
+                newMessage.content = textParts.compactMap(\.text).joined(separator: "\n")
+                newMessage.contentParts = textParts
+            }
+            return newMessage
+        }
+        return stripped
+    }
 }
