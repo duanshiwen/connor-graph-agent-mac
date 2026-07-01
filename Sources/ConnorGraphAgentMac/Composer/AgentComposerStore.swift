@@ -9,7 +9,10 @@ struct AgentComposerStore {
     func state(input: String, canSubmit: Bool, selectedSession: AgentSession?) -> AgentComposerState {
         let isNoteBeforeFirstMessage: Bool = {
             guard let session = selectedSession else { return false }
-            return session.governance.kind == .note && session.messages.isEmpty
+            guard session.governance.kind == .note else { return false }
+            guard session.messages.isEmpty else { return false }
+            guard !viewModel.isSubmittingChat else { return false }
+            return true
         }()
         return AgentComposerState(
             input: input,
