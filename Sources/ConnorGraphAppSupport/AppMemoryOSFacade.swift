@@ -240,11 +240,11 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func memoryOSContext(_ request: MemoryOSContextRequest, generatedAt: Date = Date()) throws -> MemoryOSContextPackage {
-        try MemoryOSContextDeliveryService(store: store).context(request, generatedAt: generatedAt)
+        try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).context(request, generatedAt: generatedAt)
     }
 
     public func memoryOSFlatContext(terms: [String]) throws -> [String] {
-        try MemoryOSContextDeliveryService(store: store).flatContext(terms: terms)
+        try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).flatContext(terms: terms)
     }
 
     public func findMemoryOSL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {

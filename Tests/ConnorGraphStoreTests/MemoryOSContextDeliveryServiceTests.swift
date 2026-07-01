@@ -54,6 +54,37 @@ import ConnorGraphStore
     #expect(package.diagnostics.contains { $0.kind == .expansionSkipped })
 }
 
+@Test func flatContextFallsBackToSQLiteWhenSearchKernelNil() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSContextDeliveryDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 42_000)
+    try store.upsert(entity: MemoryOSEntity(id: "entity-fallback", stableKey: "test:fallback", entityType: "system", name: "Fallback Test Entity", summary: "Tests SQLite fallback", confidence: 0.9))
+
+    // Without searchKernel → should use SQLite FTS5 and still return results
+    let service = MemoryOSContextDeliveryService(store: store, searchKernel: nil)
+    let results = try service.flatContext(terms: ["Fallback Test Entity"])
+    #expect(!results.isEmpty)
+    #expect(results.contains { $0.contains("Fallback Test Entity") })
+}
+
+@Test func flatContextAcceptsSearchKernelParameter() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSContextDeliveryDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 43_000)
+    try store.upsert(entity: MemoryOSEntity(id: "entity-kernel", stableKey: "test:kernel", entityType: "concept", name: "Kernel Integration", summary: "Tests Tantivy search kernel", confidence: 0.95))
+
+    // Verify that searchKernel parameter is accepted (nil = fallback to SQLite)
+    let serviceWithKernel = MemoryOSContextDeliveryService(store: store, searchKernel: nil)
+    let results = try serviceWithKernel.flatContext(terms: ["Kernel Integration"])
+    #expect(!results.isEmpty)
+    #expect(results.contains { $0.contains("Kernel Integration") })
+
+    // Verify default init still works (backward compatibility)
+    let serviceDefault = MemoryOSContextDeliveryService(store: store)
+    let resultsDefault = try serviceDefault.flatContext(terms: ["Kernel Integration"])
+    #expect(!resultsDefault.isEmpty)
+}
+
 private func temporaryMemoryOSContextDeliveryDatabaseURL() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("memory-os-context-delivery-\(UUID().uuidString).sqlite")
 }
