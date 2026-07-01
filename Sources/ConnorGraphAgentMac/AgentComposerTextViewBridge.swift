@@ -29,6 +29,8 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     var onSlashCommand: ((CGRect, NSRange) -> Void)? = nil
     var onSkillPickerKeyCommand: ((SkillPickerKeyCommand) -> Void)? = nil
     var onAttachmentImportError: ((String) -> Void)? = nil
+    var onTextFileDropped: ((String) -> Void)? = nil
+    var isNoteMode: Bool = false
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -73,7 +75,9 @@ struct SafeChatComposerTextView: NSViewRepresentable {
             onImportFiles: onImportFiles,
             onSlashCommand: onSlashCommand,
             onSkillPickerKeyCommand: onSkillPickerKeyCommand,
-            onAttachmentImportError: onAttachmentImportError
+            onAttachmentImportError: onAttachmentImportError,
+            onTextFileDropped: onTextFileDropped,
+            isNoteMode: isNoteMode
         )
     }
 
