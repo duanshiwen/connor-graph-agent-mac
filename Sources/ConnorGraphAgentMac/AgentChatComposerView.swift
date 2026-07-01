@@ -109,21 +109,7 @@ struct AgentChatComposerView: View {
                 .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    let isNoteMode = composerState.displayMode == .note
-                    Button(action: { isFileImporterPresented = true }) {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
-                            .symbolRenderingMode(.hierarchical)
-                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(isNoteMode ? .tertiary : composerControlForeground)
-                    .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
-                    .contentShape(Rectangle())
-                    .disabled(isNoteMode)
-                    .opacity(isNoteMode ? 0.4 : 1.0)
-                    .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
-                    .accessibilityLabel("添加附件")
+                    attachmentButton
 
                     workingDirectoryMenu
 
@@ -914,6 +900,24 @@ struct AgentChatComposerView: View {
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 8)
         }
+    }
+
+    private var attachmentButton: some View {
+        let isNoteMode = composerState.displayMode == .note
+        return Button(action: { isFileImporterPresented = true }) {
+            Image(systemName: "paperclip")
+                .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isNoteMode ? Color.secondary.opacity(0.42) : composerControlForeground)
+        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+        .contentShape(Rectangle())
+        .disabled(isNoteMode)
+        .opacity(isNoteMode ? 0.4 : 1.0)
+        .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
+        .accessibilityLabel("添加附件")
     }
 
     private var composerControlForeground: Color { .secondary }
