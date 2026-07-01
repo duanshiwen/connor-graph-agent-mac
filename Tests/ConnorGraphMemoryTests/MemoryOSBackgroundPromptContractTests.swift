@@ -230,6 +230,98 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Do not infer medical, psychological, or sensitive identity diagnoses"))
     }
 
+    @Test func l1PromptDefinesSignalDetectionGuide() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Signal detection guide for person features"))
+        #expect(prompt.contains("Explicit signals"))
+        #expect(prompt.contains("Implicit signals"))
+        #expect(prompt.contains("Behavioral signals"))
+        #expect(prompt.contains("Repeated choices"))
+        #expect(prompt.contains("Correction patterns"))
+        #expect(prompt.contains("Decision speed"))
+        #expect(prompt.contains("Planning style"))
+    }
+
+    @Test func l1PromptDefinesTemporalStabilityClassification() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Temporal stability classification"))
+        #expect(prompt.contains("stable_trait"))
+        #expect(prompt.contains("evolving_preference"))
+        #expect(prompt.contains("transient_state"))
+        #expect(prompt.contains("recurring_pattern"))
+        #expect(prompt.contains("3+ consistent observations"))
+    }
+
+    @Test func l1PromptDefinesBigFiveTraitSignals() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Big Five trait signals"))
+        #expect(prompt.contains("Openness"))
+        #expect(prompt.contains("Conscientiousness"))
+        #expect(prompt.contains("Extraversion"))
+        #expect(prompt.contains("Agreeableness"))
+        #expect(prompt.contains("Neuroticism"))
+        #expect(prompt.contains("3+ across different contexts"))
+    }
+
+    @Test func l1PromptDefinesCommunicationStyleSignals() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Communication style signals"))
+        #expect(prompt.contains("Verbosity preference"))
+        #expect(prompt.contains("Formality level"))
+        #expect(prompt.contains("Language mixing"))
+        #expect(prompt.contains("Structure preference"))
+        #expect(prompt.contains("Question style"))
+        #expect(prompt.contains("Reading depth"))
+    }
+
+    @Test func l1PromptDefinesDecisionAndInformationProcessingPatterns() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Decision and information processing patterns"))
+        #expect(prompt.contains("Information appetite"))
+        #expect(prompt.contains("Risk orientation"))
+        #expect(prompt.contains("Authority reliance"))
+        #expect(prompt.contains("Option framing"))
+        #expect(prompt.contains("Confirmation need"))
+    }
+
+    @Test func l1PromptDefinesPreferenceEvolutionHandling() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Preference evolution handling"))
+        #expect(prompt.contains("Do NOT delete previous preference records"))
+        #expect(prompt.contains("append evolution statements"))
+        #expect(prompt.contains("previously preferred"))
+    }
+
+    @Test func l1PromptDefinesEvidenceThresholdForPersonFeatures() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Evidence threshold for person feature extraction"))
+        #expect(prompt.contains("High confidence"))
+        #expect(prompt.contains("Medium confidence"))
+        #expect(prompt.contains("Low confidence"))
+        #expect(prompt.contains("Confidence qualifier in statement text"))
+    }
+
     @Test func l1PromptClarifiesPersonProfileFactRouting() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
