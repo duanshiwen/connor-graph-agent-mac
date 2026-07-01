@@ -17,6 +17,7 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
     public var apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var reasoningEffort: String?
     public var requestTimeout: TimeInterval
+    public var explicitVisionSupport: Bool?
 
     public init(
         baseURL: URL,
@@ -24,7 +25,8 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         model: String,
         extraHeaders: [String: String] = [:],
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
-        reasoningEffort: String? = nil
+        reasoningEffort: String? = nil,
+        explicitVisionSupport: Bool? = nil
     ) {
         self.init(
             baseURL: baseURL,
@@ -33,7 +35,8 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
             reasoningEffort: reasoningEffort,
-            requestTimeout: 300
+            requestTimeout: 300,
+            explicitVisionSupport: explicitVisionSupport
         )
     }
 
@@ -44,7 +47,8 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         extraHeaders: [String: String] = [:],
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil,
-        requestTimeout: TimeInterval
+        requestTimeout: TimeInterval,
+        explicitVisionSupport: Bool? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -53,6 +57,7 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         self.apiKeyHeaderKind = apiKeyHeaderKind
         self.reasoningEffort = reasoningEffort
         self.requestTimeout = requestTimeout
+        self.explicitVisionSupport = explicitVisionSupport
     }
 
     public var requestModel: String {
@@ -180,7 +185,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
 
     public var modelID: String { config.requestModel }
     public var capabilityProfile: AgentModelCapabilityProfile {
-        AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: config.requestModel)
+        AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: config.requestModel, explicitVisionSupport: config.explicitVisionSupport)
     }
     public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
 

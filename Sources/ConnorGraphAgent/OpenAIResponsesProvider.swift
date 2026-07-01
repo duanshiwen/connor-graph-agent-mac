@@ -10,6 +10,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
     public var reasoningEffort: String?
     public var includeEncryptedReasoning: Bool
     public var requestTimeout: TimeInterval
+    public var explicitVisionSupport: Bool?
 
     public init(
         baseURL: URL,
@@ -19,7 +20,8 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil,
         includeEncryptedReasoning: Bool = false,
-        requestTimeout: TimeInterval = 300
+        requestTimeout: TimeInterval = 300,
+        explicitVisionSupport: Bool? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -29,6 +31,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
         self.reasoningEffort = reasoningEffort
         self.includeEncryptedReasoning = includeEncryptedReasoning
         self.requestTimeout = requestTimeout
+        self.explicitVisionSupport = explicitVisionSupport
     }
 
     public var requestModel: String {
@@ -46,7 +49,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
 
     public var modelID: String { config.requestModel }
     public var capabilityProfile: AgentModelCapabilityProfile {
-        AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: config.requestModel)
+        AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: config.requestModel, explicitVisionSupport: config.explicitVisionSupport)
     }
     public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
 
