@@ -3,6 +3,11 @@ import ConnorGraphCore
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
+enum ComposerDisplayMode: Equatable {
+    case normal
+    case note
+}
+
 struct AgentComposerState {
     var input: String
     var pendingAttachments: [AgentMessageAttachmentRef]
@@ -10,6 +15,7 @@ struct AgentComposerState {
     var activeSkillDisplayName: String?
     var canSubmit: Bool
     var isSubmitting: Bool
+    var displayMode: ComposerDisplayMode
     var selectedModel: String
     var sessionHasLLMOverride: Bool
     var permissionMode: AgentPermissionMode
@@ -26,6 +32,7 @@ struct AgentComposerState {
         activeSkillDisplayName: String?,
         canSubmit: Bool,
         isSubmitting: Bool,
+        displayMode: ComposerDisplayMode = .normal,
         selectedModel: String,
         sessionHasLLMOverride: Bool,
         permissionMode: AgentPermissionMode,
@@ -41,6 +48,7 @@ struct AgentComposerState {
         self.activeSkillDisplayName = activeSkillDisplayName
         self.canSubmit = canSubmit
         self.isSubmitting = isSubmitting
+        self.displayMode = displayMode
         self.selectedModel = selectedModel
         self.sessionHasLLMOverride = sessionHasLLMOverride
         self.permissionMode = permissionMode

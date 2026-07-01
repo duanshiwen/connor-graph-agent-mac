@@ -10,6 +10,7 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     public var statusText: String
     public var status: AgentSessionStatus
     public var labels: [AgentSessionLabel]
+    public var kind: AgentSessionKind
     public var isArchived: Bool
     public var isFlagged: Bool
     public var messageCount: Int
@@ -21,6 +22,7 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
         self.status = session.governance.status
         self.statusText = session.governance.status.displayName
         self.labels = session.governance.labels
+        self.kind = session.governance.kind
         self.isArchived = session.governance.isArchived
         self.isFlagged = session.governance.isFlagged
         self.messageCount = session.messages.count

@@ -806,6 +806,30 @@ final class AppViewModel: NSObject, ObservableObject {
         return result
     }
 
+    /// 检查当前选中的模型是否支持图片输入
+    /// 基于模型 ID 的模式匹配，后续可接入模型 capabilities API
+    func currentModelSupportsImages() -> Bool {
+        let model = llmSelectedModel.lowercased()
+        // OpenAI 模型
+        if model.contains("gpt-4") || model.contains("gpt-4o") || model.contains("o1") || model.contains("o3") {
+            return true
+        }
+        // Anthropic 模型
+        if model.contains("claude-3") || model.contains("claude-4") || model.contains("claude-sonnet") || model.contains("claude-opus") || model.contains("claude-haiku") {
+            return true
+        }
+        // Gemini 模型
+        if model.contains("gemini-1.5") || model.contains("gemini-2") || model.contains("gemini-2.5") {
+            return true
+        }
+        // 已知不支持图片的模型
+        if model.contains("gpt-3.5") || model.contains("gpt-35") {
+            return false
+        }
+        // 默认：保留判断，假设不支持以免意外透传
+        return false
+    }
+
     func showAttachmentToast(title: String, message: String, systemImage: String = "exclamationmark.triangle") {
         let toast = AgentChatToast(title: title, message: message, systemImage: systemImage)
         attachmentToast = toast
@@ -4912,6 +4936,41 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     };
 
+    func newNoteSession() {
+        guard let chatSessionRepository else { return }
+        _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
+        rememberCurrentWorkspaceMode()
+        do {
+            let session = try chatSessionRepository.createSession()
+            var noteSession = session
+            noteSession.governance.kind = .note
+            noteSession.title = "未命名的笔记"
+            _ = try chatSessionRepository.saveSession(noteSession)
+            selectedChatSessionID = noteSession.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
+            isBrowserVisible = false
+            browserWorkspaceSessionID = nil
+            rememberWorkspaceMode(.conversation, for: noteSession.id)
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: noteSession.id)
+            try loadSessionCapsule(sessionID: noteSession.id)
+            try loadBackgroundTasks(sessionID: noteSession.id)
+            fallbackChatSession = noteSession
+            nativeSessionManager = makeNativeSessionManager(for: noteSession)
+            replaceSelectedChatTranscript([])
+            restoreChatInputDraft(for: noteSession.id)
+            refreshSelectedSubmittingState()
+            agentEventTimeline = []
+            agentEventTimelinesBySessionID[noteSession.id] = []
+            latestChatSummary = nil
+            chatSummaryMessage = nil
+            lastPromptInspection = nil
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    };
+
     func renameChatSession(_ sessionID: String, title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let chatSessionRepository else { return }
@@ -6253,7 +6312,14 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
-            let skillAugmentation = buildSkillChatPromptAugmentation(prompt: prompt, sessionID: submittingSessionID)
+            let noteAugmentedPrompt: String = {
+                guard manager.session.governance.kind == .note,
+                      manager.session.messages.isEmpty,
+                      !prompt.isEmpty
+                else { return prompt }
+                return prompt + NoteSessionPromptBuilder.noteInstructionSuffix
+            }()
+            let skillAugmentation = buildSkillChatPromptAugmentation(prompt: noteAugmentedPrompt, sessionID: submittingSessionID)
             let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
             if resolvedSkillInstructions != nil {
                 clearActiveSkill()
@@ -6445,4 +6511,42 @@ private enum LocationPreferenceError: LocalizedError {
             return "暂时无法读取当前位置。你仍可以手动填写城市和国家/地区。"
         }
     }
+}
+
+/// 笔记会话首条消息的系统指令构建器
+struct NoteSessionPromptBuilder {
+    static let noteInstructionSuffix = """
+
+## 系统笔记指令
+
+用户正在创建一个笔记。请对用户的输入进行以下处理：
+
+1. **总结核心内容**：用一段话概括用户输入的核心思想
+2. **领域识别**：指出这段内容涉及的知识领域
+3. **关系映射**：分析这个想法与同领域内其他概念的关联
+4. **启发式拓展**：指出可进一步探索的方向、可连接的交叉领域、可追问的问题
+
+然后以以下结构回复：
+
+# 📝 笔记已保存
+
+> [用户原文摘要]
+
+**领域标签：**[识别出的领域]
+
+**核心内容：**
+[总结段落]
+
+**关联概念：**
+- 概念 A：关系说明
+- 概念 B：关系说明
+
+**拓展方向：**
+- 方向 1：详细说明
+- 方向 2：详细说明
+
+---
+
+*这条笔记已被系统保存。如果你希望围绕这些议题做进一步的探索、追问、或与已有知识建立连接，可以继续在这个会话中发送消息。*
+"""
 }

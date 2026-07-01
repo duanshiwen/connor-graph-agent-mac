@@ -7,13 +7,21 @@ struct AgentComposerStore {
     unowned var viewModel: AppViewModel
 
     func state(input: String, canSubmit: Bool, selectedSession: AgentSession?) -> AgentComposerState {
-        AgentComposerState(
+        let isNoteBeforeFirstMessage: Bool = {
+            guard let session = selectedSession else { return false }
+            guard session.governance.kind == .note else { return false }
+            guard session.messages.isEmpty else { return false }
+            guard !viewModel.isSubmittingChat else { return false }
+            return true
+        }()
+        return AgentComposerState(
             input: input,
             pendingAttachments: viewModel.pendingAttachmentRefs,
             activeSkillSlug: viewModel.activeSkillSlug,
             activeSkillDisplayName: viewModel.activeSkillDisplayName,
             canSubmit: canSubmit,
             isSubmitting: viewModel.isSubmittingChat,
+            displayMode: isNoteBeforeFirstMessage ? .note : .normal,
             selectedModel: viewModel.llmSelectedModel,
             sessionHasLLMOverride: viewModel.sessionHasLLMOverride,
             permissionMode: viewModel.agentPermissionMode,
