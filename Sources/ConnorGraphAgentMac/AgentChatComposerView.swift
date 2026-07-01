@@ -12,6 +12,7 @@ struct AgentChatComposerView: View {
     @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
+    @State private var isImageImporterPresented: Bool = false
     @State private var isSkillPickerPresented: Bool = false
     @State private var slashSkillPickerAnchorRect: CGRect?
     @State private var slashSkillPickerTriggerRange: NSRange?
@@ -73,7 +74,15 @@ struct AgentChatComposerView: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if !composerState.pendingAttachments.isEmpty {
+                    if composerState.displayMode == .note {
+                            AgentComposerFormatBar(
+                                text: localChatInputBinding,
+                                selectionTracker: composerSelectionTracker,
+                                onInsertImage: { isImageImporterPresented = true }
+                            )
+                        }
+
+                        if !composerState.pendingAttachments.isEmpty {
                         AgentAttachmentShelfView(
                             attachments: composerState.pendingAttachments,
                             onPreview: { attachment in sendComposerAction(.previewAttachment(attachment)) },
@@ -100,6 +109,7 @@ struct AgentChatComposerView: View {
                 .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
+                    let isNoteMode = composerState.displayMode == .note
                     Button(action: { isFileImporterPresented = true }) {
                         Image(systemName: "paperclip")
                             .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
@@ -107,10 +117,12 @@ struct AgentChatComposerView: View {
                             .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(composerControlForeground)
+                    .foregroundStyle(isNoteMode ? .tertiary : composerControlForeground)
                     .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
                     .contentShape(Rectangle())
-                    .help("添加附件")
+                    .disabled(isNoteMode)
+                    .opacity(isNoteMode ? 0.4 : 1.0)
+                    .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
                     .accessibilityLabel("添加附件")
 
                     workingDirectoryMenu
@@ -212,6 +224,14 @@ struct AgentChatComposerView: View {
                 viewModel.showAttachmentToast(title: "附件选择失败", message: String(describing: error), systemImage: "xmark.circle")
             }
         }
+        .fileImporter(isPresented: $isImageImporterPresented, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                handleImageImport(urls)
+            case .failure:
+                break
+            }
+        }
     }
 
     private var selectedSession: AgentSession? {
@@ -308,6 +328,32 @@ struct AgentChatComposerView: View {
 
     private func handleAttachmentImportError(_ message: String) {
         sendComposerAction(.showAttachmentImportError(message))
+    }
+
+    private func handleImageImport(_ urls: [URL]) {
+        Task {
+            let result = await viewModel.importAttachments(urls: urls)
+            guard !result.accepted.isEmpty else { return }
+            let imageRefs = result.accepted.filter { $0.kind == .image }
+            for ref in imageRefs {
+                // Insert Markdown image reference into composer
+                let mdImage = "![^\(ref.displayName)]"
+                if localChatInput.isEmpty {
+                    localChatInput = mdImage
+                } else {
+                    localChatInput += "\n\n\(mdImage)"
+                }
+                viewModel.updateSelectedChatInputDraft(localChatInput)
+                // Check model image support
+                if !viewModel.currentModelSupportsImages() {
+                    viewModel.showAttachmentToast(
+                        title: "图片已保存到本地",
+                        message: "当前模型不支持图片识别，仅发送文字内容给模型。你可以在后续对话中引用这张图片。",
+                        systemImage: "photo.badge.checkmark"
+                    )
+                }
+            }
+        }
     }
 
     private func handleSlashCommand(_ rect: CGRect, triggerRange: NSRange) {
