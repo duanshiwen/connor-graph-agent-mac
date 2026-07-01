@@ -24,14 +24,18 @@ struct WelcomeLLMView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                LLMSettingsView(viewModel: viewModel)
+                SettingsAISection(viewModel: viewModel)
                     .frame(maxWidth: 520)
 
-                Button("跳过，稍后设置") {
+                Button {
                     viewModel.showWelcomePlaceholder = false
+                } label: {
+                    Label("开始使用", systemImage: "arrow.forward")
+                        .labelStyle(.titleAndIcon)
                 }
-                .buttonStyle(.link)
-                .padding(.top, 8)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(viewModel.llmConnectionConfigs.isEmpty)
 
                 Spacer(minLength: 32)
             }
