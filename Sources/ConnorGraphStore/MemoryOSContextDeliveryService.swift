@@ -1,22 +1,38 @@
 import Foundation
+import ConnorGraphSearch
 
 public struct MemoryOSContextDeliveryService: Sendable {
     public var store: SQLiteMemoryOSStore
     public var builder: MemoryOSContextBuilder
+    public var searchKernel: MemoryOSSearchKernel?
 
-    public init(store: SQLiteMemoryOSStore, builder: MemoryOSContextBuilder = MemoryOSContextBuilder()) {
+    public init(store: SQLiteMemoryOSStore, builder: MemoryOSContextBuilder = MemoryOSContextBuilder(), searchKernel: MemoryOSSearchKernel? = nil) {
         self.store = store
         self.builder = builder
+        self.searchKernel = searchKernel
     }
 
     public func context(_ request: MemoryOSContextRequest, generatedAt: Date = Date()) throws -> MemoryOSContextPackage {
+        let hits: [MemoryOSRetrievalHit]
         let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
-        let hits = try retrieval.search(MemoryOSRetrievalQuery(
-            text: request.query,
-            layers: request.layers,
-            limit: request.retrievalPolicy.maxInitialHits,
-            depth: request.graphPolicy.maxDepth
-        ))
+
+        if let searchKernel, !request.layers.isEmpty {
+            // Use Rust/Tantivy search kernel for full-text retrieval
+            let response = try searchKernel.search(MemoryOSSearchKernelRequest(
+                query: request.query,
+                layers: request.layers.compactMap { MemoryOSSearchKernelLayer(rawValue: $0.rawValue) },
+                limit: request.retrievalPolicy.maxInitialHits
+            ))
+            hits = response.hits.map { MemoryOSContextDeliveryService.hitFromKernel($0) }
+        } else {
+            hits = try retrieval.search(MemoryOSRetrievalQuery(
+                text: request.query,
+                layers: request.layers,
+                limit: request.retrievalPolicy.maxInitialHits,
+                depth: request.graphPolicy.maxDepth
+            ))
+        }
+
         var expansions: [String: [MemoryOSL4ExpansionHit]] = [:]
         var diagnostics: [MemoryOSContextDiagnostic] = []
 
@@ -54,26 +70,68 @@ public struct MemoryOSContextDeliveryService: Sendable {
     /// - Returns: Deduplicated array of natural-language memory items.
     public func flatContext(terms: [String]) throws -> [String] {
         let layers: [MemoryOSRetrievalLayer] = [.l1, .l2, .l3, .l4]
-        let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
-
         var allHits: [MemoryOSRetrievalHit] = []
         var allExpansions: [String: [MemoryOSL4ExpansionHit]] = [:]
 
-        for term in terms {
-            let hits = try retrieval.search(MemoryOSRetrievalQuery(
-                text: term, layers: layers, limit: 50, depth: 5
+        if let searchKernel, !terms.isEmpty {
+            // Use Rust/Tantivy search kernel: combine all terms into a single query.
+            // Jieba tokenization + OR logic handles multi-term better than per-term FTS5.
+            let combinedQuery = terms.joined(separator: ";")
+            let response = try searchKernel.search(MemoryOSSearchKernelRequest(
+                query: combinedQuery,
+                layers: [.l0, .l1, .l2, .l3, .l4],
+                limit: 200
             ))
-            allHits.append(contentsOf: hits)
-
-            for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
-                if allExpansions[hit.recordID] != nil { continue }
-                let entityRef = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
-                let expanded = try retrieval.expandL4(entityName: entityRef, depth: 5, limit: 8)
-                if !expanded.isEmpty { allExpansions[hit.recordID] = expanded }
+            allHits = response.hits.map { Self.hitFromKernel($0) }
+        } else {
+            // Fallback: SQLite FTS5 per-term search
+            let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
+            for term in terms {
+                let hits = try retrieval.search(MemoryOSRetrievalQuery(
+                    text: term, layers: layers, limit: 50, depth: 5
+                ))
+                allHits.append(contentsOf: hits)
             }
         }
 
+        // L4 graph expansion always uses SQLite (graph traversal, not full-text search)
+        for hit in allHits where hit.layer == .l4 && hit.canExpandDepth {
+            if allExpansions[hit.recordID] != nil { continue }
+            let entityRef = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
+            let expanded = try SQLiteMemoryOSUnifiedRetrievalService(store: store)
+                .expandL4(entityName: entityRef, depth: 5, limit: 8)
+            if !expanded.isEmpty { allExpansions[hit.recordID] = expanded }
+        }
+
         return builder.buildFlatStrings(hits: allHits, expansions: allExpansions, extraEntityNames: try resolveEntityNames(from: allExpansions))
+    }
+
+    // MARK: - Search Kernel Bridge
+
+    /// Convert a Rust/Tantivy search kernel hit to the SQLite retrieval hit format
+    /// used by MemoryOSContextBuilder.
+    private static func hitFromKernel(_ hit: MemoryOSSearchKernelHit) -> MemoryOSRetrievalHit {
+        let layer = MemoryOSRetrievalLayer(rawValue: hit.layer.rawValue) ?? .l4
+        let isEntity = hit.recordKind == "Entity"
+        let metadata: [String: String]
+        if let data = hit.metadataJSON.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            metadata = obj
+        } else {
+            metadata = [:]
+        }
+        return MemoryOSRetrievalHit(
+            layer: layer,
+            recordID: hit.recordID,
+            title: hit.title,
+            summary: hit.snippet,
+            matchedText: hit.snippet,
+            score: hit.score,
+            evidenceRefs: [],
+            entityRefs: isEntity ? [hit.recordID] : [],
+            canExpandDepth: layer == .l4 && isEntity,
+            metadata: metadata
+        )
     }
 
     private func resolveEntityNames(from expansions: [String: [MemoryOSL4ExpansionHit]]) throws -> [String: String] {
