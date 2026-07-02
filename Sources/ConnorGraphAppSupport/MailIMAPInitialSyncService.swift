@@ -676,8 +676,8 @@ private struct ParsedHeaders {
         self.messageID = unfolded.headerValue("Message-ID")
         self.subject = unfolded.headerValue("Subject")?.decodeRFC2047().nilIfEmpty
         self.from = unfolded.headerValue("From")?.decodeRFC2047()
-        self.to = unfolded.headerValue("To")
-        self.cc = unfolded.headerValue("Cc")
+        self.to = unfolded.headerValue("To")?.decodeRFC2047()
+        self.cc = unfolded.headerValue("Cc")?.decodeRFC2047()
         self.date = Self.parseDate(unfolded.headerValue("Date"))
     }
 
@@ -760,19 +760,42 @@ private extension String {
     func decodeRFC2047() -> String {
         let pattern = #"=\?([^?]+)\?([QBqb])\?([^?]*)\?="#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return self }
-        var result = self
-        let nsRange = NSRange(result.startIndex..., in: result)
-        let matches = regex.matches(in: result, range: nsRange).reversed()
-        for match in matches {
-            guard let fullRange = Range(match.range(at: 0), in: result),
-                  let charsetRange = Range(match.range(at: 1), in: result),
-                  let encodingRange = Range(match.range(at: 2), in: result),
-                  let textRange = Range(match.range(at: 3), in: result) else { continue }
-            let charset = String(result[charsetRange]).lowercased()
-            let encoding = String(result[encodingRange]).uppercased()
-            let encodedText = String(result[textRange])
-            guard let decoded = RFC2047Codec.decodeOne(charset: charset, encoding: encoding, text: encodedText) else { continue }
-            result.replaceSubrange(fullRange, with: decoded)
+        let nsString = self as NSString
+        let allMatches = regex.matches(in: self, range: NSRange(location: 0, length: nsString.length))
+        guard !allMatches.isEmpty else { return self }
+        var result = ""
+        var lastEnd = 0
+        for match in allMatches {
+            let matchRange = match.range
+            let gapStart = lastEnd
+            let gapEnd = matchRange.location
+            if gapStart < gapEnd {
+                let gap = nsString.substring(with: NSRange(location: gapStart, length: gapEnd - gapStart))
+                let isOnlyWhitespace = gap.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let hasAdjacentEncoded = gapStart > 0 && nsString.substring(with: NSRange(location: gapStart - 1, length: 1)) != " "
+                if !isOnlyWhitespace {
+                    result += gap
+                }
+            }
+            guard let charsetRange = Range(match.range(at: 1), in: self),
+                  let encodingRange = Range(match.range(at: 2), in: self),
+                  let textRange = Range(match.range(at: 3), in: self) else {
+                result += nsString.substring(with: matchRange)
+                lastEnd = matchRange.location + matchRange.length
+                continue
+            }
+            let charset = String(self[charsetRange]).lowercased()
+            let encoding = String(self[encodingRange]).uppercased()
+            let encodedText = String(self[textRange])
+            if let decoded = RFC2047Codec.decodeOne(charset: charset, encoding: encoding, text: encodedText) {
+                result += decoded
+            } else {
+                result += nsString.substring(with: matchRange)
+            }
+            lastEnd = matchRange.location + matchRange.length
+        }
+        if lastEnd < nsString.length {
+            result += nsString.substring(from: lastEnd)
         }
         return result
     }
