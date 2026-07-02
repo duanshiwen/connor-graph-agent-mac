@@ -646,6 +646,18 @@ struct BlockingIMAPClient {
         return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
     }
 
+    /// Parse RFC 822 date string
+    static func parseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        for format in ["EEE, d MMM yyyy HH:mm:ss Z", "d MMM yyyy HH:mm:ss Z", "EEE, dd MMM yyyy HH:mm:ss Z"] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value.trimmingCharacters(in: .whitespacesAndNewlines)) { return date }
+        }
+        return nil
+    }
+
     private func authenticateWithPassword(usernames: [String], password: String, input: InputStream, output: OutputStream) throws {
         var authenticated = false
         var lastLoginError = "Authentication failed"
@@ -1373,7 +1385,7 @@ struct BlockingIMAPClient {
         let from = MailAddress.parse(unfolded.headerValue("From")?.decodeRFC2047()) ?? MailAddress(email: "unknown@example.com")
         let to = MailAddress.parseList(unfolded.headerValue("To")?.decodeRFC2047())
         let cc = MailAddress.parseList(unfolded.headerValue("Cc")?.decodeRFC2047())
-        let date = ParsedHeaders.parseDate(unfolded.headerValue("Date")) ?? Date()
+        let date = Self.parseDate(unfolded.headerValue("Date")) ?? Date()
         let msgID = unfolded.headerValue("Message-ID")
         let ctHeader = unfolded.headerValue("Content-Type") ?? ""
         let cteHeader = unfolded.headerValue("Content-Transfer-Encoding") ?? ""
