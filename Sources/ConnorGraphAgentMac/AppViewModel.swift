@@ -2480,9 +2480,9 @@ final class AppViewModel: NSObject, ObservableObject {
         }
 
         // Get stored UIDs for incremental sync
-        let storedSummaries = try await mailStore.searchMessages(query: "", accountID: nil)
-        let storedUIDs = Set(storedSummaries.compactMap { summary -> String? in
-            let parts = summary.id.rawValue.split(separator: "-")
+        let allIDs = (try? await mailStore.allMessageIDs()) ?? []
+        let storedUIDs = Set(allIDs.compactMap { id -> String? in
+            let parts = id.rawValue.split(separator: "-")
             return parts.last.map(String.init)
         })
 

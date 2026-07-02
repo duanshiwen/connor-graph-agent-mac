@@ -110,6 +110,10 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
         try load().messages.first { $0.id == id }
     }
 
+    public func allMessageIDs() async throws -> [MailMessageID] {
+        try load().messages.map(\.id)
+    }
+
     public func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws {
         var snapshot = try load()
         let ids = Set(messageIDs)
