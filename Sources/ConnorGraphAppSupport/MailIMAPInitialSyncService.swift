@@ -417,6 +417,29 @@ private struct BlockingIMAPClient {
                 }
                 return partBody.mimeCleanedBody
             }
+            // No text/plain found — try text/html fallback with QP decode
+            for part in parts {
+                let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("--") else { continue }
+                let isHTML = trimmed.range(of: #"Content-Type:\s*text/html"#, options: [.caseInsensitive, .regularExpression]) != nil
+                guard isHTML else { continue }
+                let partHeaderEnd: String.Index?
+                if let r = trimmed.range(of: "\r\n\r\n") { partHeaderEnd = r.upperBound }
+                else if let r = trimmed.range(of: "\n\n") { partHeaderEnd = r.upperBound }
+                else { partHeaderEnd = nil }
+                guard let partBodyStart = partHeaderEnd else { continue }
+                let partHeaders = String(trimmed[..<partBodyStart])
+                var partBody = String(trimmed[partBodyStart...])
+                if let encMatch = partHeaders.range(of: #"Content-Transfer-Encoding:\s*(\S+)"#, options: [.caseInsensitive, .regularExpression]) {
+                    let encValue = String(partHeaders[encMatch.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if encValue.hasPrefix("quoted-printable") {
+                        partBody = String(data: decodeQuotedPrintable(Data(partBody.utf8)), encoding: .utf8) ?? partBody
+                    } else if encValue == "base64" {
+                        partBody = String(data: Data(base64Encoded: partBody.trimmingCharacters(in: .whitespacesAndNewlines)) ?? Data(), encoding: .utf8) ?? partBody
+                    }
+                }
+                return partBody.mimeCleanedBody
+            }
             return body.mimeCleanedBody
         }
     }
@@ -751,7 +774,9 @@ private struct BlockingIMAPClient {
             let count = input.read(&buffer, maxLength: buffer.count)
             if count > 0 {
                 data.append(buffer, count: count)
-                if let string = String(data: data, encoding: .utf8), string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") {
+                // Use lossy UTF-8 so non-UTF-8 body bytes don't prevent tag detection
+                let string = String(decoding: data, as: Unicode.UTF8.self)
+                if string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") {
                     return (string, data)
                 }
             } else if count < 0 {
@@ -771,7 +796,8 @@ private struct BlockingIMAPClient {
             let count = input.read(&buffer, maxLength: buffer.count)
             if count > 0 {
                 data.append(buffer, count: count)
-                if let string = String(data: data, encoding: .utf8), string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") { return string }
+                let string = String(decoding: data, as: Unicode.UTF8.self)
+                if string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") { return string }
             } else if count < 0 {
                 throw IMAPError.connectionFailed(input.streamError?.localizedDescription ?? "Read failed")
             } else {
