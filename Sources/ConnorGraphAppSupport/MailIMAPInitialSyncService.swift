@@ -677,14 +677,97 @@ private struct BlockingIMAPClient {
 
     private func parseFetchedMessages(_ response: String, rawData: Data? = nil) -> [FetchedMessage] {
         let chunks = response.components(separatedBy: "\r\n* ").map { $0.hasPrefix("* ") ? $0 : "* " + $0 }
+
+        // Pre-extract body byte ranges from rawData using sequential parsing
+        var bodyRanges: [String: Range<Data.Index>] = [:] // uid -> range in rawData
+        if let rawData {
+            bodyRanges = extractBodyRanges(from: rawData)
+        }
+
         return chunks.compactMap { chunk -> FetchedMessage? in
             guard chunk.contains(" FETCH "), let uid = chunk.firstString(matching: #"UID\s+(\d+)"#) else { return nil }
             let flags = chunk.firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
             let header = extractHeader(from: chunk)
             let body = extractBody(from: chunk, after: header)
-            let rawBody = extractBodyAsData(from: chunk, rawData: rawData)
+            let rawBody: Data? = bodyRanges[uid].flatMap { rawData?.subdata(in: $0) }
             return FetchedMessage(uid: uid, flags: flags, header: header, snippet: body, rawBodyData: rawBody, fallbackSequenceDate: Date())
         }.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
+    }
+
+    /// Parse raw IMAP response bytes sequentially to extract BODY[TEXT] byte ranges per UID.
+    /// Uses a simple state machine that respects literal sizes, so it never confuses
+    /// "BODY[TEXT]" appearing inside email content with the actual IMAP literal marker.
+    private func extractBodyRanges(from data: Data) -> [String: Range<Data.Index>] {
+        var result: [String: Range<Data.Index>] = [:]
+        let bytes = [UInt8](data)
+        let marker = Array("BODY[TEXT]".utf8)
+        let uidMarker = Array("UID ".utf8)
+        let fetchMarker = Array(" FETCH ".utf8)
+        let crlf = Array("\r\n".utf8)
+
+        var i = 0
+        var currentUID: String?
+
+        while i < bytes.count {
+            // Look for "* NNN FETCH " to identify a new FETCH response
+            if bytes[i] == 0x2A { // '*'
+                // Try to find "UID " after FETCH
+                let slice = Array(bytes[i..<min(i + 200, bytes.count)])
+                if let fetchIdx = findPattern(slice, fetchMarker) {
+                    let afterFetch = Array(bytes[(i + fetchIdx + fetchMarker.count)..<min(i + fetchIdx + fetchMarker.count + 100, bytes.count)])
+                    if let uidIdx = findPattern(afterFetch, uidMarker) {
+                        let uidStart = uidIdx + uidMarker.count
+                        var uid = ""
+                        for j in uidStart..<afterFetch.count {
+                            let c = Character(UnicodeScalar(afterFetch[j]))
+                            if c.isNumber { uid.append(c) } else { break }
+                        }
+                        if !uid.isEmpty { currentUID = uid }
+                    }
+                }
+            }
+
+            // Look for "BODY[TEXT]{NNN}\r\n" marker
+            if i + marker.count <= bytes.count {
+                let slice = Array(bytes[i..<(i + marker.count)])
+                if slice == marker {
+                    let afterMarker = i + marker.count
+                    // Find {NNN}
+                    if afterMarker < bytes.count && bytes[afterMarker] == 0x7B { // '{'
+                        var sizeStr = ""
+                        var j = afterMarker + 1
+                        while j < bytes.count && bytes[j] != 0x7D { // not '}'
+                            sizeStr.append(Character(UnicodeScalar(bytes[j])))
+                            j += 1
+                        }
+                        if j < bytes.count && bytes[j] == 0x7D, let literalSize = Int(sizeStr) {
+                            let bodyStart = j + 1 + 2 // skip '}\r\n'
+                            let bodyEnd = bodyStart + literalSize
+                            if bodyEnd <= bytes.count, let uid = currentUID {
+                                result[uid] = bodyStart..<bodyEnd
+                            }
+                            i = min(bodyEnd, bytes.count)
+                            continue
+                        }
+                    }
+                }
+            }
+            i += 1
+        }
+        return result
+    }
+
+    /// Find pattern in bytes using simple search
+    private func findPattern(_ bytes: [UInt8], _ pattern: [UInt8]) -> Int? {
+        guard !pattern.isEmpty, bytes.count >= pattern.count else { return nil }
+        for i in 0...(bytes.count - pattern.count) {
+            var match = true
+            for j in 0..<pattern.count {
+                if bytes[i + j] != pattern[j] { match = false; break }
+            }
+            if match { return i }
+        }
+        return nil
     }
 
     private func extractHeader(from chunk: String) -> String {
