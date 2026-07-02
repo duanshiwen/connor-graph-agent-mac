@@ -119,7 +119,7 @@ struct SettingsCalendarSection: View {
                 SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
                 SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
                 SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
-                Text("当前版本专注于只读同步日程：本机日历通过 macOS Calendar / EventKit 读取；CalDAV、Google、Microsoft 与 ICS/Webcal 原生日历来源平台正在接入中，暂不开放事件写入。")
+                Text("支持本机日历（EventKit）、ICS/Webcal 订阅、CalDAV（通用、iCloud、Fastmail、Nextcloud）只读同步。Google 和 Microsoft 365 将通过 OAuth 接入。所有日历源暂不支持事件写入。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
