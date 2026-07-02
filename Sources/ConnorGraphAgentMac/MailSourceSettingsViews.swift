@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
@@ -27,7 +28,7 @@ struct MailSourceSettingsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
                     Divider().opacity(0.6)
-                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage)
+                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else {
@@ -66,21 +67,75 @@ private struct MailBrowserTopBar: View {
     }
 }
 
+/// WKWebView wrapper for rendering email HTML bodies with image support.
+private struct MailHTMLBodyView: NSViewRepresentable {
+    var htmlContent: String
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        // Disable JavaScript for security (email HTML should not execute scripts)
+        let preferences = WKWebpagePreferences()
+        preferences.allowsContentJavaScript = false
+        config.defaultWebpagePreferences = preferences
+        // Prevent auto-loading remote content for privacy
+        let view = WKWebView(frame: .zero, configuration: config)
+        view.setValue(false, forKey: "drawsBackground")
+        view.isHidden = true
+        return view
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        // Wrap HTML in a basic document structure for consistent rendering
+        let wrapped: String
+        if htmlContent.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("<html") {
+            wrapped = htmlContent
+        } else {
+            wrapped = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.5; padding: 0; margin: 0; word-wrap: break-word; overflow-wrap: break-word; }
+                img { max-width: 100%; height: auto; }
+                a { color: -webkit-link; }
+                pre, code { white-space: pre-wrap; word-break: break-all; }
+            </style>
+            </head>
+            <body>\(htmlContent)</body>
+            </html>
+            """
+        }
+        nsView.loadHTMLString(wrapped, baseURL: nil)
+        nsView.isHidden = false
+    }
+}
+
 private struct MailMessageDetailPane: View {
     var account: MailAccount?
     var mailbox: MailMailbox?
     var message: MailMessageSummary
+    @ObservedObject var viewModel: AppViewModel
+    @State private var fullBodyText: String?
+    @State private var bodyHTML: String?
+    @State private var bodyWebViewHeight: CGFloat = 200
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
-                MailInfoSection(title: "邮件摘要", systemImage: "doc.text.magnifyingglass") {
-                    Text(message.snippet)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
+                    if let bodyHTML {
+                        MailHTMLBodyView(htmlContent: bodyHTML)
+                            .frame(minHeight: bodyWebViewHeight)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Text(fullBodyText ?? message.snippet)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 MailInfoSection(title: "收件人", systemImage: "person.2") {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
@@ -91,12 +146,14 @@ private struct MailMessageDetailPane: View {
                         }
                     }
                 }
-                MailInfoSection(title: "治理提示", systemImage: "checkmark.shield") {
-                    MailGovernanceHintStrip()
-                }
             }
             .padding(AppShellLayout.spaceXL)
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+        }
+        .task(id: message.id) {
+            // Load both plain text and HTML content
+            fullBodyText = await viewModel.loadMailBodyText(for: message.id)
+            bodyHTML = await viewModel.loadMailBodyHTML(for: message.id)
         }
     }
 }
@@ -176,16 +233,6 @@ private struct MailAddressLine: View {
     }
 }
 
-private struct MailGovernanceHintStrip: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-            MailChecklistRow(title: "读取不自动标记已读", isReady: true, detail: "列表和详情预览不会自动把邮件标记为已读。")
-            MailChecklistRow(title: "发信始终需要审批", isReady: true, detail: "发送草稿前，康纳同学会先请求确认。")
-            MailChecklistRow(title: "附件导入受保护", isReady: true, detail: "附件会先保存到当前会话，再供康纳同学使用。")
-        }
-    }
-}
-
 struct AddMailAccountSheet: View {
     private enum Layout {
         static let sheetWidth: CGFloat = 640
@@ -209,6 +256,10 @@ struct AddMailAccountSheet: View {
     @State private var isSubmitting: Bool = false
     @State private var setupMessage: String?
     @State private var setupError: String?
+    @State private var isAutoconfigLoading: Bool = false
+    @State private var autoconfigResult: MailAutoconfigResult?
+    @State private var isTestingConnection: Bool = false
+    @State private var testResult: MailConnectionTestResult?
 
     private var isManualPreset: Bool {
         selectedPreset == .other
@@ -284,9 +335,23 @@ struct AddMailAccountSheet: View {
                 }
 
                 MailAccountSetupRow("邮箱地址", labelWidth: Layout.labelColumnWidth) {
-                    TextField("name@example.com", text: $email)
-                        .textFieldStyle(.roundedBorder)
-                        .textContentType(.emailAddress)
+                    HStack(spacing: 8) {
+                        TextField("name@example.com", text: $email)
+                            .textFieldStyle(.roundedBorder)
+                            .textContentType(.emailAddress)
+
+                        Button {
+                            Task { await runAutoconfig() }
+                        } label: {
+                            if isAutoconfigLoading {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text("自动检测")
+                            }
+                        }
+                        .disabled(isAutoconfigLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
 
                 MailAccountSetupRow("授权凭据", labelWidth: Layout.labelColumnWidth) {
@@ -332,7 +397,17 @@ struct AddMailAccountSheet: View {
 
     @ViewBuilder
     private var setupFeedback: some View {
-        if let setupError {
+        if let testResult {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("连接测试结果")
+                    .font(SettingsListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Text(testResult.summary)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(testResult.isSuccess ? .green : .red)
+                    .textSelection(.enabled)
+            }
+        } else if let setupError {
             Text(setupError)
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.red)
@@ -346,7 +421,20 @@ struct AddMailAccountSheet: View {
 
     private var footer: some View {
         HStack(spacing: SettingsListLayout.spaceS) {
+            Button {
+                Task { await runConnectionTest() }
+            } label: {
+                if isTestingConnection {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("测试连接")
+                }
+            }
+            .disabled(isTestingConnection || email.isEmpty || credential.isEmpty)
+
             Spacer()
+
             Button("取消") { dismiss() }
                 .keyboardShortcut(.cancelAction)
                 .disabled(isSubmitting)
@@ -371,7 +459,7 @@ struct AddMailAccountSheet: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         setupError = nil
-        setupMessage = "正在添加账户并准备同步…"
+        setupMessage = "正在添加账户…"
         do {
             try await viewModel.addMailAccountAndPrepareSync(
                 preset: selectedPreset,
@@ -400,6 +488,71 @@ struct AddMailAccountSheet: View {
             displayName = preset.title
             lastAutofilledDisplayName = preset.title
         }
+    }
+
+    @MainActor
+    private func runAutoconfig() async {
+        let emailValue = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard emailValue.contains("@"), emailValue.contains(".") else { return }
+
+        isAutoconfigLoading = true
+        setupMessage = "正在自动检测服务器配置…"
+        setupError = nil
+
+        let service = MailAutoconfigService()
+        if let result = try? await service.discover(email: emailValue) {
+            autoconfigResult = result
+            incomingHost = result.incomingHost
+            incomingPort = result.incomingPort
+            outgoingHost = result.outgoingHost
+            outgoingPort = result.outgoingPort
+            setupMessage = "已自动检测到服务器配置"
+            selectedPreset = .other
+        } else {
+            setupMessage = nil
+            setupError = "未找到自动配置，请手动填写服务器信息"
+        }
+
+        isAutoconfigLoading = false
+    }
+
+    @MainActor
+    private func runConnectionTest() async {
+        let emailValue = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let credentialValue = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !emailValue.isEmpty, !credentialValue.isEmpty else {
+            setupError = "请先填写邮箱地址和授权凭据"
+            return
+        }
+
+        isTestingConnection = true
+        setupMessage = "正在测试连接…"
+        setupError = nil
+        testResult = nil
+
+        let service = MailConnectionTestService()
+        do {
+            let result = try await service.testConnection(
+                email: emailValue,
+                credential: credentialValue,
+                incomingHost: incomingHost,
+                incomingPort: incomingPort,
+                incomingSecurity: .tls,
+                outgoingHost: outgoingHost,
+                outgoingPort: outgoingPort,
+                outgoingSecurity: .startTLS
+            )
+            testResult = result
+            if result.isSuccess {
+                setupMessage = "连接测试通过"
+            } else {
+                setupError = "连接测试失败，请检查配置"
+            }
+        } catch {
+            setupError = "测试失败: \(error.localizedDescription)"
+        }
+
+        isTestingConnection = false
     }
 }
 
@@ -507,28 +660,7 @@ private struct MailInfoSection<Content: View>: View {
     }
 }
 
-private struct MailChecklistRow: View {
-    var title: String
-    var isReady: Bool
-    var detail: String
 
-    var body: some View {
-        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
-            Image(systemName: isReady ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(isReady ? .green : .orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(AppListTypography.rowTitleSelected)
-                Text(detail)
-                    .font(AppListTypography.rowSubtitle)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-}
 
 private struct MailStatusPill: View {
     var status: String

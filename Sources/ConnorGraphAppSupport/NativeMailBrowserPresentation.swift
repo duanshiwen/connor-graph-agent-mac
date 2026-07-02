@@ -62,20 +62,14 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
 
     public var outgoingPort: Int {
         switch self {
-        case .apple: 587
-        case .qq, .netease: 465
-        case .other: 587
+        case .apple, .qq, .netease, .other: 587
         }
     }
 
     public var incomingSecurity: MailConnectionSecurity { .tls }
 
     public var outgoingSecurity: MailConnectionSecurity {
-        switch self {
-        case .apple: .startTLS
-        case .qq, .netease: .tls
-        case .other: .startTLS
-        }
+        .startTLS
     }
 
     public var authMode: MailAuthMode {
@@ -145,8 +139,7 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     }
 
     public var totalMessageCount: Int {
-        let mailboxMessageCount = mailboxes.reduce(0) { $0 + $1.status.messageCount }
-        return max(mailboxMessageCount, messages.count)
+        messages.count
     }
 
     public var totalUnreadCount: Int {
