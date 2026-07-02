@@ -604,7 +604,7 @@ private struct BlockingIMAPClient {
             let batch = Array(newUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
-            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[TEXT])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
             let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
             allMessages.append(contentsOf: batchMessages)
@@ -664,7 +664,7 @@ private struct BlockingIMAPClient {
             let batch = Array(fetchUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
-            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[TEXT])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
             let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
             allMessages.append(contentsOf: batchMessages)
@@ -691,10 +691,10 @@ private struct BlockingIMAPClient {
         }.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
     }
 
-    /// State machine parser: extracts UID, flags, headers, and body from raw IMAP bytes.
+    /// State machine parser: extracts UID, flags, ENVELOPE, and body from raw IMAP bytes.
     private func parseFetchedMessagesFromRaw(_ data: Data) -> [FetchedMessage] {
         let bytes = [UInt8](data)
-        let headerMarker = Array("BODY[HEADER.FIELDS".utf8)
+        let envelopeMarker = Array("ENVELOPE ".utf8)
         let textMarker = Array("BODY[TEXT]".utf8)
         let fetchMarker = Array(" FETCH ".utf8)
         let uidMarker = Array("UID ".utf8)
@@ -704,9 +704,7 @@ private struct BlockingIMAPClient {
         var i = 0
 
         while i < bytes.count {
-            // Look for "* NNN FETCH " pattern
             if bytes[i] == 0x2A { // '*'
-                // Find FETCH marker
                 let fetchSearch = Array(bytes[i..<min(i + 300, bytes.count)])
                 guard let fetchIdx = findPattern(fetchSearch, fetchMarker) else { i += 1; continue }
 
@@ -728,70 +726,96 @@ private struct BlockingIMAPClient {
                     let flagsStart = flagsIdx + flagsMarker.count
                     var f = ""
                     for j in flagsStart..<afterFetch.count {
-                        if afterFetch[j] == 0x29 { break } // ')'
+                        if afterFetch[j] == 0x29 { break }
                         f.append(Character(UnicodeScalar(afterFetch[j])))
                     }
                     flags = f
                 }
 
-                // Find BODY[HEADER.FIELDS ...] literal
-                var headerString = ""
-                var headerEndPos = i
-                let headerSearch = Array(bytes[i..<min(i + 500, bytes.count)])
-                if let headerIdx = findPattern(headerSearch, headerMarker) {
-                    // Find the closing brace of the size: {NNN}
-                    let afterHeader = Array(bytes[(i + headerIdx + headerMarker.count)..<min(i + headerIdx + headerMarker.count + 200, bytes.count)])
-                    if let closeBraceIdx = findPattern(afterHeader, Array("}\r\n".utf8)) {
-                        // Extract header size
-                        var sizeStr = ""
-                        for j in 0..<closeBraceIdx {
-                            let c = Character(UnicodeScalar(afterHeader[j]))
-                        if c == "{" { continue }
-                        if c.isNumber { sizeStr.append(c) }
+                // Find ENVELOPE and extract subject, from, to, cc, date
+                var subject = ""
+                var fromAddress: MailAddress?
+                var toAddresses: [MailAddress] = []
+                var ccAddresses: [MailAddress] = []
+                var envelopeDate: Date?
+                var envelopeEndPos = i
+
+                let envSearch = Array(bytes[i..<min(i + 2000, bytes.count)])
+                if let envIdx = findPattern(envSearch, envelopeMarker) {
+                    // Find the matching closing paren for ENVELOPE (...)
+                    let envStart = i + envIdx + envelopeMarker.count
+                    // ENVELOPE starts with '('
+                    if envStart < bytes.count && bytes[envStart] == 0x28 {
+                        // Extract ENVELOPE content by counting parens
+                        var depth = 0
+                        var envContent = ""
+                        var j = envStart
+                        while j < bytes.count {
+                            let b = bytes[j]
+                            if b == 0x28 { depth += 1 }
+                            else if b == 0x29 { depth -= 1 }
+                            envContent.append(Character(UnicodeScalar(b)))
+                            if depth == 0 { break }
+                            j += 1
                         }
-                        if let headerSize = Int(sizeStr) {
-                            let headerStart = i + headerIdx + headerMarker.count + closeBraceIdx + 3 // skip }\r\n
-                            let headerEnd = headerStart + headerSize
-                            if headerEnd <= bytes.count {
-                                let headerData = Data(bytes[headerStart..<headerEnd])
-                                headerString = String(data: headerData, encoding: .utf8) ?? String(decoding: headerData, as: Unicode.UTF8.self)
-                                headerEndPos = headerEnd
-                            }
-                        }
+                        envelopeEndPos = j + 1
+                        // Parse ENVELOPE: ("date" "subject" (from) (sender) (reply-to) (to) (cc) (bcc) "in-reply-to" "message-id")
+                        let parsed = parseEnvelope(envContent)
+                        subject = parsed.subject
+                        fromAddress = parsed.from
+                        toAddresses = parsed.to
+                        ccAddresses = parsed.cc
+                        envelopeDate = parsed.date
                     }
                 }
 
-                // Find BODY[TEXT] literal starting from after headers
+                // Find BODY[TEXT] literal starting from after ENVELOPE
                 var bodyData: Data? = nil
-                var fetchEndPos = headerEndPos // track end of this FETCH response
-                let bodySearch = Array(bytes[headerEndPos..<min(headerEndPos + 500, bytes.count)])
+                var fetchEndPos = envelopeEndPos
+                let bodySearch = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 500, bytes.count)])
                 if let bodyIdx = findPattern(bodySearch, textMarker) {
-                    let afterBody = Array(bytes[(headerEndPos + bodyIdx + textMarker.count)..<min(headerEndPos + bodyIdx + textMarker.count + 100, bytes.count)])
+                    let afterBody = Array(bytes[(envelopeEndPos + bodyIdx + textMarker.count)..<min(envelopeEndPos + bodyIdx + textMarker.count + 100, bytes.count)])
                     if let closeBraceIdx = findPattern(afterBody, Array("}\r\n".utf8)) {
                         var sizeStr = ""
-                        for j in 0..<closeBraceIdx {
-                            let c = Character(UnicodeScalar(afterBody[j]))
+                        for k in 0..<closeBraceIdx {
+                            let c = Character(UnicodeScalar(afterBody[k]))
                             if c == "{" { continue }
                             if c.isNumber { sizeStr.append(c) }
                         }
                         if let bodySize = Int(sizeStr) {
-                            let bodyStart = headerEndPos + bodyIdx + textMarker.count + closeBraceIdx + 3
+                            let bodyStart = envelopeEndPos + bodyIdx + textMarker.count + closeBraceIdx + 3
                             let bodyEnd = bodyStart + bodySize
                             if bodyEnd <= bytes.count {
                                 bodyData = Data(bytes[bodyStart..<bodyEnd])
-                                fetchEndPos = bodyEnd + 2 // skip \r\n before closing paren
+                                fetchEndPos = bodyEnd + 2
                             }
                         }
                     }
                 }
 
+                // Build header string from ENVELOPE data (for compatibility)
+                var headerParts: [String] = []
+                if !subject.isEmpty { headerParts.append("Subject: \(subject)") }
+                if let from = fromAddress {
+                    let fromStr = from.name.map { "\($0) <\(from.email)>" } ?? from.email
+                    headerParts.append("From: \(fromStr)")
+                }
+                if !toAddresses.isEmpty {
+                    let toStr = toAddresses.map { a in a.name.map { "\($0) <\(a.email)>" } ?? a.email }.joined(separator: ", ")
+                    headerParts.append("To: \(toStr)")
+                }
+                if !ccAddresses.isEmpty {
+                    let ccStr = ccAddresses.map { a in a.name.map { "\($0) <\(a.email)>" } ?? a.email }.joined(separator: ", ")
+                    headerParts.append("Cc: \(ccStr)")
+                }
+                let headerString = headerParts.joined(separator: "\r\n")
+
                 results.append(FetchedMessage(
                     uid: uid, flags: flags, header: headerString,
                     snippet: bodyData.flatMap { String(data: $0, encoding: .utf8) } ?? "",
-                    rawBodyData: bodyData, fallbackSequenceDate: Date()
+                    rawBodyData: bodyData, fallbackSequenceDate: envelopeDate ?? Date()
                 ))
 
-                // Jump past this entire FETCH response to next message
                 i = fetchEndPos
                 continue
             }
@@ -799,6 +823,138 @@ private struct BlockingIMAPClient {
         }
 
         return results.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
+    }
+
+    /// Parse IMAP ENVELOPE string: ("date" "subject" (from) (sender) (reply-to) (to) (cc) (bcc) "in-reply-to" "message-id")
+    private struct ParsedEnvelope {
+        var subject: String = ""
+        var from: MailAddress?
+        var to: [MailAddress] = []
+        var cc: [MailAddress] = []
+        var date: Date?
+    }
+
+    private func parseEnvelope(_ env: String) -> ParsedEnvelope {
+        var result = ParsedEnvelope()
+        // Split envelope into fields: date, subject, from, sender, reply-to, to, cc, bcc, in-reply-to, message-id
+        let fields = splitEnvelopeFields(env)
+        guard fields.count >= 8 else { return result }
+        // fields[0] = date (quoted), fields[1] = subject (quoted)
+        // fields[2] = from (address list), fields[3] = sender, fields[4] = reply-to
+        // fields[5] = to, fields[6] = cc, fields[7] = bcc
+        result.date = parseIMAPDate(fields[0])
+        result.subject = unquoteIMAP(fields[1])
+        result.from = parseIMAPAddressList(fields[2]).first
+        result.to = parseIMAPAddressList(fields[5])
+        result.cc = parseIMAPAddressList(fields[6])
+        return result
+    }
+
+    /// Split ENVELOPE content into 10 fields, respecting nested parentheses
+    private func splitEnvelopeFields(_ env: String) -> [String] {
+        var fields: [String] = []
+        var current = ""
+        var depth = 0
+        var inQuote = false
+        var escapeNext = false
+        for ch in env {
+            if escapeNext { current.append(ch); escapeNext = false; continue }
+            if ch == "\\" && inQuote { current.append(ch); escapeNext = true; continue }
+            if ch == "\"" { inQuote = !inQuote; current.append(ch); continue }
+            if !inQuote {
+                if ch == "(" { depth += 1 }
+                else if ch == ")" { depth -= 1 }
+            }
+            // Split on space at depth 0, outside quotes
+            if ch == " " && depth == 0 && !inQuote {
+                if !current.isEmpty {
+                    fields.append(current)
+                    current = ""
+                }
+                continue
+            }
+            if depth > 0 || (depth == 0 && ch != "(") {
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty { fields.append(current) }
+        return fields
+    }
+
+    /// Remove surrounding quotes from IMAP string
+    private func unquoteIMAP(_ s: String) -> String {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"") {
+            return String(trimmed.dropFirst().dropLast())
+        }
+        return trimmed
+    }
+
+    /// Parse IMAP address list: (("name" "route" "mailbox" "host") ...)
+    private func parseIMAPAddressList(_ s: String) -> [MailAddress] {
+        var addresses: [MailAddress] = []
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Each address is ("name" NIL "mailbox" "host")
+        var i = trimmed.startIndex
+        while i < trimmed.endIndex {
+            if trimmed[i] == "(" {
+                // Find matching close paren
+                var depth = 0
+                var j = i
+                while j < trimmed.endIndex {
+                    if trimmed[j] == "(" { depth += 1 }
+                    else if trimmed[j] == ")" { depth -= 1; if depth == 0 { break } }
+                    j = trimmed.index(after: j)
+                }
+                if j < trimmed.endIndex {
+                    let addrStr = String(trimmed[trimmed.index(after: i)..<j])
+                    let parts = splitIMAPQuoted(addrStr)
+                    if parts.count >= 4 {
+                        let name = unquoteIMAP(parts[0])
+                        let mailbox = unquoteIMAP(parts[2])
+                        let host = unquoteIMAP(parts[3])
+                        if !mailbox.isEmpty && !host.isEmpty {
+                            let email = "\(mailbox)@\(host)"
+                            addresses.append(MailAddress(name: name.isEmpty ? nil : name, email: email))
+                        }
+                    }
+                    i = trimmed.index(after: j)
+                    continue
+                }
+            }
+            i = trimmed.index(after: i)
+        }
+        return addresses
+    }
+
+    /// Split IMAP quoted fields, respecting quotes
+    private func splitIMAPQuoted(_ s: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var inQuote = false
+        for ch in s {
+            if ch == "\"" { inQuote = !inQuote; current.append(ch); continue }
+            if ch == " " && !inQuote {
+                if !current.isEmpty { parts.append(current); current = "" }
+                continue
+            }
+            current.append(ch)
+        }
+        if !current.isEmpty { parts.append(current) }
+        return parts
+    }
+
+    /// Parse IMAP date string: "dd-Mon-yyyy HH:mm:ss +HHMM"
+    private func parseIMAPDate(_ s: String) -> Date? {
+        let cleaned = unquoteIMAP(s)
+        guard !cleaned.isEmpty && cleaned != "NIL" else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        for format in ["dd-MMM-yyyy HH:mm:ss Z", "dd-MMM-yyyy HH:mm:ss"] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: cleaned) { return date }
+        }
+        return nil
     }
 
     /// Parse raw IMAP response bytes sequentially to extract BODY[TEXT] byte ranges per UID.
