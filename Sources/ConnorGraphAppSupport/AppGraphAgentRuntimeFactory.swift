@@ -170,10 +170,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         if let storagePaths {
             let scanner = SkillPackageScanner()
             let snapshot = scanner.scan(storagePaths: storagePaths)
-            if !snapshot.packages.isEmpty {
-                registry.register(SkillActivateTool(packages: snapshot.packages))
-                registry.register(SkillListTool(packages: snapshot.packages))
-            }
+            registry.register(SkillActivateTool(packages: snapshot.packages))
+            registry.register(SkillListTool(packages: snapshot.packages))
         }
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
