@@ -451,7 +451,7 @@ private struct BlockingIMAPClient {
         return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit, onBatch: onBatch)
     }
 
-    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, fetchBatchSize: Int = 5, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -635,7 +635,7 @@ private struct BlockingIMAPClient {
         }
 
         var allMessages: [FetchedMessage] = []
-        let batchSize = 50
+        let batchSize = 5
         for batchStart in stride(from: 0, to: fetchUIDs.count, by: batchSize) {
             let batchEnd = min(batchStart + batchSize, fetchUIDs.count)
             let batch = Array(fetchUIDs[batchStart..<batchEnd])
