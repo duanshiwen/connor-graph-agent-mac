@@ -124,6 +124,101 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
+    public func syncIncremental(account originalAccount: MailAccount, storedUIDs: Set<String>) async throws -> MailInitialSyncResult {
+        guard let endpoint = originalAccount.incoming, endpoint.protocolKind == .imap else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "缺少 IMAP 收件服务器配置", reasons: ["Incoming endpoint is not IMAP"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+        guard endpoint.security == .tls else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "增量同步仅允许 TLS IMAP", reasons: ["Direct TLS on port 993 is required"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+        guard let binding = originalAccount.credentialBinding,
+              let rawCredential = try credentialStore.readCredential(binding: binding),
+              !rawCredential.isEmpty else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing Keychain credential"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+        guard let email = originalAccount.identities.first?.address.email, !email.isEmpty else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "缺少邮箱地址", reasons: ["Missing mail identity address"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+
+        do {
+            if binding.authMode == .oauth2 {
+                return MailInitialSyncResult(
+                    account: updatedAccount(originalAccount, status: .blocked, summary: "OAuth 邮件登录已不再支持", reasons: ["请删除此旧账户后使用授权码、App Password 或通用 IMAP/SMTP 凭据重新添加。"]),
+                    mailboxes: [],
+                    messages: []
+                )
+            }
+            let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
+            let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
+            let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let result = try client.withPasswordSessionIncremental(usernames: loginUsernames, password: rawCredential, storedUIDs: storedUIDs)
+                        continuation.resume(returning: result)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            let accountID = originalAccount.id
+            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
+            let now = Date()
+            let mailbox = MailMailbox(
+                id: inboxID,
+                accountID: accountID,
+                name: "收件箱",
+                path: "INBOX",
+                role: .inbox,
+                status: MailMailboxStatus(
+                    messageCount: snapshot.exists,
+                    unreadCount: snapshot.unreadCount,
+                    syncCursor: snapshot.highestUID.map { MailSyncCursor(value: $0, updatedAt: now, uidValidity: snapshot.uidValidity) },
+                    lastSyncedAt: now
+                )
+            )
+            let messages = snapshot.messages.map { fetched in
+                fetched.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email))
+            }
+            var account = originalAccount
+            account.health = MailAccountHealth(
+                status: .ready,
+                checkedAt: now,
+                summary: "增量同步完成 · INBOX \(snapshot.exists) 封 · 新拉取 \(messages.count) 封",
+                blockingReasons: []
+            )
+            account.updatedAt = now
+            return MailInitialSyncResult(account: account, mailboxes: [mailbox], messages: messages)
+        } catch let error as BlockingIMAPClient.IMAPError {
+            let health: MailAccountHealth
+            switch error {
+            case .authenticationFailed(let message):
+                health = MailAccountHealth(status: .unauthenticated, summary: "IMAP 登录失败", blockingReasons: [message])
+            case .connectionFailed(let message), .protocolError(let message):
+                health = MailAccountHealth(status: .degraded, summary: "IMAP 增量同步失败", blockingReasons: [message])
+            }
+            var account = originalAccount
+            account.health = health
+            account.updatedAt = Date()
+            return MailInitialSyncResult(account: account, mailboxes: [], messages: [])
+        }
+    }
+
     private func candidateUsernames(email: String, provider: MailProviderKind) -> [String] {
         var usernames = [email]
         if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap {
@@ -178,7 +273,8 @@ private struct BlockingIMAPClient {
             let from = MailAddress.parse(headers.from) ?? MailAddress(email: "unknown@example.com")
             let to = MailAddress.parseList(headers.to)
             let date = headers.date ?? fallbackSequenceDate
-            let cleanSnippet = snippet.htmlStripped.normalizedWhitespace.prefixString(300)
+            let fullBodyText = snippet.mimeCleanedBody
+            let cleanSnippet = fullBodyText.htmlStripped.normalizedWhitespace.prefixString(300)
             let summary = MailMessageSummary(
                 id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
                 accountID: accountID,
@@ -194,9 +290,9 @@ private struct BlockingIMAPClient {
                 hasAttachments: header.localizedCaseInsensitiveContains("multipart/mixed")
             )
             let body = MailMessageBody(
-                plainText: MailBodyPart(mimeType: "text/plain", text: cleanSnippet, byteCount: cleanSnippet.utf8.count, wasTruncated: snippet.utf8.count > cleanSnippet.utf8.count),
-                redactedPreview: cleanSnippet,
-                bodyHash: String(abs(snippet.hashValue))
+                plainText: MailBodyPart(mimeType: "text/plain", text: fullBodyText, byteCount: fullBodyText.utf8.count, wasTruncated: false),
+                redactedPreview: String(fullBodyText.prefix(500)),
+                bodyHash: String(abs(fullBodyText.hashValue))
             )
             return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: headers.messageID, rawHeaderHash: String(abs(header.hashValue))), body: body)
         }
@@ -230,6 +326,33 @@ private struct BlockingIMAPClient {
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
         return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
+    }
+
+    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, fetchBatchSize: Int = 50) throws -> Snapshot {
+        var readStream: Unmanaged<CFReadStream>?
+        var writeStream: Unmanaged<CFWriteStream>?
+        CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
+        guard let readStream, let writeStream else { throw IMAPError.connectionFailed("Cannot create socket streams for \(host):\(port)") }
+        let input = readStream.takeRetainedValue() as InputStream
+        let output = writeStream.takeRetainedValue() as OutputStream
+        input.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        output.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        let sslSettings: [String: Any] = [
+            kCFStreamSSLPeerName as String: host,
+            kCFStreamSSLValidatesCertificateChain as String: true
+        ]
+        let sslSettingsKey = Stream.PropertyKey(rawValue: kCFStreamPropertySSLSettings as String)
+        input.setProperty(sslSettings, forKey: sslSettingsKey)
+        output.setProperty(sslSettings, forKey: sslSettingsKey)
+        input.open()
+        output.open()
+        defer {
+            input.close()
+            output.close()
+        }
+        _ = try readUntilLine(input: input, timeout: 20)
+        try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, fetchBatchSize: fetchBatchSize)
     }
 
     func withOAuth2Session(usernames: [String], accessToken: String, messageLimit: Int) throws -> Snapshot {
@@ -293,6 +416,65 @@ private struct BlockingIMAPClient {
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
     }
 
+    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, fetchBatchSize: Int) throws -> Snapshot {
+        let statusTag = nextTag()
+        try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
+        let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
+        let statusMessages = statusResponse.firstInt(matching: #"MESSAGES\s+(\d+)"#)
+        let statusUnseen = statusResponse.firstInt(matching: #"UNSEEN\s+(\d+)"#)
+        let statusUIDValidity = statusResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
+
+        let selectTag = nextTag()
+        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
+        guard selectResponse.contains("\(selectTag) OK") else {
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+        }
+        let exists = statusMessages ?? selectResponse.firstInt(matching: #"\*\s+(\d+)\s+EXISTS"#) ?? 0
+        let uidValidity = statusUIDValidity ?? selectResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
+        guard exists > 0 else {
+            try logout(input: input, output: output)
+            return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
+        }
+
+        // Phase 1: Fetch all UIDs and flags
+        let uidTag = nextTag()
+        try write("\(uidTag) UID FETCH 1:* (UID FLAGS)\r\n", output: output)
+        let uidResponse = try readUntilTagged(tag: uidTag, input: input, timeout: 60)
+        let allServerUIDs = parseUIDList(uidResponse)
+
+        // Phase 2: Find new UIDs not in store
+        let newUIDs = allServerUIDs.filter { !storedUIDs.contains($0) }.compactMap(Int.init).sorted()
+
+        guard !newUIDs.isEmpty else {
+            try logout(input: input, output: output)
+            return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allServerUIDs.compactMap(Int.init).max().map(String.init), messages: [])
+        }
+
+        // Phase 3: Batch-fetch new messages
+        var allMessages: [FetchedMessage] = []
+        for batchStart in stride(from: 0, to: newUIDs.count, by: fetchBatchSize) {
+            let batchEnd = min(batchStart + fetchBatchSize, newUIDs.count)
+            let batch = Array(newUIDs[batchStart..<batchEnd])
+            let uidRange = "\(batch.first!):\(batch.last!)"
+            let fetchTag = nextTag()
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
+            let fetchResponse = try readUntilTagged(tag: fetchTag, input: input, timeout: 120)
+            allMessages.append(contentsOf: parseFetchedMessages(fetchResponse))
+        }
+
+        try logout(input: input, output: output)
+        return Snapshot(exists: exists, unreadCount: statusUnseen ?? allMessages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: allServerUIDs.compactMap(Int.init).max().map(String.init), messages: allMessages.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) })
+    }
+
+    private func parseUIDList(_ response: String) -> [String] {
+        let chunks = response.components(separatedBy: "\r\n* ")
+        return chunks.compactMap { chunk -> String? in
+            guard chunk.contains(" FETCH ") else { return nil }
+            return chunk.firstString(matching: #"UID\s+(\d+)"#)
+        }
+    }
+
     private func fetchInboxSnapshot(input: InputStream, output: OutputStream, messageLimit: Int) throws -> Snapshot {
         let statusTag = nextTag()
         try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
@@ -315,7 +497,7 @@ private struct BlockingIMAPClient {
         }
         let start = max(1, exists - max(1, messageLimit) + 1)
         let fetchTag = nextTag()
-        try write("\(fetchTag) UID FETCH \(start):\(exists) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT]<0.1024>)\r\n", output: output)
+        try write("\(fetchTag) UID FETCH \(start):\(exists) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
         let fetchResponse = try readUntilTagged(tag: fetchTag, input: input, timeout: 60)
         try logout(input: input, output: output)
         let messages = parseFetchedMessages(fetchResponse)
@@ -423,8 +605,8 @@ private struct ParsedHeaders {
     init(raw: String) {
         let unfolded = raw.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
         self.messageID = unfolded.headerValue("Message-ID")
-        self.subject = unfolded.headerValue("Subject")
-        self.from = unfolded.headerValue("From")
+        self.subject = unfolded.headerValue("Subject")?.decodeRFC2047().nilIfEmpty
+        self.from = unfolded.headerValue("From")?.decodeRFC2047()
         self.to = unfolded.headerValue("To")
         self.cc = unfolded.headerValue("Cc")
         self.date = Self.parseDate(unfolded.headerValue("Date"))
@@ -477,6 +659,36 @@ private extension String {
         replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
     }
 
+    var mimeCleanedBody: String {
+        var text = self
+        let mimeHeaderPattern = #"(?m)^(Content-Type|Content-Transfer-Encoding|Mime-Version|Content-Disposition|Content-ID|X-)[^\n]*\n?"#
+        text = text.replacingOccurrences(of: mimeHeaderPattern, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?m)^--\S+\s*$"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?m)^[A-Z]\d+ OK FETCH.*$"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func decodeRFC2047() -> String {
+        let pattern = #"=\?([^?]+)\?([QBqb])\?([^?]*)\?="#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return self }
+        var result = self
+        let nsRange = NSRange(result.startIndex..., in: result)
+        let matches = regex.matches(in: result, range: nsRange).reversed()
+        for match in matches {
+            guard let fullRange = Range(match.range(at: 0), in: result),
+                  let charsetRange = Range(match.range(at: 1), in: result),
+                  let encodingRange = Range(match.range(at: 2), in: result),
+                  let textRange = Range(match.range(at: 3), in: result) else { continue }
+            let charset = String(result[charsetRange]).lowercased()
+            let encoding = String(result[encodingRange]).uppercased()
+            let encodedText = String(result[textRange])
+            guard let decoded = RFC2047Codec.decodeOne(charset: charset, encoding: encoding, text: encodedText) else { continue }
+            result.replaceSubrange(fullRange, with: decoded)
+        }
+        return result
+    }
+
     func prefixString(_ count: Int) -> String {
         String(prefix(count))
     }
@@ -494,5 +706,50 @@ private extension String {
 
     func headerValue(_ name: String) -> String? {
         firstString(matching: #"(?m)^\#(name):\s*(.+)$"#)
+    }
+}
+
+private enum RFC2047Codec {
+    static func decodeOne(charset: String, encoding: String, text: String) -> String? {
+        if encoding == "B" {
+            guard let data = Data(base64Encoded: text) else { return nil }
+            return decodeData(data, charset: charset)
+        } else if encoding == "Q" {
+            let cleaned = text.replacingOccurrences(of: "_", with: " ")
+            var bytes = [UInt8]()
+            var i = cleaned.startIndex
+            while i < cleaned.endIndex {
+                if cleaned[i] == "=",
+                   i < cleaned.index(cleaned.endIndex, offsetBy: -2),
+                   let byte = UInt8(cleaned[cleaned.index(after: i)...cleaned.index(i, offsetBy: 2)], radix: 16) {
+                    bytes.append(byte)
+                    i = cleaned.index(i, offsetBy: 3)
+                } else {
+                    if let scalar = cleaned[i].unicodeScalars.first, scalar.isASCII {
+                        bytes.append(UInt8(scalar.value))
+                    }
+                    i = cleaned.index(after: i)
+                }
+            }
+            return decodeData(Data(bytes), charset: charset)
+        }
+        return nil
+    }
+
+    static func decodeData(_ data: Data, charset: String) -> String? {
+        if let s = String(data: data, encoding: .utf8) { return s }
+        let cfEncoding: CFStringEncoding
+        switch charset {
+        case "gb2312", "gbk", "gb18030": cfEncoding = CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+        case "big5": cfEncoding = CFStringEncoding(CFStringEncodings.big5.rawValue)
+        case "iso-2022-jp": cfEncoding = CFStringEncoding(CFStringEncodings.ISO_2022_JP.rawValue)
+        case "euc-jp": cfEncoding = CFStringEncoding(CFStringEncodings.EUC_JP.rawValue)
+        case "shift_jis", "shift-jis": cfEncoding = CFStringEncoding(CFStringEncodings.shiftJIS.rawValue)
+        case "euc-kr": cfEncoding = CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)
+        default:
+            return String(data: data, encoding: .ascii)
+        }
+        let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+        return String(data: data, encoding: String.Encoding(rawValue: nsEncoding))
     }
 }
