@@ -231,6 +231,36 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
+    /// Search emails by query string
+    public func search(account: MailAccount, query: String) async throws -> [String] {
+        guard let endpoint = account.incoming, endpoint.protocolKind == .imap else {
+            throw BlockingIMAPClient.IMAPError.protocolError("缺少 IMAP 收件服务器配置")
+        }
+        guard endpoint.security == .tls else {
+            throw BlockingIMAPClient.IMAPError.protocolError("搜索仅允许 TLS IMAP")
+        }
+        guard let binding = account.credentialBinding,
+              let rawCredential = try credentialStore.readCredential(binding: binding),
+              !rawCredential.isEmpty else {
+            throw BlockingIMAPClient.IMAPError.authenticationFailed("缺少邮件账户凭据")
+        }
+        guard let email = account.identities.first?.address.email, !email.isEmpty else {
+            throw BlockingIMAPClient.IMAPError.protocolError("缺少邮箱地址")
+        }
+        let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
+        let loginUsernames = candidateUsernames(email: email, provider: account.provider)
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[String], Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let result = try client.search(usernames: loginUsernames, password: rawCredential, query: query)
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     private func candidateUsernames(email: String, provider: MailProviderKind) -> [String] {
         var usernames = [email]
         if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap {
@@ -1084,6 +1114,62 @@ private struct BlockingIMAPClient {
         let bodyStartOffset = bodyStart - rawData.startIndex
         guard bodyStartOffset >= 0, bodyStartOffset + literalSize <= rawData.count else { return nil }
         return rawData.subdata(in: bodyStartOffset..<(bodyStartOffset + literalSize))
+    }
+
+    /// Search emails using IMAP SEARCH command
+    func search(usernames: [String], password: String, query: String) throws -> [String] {
+        var readStream: Unmanaged<CFReadStream>?
+        var writeStream: Unmanaged<CFWriteStream>?
+        CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
+        guard let readStream, let writeStream else { throw IMAPError.connectionFailed("Cannot create socket streams for \(host):\(port)") }
+        let input = readStream.takeRetainedValue() as InputStream
+        let output = writeStream.takeRetainedValue() as OutputStream
+        input.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        output.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        let sslSettings: [String: Any] = [
+            kCFStreamSSLPeerName as String: host,
+            kCFStreamSSLValidatesCertificateChain as String: true
+        ]
+        let sslSettingsKey = Stream.PropertyKey(rawValue: kCFStreamPropertySSLSettings as String)
+        input.setProperty(sslSettings, forKey: sslSettingsKey)
+        output.setProperty(sslSettings, forKey: sslSettingsKey)
+        input.open()
+        output.open()
+        defer {
+            input.close()
+            output.close()
+        }
+        _ = try readUntilLine(input: input, timeout: 20)
+        try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+        return try searchInbox(input: input, output: output, query: query)
+    }
+
+    private func searchInbox(input: InputStream, output: OutputStream, query: String) throws -> [String] {
+        let selectTag = nextTag()
+        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
+        guard selectResponse.contains("\(selectTag) OK") else {
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+        }
+
+        // IMAP SEARCH command
+        let searchTag = nextTag()
+        // Search in Subject, From, and body
+        try write("\(searchTag) UID SEARCH OR SUBJECT \"\(query)\" OR FROM \"\(query)\" BODY \"\(query)\"\r\n", output: output)
+        let searchResponse = try readUntilTagged(tag: searchTag, input: input, timeout: 60)
+
+        // Parse SEARCH response: * SEARCH uid1 uid2 uid3 ...
+        var uids: [String] = []
+        let lines = searchResponse.components(separatedBy: "\r\n")
+        for line in lines {
+            if line.hasPrefix("* SEARCH") {
+                let parts = line.components(separatedBy: " ")
+                uids = Array(parts.dropFirst(2)) // drop "*" and "SEARCH"
+            }
+        }
+
+        try logout(input: input, output: output)
+        return uids
     }
 
     private func logout(input: InputStream, output: OutputStream) throws {
