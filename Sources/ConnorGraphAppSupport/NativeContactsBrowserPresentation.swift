@@ -27,6 +27,19 @@ public struct NativeContactsBrowserPresentation: Sendable, Equatable {
             .map(NativeContactRowPresentation.init(record:))
         return NativeContactsBrowserPresentation(query: query, rows: rows, emptyMessage: rows.isEmpty ? "没有匹配的联系人" : nil)
     }
+
+    /// 从邮件联系人构建
+    public static func build(contacts: [MailContact], query: String = "") -> NativeContactsBrowserPresentation {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let filtered = normalized.isEmpty ? contacts : contacts.filter { contact in
+            contact.email.lowercased().contains(normalized)
+            || (contact.displayName?.lowercased().contains(normalized) ?? false)
+        }
+        let rows = filtered
+            .sorted { $0.frequency > $1.frequency }
+            .map(NativeContactRowPresentation.init(contact:))
+        return NativeContactsBrowserPresentation(query: query, rows: rows, emptyMessage: rows.isEmpty ? "没有匹配的联系人" : nil)
+    }
 }
 
 public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
@@ -48,6 +61,15 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
             displayName: record.displayName,
             primaryEmail: record.emails.first?.email,
             organizationName: record.organizationName
+        )
+    }
+
+    public init(contact: MailContact) {
+        self.init(
+            id: contact.id,
+            displayName: contact.displayName ?? contact.email,
+            primaryEmail: contact.email,
+            organizationName: nil
         )
     }
 }
