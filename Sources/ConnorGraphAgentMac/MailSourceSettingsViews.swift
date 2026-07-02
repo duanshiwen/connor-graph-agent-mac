@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
@@ -66,23 +67,75 @@ private struct MailBrowserTopBar: View {
     }
 }
 
+/// WKWebView wrapper for rendering email HTML bodies with image support.
+private struct MailHTMLBodyView: NSViewRepresentable {
+    var htmlContent: String
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        // Disable JavaScript for security (email HTML should not execute scripts)
+        let preferences = WKWebpagePreferences()
+        preferences.allowsContentJavaScript = false
+        config.defaultWebpagePreferences = preferences
+        // Prevent auto-loading remote content for privacy
+        let view = WKWebView(frame: .zero, configuration: config)
+        view.setValue(false, forKey: "drawsBackground")
+        view.isHidden = true
+        return view
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        // Wrap HTML in a basic document structure for consistent rendering
+        let wrapped: String
+        if htmlContent.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("<html") {
+            wrapped = htmlContent
+        } else {
+            wrapped = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.5; padding: 0; margin: 0; word-wrap: break-word; overflow-wrap: break-word; }
+                img { max-width: 100%; height: auto; }
+                a { color: -webkit-link; }
+                pre, code { white-space: pre-wrap; word-break: break-all; }
+            </style>
+            </head>
+            <body>\(htmlContent)</body>
+            </html>
+            """
+        }
+        nsView.loadHTMLString(wrapped, baseURL: nil)
+        nsView.isHidden = false
+    }
+}
+
 private struct MailMessageDetailPane: View {
     var account: MailAccount?
     var mailbox: MailMailbox?
     var message: MailMessageSummary
     @ObservedObject var viewModel: AppViewModel
     @State private var fullBodyText: String?
+    @State private var bodyHTML: String?
+    @State private var bodyWebViewHeight: CGFloat = 200
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
                 MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
-                    Text(fullBodyText ?? message.snippet)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let bodyHTML {
+                        MailHTMLBodyView(htmlContent: bodyHTML)
+                            .frame(minHeight: bodyWebViewHeight)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Text(fullBodyText ?? message.snippet)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 MailInfoSection(title: "收件人", systemImage: "person.2") {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
@@ -97,8 +150,10 @@ private struct MailMessageDetailPane: View {
             .padding(AppShellLayout.spaceXL)
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
         }
-        .task {
+        .task(id: message.id) {
+            // Load both plain text and HTML content
             fullBodyText = await viewModel.loadMailBodyText(for: message.id)
+            bodyHTML = await viewModel.loadMailBodyHTML(for: message.id)
         }
     }
 }

@@ -3,6 +3,16 @@ import ConnorGraphCore
 
 /// MIME parser for email bodies. Handles multipart/alternative, base64/quoted-printable encoding,
 /// and charset conversion (UTF-8, GB2312/GBK, Big5, ISO-2022-JP, etc.)
+public struct MailMIMEBodyResult: Sendable, Equatable {
+    public var plainText: String
+    public var htmlText: String?
+
+    public init(plainText: String, htmlText: String? = nil) {
+        self.plainText = plainText
+        self.htmlText = htmlText
+    }
+}
+
 public struct MailMIMEParser: Sendable, Equatable {
     public init() {}
 
@@ -15,8 +25,15 @@ public struct MailMIMEParser: Sendable, Equatable {
         let decodedData = decodeTransferEncoding(rawData, encoding: transferEncoding)
 
         // Step 2: If multipart, extract text/plain part
-        if let contentType = contentType?.lowercased(), contentType.contains("multipart/"),
-           let boundary = boundary, !boundary.isEmpty {
+        // Detect multipart via contentType OR by presence of a valid boundary.
+        // The contentType parameter may be a synthetic header (no Content-Type) when called
+        // from IMAP detail(), so we must also accept boundary alone as a multipart signal.
+        let isMultipart: Bool = {
+            if let ct = contentType?.lowercased(), ct.contains("multipart/") { return true }
+            if let b = boundary, !b.isEmpty { return true }
+            return false
+        }()
+        if isMultipart, let boundary = boundary, !boundary.isEmpty {
             let bodyString = String(data: decodedData, encoding: .utf8) ?? String(decoding: decodedData, as: Unicode.UTF8.self)
             return extractPlainText(from: bodyString, boundary: boundary)
         }
@@ -64,6 +81,91 @@ public struct MailMIMEParser: Sendable, Equatable {
         return String(data: data, encoding: String.Encoding(rawValue: nsEncoding))
     }
 
+    /// Parse a raw email body and return both plain text and HTML content.
+    /// Handles multipart/alternative, multipart/mixed, base64/quoted-printable, charset conversion.
+    public func parseBodyWithHTML(rawData: Data?, fallbackString: String, charset: String?, transferEncoding: String?, contentType: String?, boundary: String?) -> MailMIMEBodyResult {
+        guard let rawData, !rawData.isEmpty else {
+            return MailMIMEBodyResult(plainText: fallbackString)
+        }
+
+        // Step 1: Decode Content-Transfer-Encoding
+        let decodedData = decodeTransferEncoding(rawData, encoding: transferEncoding)
+
+        // Step 2: If multipart, extract both text/plain and text/html parts
+        let isMultipart: Bool = {
+            if let ct = contentType?.lowercased(), ct.contains("multipart/") { return true }
+            if let b = boundary, !b.isEmpty { return true }
+            return false
+        }()
+        if isMultipart, let boundary = boundary, !boundary.isEmpty {
+            let bodyString = String(data: decodedData, encoding: .utf8) ?? String(decoding: decodedData, as: Unicode.UTF8.self)
+            return extractBodyComponents(from: bodyString, boundary: boundary)
+        }
+
+        // Step 3: Single part — detect whether it's HTML or plain text
+        let decodedString = decodeCharset(decodedData, charset: charset) ?? fallbackString
+        let trimmed = decodedString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed.hasPrefix("<html") || trimmed.hasPrefix("<!doctype html") || trimmed.hasPrefix("<!doctype") {
+            return MailMIMEBodyResult(plainText: stripHTML(decodedString), htmlText: decodedString)
+        }
+        return MailMIMEBodyResult(plainText: decodedString)
+    }
+
+    /// Extract both text/plain and text/html parts from multipart body
+    public func extractBodyComponents(from body: String, boundary: String) -> MailMIMEBodyResult {
+        let delimiter = "--\(boundary)"
+        let parts = body.components(separatedBy: delimiter)
+        var bestPlain: String?
+        var bestHTML: String?
+
+        for part in parts {
+            let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("--") else { continue }
+
+            let separator: String
+            if trimmed.contains("\r\n\r\n") {
+                separator = "\r\n\r\n"
+            } else {
+                separator = "\n\n"
+            }
+            let components = trimmed.components(separatedBy: separator)
+            let headerPart = components.first ?? ""
+            let bodyPart = components.dropFirst().joined(separator: separator)
+
+            let contentType = headerPart.lowercased()
+            if contentType.contains("text/plain") {
+                let charset = extractCharsetFromContentType(headerPart)
+                let transferEncoding = extractTransferEncodingFromHeader(headerPart)
+                let decodedBody = decodeTransferEncoding(Data(bodyPart.utf8), encoding: transferEncoding)
+                if let text = decodeCharset(decodedBody, charset: charset) {
+                    bestPlain = text
+                }
+            } else if contentType.contains("text/html") {
+                let charset = extractCharsetFromContentType(headerPart)
+                let transferEncoding = extractTransferEncodingFromHeader(headerPart)
+                let decodedBody = decodeTransferEncoding(Data(bodyPart.utf8), encoding: transferEncoding)
+                if let html = decodeCharset(decodedBody, charset: charset) {
+                    bestHTML = html
+                }
+            } else if contentType.contains("multipart/") {
+                // Nested multipart — recursively extract
+                let nestedBoundary = extractBoundaryFromContentType(headerPart)
+                if let nestedBoundary = nestedBoundary {
+                    let nested = extractBodyComponents(from: bodyPart, boundary: nestedBoundary)
+                    if bestPlain == nil, !nested.plainText.isEmpty {
+                        bestPlain = nested.plainText
+                    }
+                    if bestHTML == nil, let nestedHTML = nested.htmlText {
+                        bestHTML = nestedHTML
+                    }
+                }
+            }
+        }
+
+        let plain = bestPlain ?? (bestHTML.map { stripHTML($0) }) ?? stripHTML(body)
+        return MailMIMEBodyResult(plainText: plain, htmlText: bestHTML)
+    }
+
     /// Extract text/plain part from multipart body
     public func extractPlainText(from body: String, boundary: String) -> String {
         let delimiter = "--\(boundary)"
@@ -75,10 +177,16 @@ public struct MailMIMEParser: Sendable, Equatable {
             let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, !trimmed.hasPrefix("--") else { continue }
 
-            // Split headers and body
-            let components = trimmed.components(separatedBy: "\r\n\r\n")
+            // Split headers and body (handle both CRLF and LF line endings)
+            let separator: String
+            if trimmed.contains("\r\n\r\n") {
+                separator = "\r\n\r\n"
+            } else {
+                separator = "\n\n"
+            }
+            let components = trimmed.components(separatedBy: separator)
             let headerPart = components.first ?? ""
-            let bodyPart = components.dropFirst().joined(separator: "\r\n\r\n")
+            let bodyPart = components.dropFirst().joined(separator: separator)
 
             // Check Content-Type
             let contentType = headerPart.lowercased()
