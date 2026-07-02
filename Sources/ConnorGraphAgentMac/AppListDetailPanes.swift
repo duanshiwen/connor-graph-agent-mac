@@ -717,6 +717,19 @@ struct CraftMailListPane: View {
                 viewModel.mailSearchQuery = ""
             }
 
+            if viewModel.isInitialSyncingMail {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在后台同步邮件…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.accentColor.opacity(0.08))
+            }
+
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("还没有连接邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮箱账户。之后康纳同学可以在本地读取邮件，并把相关邮件作为会话上下文。"))
                     .padding(.top, 80)
