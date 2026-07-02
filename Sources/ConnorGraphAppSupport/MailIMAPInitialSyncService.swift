@@ -17,7 +17,7 @@ public struct MailIMAPInitialSyncService: Sendable {
     public var credentialStore: AppMailCredentialStore
     public var messageLimit: Int
 
-    public init(credentialStore: AppMailCredentialStore = AppMailCredentialStore(), messageLimit: Int = 25) {
+    public init(credentialStore: AppMailCredentialStore = AppMailCredentialStore(), messageLimit: Int = 200) {
         self.credentialStore = credentialStore
         self.messageLimit = messageLimit
     }
@@ -547,13 +547,34 @@ private struct BlockingIMAPClient {
             try logout(input: input, output: output)
             return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
         }
-        let start = max(1, exists - max(1, messageLimit) + 1)
-        let fetchTag = nextTag()
-        try write("\(fetchTag) UID FETCH \(start):\(exists) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
-        let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
+
+        // Phase 1: Fetch all UIDs to get correct UID list
+        let uidTag = nextTag()
+        try write("\(uidTag) UID FETCH 1:* (UID FLAGS)\r\n", output: output)
+        let uidResponse = try readUntilTagged(tag: uidTag, input: input, timeout: 60)
+        let allUIDs = parseUIDList(uidResponse).compactMap(Int.init).sorted()
+
+        // Phase 2: Take latest N UIDs and batch-fetch content
+        let fetchUIDs = Array(allUIDs.suffix(messageLimit))
+        guard !fetchUIDs.isEmpty else {
+            try logout(input: input, output: output)
+            return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: [])
+        }
+
+        var allMessages: [FetchedMessage] = []
+        let batchSize = 50
+        for batchStart in stride(from: 0, to: fetchUIDs.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, fetchUIDs.count)
+            let batch = Array(fetchUIDs[batchStart..<batchEnd])
+            let uidRange = "\(batch.first!):\(batch.last!)"
+            let fetchTag = nextTag()
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
+            let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
+            allMessages.append(contentsOf: parseFetchedMessages(fetchResponse, rawData: fetchRaw))
+        }
+
         try logout(input: input, output: output)
-        let messages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
-        return Snapshot(exists: exists, unreadCount: statusUnseen ?? messages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: messages.map(\.uid).compactMap(Int.init).max().map(String.init), messages: messages)
+        return Snapshot(exists: exists, unreadCount: statusUnseen ?? allMessages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: allMessages.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) })
     }
 
     private func parseFetchedMessages(_ response: String, rawData: Data? = nil) -> [FetchedMessage] {

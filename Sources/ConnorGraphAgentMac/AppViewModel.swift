@@ -2468,7 +2468,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func refreshMailForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
         guard let mailStore else { return "Mail store unavailable" }
-        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore, messageLimit: 25)
+        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore)
         let accounts: [MailAccount]
         if let sourceInstanceID, !sourceInstanceID.isEmpty {
             guard let account = try await mailStore.account(id: MailAccountID(rawValue: sourceInstanceID)) else {
@@ -2697,7 +2697,7 @@ final class AppViewModel: NSObject, ObservableObject {
             try await mailStore?.saveMailbox(mailbox)
         }
 
-        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore, messageLimit: 25)
+        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore)
         let syncResult = try await syncService.sync(account: account)
         try await mailStore?.saveAccount(syncResult.account)
         let syncedMailboxIDs = Set(syncResult.mailboxes.map(\.id))
