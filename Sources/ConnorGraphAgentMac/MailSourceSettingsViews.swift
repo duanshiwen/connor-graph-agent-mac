@@ -203,6 +203,8 @@ struct AddMailAccountSheet: View {
     @State private var setupError: String?
     @State private var isAutoconfigLoading: Bool = false
     @State private var autoconfigResult: MailAutoconfigResult?
+    @State private var isTestingConnection: Bool = false
+    @State private var testResult: MailConnectionTestResult?
 
     private var isManualPreset: Bool {
         selectedPreset == .other
@@ -354,7 +356,20 @@ struct AddMailAccountSheet: View {
 
     private var footer: some View {
         HStack(spacing: SettingsListLayout.spaceS) {
+            Button {
+                Task { await runConnectionTest() }
+            } label: {
+                if isTestingConnection {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("测试连接")
+                }
+            }
+            .disabled(isTestingConnection || email.isEmpty || credential.isEmpty)
+
             Spacer()
+
             Button("取消") { dismiss() }
                 .keyboardShortcut(.cancelAction)
                 .disabled(isSubmitting)
@@ -434,6 +449,45 @@ struct AddMailAccountSheet: View {
         }
 
         isAutoconfigLoading = false
+    }
+
+    @MainActor
+    private func runConnectionTest() async {
+        let emailValue = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let credentialValue = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !emailValue.isEmpty, !credentialValue.isEmpty else {
+            setupError = "请先填写邮箱地址和授权凭据"
+            return
+        }
+
+        isTestingConnection = true
+        setupMessage = "正在测试连接…"
+        setupError = nil
+        testResult = nil
+
+        let service = MailConnectionTestService()
+        do {
+            let result = try await service.testConnection(
+                email: emailValue,
+                credential: credentialValue,
+                incomingHost: incomingHost,
+                incomingPort: incomingPort,
+                incomingSecurity: .tls,
+                outgoingHost: outgoingHost,
+                outgoingPort: outgoingPort,
+                outgoingSecurity: .startTLS
+            )
+            testResult = result
+            if result.isSuccess {
+                setupMessage = "连接测试通过"
+            } else {
+                setupError = "连接测试失败，请检查配置"
+            }
+        } catch {
+            setupError = "测试失败: \(error.localizedDescription)"
+        }
+
+        isTestingConnection = false
     }
 }
 
