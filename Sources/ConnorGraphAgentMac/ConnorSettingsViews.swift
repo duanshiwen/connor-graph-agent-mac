@@ -880,6 +880,62 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
 
     static let all: [AIConnectionOnboardingOption] = [
         AIConnectionOnboardingOption(
+            id: "deepseek",
+            title: "DeepSeek",
+            subtitle: "使用 DeepSeek API，适合国内开发、Agent 和高性价比推理。",
+            systemImage: "bolt.horizontal.circle",
+            tint: .blue,
+            providerMode: .openAICompatible,
+            connectionName: "DeepSeek",
+            baseURLString: "https://api.deepseek.com",
+            model: "deepseek-v4-flash",
+            selectedModel: "deepseek-v4-flash",
+            supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
+            setupTitle: "连接 DeepSeek",
+            setupSubtitle: "使用 DeepSeek OpenAI Compatible API 驱动康纳同学。",
+            setupInstruction: "选择 DeepSeek 模型并填写 API Key。接口地址已按官方文档预设。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
+            id: "xiaomi-mimo",
+            title: "Xiaomi MiMo",
+            subtitle: "使用小米 MiMo API，专为 Agent 与软件工程模型场景准备。",
+            systemImage: "sparkle.magnifyingglass",
+            tint: .orange,
+            providerMode: .openAICompatible,
+            connectionName: "Xiaomi MiMo",
+            baseURLString: "https://api.xiaomimimo.com/v1",
+            model: "mimo-v2.5-pro",
+            selectedModel: "mimo-v2.5-pro",
+            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"],
+            setupTitle: "连接 Xiaomi MiMo",
+            setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
+            setupInstruction: "选择 MiMo 使用方式、模型并填写对应 API Key。sk-... 使用按量付费 endpoint；tp-... 使用 Token Plan endpoint。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
+            id: "china-provider",
+            title: "中国常用模型",
+            subtitle: "接入 Qwen、豆包、Kimi、GLM、MiniMax、阶跃等国内常用 API。",
+            systemImage: "globe.asia.australia",
+            tint: .red,
+            providerMode: .openAICompatible,
+            connectionName: "阿里百炼 · Qwen",
+            baseURLString: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model: "qwen-plus",
+            selectedModel: "qwen-plus",
+            setupTitle: "连接中国常用模型",
+            setupSubtitle: "从国内常用模型 API 中选择一个兼容服务。",
+            setupInstruction: "选择服务商和模型并填写 API Key。接口地址已按常用兼容服务预设。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
             id: "openai-responses-api",
             title: "OpenAI API",
             subtitle: "使用 OpenAI API Key 通过 Connor 原生 Responses 管线驱动康纳同学。",
@@ -950,62 +1006,6 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             loginButtonTitle: "打开 GitHub 授权页",
             authURLString: "https://github.com/login/device",
             authenticationKind: .deviceCode(code: "B3D1-87D5", verificationURL: "https://github.com/login/device")
-        ),
-        AIConnectionOnboardingOption(
-            id: "deepseek",
-            title: "DeepSeek",
-            subtitle: "使用 DeepSeek API，适合国内开发、Agent 和高性价比推理。",
-            systemImage: "bolt.horizontal.circle",
-            tint: .blue,
-            providerMode: .openAICompatible,
-            connectionName: "DeepSeek",
-            baseURLString: "https://api.deepseek.com",
-            model: "deepseek-v4-flash",
-            selectedModel: "deepseek-v4-flash",
-            supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
-            setupTitle: "连接 DeepSeek",
-            setupSubtitle: "使用 DeepSeek OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "选择 DeepSeek 模型并填写 API Key。接口地址已按官方文档预设。",
-            loginButtonTitle: "继续",
-            authURLString: "",
-            authenticationKind: .direct
-        ),
-        AIConnectionOnboardingOption(
-            id: "xiaomi-mimo",
-            title: "Xiaomi MiMo",
-            subtitle: "使用小米 MiMo API，专为 Agent 与软件工程模型场景准备。",
-            systemImage: "sparkle.magnifyingglass",
-            tint: .orange,
-            providerMode: .openAICompatible,
-            connectionName: "Xiaomi MiMo",
-            baseURLString: "https://api.xiaomimimo.com/v1",
-            model: "mimo-v2.5-pro",
-            selectedModel: "mimo-v2.5-pro",
-            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"],
-            setupTitle: "连接 Xiaomi MiMo",
-            setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "选择 MiMo 使用方式、模型并填写对应 API Key。sk-... 使用按量付费 endpoint；tp-... 使用 Token Plan endpoint。",
-            loginButtonTitle: "继续",
-            authURLString: "",
-            authenticationKind: .direct
-        ),
-        AIConnectionOnboardingOption(
-            id: "china-provider",
-            title: "中国常用模型",
-            subtitle: "接入 Qwen、豆包、Kimi、GLM、MiniMax、阶跃等国内常用 API。",
-            systemImage: "globe.asia.australia",
-            tint: .red,
-            providerMode: .openAICompatible,
-            connectionName: "阿里百炼 · Qwen",
-            baseURLString: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            model: "qwen-plus",
-            selectedModel: "qwen-plus",
-            setupTitle: "连接中国常用模型",
-            setupSubtitle: "从国内常用模型 API 中选择一个兼容服务。",
-            setupInstruction: "选择服务商和模型并填写 API Key。接口地址已按常用兼容服务预设。",
-            loginButtonTitle: "继续",
-            authURLString: "",
-            authenticationKind: .direct
         ),
         AIConnectionOnboardingOption(
             id: "other-provider",
@@ -1380,15 +1380,15 @@ struct AIConnectionSetupView: View {
                     aiConnectionTextField("claude-sonnet-4-5", text: $selectedModel)
                 }
                 aiConnectionSettingsRow(title: "视觉输入", help: "默认自动检测模型是否支持图片。如果自动检测不准（如新模型），可手动覆盖。") {
-                    Picker("视觉输入", selection: $visionSupportOverride) {
-                        Text("自动检测").tag(nil as Bool?)
-                        Text("强制开启").tag(true as Bool?)
-                        Text("强制关闭").tag(false as Bool?)
+                    aiConnectionInputContainer {
+                        Picker("视觉输入", selection: $visionSupportOverride) {
+                            Text("自动检测").tag(nil as Bool?)
+                            Text("强制开启").tag(true as Bool?)
+                            Text("强制关闭").tag(false as Bool?)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.large)
-                    .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 }
             }
             .padding(.top, SettingsListLayout.spaceM)
