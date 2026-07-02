@@ -2073,16 +2073,12 @@ final class AppViewModel: NSObject, ObservableObject {
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
             )
-            do {
-                self.mailStore = try SQLiteMailSourceStore(
-                    databaseURL: storagePaths.applicationSupportDirectory
-                        .appendingPathComponent("mail", isDirectory: true)
-                        .appendingPathComponent("mail.db"),
-                    searchService: nativeSourceSearchBackend
-                )
-            } catch {
-                self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
-            }
+            self.mailStore = try? SQLiteMailSourceStore(
+                databaseURL: storagePaths.applicationSupportDirectory
+                    .appendingPathComponent("mail", isDirectory: true)
+                    .appendingPathComponent("mail.db"),
+                searchService: nativeSourceSearchBackend
+            )
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
