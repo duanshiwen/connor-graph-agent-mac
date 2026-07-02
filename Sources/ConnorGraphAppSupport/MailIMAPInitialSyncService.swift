@@ -275,8 +275,14 @@ private struct BlockingIMAPClient {
             let to = MailAddress.parseList(headers.to)
             let date = headers.date ?? fallbackSequenceDate
             let charset = ParsedHeaders.extractCharset(from: header)
+            let isMultipart = header.localizedCaseInsensitiveContains("multipart/")
             let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset)
-            let fullBodyText = decodedBody.mimeCleanedBody
+            let fullBodyText: String
+            if isMultipart, let boundary = ParsedHeaders.extractBoundary(from: header) {
+                fullBodyText = Self.extractPlainTextPart(from: decodedBody, boundary: boundary)
+            } else {
+                fullBodyText = decodedBody.mimeCleanedBody
+            }
             let cleanSnippet = fullBodyText.htmlStripped.normalizedWhitespace.prefixString(300)
             let summary = MailMessageSummary(
                 id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
@@ -324,6 +330,23 @@ private struct BlockingIMAPClient {
             }
             let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
             return String(data: rawData, encoding: String.Encoding(rawValue: nsEncoding)) ?? fallbackString
+        }
+
+        static func extractPlainTextPart(from body: String, boundary: String) -> String {
+            let delimiter = "--\(boundary)"
+            let parts = body.components(separatedBy: delimiter)
+            for part in parts {
+                let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("--") else { continue }
+                let isPlainText = trimmed.range(of: #"Content-Type:\s*text/plain"#, options: [.caseInsensitive, .regularExpression]) != nil
+                guard isPlainText else { continue }
+                if let headerEnd = trimmed.range(of: "\r\n\r\n") {
+                    return String(trimmed[headerEnd.upperBound...]).mimeCleanedBody
+                } else if let headerEnd = trimmed.range(of: "\n\n") {
+                    return String(trimmed[headerEnd.upperBound...]).mimeCleanedBody
+                }
+            }
+            return body.mimeCleanedBody
         }
     }
 
@@ -692,6 +715,28 @@ private struct ParsedHeaders {
             let endChars = CharacterSet(charactersIn: "; \t\r\n")
             var result = ""
             for char in afterCharset {
+                if char.unicodeScalars.contains(where: { endChars.contains($0) }) { break }
+                result.append(char)
+            }
+            return result.isEmpty ? nil : result
+        }
+        return nil
+    }
+
+    static func extractBoundary(from header: String) -> String? {
+        let unfolded = header.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
+        guard let contentType = unfolded.headerValue("Content-Type") else { return nil }
+        if let boundaryRange = contentType.range(of: #"boundary="#, options: .caseInsensitive) {
+            let afterBoundary = contentType[boundaryRange.upperBound...]
+            if let startQuote = afterBoundary.range(of: "\"") {
+                let afterQuote = afterBoundary[startQuote.upperBound...]
+                if let endQuote = afterQuote.range(of: "\"") {
+                    return String(afterQuote[..<endQuote.lowerBound])
+                }
+            }
+            let endChars = CharacterSet(charactersIn: "; \t\r\n")
+            var result = ""
+            for char in afterBoundary {
                 if char.unicodeScalars.contains(where: { endChars.contains($0) }) { break }
                 result.append(char)
             }
