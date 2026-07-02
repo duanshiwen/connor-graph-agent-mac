@@ -70,7 +70,7 @@ public struct MailIMAPInitialSyncService: Sendable {
                 )
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-            let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
+            let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
             let accountID = originalAccount.id
             let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
@@ -171,7 +171,7 @@ public struct MailIMAPInitialSyncService: Sendable {
                 )
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-            let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
+            let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
             let accountID = originalAccount.id
             let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
@@ -231,6 +231,39 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
+    /// Fetch a single message's body from IMAP on demand (lazy loading).
+    /// Used by AppViewModel when user opens a message that has no cached body.
+    public func fetchMessageBody(account: MailAccount, uid: String, messageID: MailMessageID, mailboxID: MailMailboxID, snippet: String) async throws -> MailMessageDetail? {
+        guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return nil }
+        guard endpoint.security == .tls else { return nil }
+        guard let binding = account.credentialBinding,
+              let password = try credentialStore.readCredential(binding: binding),
+              !password.isEmpty else { return nil }
+        guard let email = account.identities.first?.address.email, !email.isEmpty else { return nil }
+
+        let uidInt = Int(uid) ?? 0
+        guard uidInt > 0 else { return nil }
+
+        let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
+        let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
+        let accountID = account.id
+
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let detail = try client.fetchSingleMessageBody(
+                        usernames: loginUsernames, password: password,
+                        uid: uid, accountID: accountID, mailboxID: mailboxID,
+                        fallbackRecipient: MailAddress(email: email), snippet: snippet
+                    )
+                    continuation.resume(returning: detail)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     /// Search emails by query string
     public func search(account: MailAccount, query: String) async throws -> [String] {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else {
@@ -248,7 +281,7 @@ public struct MailIMAPInitialSyncService: Sendable {
             throw BlockingIMAPClient.IMAPError.protocolError("缺少邮箱地址")
         }
         let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
-        let loginUsernames = candidateUsernames(email: email, provider: account.provider)
+        let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[String], Error>) in
             DispatchQueue.global(qos: .utility).async {
                 do {
@@ -261,7 +294,7 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
-    private func candidateUsernames(email: String, provider: MailProviderKind) -> [String] {
+    public static func candidateUsernames(email: String, provider: MailProviderKind) -> [String] {
         var usernames = [email]
         if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap {
             return usernames
@@ -280,7 +313,7 @@ public struct MailIMAPInitialSyncService: Sendable {
     }
 }
 
-private struct BlockingIMAPClient {
+struct BlockingIMAPClient {
     enum IMAPError: Error, Sendable, Equatable, CustomStringConvertible {
         case connectionFailed(String)
         case authenticationFailed(String)
@@ -305,33 +338,69 @@ private struct BlockingIMAPClient {
         var uid: String
         var flags: String
         var header: String
+        var rawHeaderData: Data?  // Raw RFC 822 headers from BODY.PEEK[HEADER.FIELDS]
         var snippet: String
         var rawBodyData: Data?
         var fallbackSequenceDate: Date
 
         func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress) -> MailMessageDetail {
-            let headers = ParsedHeaders(raw: header)
-            let messageID = headers.messageID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "imap-uid-\(uid)"
-            let subject = headers.subject?.nilIfEmpty ?? "（无主题）"
-            let from = MailAddress.parse(headers.from) ?? MailAddress(email: "unknown@example.com")
-            let to = MailAddress.parseList(headers.to)
-            let date = headers.date ?? fallbackSequenceDate
-            let charset = ParsedHeaders.extractCharset(from: header)
-            let isMultipart = header.localizedCaseInsensitiveContains("multipart/")
+            // Parse headers: prefer raw RFC 822 headers (ASCII-safe, proper RFC 2047 decoding)
+            // over synthetic header from ENVELOPE (may have lossy non-ASCII bytes).
+            let rawHeaders: ParsedHeaders
+            if let rawHeaderData {
+                // Some servers (e.g. QQ, 163) send raw UTF-8 in BODY[HEADER.FIELDS] instead of
+                // RFC 2047 encoded form. Try ASCII first (RFC 2047 is ASCII-safe), then UTF-8
+                // (for raw non-ASCII headers), then Latin-1 as broad fallback.
+                if let headerString = String(data: rawHeaderData, encoding: .ascii) {
+                    rawHeaders = ParsedHeaders(raw: headerString)
+                } else if let headerString = String(data: rawHeaderData, encoding: .utf8) {
+                    // Raw UTF-8 header: content is already decoded, skip RFC 2047 decode
+                    rawHeaders = ParsedHeaders(raw: headerString, skipRFC2047: true)
+                } else if let headerString = String(data: rawHeaderData, encoding: .isoLatin1) {
+                    rawHeaders = ParsedHeaders(raw: headerString)
+                } else {
+                    rawHeaders = ParsedHeaders(raw: header)
+                }
+            } else {
+                rawHeaders = ParsedHeaders(raw: header)
+            }
+            let envHeaders = ParsedHeaders(raw: header)
+            let messageID = envHeaders.messageID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "imap-uid-\(uid)"
+            // Subject/From: prefer raw RFC 822 headers (proper RFC 2047 decoding)
+            let subject = rawHeaders.subject?.nilIfEmpty ?? envHeaders.subject?.nilIfEmpty ?? "（无主题）"
+            let from = MailAddress.parse(rawHeaders.from) ?? MailAddress.parse(envHeaders.from) ?? MailAddress(email: "unknown@example.com")
+            // To/Cc/Date: use ENVELOPE data (structured, already parsed)
+            let to = MailAddress.parseList(envHeaders.to)
+            let date = envHeaders.date ?? fallbackSequenceDate
+            // Charset extraction: try rawHeaderData with the same multi-encoding fallback
+            let charset: String? = {
+                guard let rawHeaderData else { return ParsedHeaders.extractCharset(from: header) }
+                if let s = String(data: rawHeaderData, encoding: .ascii) { return ParsedHeaders.extractCharset(from: s) }
+                if let s = String(data: rawHeaderData, encoding: .utf8) { return ParsedHeaders.extractCharset(from: s) }
+                if let s = String(data: rawHeaderData, encoding: .isoLatin1) { return ParsedHeaders.extractCharset(from: s) }
+                return ParsedHeaders.extractCharset(from: header)
+            }()
             let mimeParser = MailMIMEParser()
-            let fullBodyText: String
-            if isMultipart || rawBodyData.flatMap({ String(data: $0, encoding: .utf8)?.contains("boundary=") }) == true {
-                // Use MIME parser for multipart
-                let boundary = ParsedHeaders.extractBoundary(from: header) ?? rawBodyData.flatMap { data in
-                    let str = String(data: data, encoding: .utf8) ?? ""
+            // Detect multipart: check rawBodyData for boundary= (the synthetic header from ENVELOPE
+            // never contains Content-Type, so header-based detection is unreliable).
+            // Use tolerant decoding: only scan first 2KB where MIME headers live (always ASCII-compatible),
+            // and fall back to lossy UTF-8 decoding if strict UTF-8 fails.
+            let boundary = rawBodyData.flatMap { data -> String? in
+                let prefix = data.prefix(2048)
+                if let str = String(data: prefix, encoding: .utf8) {
                     return MailMIMEParser().extractBoundaryFromContentType(str)
                 }
-                fullBodyText = mimeParser.parseBody(rawData: rawBodyData, fallbackString: snippet, charset: charset, transferEncoding: headers.transferEncoding, contentType: header, boundary: boundary)
-            } else {
-                let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset, transferEncoding: headers.transferEncoding)
-                fullBodyText = decodedBody.mimeCleanedBody
+                // Lossy UTF-8: tolerate non-UTF-8 bytes in the data prefix
+                let lossy = String(decoding: prefix, as: Unicode.UTF8.self)
+                return MailMIMEParser().extractBoundaryFromContentType(lossy)
             }
-            let cleanSnippet = fullBodyText.htmlStripped.normalizedWhitespace.prefixString(300)
+            // Use new parseBodyWithHTML that returns both plain text and HTML content
+            let bodyResult = mimeParser.parseBodyWithHTML(
+                rawData: rawBodyData, fallbackString: snippet,
+                charset: charset, transferEncoding: rawHeaders.transferEncoding ?? envHeaders.transferEncoding,
+                contentType: header, boundary: boundary
+            )
+            let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
             let summary = MailMessageSummary(
                 id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
                 accountID: accountID,
@@ -340,18 +409,19 @@ private struct BlockingIMAPClient {
                 subject: subject,
                 from: from,
                 to: to.isEmpty ? [fallbackRecipient] : to,
-                cc: MailAddress.parseList(headers.cc),
+                cc: MailAddress.parseList(envHeaders.cc),
                 date: date,
                 snippet: cleanSnippet.isEmpty ? "（无正文摘要）" : cleanSnippet,
                 flags: MailMessageFlags(isRead: flags.localizedCaseInsensitiveContains("\\Seen"), isFlagged: flags.localizedCaseInsensitiveContains("\\Flagged"), isAnswered: flags.localizedCaseInsensitiveContains("\\Answered"), isDeleted: flags.localizedCaseInsensitiveContains("\\Deleted")),
                 hasAttachments: header.localizedCaseInsensitiveContains("multipart/mixed")
             )
             let body = MailMessageBody(
-                plainText: MailBodyPart(mimeType: "text/plain", text: fullBodyText, byteCount: fullBodyText.utf8.count, wasTruncated: false),
-                redactedPreview: String(fullBodyText.prefix(500)),
-                bodyHash: String(abs(fullBodyText.hashValue))
+                plainText: MailBodyPart(mimeType: "text/plain", text: bodyResult.plainText, byteCount: bodyResult.plainText.utf8.count, wasTruncated: false),
+                htmlText: bodyResult.htmlText.map { MailBodyPart(mimeType: "text/html", text: $0, byteCount: $0.utf8.count) },
+                redactedPreview: String(bodyResult.plainText.prefix(500)),
+                bodyHash: String(abs(bodyResult.plainText.hashValue))
             )
-            return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: headers.messageID, rawHeaderHash: String(abs(header.hashValue))), body: body)
+            return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: envHeaders.messageID, rawHeaderHash: String(abs(header.hashValue))), body: body)
         }
 
         static func decodeQuotedPrintable(_ data: Data) -> Data {
@@ -510,7 +580,7 @@ private struct BlockingIMAPClient {
         return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit, onBatch: onBatch)
     }
 
-    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int = 5, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -646,7 +716,8 @@ private struct BlockingIMAPClient {
             let batch = Array(newUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
-            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[TEXT])\r\n", output: output)
+            // Incremental sync: fetch only headers — no body text
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type)])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
             let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
             allMessages.append(contentsOf: batchMessages)
@@ -700,13 +771,17 @@ private struct BlockingIMAPClient {
         }
 
         var allMessages: [FetchedMessage] = []
-        let batchSize = 5
+        // Initial sync: fetch only headers, envelope and flags. NO body text.
+        // Body is fetched on-demand when user opens a message (see Task 2).
+        // Larger batch size (50 instead of 5) significantly reduces round trips.
+        let batchSize = 50
         for batchStart in stride(from: 0, to: fetchUIDs.count, by: batchSize) {
             let batchEnd = min(batchStart + batchSize, fetchUIDs.count)
             let batch = Array(fetchUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
-            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[TEXT])\r\n", output: output)
+            // Fetch only envelope and key headers — no body text
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type)])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
             let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
             allMessages.append(contentsOf: batchMessages)
@@ -729,7 +804,7 @@ private struct BlockingIMAPClient {
             let flags = chunk.firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
             let header = extractHeader(from: chunk)
             let body = extractBody(from: chunk, after: header)
-            return FetchedMessage(uid: uid, flags: flags, header: header, snippet: body, rawBodyData: nil, fallbackSequenceDate: Date())
+            return FetchedMessage(uid: uid, flags: flags, header: header, rawHeaderData: nil, snippet: body, rawBodyData: nil, fallbackSequenceDate: Date())
         }.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
     }
 
@@ -788,19 +863,23 @@ private struct BlockingIMAPClient {
                     let envStart = i + envIdx + envelopeMarker.count
                     // ENVELOPE starts with '('
                     if envStart < bytes.count && bytes[envStart] == 0x28 {
-                        // Extract ENVELOPE content by counting parens
-                        var depth = 0
-                        var envContent = ""
-                        var j = envStart
-                        while j < bytes.count {
-                            let b = bytes[j]
-                            if b == 0x28 { depth += 1 }
-                            else if b == 0x29 { depth -= 1 }
-                            envContent.append(Character(UnicodeScalar(b)))
+                        // Extract ENVELOPE content by counting parens in raw bytes.
+                        // Use tolerant UTF-8 decoding instead of byte-by-byte Character(UnicodeScalar(b))
+                        // which garbles non-ASCII bytes (e.g. Chinese subjects).
+                        var depth = 1
+                        var j = envStart + 1
+                        while j < bytes.count && depth > 0 {
+                            if bytes[j] == 0x28 { depth += 1 }
+                            else if bytes[j] == 0x29 { depth -= 1 }
                             if depth == 0 { break }
                             j += 1
                         }
-                        envelopeEndPos = j + 1
+                        let envEndPos = j < bytes.count ? j + 1 : bytes.count
+                        envelopeEndPos = envEndPos
+                        let envData = Data(bytes[envStart..<envEndPos])
+                        // Use lossy UTF-8: replaces invalid byte sequences with U+FFFD
+                        // instead of corrupting them via Latin-1 byte-by-byte conversion.
+                        let envContent = String(decoding: envData, as: Unicode.UTF8.self)
                         // Parse ENVELOPE: ("date" "subject" (from) (sender) (reply-to) (to) (cc) (bcc) "in-reply-to" "message-id")
                         let parsed = parseEnvelope(envContent)
                         subject = parsed.subject
@@ -811,10 +890,42 @@ private struct BlockingIMAPClient {
                     }
                 }
 
+                // Find BODY[HEADER.FIELDS] literal (raw RFC 822 headers)
+                var rawHeaderData: Data? = nil
+                let headerFieldsMarker = Array("BODY[HEADER.FIELDS".utf8)
+                let headerSearch = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 1000, bytes.count)])
+                if let hfIdx = findPattern(headerSearch, headerFieldsMarker) {
+                    // Find the ']' after HEADER.FIELDS (...)
+                    let afterHf = Array(bytes[(envelopeEndPos + hfIdx)..<min(envelopeEndPos + hfIdx + 500, bytes.count)])
+                    if let closeBracketIdx = findPattern(afterHf, Array("]".utf8)) {
+                        let afterBracket = Array(bytes[(envelopeEndPos + hfIdx + closeBracketIdx + 1)..<min(envelopeEndPos + hfIdx + closeBracketIdx + 200, bytes.count)])
+                        // Look for {NNN}\r\n literal size
+                        if afterBracket.count > 3 && afterBracket[0] == 0x7B {
+                            var sizeStr = ""
+                            var k = 1
+                            while k < afterBracket.count && afterBracket[k] != 0x7D {
+                                sizeStr.append(Character(UnicodeScalar(afterBracket[k])))
+                                k += 1
+                            }
+                            if k < afterBracket.count && afterBracket[k] == 0x7D, let headerSize = Int(sizeStr) {
+                                let headerStart = envelopeEndPos + hfIdx + closeBracketIdx + 1 + k + 1 + 2 // skip }\r\n
+                                let headerEnd = headerStart + headerSize
+                                if headerEnd <= bytes.count {
+                                    rawHeaderData = Data(bytes[headerStart..<headerEnd])
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Find BODY[TEXT] literal starting from after ENVELOPE
                 var bodyData: Data? = nil
+                // Calculate fetch end position: when BODY[TEXT] is present, use its end.
+                // When absent (initial/incremental sync without bodies), use HEADER.FIELDS end.
+                // This is critical — without it, the parser state machine loses sync and
+                // produces garbage for all subsequent messages.
                 var fetchEndPos = envelopeEndPos
-                let bodySearch = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 500, bytes.count)])
+                let bodySearch = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 1500, bytes.count)])
                 if let bodyIdx = findPattern(bodySearch, textMarker) {
                     let afterBody = Array(bytes[(envelopeEndPos + bodyIdx + textMarker.count)..<min(envelopeEndPos + bodyIdx + textMarker.count + 100, bytes.count)])
                     if let closeBraceIdx = findPattern(afterBody, Array("}\r\n".utf8)) {
@@ -830,6 +941,32 @@ private struct BlockingIMAPClient {
                             if bodyEnd <= bytes.count {
                                 bodyData = Data(bytes[bodyStart..<bodyEnd])
                                 fetchEndPos = bodyEnd + 2
+                            }
+                        }
+                    }
+                } else if let rawHeaderData {
+                    // No BODY[TEXT] — advance past HEADER.FIELDS literal end
+                    // The HEADER.FIELDS literal position was calculated above.
+                    // Find the end of HEADER.FIELDS literal to set fetchEndPos.
+                    let headerSearch2 = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 1000, bytes.count)])
+                    if let hfIdx2 = findPattern(headerSearch2, headerFieldsMarker) {
+                        let afterHf2 = Array(bytes[(envelopeEndPos + hfIdx2)..<min(envelopeEndPos + hfIdx2 + 500, bytes.count)])
+                        if let closeBracketIdx2 = findPattern(afterHf2, Array("]".utf8)) {
+                            let afterBracket2 = Array(bytes[(envelopeEndPos + hfIdx2 + closeBracketIdx2 + 1)..<min(envelopeEndPos + hfIdx2 + closeBracketIdx2 + 200, bytes.count)])
+                            if afterBracket2.count > 3 && afterBracket2[0] == 0x7B {
+                                var sizeStr2 = ""
+                                var k2 = 1
+                                while k2 < afterBracket2.count && afterBracket2[k2] != 0x7D {
+                                    sizeStr2.append(Character(UnicodeScalar(afterBracket2[k2])))
+                                    k2 += 1
+                                }
+                                if k2 < afterBracket2.count && afterBracket2[k2] == 0x7D, let headerSize2 = Int(sizeStr2) {
+                                    let headerStart2 = envelopeEndPos + hfIdx2 + closeBracketIdx2 + 1 + k2 + 1 + 2
+                                    let headerEnd2 = headerStart2 + headerSize2
+                                    if headerEnd2 <= bytes.count {
+                                        fetchEndPos = headerEnd2 + 2 // skip closing \r\n
+                                    }
+                                }
                             }
                         }
                     }
@@ -852,9 +989,15 @@ private struct BlockingIMAPClient {
                 }
                 let headerString = headerParts.joined(separator: "\r\n")
 
+                // Use lossy UTF-8 for snippet so non-UTF-8 body data produces"."some readable content"at."instead"of"empty"string.
+                let snippet: String = {
+                    guard let bodyData else { return "" }
+                    if let s = String(data: bodyData, encoding: .utf8) { return s }
+                    return String(decoding: bodyData, as: Unicode.UTF8.self)
+                }()
                 results.append(FetchedMessage(
-                    uid: uid, flags: flags, header: headerString,
-                    snippet: bodyData.flatMap { String(data: $0, encoding: .utf8) } ?? "",
+                    uid: uid, flags: flags, header: headerString, rawHeaderData: rawHeaderData,
+                    snippet: snippet,
                     rawBodyData: bodyData, fallbackSequenceDate: envelopeDate ?? Date()
                 ))
 
@@ -1116,6 +1259,53 @@ private struct BlockingIMAPClient {
         return rawData.subdata(in: bodyStartOffset..<(bodyStartOffset + literalSize))
     }
 
+    /// Fetch a single message's full body (BODY[TEXT]) from IMAP.
+    /// Used for lazy loading when user opens a message.
+    func fetchSingleMessageBody(usernames: [String], password: String, uid: String, accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail? {
+        var readStream: Unmanaged<CFReadStream>?
+        var writeStream: Unmanaged<CFWriteStream>?
+        CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
+        guard let readStream, let writeStream else { throw IMAPError.connectionFailed("Cannot create socket streams for \(host):\(port)") }
+        let input = readStream.takeRetainedValue() as InputStream
+        let output = writeStream.takeRetainedValue() as OutputStream
+        input.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        output.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        let sslSettings: [String: Any] = [
+            kCFStreamSSLPeerName as String: host,
+            kCFStreamSSLValidatesCertificateChain as String: true
+        ]
+        let sslSettingsKey = Stream.PropertyKey(rawValue: kCFStreamPropertySSLSettings as String)
+        input.setProperty(sslSettings, forKey: sslSettingsKey)
+        output.setProperty(sslSettings, forKey: sslSettingsKey)
+        input.open()
+        output.open()
+        defer {
+            input.close()
+            output.close()
+        }
+        _ = try readUntilLine(input: input, timeout: 20)
+        try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+        let selectTag = nextTag()
+        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
+        guard selectResponse.contains("\(selectTag) OK") else {
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+        }
+        // Fetch full body for this specific UID
+        let fetchTag = nextTag()
+        // Fetch headers (including Content-Type/Content-Transfer-Encoding for MIME decoding)
+        // plus full body text (BODY.PEEK[TEXT])
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type Content-Transfer-Encoding)] BODY.PEEK[TEXT])\r\n", output: output)
+        let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
+        let parsed = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
+        guard let fetched = parsed.first(where: { $0.uid == uid }) else {
+            try logout(input: input, output: output)
+            return nil
+        }
+        try logout(input: input, output: output)
+        return fetched.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: fallbackRecipient)
+    }
+
     /// Search emails using IMAP SEARCH command
     func search(usernames: [String], password: String, query: String) throws -> [String] {
         var readStream: Unmanaged<CFReadStream>?
@@ -1214,13 +1404,24 @@ private struct BlockingIMAPClient {
         let deadline = Date().addingTimeInterval(timeout)
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 8192)
+        // Search for tag in raw bytes to avoid O(n²) String conversion on every read.
+        // Tag marker: \r\n<tag> (space after tag signals tagged response line).
+        let tagCRLF = "\r\n\(tag) ".data(using: .utf8)!
+        let tagPrefix = "\(tag) ".data(using: .utf8)!
         while Date() < deadline {
             let count = input.read(&buffer, maxLength: buffer.count)
             if count > 0 {
                 data.append(buffer, count: count)
-                // Use lossy UTF-8 so non-UTF-8 body bytes don't prevent tag detection
-                let string = String(decoding: data, as: Unicode.UTF8.self)
-                if string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") {
+                // Search the last 128 bytes + new data for the tag marker
+                let searchRange: Int
+                if data.count > 128 {
+                    searchRange = data.count - min(data.count, 128 + count)
+                } else {
+                    searchRange = 0
+                }
+                let searchData = data.subdata(in: searchRange..<data.count)
+                if searchData.range(of: tagCRLF) != nil || searchData.range(of: tagPrefix) != nil {
+                    let string = String(decoding: data, as: Unicode.UTF8.self)
                     return (string, data)
                 }
             } else if count < 0 {
@@ -1236,12 +1437,18 @@ private struct BlockingIMAPClient {
         let deadline = Date().addingTimeInterval(timeout)
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 8192)
+        // Same Data-level optimization as readUntilTaggedRaw
+        let tagCRLF = "\r\n\(tag) ".data(using: .utf8)!
+        let tagPrefix = "\(tag) ".data(using: .utf8)!
         while Date() < deadline {
             let count = input.read(&buffer, maxLength: buffer.count)
             if count > 0 {
                 data.append(buffer, count: count)
-                let string = String(decoding: data, as: Unicode.UTF8.self)
-                if string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") { return string }
+                let searchRange = data.count > 128 ? data.count - min(data.count, 128 + count) : 0
+                let searchData = data.subdata(in: searchRange..<data.count)
+                if searchData.range(of: tagCRLF) != nil || searchData.range(of: tagPrefix) != nil {
+                    return String(decoding: data, as: Unicode.UTF8.self)
+                }
             } else if count < 0 {
                 throw IMAPError.connectionFailed(input.streamError?.localizedDescription ?? "Read failed")
             } else {
@@ -1261,13 +1468,21 @@ private struct ParsedHeaders {
     var date: Date?
     var transferEncoding: String?
 
-    init(raw: String) {
+    init(raw: String, skipRFC2047: Bool = false) {
         let unfolded = raw.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
         self.messageID = unfolded.headerValue("Message-ID")
-        self.subject = unfolded.headerValue("Subject")?.decodeRFC2047().nilIfEmpty
-        self.from = unfolded.headerValue("From")?.decodeRFC2047()
-        self.to = unfolded.headerValue("To")?.decodeRFC2047()
-        self.cc = unfolded.headerValue("Cc")?.decodeRFC2047()
+        if skipRFC2047 {
+            // Raw UTF-8 header: content is already decoded, no RFC 2047 decode needed
+            self.subject = unfolded.headerValue("Subject")?.nilIfEmpty
+            self.from = unfolded.headerValue("From")
+            self.to = unfolded.headerValue("To")
+            self.cc = unfolded.headerValue("Cc")
+        } else {
+            self.subject = unfolded.headerValue("Subject")?.decodeRFC2047().nilIfEmpty
+            self.from = unfolded.headerValue("From")?.decodeRFC2047()
+            self.to = unfolded.headerValue("To")?.decodeRFC2047()
+            self.cc = unfolded.headerValue("Cc")?.decodeRFC2047()
+        }
         self.date = Self.parseDate(unfolded.headerValue("Date"))
         self.transferEncoding = unfolded.headerValue("Content-Transfer-Encoding")
     }

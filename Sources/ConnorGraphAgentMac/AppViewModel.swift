@@ -547,7 +547,67 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func loadMailBodyText(for messageID: MailMessageID) async -> String? {
         guard let detail = try? await mailStore?.message(id: messageID) else { return nil }
-        return detail.body?.plainText?.text ?? detail.body?.redactedPreview
+        // If body is already cached, return it
+        if let text = detail.body?.plainText?.text, !text.isEmpty {
+            return text
+        }
+        // Lazy fetch: body not available, fetch from IMAP on demand
+        await fetchAndCacheMessageBody(messageID: messageID, detail: detail)
+        // Retry after caching
+        if let updated = try? await mailStore?.message(id: messageID),
+           let text = updated.body?.plainText?.text, !text.isEmpty {
+            return text
+        }
+        return detail.body?.redactedPreview
+    }
+
+    func loadMailBodyHTML(for messageID: MailMessageID) async -> String? {
+        guard let detail = try? await mailStore?.message(id: messageID) else { return nil }
+        // If HTML is already cached, return it
+        if let html = detail.body?.htmlText?.text, !html.isEmpty {
+            return html
+        }
+        // If body is missing (no plain text either), trigger lazy fetch
+        if (detail.body?.plainText?.text ?? "").isEmpty {
+            await fetchAndCacheMessageBody(messageID: messageID, detail: detail)
+            if let updated = try? await mailStore?.message(id: messageID),
+               let html = updated.body?.htmlText?.text, !html.isEmpty {
+                return html
+            }
+        }
+        return nil
+    }
+
+    /// Lazy-fetch full message body from IMAP when user opens a message.
+    /// This avoids downloading bodies for all messages during initial sync.
+    private func fetchAndCacheMessageBody(messageID: MailMessageID, detail: MailMessageDetail) async {
+        // Extract UID from message ID (format: "{accountID}-INBOX-{uid}")
+        let uid = messageID.rawValue.split(separator: "-").last.map(String.init) ?? ""
+        guard !uid.isEmpty else { return }
+        
+        guard let account = try? await mailStore?.account(id: detail.summary.accountID),
+              let endpoint = account.incoming,
+              endpoint.protocolKind == .imap,
+              let binding = account.credentialBinding,
+              let password = try? mailCredentialStore.readCredential(binding: binding), !password.isEmpty else {
+            return
+        }
+        
+        do {
+            let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore)
+            let result = try await syncService.fetchMessageBody(
+                account: account,
+                uid: uid,
+                messageID: messageID,
+                mailboxID: detail.summary.mailboxID,
+                snippet: detail.summary.snippet
+            )
+            if let result {
+                try? await mailStore?.saveMessage(result)
+            }
+        } catch {
+            // Silent failure — body just won't appear
+        }
     }
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
