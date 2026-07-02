@@ -14,7 +14,7 @@ struct WelcomeLLMView: View {
                 viewModel: viewModel,
                 option: option,
                 complete: {
-                    setupOption = nil
+                    viewModel.showWelcomePlaceholder = false
                 },
                 back: {
                     setupOption = nil
@@ -27,9 +27,7 @@ struct WelcomeLLMView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     WelcomeOnboardingContent(
-                        choose: { setupOption = $0 },
-                        canDismiss: !viewModel.llmConnectionConfigs.isEmpty,
-                        dismiss: { viewModel.showWelcomePlaceholder = false }
+                        choose: { setupOption = $0 }
                     )
                 }
             }
@@ -39,8 +37,6 @@ struct WelcomeLLMView: View {
 
 private struct WelcomeOnboardingContent: View {
     var choose: (AIConnectionOnboardingOption) -> Void
-    var canDismiss: Bool
-    var dismiss: () -> Void
 
     var body: some View {
         VStack(spacing: 18) {
@@ -67,16 +63,6 @@ private struct WelcomeOnboardingContent: View {
                 }
             }
             .frame(maxWidth: 760)
-
-            if canDismiss {
-                Button(action: dismiss) {
-                    Label("开始使用", systemImage: "arrow.forward")
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.top, 12)
-            }
 
             Spacer(minLength: 56)
         }
