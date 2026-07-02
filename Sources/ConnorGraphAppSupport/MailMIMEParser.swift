@@ -55,12 +55,32 @@ public struct MailMIMEParser: Sendable, Equatable {
         }
     }
 
-    /// Convert data to string using charset
+    /// Convert data to string using charset.
+    /// When charset is nil/unknown and UTF-8 fails, tries common Asian encodings as fallback
+    /// (many Chinese mail servers set charset=us-ascii or omit it while sending GBK/GB18030 content).
     public func decodeCharset(_ data: Data, charset: String?) -> String? {
         let charsetLower = charset?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        // If charset is explicitly UTF-8 or unknown, try UTF-8 first
         if charsetLower.isEmpty || charsetLower == "utf-8" || charsetLower == "utf8" {
-            return String(data: data, encoding: .utf8)
+            if let s = String(data: data, encoding: .utf8) { return s }
+            // UTF-8 failed even though charset says UTF-8 — data might be non-UTF-8.
+            // Try common Asian encodings as fallback (some servers mislabel charset).
+            let fallbackEncodings: [CFStringEncoding] = [
+                CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue), // GBK/GB2312/GB18030
+                CFStringEncoding(CFStringEncodings.big5.rawValue),          // Big5
+                CFStringEncoding(CFStringEncodings.shiftJIS.rawValue),      // Shift-JIS
+                CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)         // EUC-KR
+            ]
+            for encoding in fallbackEncodings {
+                let nsEncoding = CFStringConvertEncodingToNSStringEncoding(encoding)
+                if let s = String(data: data, encoding: String.Encoding(rawValue: nsEncoding)) {
+                    return s
+                }
+            }
+            return nil
         }
+        
         let cfEncoding: CFStringEncoding
         switch charsetLower {
         case "gb2312", "gbk", "gb18030": cfEncoding = CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)

@@ -468,7 +468,19 @@ struct BlockingIMAPClient {
             // Step 2: Charset conversion
             let charsetLower = charset?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if charsetLower.isEmpty || charsetLower == "utf-8" || charsetLower == "utf8" {
-                return String(data: decodedData, encoding: .utf8) ?? fallbackString
+                if let s = String(data: decodedData, encoding: .utf8) { return s }
+                // UTF-8 failed — try common Asian encodings as fallback
+                let fallbacks: [CFStringEncoding] = [
+                    CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue),
+                    CFStringEncoding(CFStringEncodings.big5.rawValue),
+                    CFStringEncoding(CFStringEncodings.shiftJIS.rawValue),
+                    CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)
+                ]
+                for encoding in fallbacks {
+                    let nsEncoding = CFStringConvertEncodingToNSStringEncoding(encoding)
+                    if let s = String(data: decodedData, encoding: String.Encoding(rawValue: nsEncoding)) { return s }
+                }
+                return fallbackString
             }
             let cfEncoding: CFStringEncoding
             switch charsetLower {
@@ -890,25 +902,27 @@ struct BlockingIMAPClient {
                     }
                 }
 
-                // Find BODY[HEADER.FIELDS] literal (raw RFC 822 headers)
+                // Find BODY[HEADER] or BODY[HEADER.FIELDS] literal (raw RFC 822 headers)
                 var rawHeaderData: Data? = nil
-                let headerFieldsMarker = Array("BODY[HEADER.FIELDS".utf8)
+                let headerMarker = Array("BODY[HEADER".utf8)
                 let headerSearch = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 1000, bytes.count)])
-                if let hfIdx = findPattern(headerSearch, headerFieldsMarker) {
-                    // Find the ']' after HEADER.FIELDS (...)
-                    let afterHf = Array(bytes[(envelopeEndPos + hfIdx)..<min(envelopeEndPos + hfIdx + 500, bytes.count)])
-                    if let closeBracketIdx = findPattern(afterHf, Array("]".utf8)) {
+                if let hfIdx = findPattern(headerSearch, headerMarker) {
+                    // Skip past "BODY[HEADER" or "BODY[HEADER.FIELDS (...)]" to find the literal size {NNN}
+                    let afterHeader = Array(bytes[(envelopeEndPos + hfIdx)..<min(envelopeEndPos + hfIdx + 500, bytes.count)])
+                    // Find the ']' that closes the section specifier
+                    if let closeBracketIdx = findPattern(afterHeader, Array("]".utf8)) {
                         let afterBracket = Array(bytes[(envelopeEndPos + hfIdx + closeBracketIdx + 1)..<min(envelopeEndPos + hfIdx + closeBracketIdx + 200, bytes.count)])
-                        // Look for {NNN}\r\n literal size
-                        if afterBracket.count > 3 && afterBracket[0] == 0x7B {
+                        // Look for {NNN}\r\n literal size (may have whitespace after ])
+                        let braceIdx = afterBracket.firstIndex { $0 == 0x7B } ?? afterBracket.count
+                        if braceIdx < afterBracket.count - 3 {
                             var sizeStr = ""
-                            var k = 1
+                            var k = braceIdx + 1
                             while k < afterBracket.count && afterBracket[k] != 0x7D {
                                 sizeStr.append(Character(UnicodeScalar(afterBracket[k])))
                                 k += 1
                             }
                             if k < afterBracket.count && afterBracket[k] == 0x7D, let headerSize = Int(sizeStr) {
-                                let headerStart = envelopeEndPos + hfIdx + closeBracketIdx + 1 + k + 1 + 2 // skip }\r\n
+                                let headerStart = envelopeEndPos + hfIdx + closeBracketIdx + 1 + (k - braceIdx) + 1 + 2 // skip }\r\n
                                 let headerEnd = headerStart + headerSize
                                 if headerEnd <= bytes.count {
                                     rawHeaderData = Data(bytes[headerStart..<headerEnd])
@@ -944,24 +958,24 @@ struct BlockingIMAPClient {
                             }
                         }
                     }
-                } else if let rawHeaderData {
-                    // No BODY[TEXT] — advance past HEADER.FIELDS literal end
-                    // The HEADER.FIELDS literal position was calculated above.
-                    // Find the end of HEADER.FIELDS literal to set fetchEndPos.
+                } else if rawHeaderData != nil {
+                    // No BODY[TEXT] — advance past HEADER or HEADER.FIELDS literal end
+                    // Find the end position to maintain state machine sync for subsequent messages.
                     let headerSearch2 = Array(bytes[envelopeEndPos..<min(envelopeEndPos + 1000, bytes.count)])
-                    if let hfIdx2 = findPattern(headerSearch2, headerFieldsMarker) {
+                    if let hfIdx2 = findPattern(headerSearch2, headerMarker) {
                         let afterHf2 = Array(bytes[(envelopeEndPos + hfIdx2)..<min(envelopeEndPos + hfIdx2 + 500, bytes.count)])
                         if let closeBracketIdx2 = findPattern(afterHf2, Array("]".utf8)) {
                             let afterBracket2 = Array(bytes[(envelopeEndPos + hfIdx2 + closeBracketIdx2 + 1)..<min(envelopeEndPos + hfIdx2 + closeBracketIdx2 + 200, bytes.count)])
-                            if afterBracket2.count > 3 && afterBracket2[0] == 0x7B {
+                            let braceIdx2 = afterBracket2.firstIndex { $0 == 0x7B } ?? afterBracket2.count
+                            if braceIdx2 < afterBracket2.count - 3 {
                                 var sizeStr2 = ""
-                                var k2 = 1
+                                var k2 = braceIdx2 + 1
                                 while k2 < afterBracket2.count && afterBracket2[k2] != 0x7D {
                                     sizeStr2.append(Character(UnicodeScalar(afterBracket2[k2])))
                                     k2 += 1
                                 }
                                 if k2 < afterBracket2.count && afterBracket2[k2] == 0x7D, let headerSize2 = Int(sizeStr2) {
-                                    let headerStart2 = envelopeEndPos + hfIdx2 + closeBracketIdx2 + 1 + k2 + 1 + 2
+                                    let headerStart2 = envelopeEndPos + hfIdx2 + closeBracketIdx2 + 1 + (k2 - braceIdx2) + 1 + 2
                                     let headerEnd2 = headerStart2 + headerSize2
                                     if headerEnd2 <= bytes.count {
                                         fetchEndPos = headerEnd2 + 2 // skip closing \r\n
@@ -1035,33 +1049,58 @@ struct BlockingIMAPClient {
         return result
     }
 
-    /// Split ENVELOPE content into 10 fields, respecting nested parentheses
+    /// Split ENVELOPE content into 10 fields, respecting nested parentheses.
+    /// ENVELOPE format: ("date" "subject" (from_list) (sender) (reply-to) (to_list) (cc_list) (bcc_list) "in-reply-to" "message-id")
+    /// Outer parens are at depth 1, nested address lists at depth >= 2.
+    /// Split on spaces at depth 1 (between top-level fields), NOT at depth 2+ (inside address lists).
     private func splitEnvelopeFields(_ env: String) -> [String] {
         var fields: [String] = []
         var current = ""
         var depth = 0
         var inQuote = false
         var escapeNext = false
+        var seenOpenParen = false
+        
         for ch in env {
             if escapeNext { current.append(ch); escapeNext = false; continue }
             if ch == "\\" && inQuote { current.append(ch); escapeNext = true; continue }
-            if ch == "\"" { inQuote = !inQuote; current.append(ch); continue }
+            if ch == "\"" { inQuote = !inQuote }
+            
             if !inQuote {
-                if ch == "(" { depth += 1 }
-                else if ch == ")" { depth -= 1 }
+                if ch == "(" {
+                    depth += 1
+                    if !seenOpenParen {
+                        // Skip the outermost opening paren that starts ENVELOPE
+                        seenOpenParen = true
+                        continue
+                    }
+                } else if ch == ")" {
+                    depth -= 1
+                    if depth == 0 {
+                        // Skip the outermost closing paren that ends ENVELOPE
+                        continue
+                    }
+                }
             }
-            // Split on space at depth 0, outside quotes
-            if ch == " " && depth == 0 && !inQuote {
+            
+            // Split on space at depth 1 (between top-level ENVELOPE fields)
+            // Depth 2+ means inside nested address lists — don't split there
+            if ch == " " && depth == 1 && !inQuote {
                 if !current.isEmpty {
                     fields.append(current)
                     current = ""
                 }
                 continue
             }
-            if depth > 0 || (depth == 0 && ch != "(") {
+            
+            // Append everything inside the envelope (depth >= 1)
+            // After closing paren (depth == 0) stop appending — last field already captured
+            if depth > 0 {
                 current.append(ch)
             }
         }
+        
+        // Last field (accumulated before outer ")" triggered depth == 0)
         if !current.isEmpty { fields.append(current) }
         return fields
     }
@@ -1092,15 +1131,23 @@ struct BlockingIMAPClient {
                     j = trimmed.index(after: j)
                 }
                 if j < trimmed.endIndex {
-                    let addrStr = String(trimmed[trimmed.index(after: i)..<j])
+                    // addrStr strips outer address-list parens, but individual addresses
+                    // like ("Alice" NIL "alice" "example.com") have inner parens that
+                    // contaminate parts[0] with "(" and parts[3] with ")".
+                    var addrStr = String(trimmed[trimmed.index(after: i)..<j])
+                    // Strip inner address parens so splitIMAPQuoted produces clean parts.
+                    if addrStr.hasPrefix("(") { addrStr = String(addrStr.dropFirst()) }
+                    if addrStr.hasSuffix(")") { addrStr = String(addrStr.dropLast()) }
                     let parts = splitIMAPQuoted(addrStr)
                     if parts.count >= 4 {
                         let name = unquoteIMAP(parts[0])
+                        // IMAP ENVELOPE uses unquoted NIL to mean "no value"
+                        let nameVal: String? = (name == "NIL" || name.isEmpty) ? nil : name
                         let mailbox = unquoteIMAP(parts[2])
                         let host = unquoteIMAP(parts[3])
                         if !mailbox.isEmpty && !host.isEmpty {
                             let email = "\(mailbox)@\(host)"
-                            addresses.append(MailAddress(name: name.isEmpty ? nil : name, email: email))
+                            addresses.append(MailAddress(name: nameVal, email: email))
                         }
                     }
                     i = trimmed.index(after: j)
@@ -1151,7 +1198,7 @@ struct BlockingIMAPClient {
         let marker = Array("BODY[TEXT]".utf8)
         let uidMarker = Array("UID ".utf8)
         let fetchMarker = Array(" FETCH ".utf8)
-        let crlf = Array("\r\n".utf8)
+        _ = Array("\r\n".utf8) // crlf for literal end detection (used via findPattern)
 
         var i = 0
         var currentUID: String?
@@ -1293,9 +1340,11 @@ struct BlockingIMAPClient {
         }
         // Fetch full body for this specific UID
         let fetchTag = nextTag()
-        // Fetch headers (including Content-Type/Content-Transfer-Encoding for MIME decoding)
-        // plus full body text (BODY.PEEK[TEXT])
-        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type Content-Transfer-Encoding)] BODY.PEEK[TEXT])\r\n", output: output)
+        // Fetch ALL headers (BODY.PEEK[HEADER]) for reliable MIME header parsing,
+        // plus full body text (BODY.PEEK[TEXT]).
+        // Using BODY.PEEK[HEADER] instead of HEADER.FIELDS ensures Content-Type (with charset)
+        // and Content-Transfer-Encoding are always present.
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS ENVELOPE BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
         let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
         let parsed = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
         guard let fetched = parsed.first(where: { $0.uid == uid }) else {
