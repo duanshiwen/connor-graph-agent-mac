@@ -1306,8 +1306,9 @@ struct BlockingIMAPClient {
         return rawData.subdata(in: bodyStartOffset..<(bodyStartOffset + literalSize))
     }
 
-    /// Fetch a single message's full body (BODY[TEXT]) from IMAP.
-    /// Used for lazy loading when user opens a message.
+    /// Fetch a single message's complete raw MIME data from IMAP.
+    /// Uses BODY.PEEK[] (Thunderbird-style) — fetches entire message as one literal.
+    /// Parses the raw IMAP response directly, bypassing the state machine.
     func fetchSingleMessageBody(usernames: [String], password: String, uid: String, accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail? {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
@@ -1338,21 +1339,82 @@ struct BlockingIMAPClient {
         guard selectResponse.contains("\(selectTag) OK") else {
             throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
         }
-        // Fetch full body for this specific UID
+        // Thunderbird-style: fetch complete message as single literal — no state machine
         let fetchTag = nextTag()
-        // Fetch ALL headers (BODY.PEEK[HEADER]) for reliable MIME header parsing,
-        // plus full body text (BODY.PEEK[TEXT]).
-        // Using BODY.PEEK[HEADER] instead of HEADER.FIELDS ensures Content-Type (with charset)
-        // and Content-Transfer-Encoding are always present.
-        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS ENVELOPE BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
-        let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
-        let parsed = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
-        guard let fetched = parsed.first(where: { $0.uid == uid }) else {
-            try logout(input: input, output: output)
-            return nil
-        }
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[])\r\n", output: output)
+        let (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
         try logout(input: input, output: output)
-        return fetched.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: fallbackRecipient)
+        
+        // Parse the raw IMAP response directly: find BODY[] {NNN}\r\n
+        let marker = Data("BODY[]".utf8)
+        guard let markerEnd = fetchRaw.range(of: marker)?.upperBound else { return nil }
+        let afterMarker = fetchRaw[markerEnd...]
+        // Skip whitespace, find {NNN}\r\n
+        guard let brace = afterMarker.firstIndex(of: 0x7B),
+              let closeBrace = afterMarker[brace...].firstIndex(of: 0x7D) else { return nil }
+        let sizeStr = String(data: afterMarker[afterMarker.index(after: brace)..<closeBrace], encoding: .utf8) ?? ""
+        guard let size = Int(sizeStr), size > 0 else { return nil }
+        let dataStart = afterMarker.index(closeBrace, offsetBy: 3) // skip }\r\n
+        guard dataStart + size <= afterMarker.endIndex else { return nil }
+        let rawMIME = Data(afterMarker[dataStart..<(dataStart + size)])
+        
+        // Split headers from body
+        let headerEnd: Int
+        if let r = rawMIME.range(of: Data("\r\n\r\n".utf8)) { headerEnd = r.upperBound - rawMIME.startIndex }
+        else if let r = rawMIME.range(of: Data("\n\n".utf8)) { headerEnd = r.upperBound - rawMIME.startIndex }
+        else { headerEnd = 0 }
+        
+        let headerBytes = rawMIME[..<headerEnd]
+        let bodyBytes = rawMIME[headerEnd...]
+        let headerStr = String(data: headerBytes, encoding: .ascii) ?? String(decoding: headerBytes, as: Unicode.UTF8.self)
+        let unfolded = headerStr.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
+        
+        let subject = (unfolded.headerValue("Subject")?.decodeRFC2047()).flatMap { $0.isEmpty ? nil : $0 } ?? "（无主题）"
+        let from = MailAddress.parse(unfolded.headerValue("From")?.decodeRFC2047()) ?? MailAddress(email: "unknown@example.com")
+        let to = MailAddress.parseList(unfolded.headerValue("To")?.decodeRFC2047())
+        let cc = MailAddress.parseList(unfolded.headerValue("Cc")?.decodeRFC2047())
+        let date = ParsedHeaders.parseDate(unfolded.headerValue("Date")) ?? Date()
+        let msgID = unfolded.headerValue("Message-ID")
+        let ctHeader = unfolded.headerValue("Content-Type") ?? ""
+        let cteHeader = unfolded.headerValue("Content-Transfer-Encoding") ?? ""
+        let charset = ParsedHeaders.extractCharset(from: unfolded)
+        let boundary = ParsedHeaders.extractBoundary(from: unfolded)
+        
+        let flagsStr = (String(data: fetchRaw.prefix(200), encoding: .utf8) ?? "").firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
+        
+        let mimeParser = MailMIMEParser()
+        let bodyResult = mimeParser.parseBodyWithHTML(
+            rawData: Data(bodyBytes), fallbackString: snippet,
+            charset: charset,
+            transferEncoding: cteHeader.nilIfEmpty,
+            contentType: ctHeader, boundary: boundary
+        )
+        
+        let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
+            accountID: accountID, mailboxID: mailboxID,
+            threadID: msgID.flatMap { MailThreadID(rawValue: $0.trimmingCharacters(in: .whitespaces)) },
+            subject: subject, from: from,
+            to: to.isEmpty ? [fallbackRecipient] : to, cc: cc, date: date,
+            snippet: cleanSnippet.isEmpty ? "（无正文摘要）" : cleanSnippet,
+            flags: MailMessageFlags(
+                isRead: flagsStr.localizedCaseInsensitiveContains("\\Seen"),
+                isFlagged: flagsStr.localizedCaseInsensitiveContains("\\Flagged")
+            ),
+            hasAttachments: ctHeader.localizedCaseInsensitiveContains("multipart/mixed")
+        )
+        let body = MailMessageBody(
+            plainText: MailBodyPart(mimeType: "text/plain", text: bodyResult.plainText, byteCount: bodyResult.plainText.utf8.count),
+            htmlText: bodyResult.htmlText.map { MailBodyPart(mimeType: "text/html", text: $0, byteCount: $0.utf8.count) },
+            redactedPreview: String(bodyResult.plainText.prefix(500)),
+            bodyHash: String(abs(bodyResult.plainText.hashValue))
+        )
+        return MailMessageDetail(
+            summary: summary,
+            headers: MailMessageHeaders(messageIDHeader: msgID?.trimmingCharacters(in: .whitespaces) ?? "", rawHeaderHash: String(abs(headerStr.hashValue))),
+            body: body
+        )
     }
 
     /// Search emails using IMAP SEARCH command
