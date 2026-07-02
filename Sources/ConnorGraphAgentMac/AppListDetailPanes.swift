@@ -698,6 +698,10 @@ struct CraftMailListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                if viewModel.isInitialSyncingMail {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Text("邮件系统")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
