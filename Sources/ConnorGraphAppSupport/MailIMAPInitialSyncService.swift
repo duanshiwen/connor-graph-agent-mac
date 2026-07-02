@@ -676,22 +676,127 @@ private struct BlockingIMAPClient {
     }
 
     private func parseFetchedMessages(_ response: String, rawData: Data? = nil) -> [FetchedMessage] {
-        let chunks = response.components(separatedBy: "\r\n* ").map { $0.hasPrefix("* ") ? $0 : "* " + $0 }
-
-        // Pre-extract body byte ranges from rawData using sequential parsing
-        var bodyRanges: [String: Range<Data.Index>] = [:] // uid -> range in rawData
+        // Use state machine on raw bytes to extract everything reliably
         if let rawData {
-            bodyRanges = extractBodyRanges(from: rawData)
+            return parseFetchedMessagesFromRaw(rawData)
         }
-
+        // Fallback: string-based parsing (no raw data)
+        let chunks = response.components(separatedBy: "\r\n* ").map { $0.hasPrefix("* ") ? $0 : "* " + $0 }
         return chunks.compactMap { chunk -> FetchedMessage? in
             guard chunk.contains(" FETCH "), let uid = chunk.firstString(matching: #"UID\s+(\d+)"#) else { return nil }
             let flags = chunk.firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
             let header = extractHeader(from: chunk)
             let body = extractBody(from: chunk, after: header)
-            let rawBody: Data? = bodyRanges[uid].flatMap { rawData?.subdata(in: $0) }
-            return FetchedMessage(uid: uid, flags: flags, header: header, snippet: body, rawBodyData: rawBody, fallbackSequenceDate: Date())
+            return FetchedMessage(uid: uid, flags: flags, header: header, snippet: body, rawBodyData: nil, fallbackSequenceDate: Date())
         }.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
+    }
+
+    /// State machine parser: extracts UID, flags, headers, and body from raw IMAP bytes.
+    private func parseFetchedMessagesFromRaw(_ data: Data) -> [FetchedMessage] {
+        let bytes = [UInt8](data)
+        let headerMarker = Array("BODY[HEADER.FIELDS".utf8)
+        let textMarker = Array("BODY[TEXT]".utf8)
+        let fetchMarker = Array(" FETCH ".utf8)
+        let uidMarker = Array("UID ".utf8)
+        let flagsMarker = Array("FLAGS (".utf8)
+
+        var results: [FetchedMessage] = []
+        var i = 0
+
+        while i < bytes.count {
+            // Look for "* NNN FETCH " pattern
+            if bytes[i] == 0x2A { // '*'
+                // Find FETCH marker
+                let fetchSearch = Array(bytes[i..<min(i + 300, bytes.count)])
+                guard let fetchIdx = findPattern(fetchSearch, fetchMarker) else { i += 1; continue }
+
+                // Extract UID
+                let afterFetch = Array(bytes[(i + fetchIdx + fetchMarker.count)..<min(i + fetchIdx + fetchMarker.count + 200, bytes.count)])
+                var uid = ""
+                if let uidIdx = findPattern(afterFetch, uidMarker) {
+                    let uidStart = uidIdx + uidMarker.count
+                    for j in uidStart..<afterFetch.count {
+                        let c = Character(UnicodeScalar(afterFetch[j]))
+                        if c.isNumber { uid.append(c) } else { break }
+                    }
+                }
+                guard !uid.isEmpty else { i += 1; continue }
+
+                // Extract FLAGS
+                var flags = ""
+                if let flagsIdx = findPattern(afterFetch, flagsMarker) {
+                    let flagsStart = flagsIdx + flagsMarker.count
+                    var f = ""
+                    for j in flagsStart..<afterFetch.count {
+                        if afterFetch[j] == 0x29 { break } // ')'
+                        f.append(Character(UnicodeScalar(afterFetch[j])))
+                    }
+                    flags = f
+                }
+
+                // Find BODY[HEADER.FIELDS ...] literal
+                var headerString = ""
+                var headerEndPos = i
+                let headerSearch = Array(bytes[i..<min(i + 500, bytes.count)])
+                if let headerIdx = findPattern(headerSearch, headerMarker) {
+                    // Find the closing brace of the size: {NNN}
+                    let afterHeader = Array(bytes[(i + headerIdx + headerMarker.count)..<min(i + headerIdx + headerMarker.count + 200, bytes.count)])
+                    if let closeBraceIdx = findPattern(afterHeader, Array("}\r\n".utf8)) {
+                        // Extract header size
+                        var sizeStr = ""
+                        for j in 0..<closeBraceIdx {
+                            let c = Character(UnicodeScalar(afterHeader[j]))
+                        if c == "{" { continue }
+                        if c.isNumber { sizeStr.append(c) }
+                        }
+                        if let headerSize = Int(sizeStr) {
+                            let headerStart = i + headerIdx + headerMarker.count + closeBraceIdx + 3 // skip }\r\n
+                            let headerEnd = headerStart + headerSize
+                            if headerEnd <= bytes.count {
+                                let headerData = Data(bytes[headerStart..<headerEnd])
+                                headerString = String(data: headerData, encoding: .utf8) ?? String(decoding: headerData, as: Unicode.UTF8.self)
+                                headerEndPos = headerEnd
+                            }
+                        }
+                    }
+                }
+
+                // Find BODY[TEXT] literal starting from after headers
+                var bodyData: Data? = nil
+                let bodySearch = Array(bytes[headerEndPos..<min(headerEndPos + 500, bytes.count)])
+                if let bodyIdx = findPattern(bodySearch, textMarker) {
+                    let afterBody = Array(bytes[(headerEndPos + bodyIdx + textMarker.count)..<min(headerEndPos + bodyIdx + textMarker.count + 100, bytes.count)])
+                    if let closeBraceIdx = findPattern(afterBody, Array("}\r\n".utf8)) {
+                        var sizeStr = ""
+                        for j in 0..<closeBraceIdx {
+                            let c = Character(UnicodeScalar(afterBody[j]))
+                            if c == "{" { continue }
+                            if c.isNumber { sizeStr.append(c) }
+                        }
+                        if let bodySize = Int(sizeStr) {
+                            let bodyStart = headerEndPos + bodyIdx + textMarker.count + closeBraceIdx + 3
+                            let bodyEnd = bodyStart + bodySize
+                            if bodyEnd <= bytes.count {
+                                bodyData = Data(bytes[bodyStart..<bodyEnd])
+                            }
+                        }
+                    }
+                }
+
+                results.append(FetchedMessage(
+                    uid: uid, flags: flags, header: headerString,
+                    snippet: bodyData.flatMap { String(data: $0, encoding: .utf8) } ?? "",
+                    rawBodyData: bodyData, fallbackSequenceDate: Date()
+                ))
+
+                // Skip past this FETCH response
+                i = min(headerEndPos + 1, bytes.count)
+                continue
+            }
+            i += 1
+        }
+
+        return results.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
     }
 
     /// Parse raw IMAP response bytes sequentially to extract BODY[TEXT] byte ranges per UID.
