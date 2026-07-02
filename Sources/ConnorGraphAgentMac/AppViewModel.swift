@@ -22,15 +22,21 @@ enum AppMailAccountSetupError: LocalizedError {
     case invalidEmail
     case missingCredential
     case missingServerConfiguration
+    case invalidHostname(String)
+    case invalidPort(Int)
 
     var errorDescription: String? {
         switch self {
         case .invalidEmail:
-            return "请输入有效的邮箱地址。"
+            return "请输入有效的邮箱地址（例如 user@example.com）。"
         case .missingCredential:
             return "请输入授权凭据或 App Password。"
         case .missingServerConfiguration:
             return "请填写完整的收件/发件服务器配置。"
+        case .invalidHostname(let host):
+            return "无效的主机名：\(host)"
+        case .invalidPort(let port):
+            return "无效的端口号：\(port)（有效范围 1-65535）"
         }
     }
 }
@@ -2657,10 +2663,30 @@ final class AppViewModel: NSObject, ObservableObject {
         let credential = rawCredential.trimmingCharacters(in: .whitespacesAndNewlines)
         let incomingHost = rawIncomingHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let outgoingHost = rawOutgoingHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard email.contains("@"), email.contains(".") else { throw AppMailAccountSetupError.invalidEmail }
+
+        // 验证邮箱格式
+        let emailRegex = #"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#
+        guard email.range(of: emailRegex, options: .regularExpression) != nil else {
+            throw AppMailAccountSetupError.invalidEmail
+        }
+
         guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
-        guard !incomingHost.isEmpty, !outgoingHost.isEmpty, incomingPort > 0, outgoingPort > 0 else {
-            throw AppMailAccountSetupError.missingServerConfiguration
+
+        // 验证主机名格式
+        let hostnameRegex = #"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"#
+        guard incomingHost.range(of: hostnameRegex, options: .regularExpression) != nil else {
+            throw AppMailAccountSetupError.invalidHostname(incomingHost)
+        }
+        guard outgoingHost.range(of: hostnameRegex, options: .regularExpression) != nil else {
+            throw AppMailAccountSetupError.invalidHostname(outgoingHost)
+        }
+
+        // 验证端口范围
+        guard incomingPort > 0 && incomingPort <= 65535 else {
+            throw AppMailAccountSetupError.invalidPort(incomingPort)
+        }
+        guard outgoingPort > 0 && outgoingPort <= 65535 else {
+            throw AppMailAccountSetupError.invalidPort(outgoingPort)
         }
 
         let credentialToStore = credential
