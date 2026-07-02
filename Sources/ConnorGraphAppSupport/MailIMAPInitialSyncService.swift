@@ -22,7 +22,7 @@ public struct MailIMAPInitialSyncService: Sendable {
         self.messageLimit = messageLimit
     }
 
-    public func sync(account originalAccount: MailAccount) async throws -> MailInitialSyncResult {
+    public func sync(account originalAccount: MailAccount, onBatch: (@Sendable ([MailMessageDetail]) -> Void)? = nil) async throws -> MailInitialSyncResult {
         if originalAccount.provider == .gmail || originalAccount.provider == .microsoft365 {
             return MailInitialSyncResult(
                 account: updatedAccount(originalAccount, status: .blocked, summary: "此邮件账户类型已不再支持", reasons: ["请删除此旧账户后使用授权码、App Password 或通用 IMAP/SMTP 凭据重新添加。"]),
@@ -71,18 +71,24 @@ public struct MailIMAPInitialSyncService: Sendable {
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
+            let accountID = originalAccount.id
+            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
+            let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
+                return { @Sendable (batch: [BlockingIMAPClient.FetchedMessage]) in
+                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email)) }
+                    callback(details)
+                }
+            }
             let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
                 DispatchQueue.global(qos: .utility).async {
                     do {
-                        let result = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit)
+                        let result = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit, onBatch: onBatchWithDetail)
                         continuation.resume(returning: result)
                     } catch {
                         continuation.resume(throwing: error)
                     }
                 }
             }
-            let accountID = originalAccount.id
-            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let now = Date()
             let mailbox = MailMailbox(
                 id: inboxID,
@@ -124,7 +130,7 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
-    public func syncIncremental(account originalAccount: MailAccount, storedUIDs: Set<String>) async throws -> MailInitialSyncResult {
+    public func syncIncremental(account originalAccount: MailAccount, storedUIDs: Set<String>, onBatch: (@Sendable ([MailMessageDetail]) -> Void)? = nil) async throws -> MailInitialSyncResult {
         guard let endpoint = originalAccount.incoming, endpoint.protocolKind == .imap else {
             return MailInitialSyncResult(
                 account: updatedAccount(originalAccount, status: .blocked, summary: "缺少 IMAP 收件服务器配置", reasons: ["Incoming endpoint is not IMAP"]),
@@ -166,18 +172,24 @@ public struct MailIMAPInitialSyncService: Sendable {
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
+            let accountID = originalAccount.id
+            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
+            let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
+                return { @Sendable (batch: [BlockingIMAPClient.FetchedMessage]) in
+                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email)) }
+                    callback(details)
+                }
+            }
             let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
                 DispatchQueue.global(qos: .utility).async {
                     do {
-                        let result = try client.withPasswordSessionIncremental(usernames: loginUsernames, password: rawCredential, storedUIDs: storedUIDs)
+                        let result = try client.withPasswordSessionIncremental(usernames: loginUsernames, password: rawCredential, storedUIDs: storedUIDs, onBatch: onBatchWithDetail)
                         continuation.resume(returning: result)
                     } catch {
                         continuation.resume(throwing: error)
                     }
                 }
             }
-            let accountID = originalAccount.id
-            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let now = Date()
             let mailbox = MailMailbox(
                 id: inboxID,
@@ -412,7 +424,7 @@ private struct BlockingIMAPClient {
     var host: String
     var port: Int
 
-    func withPasswordSession(usernames: [String], password: String, messageLimit: Int) throws -> Snapshot {
+    func withPasswordSession(usernames: [String], password: String, messageLimit: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -436,10 +448,10 @@ private struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
+        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit, onBatch: onBatch)
     }
 
-    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, fetchBatchSize: Int = 50) throws -> Snapshot {
+    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -463,7 +475,7 @@ private struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, fetchBatchSize: fetchBatchSize)
+        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
     }
 
     func withOAuth2Session(usernames: [String], accessToken: String, messageLimit: Int) throws -> Snapshot {
@@ -527,7 +539,7 @@ private struct BlockingIMAPClient {
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
     }
 
-    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, fetchBatchSize: Int) throws -> Snapshot {
+    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
         try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
@@ -571,7 +583,9 @@ private struct BlockingIMAPClient {
             let fetchTag = nextTag()
             try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
-            allMessages.append(contentsOf: parseFetchedMessages(fetchResponse, rawData: fetchRaw))
+            let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
+            allMessages.append(contentsOf: batchMessages)
+            if !batchMessages.isEmpty { onBatch?(batchMessages) }
         }
 
         try logout(input: input, output: output)
@@ -586,7 +600,7 @@ private struct BlockingIMAPClient {
         }
     }
 
-    private func fetchInboxSnapshot(input: InputStream, output: OutputStream, messageLimit: Int) throws -> Snapshot {
+    private func fetchInboxSnapshot(input: InputStream, output: OutputStream, messageLimit: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
         try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
@@ -629,7 +643,9 @@ private struct BlockingIMAPClient {
             let fetchTag = nextTag()
             try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
-            allMessages.append(contentsOf: parseFetchedMessages(fetchResponse, rawData: fetchRaw))
+            let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
+            allMessages.append(contentsOf: batchMessages)
+            if !batchMessages.isEmpty { onBatch?(batchMessages) }
         }
 
         try logout(input: input, output: output)

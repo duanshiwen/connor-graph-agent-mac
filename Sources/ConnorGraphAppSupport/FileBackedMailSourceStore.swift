@@ -79,6 +79,19 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
         try await searchService?.upsert([NativeSourceSearchAdapters.mailDocument(from: message)])
     }
 
+    /// Batch save messages — single load+save cycle for the entire batch (much faster than per-message)
+    public func saveMessagesBatch(_ messages: [MailMessageDetail]) async throws {
+        guard !messages.isEmpty else { return }
+        var snapshot = try load()
+        let newIDs = Set(messages.map(\.id))
+        snapshot.messages.removeAll { newIDs.contains($0.id) }
+        snapshot.messages.append(contentsOf: messages)
+        try save(snapshot)
+        if let searchService {
+            try await searchService.upsert(messages.map { NativeSourceSearchAdapters.mailDocument(from: $0) })
+        }
+    }
+
     public func searchMessages(query: String, accountID: MailAccountID?) async throws -> [MailMessageSummary] {
         try await searchMessages(query: query, accountID: accountID, temporalFilter: nil, temporalSort: .relevanceThenTimeDesc, limit: Int.max)
     }
