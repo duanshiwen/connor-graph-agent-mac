@@ -351,9 +351,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
     @Published var isAddingLLMConnection: Bool = false
-    @Published var llmModelConnections: [AppLLMModelConnection] = [] {
-        didSet { updateWelcomeState() }
-    }
+    @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var showWelcomePlaceholder: Bool = false
     @Published var chatSessions: [AgentSession] = []
@@ -2982,6 +2980,36 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func addCalendarSourceFromWizard(account: CalendarAccount, credential: String?) {
+        // Save credential to keychain if provided
+        if let credential, !credential.isEmpty, let username = account.configuration.username {
+            let binding = AppCalendarCredentialStore.binding(
+                accountID: account.id,
+                username: username,
+                authMode: account.configuration.authMode
+            )
+            try? calendarCredentialStore.saveCredential(credential, binding: binding)
+        }
+
+        calendarAccounts = (calendarAccounts + [account])
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        selectedCalendarEventID = nil
+        isPresentingAddCalendarSourceSheet = false
+        calendarSyncMessage = "已添加日历源：\(account.displayName)，正在同步…"
+        reloadCalendarBrowserPresentation()
+
+        Task { @MainActor in
+            await persistCalendarSnapshot()
+            do {
+                try await reconcileCalendarAccountRefreshTasks()
+                reloadCalendarBrowserPresentation()
+                reloadTaskManagementPresentation()
+            } catch {
+                calendarSyncMessage = "日历源同步失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
     func deleteCalendarSource(_ account: CalendarAccount) {
         let collectionIDs = Set(calendarCollections.filter { $0.accountID == account.id }.map(\.id))
         let nextAccounts = calendarAccounts.filter { $0.id != account.id }
@@ -3761,10 +3789,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        // 只在连接列表为空时显示欢迎页，不在连接出现时自动关闭（由用户点击"开始使用"手动关闭）
-        if llmModelConnections.isEmpty {
-            showWelcomePlaceholder = true
-        }
+        // 有连接配置就不显示欢迎页，不管连接是否可用
+        showWelcomePlaceholder = llmConnectionConfigs.isEmpty
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
