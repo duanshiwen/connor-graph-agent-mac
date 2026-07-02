@@ -171,80 +171,309 @@ struct CraftCalendarListPane: View {
 struct AddCalendarSourceSheet: View {
     @ObservedObject var viewModel: AppViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var localMessage: String?
+
+    private static let supportedProviders: [CalendarProviderProfile] =
+        CalendarProviderProfile.catalog.filter(\.isUserConfigurable)
+
+    @State private var selectedProvider: CalendarSourceKind = .macOSEventKit
+    @State private var displayName: String = ""
+    @State private var subscriptionURL: String = ""
+    @State private var serverURL: String = ""
+    @State private var username: String = ""
+    @State private var appPassword: String = ""
+    @State private var isSyncingLocal = false
+    @State private var isSubmitting = false
+    @State private var feedbackMessage: String?
+    @State private var feedbackError: String?
+
+    private var selectedProfile: CalendarProviderProfile {
+        Self.supportedProviders.first { $0.sourceKind == selectedProvider }
+            ?? CalendarProviderProfile.catalog[0]
+    }
+
+    private var isFormValid: Bool {
+        switch selectedProvider {
+        case .macOSEventKit:
+            return true
+        case .icsSubscription:
+            return !subscriptionURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .genericCalDAV, .appleICloudCalDAV, .fastmailCalDAV, .nextcloudCalDAV:
+            return !serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !appPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default:
+            return false
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-            HStack {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                    Text("添加日历源")
-                        .font(.system(size: 24, weight: .semibold))
-                    Text("当前可同步 macOS Calendar / EventKit。本分支正在接入可商用日历来源平台；远程来源将以只读同步为边界，暂不支持写入事件。")
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+            header
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                    providerSection
+                    configurationForm
+                    hintCard
+                    feedbackView
                 }
-                Spacer()
-                Button(action: { dismiss() }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
             }
 
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                Label("本机日历", systemImage: "calendar")
-                    .font(AgentChatTypography.title)
-                Text("点击同步后，系统会弹出日历权限请求。授权后，康纳同学会读取未来 90 天和过去 7 天的事件，并按天展示在日历列表。")
-                    .font(AgentChatTypography.meta)
+            footer
+        }
+        .padding(SettingsListLayout.spaceXL)
+        .frame(width: 600)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: 520)
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.13))
+                Image(systemName: "calendar.badge.plus")
+                    .font(SettingsListTypography.largeIcon)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text("添加日历源")
+                    .font(SettingsListTypography.header)
+                Text("选择服务商并填写配置信息。添加后康纳同学会自动发现日历并开始同步日程。所有远程日历均为只读同步。")
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("本机日历只读取 macOS 已授权可见的日历；如需连接其他服务，可先在 macOS Calendar 中添加账户，Connor 会通过 EventKit 读取。")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Connor 原生日历来源平台会接入 CalDAV、Google、Microsoft 与 ICS/Webcal，但当前用户界面暂不开放远程账户配置；日历写入功能也暂不支持。")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let message = localMessage ?? viewModel.calendarSyncMessage {
-                    Text(message)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(message.contains("失败") || message.contains("拒绝") || message.contains("未授权") ? .red : .secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - Provider Picker
+
+    private var providerSection: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text("服务商")
+                .font(SettingsListTypography.rowTitle)
+
+            Picker("服务商", selection: $selectedProvider) {
+                ForEach(Self.supportedProviders) { profile in
+                    Text(profile.displayName).tag(profile.sourceKind)
                 }
             }
-            .padding(AppShellLayout.spaceL)
+            .labelsHidden()
+            .pickerStyle(.menu)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+            .onChange(of: selectedProvider) { _, _ in
+                feedbackMessage = nil
+                feedbackError = nil
+            }
+        }
+    }
 
-            Spacer()
+    // MARK: - Configuration Form
 
-            HStack {
+    @ViewBuilder
+    private var configurationForm: some View {
+        switch selectedProvider {
+        case .macOSEventKit:
+            eventKitForm
+        case .icsSubscription:
+            icsForm
+        case .genericCalDAV, .appleICloudCalDAV, .fastmailCalDAV, .nextcloudCalDAV:
+            calDAVForm
+        default:
+            EmptyView()
+        }
+    }
+
+    private var eventKitForm: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text("本机日历")
+                .font(SettingsListTypography.rowTitle)
+            Text("点击「同步本机日历」后，系统会弹出日历权限请求。授权后，康纳同学会读取未来 90 天和过去 7 天的事件。")
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("本机日历只读取 macOS 已授权可见的日历。如需连接其他服务，可先在 macOS 系统设置 → 互联网账户中添加账户，Connor 会通过 EventKit 读取。")
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private var icsForm: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text("订阅 URL")
+                .font(SettingsListTypography.rowTitle)
+            TextField("https://example.com/calendar.ics", text: $subscriptionURL)
+                .textFieldStyle(.roundedBorder)
+            Text("输入 ICS / Webcal 订阅链接地址。支持 http、https 和 webcal 协议。")
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private var calDAVForm: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            calDAVField("服务器 URL", text: $serverURL, placeholder: serverURLPlaceholder)
+            calDAVField("用户名", text: $username, placeholder: "user@example.com")
+            calDAVField("应用密码", text: $appPassword, placeholder: "App Password", isSecure: true)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private func calDAVField(_ title: String, text: Binding<String>, placeholder: String, isSecure: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+            if isSecure {
+                SecureField(placeholder, text: text)
+                    .textFieldStyle(.roundedBorder)
+            } else {
+                TextField(placeholder, text: text)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var serverURLPlaceholder: String {
+        switch selectedProvider {
+        case .appleICloudCalDAV: return "https://caldav.icloud.com"
+        case .fastmailCalDAV: return "https://caldav.fastmail.com"
+        case .nextcloudCalDAV: return "https://your-nextcloud.com/dav"
+        default: return "https://caldav.example.com"
+        }
+    }
+
+    // MARK: - Hint Card
+
+    private var hintCard: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Label(selectedProfile.displayName, systemImage: "info.circle")
+                .font(SettingsListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.secondary)
+            Text(selectedProfile.helpText)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.accentColor.opacity(0.15), lineWidth: 1))
+    }
+
+    // MARK: - Feedback
+
+    @ViewBuilder
+    private var feedbackView: some View {
+        if let error = feedbackError {
+            Text(error)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        } else if let message = feedbackMessage {
+            Text(message)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: SettingsListLayout.spaceL) {
+            if selectedProvider == .macOSEventKit {
                 Button("前往日历设置") {
                     viewModel.selectSettingsSection(.calendar)
                     viewModel.isPresentingAddCalendarSourceSheet = false
                 }
-                Spacer()
-                Button("取消") { dismiss() }
-                    .disabled(viewModel.isSyncingSystemCalendar)
-                Button(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历") {
-                    localMessage = "正在请求日历权限并同步…"
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+            Button("取消") { dismiss() }
+                .buttonStyle(.bordered)
+                .disabled(isSubmitting || isSyncingLocal)
+
+            if selectedProvider == .macOSEventKit {
+                Button {
+                    isSyncingLocal = true
+                    feedbackMessage = "正在请求日历权限并同步…"
                     Task { @MainActor in
                         let succeeded = await viewModel.syncSystemCalendarNow()
-                        localMessage = viewModel.calendarSyncMessage
+                        feedbackMessage = viewModel.calendarSyncMessage
+                        isSyncingLocal = false
                         if succeeded { dismiss() }
+                    }
+                } label: {
+                    if isSyncingLocal {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("同步本机日历", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isSyncingSystemCalendar)
+                .disabled(isSyncingLocal)
+                .keyboardShortcut(.defaultAction)
+            } else {
+                Button {
+                    submitWizardAccount()
+                } label: {
+                    if isSubmitting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("添加并同步", systemImage: "plus")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isFormValid || isSubmitting)
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(AppShellLayout.spaceXL)
-        .frame(width: 600, height: 420)
+    }
+
+    // MARK: - Submit
+
+    private func submitWizardAccount() {
+        guard isFormValid else { return }
+        isSubmitting = true
+        feedbackError = nil
+        feedbackMessage = nil
+
+        do {
+            let wizard = CalendarSourceWizardState(
+                provider: selectedProvider,
+                displayName: displayName,
+                subscriptionURLString: subscriptionURL,
+                serverURLString: serverURL,
+                username: username,
+                appPassword: appPassword
+            )
+            let account = try wizard.buildAccount(existingAccountCount: viewModel.calendarAccounts.count)
+            viewModel.addCalendarSourceFromWizard(account: account, credential: appPassword)
+            isSubmitting = false
+        } catch {
+            isSubmitting = false
+            feedbackError = "配置无效：\(error.localizedDescription)"
+        }
     }
 }
 
