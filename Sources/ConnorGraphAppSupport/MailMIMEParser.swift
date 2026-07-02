@@ -139,9 +139,9 @@ public struct MailMIMEParser: Sendable, Equatable {
                 continue
             }
             
-            let headerBytes = partData[..<headerEnd]
+            let headerBytes = headerEnd > 0 ? partData.subdata(in: 0..<headerEnd) : Data()
             guard let headerStr = String(data: headerBytes, encoding: .ascii) else { continue }
-            let bodySlice = partData[headerEnd...]
+            let bodySlice = partData.subdata(in: headerEnd..<partData.count)
             
             // Extract Content-Type
             let headerLower = headerStr.lowercased()
@@ -149,7 +149,7 @@ public struct MailMIMEParser: Sendable, Equatable {
             if headerLower.contains("text/plain") || headerLower.contains("text/html") {
                 let charset = extractCharsetFromContentType(headerStr)
                 let transferEncoding = extractTransferEncodingFromHeader(headerStr)
-                let decodedBody = decodeTransferEncoding(Data(bodySlice), encoding: transferEncoding)
+                let decodedBody = decodeTransferEncoding(bodySlice, encoding: transferEncoding)
                 
                 if headerLower.contains("text/html") {
                     if let html = decodeCharset(decodedBody, charset: charset) {
@@ -165,7 +165,7 @@ public struct MailMIMEParser: Sendable, Equatable {
                 // Nested multipart — recursive
                 let nestedBoundary = extractBoundaryFromContentType(headerStr)
                 if let nestedBoundary {
-                    let nested = extractBodyComponents(data: Data(bodySlice), boundary: nestedBoundary, fallback: fallback)
+                    let nested = extractBodyComponents(data: bodySlice, boundary: nestedBoundary, fallback: fallback)
                     if bestPlain == nil, !nested.plainText.isEmpty { bestPlain = nested.plainText }
                     if bestHTML == nil, let h = nested.htmlText { bestHTML = h }
                 }

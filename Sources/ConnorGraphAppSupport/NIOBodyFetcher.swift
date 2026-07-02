@@ -223,6 +223,7 @@ private final class OneShotFetchHandler: ChannelInboundHandler {
     private var bodyData = Data()
     private var state: State = .greeting
     private var channel: Channel?
+    private var didResume = false
 
     enum State { case greeting, loggingIn, selecting, fetching, done }
 
@@ -275,13 +276,20 @@ private final class OneShotFetchHandler: ChannelInboundHandler {
             let uidSet = UIDSetNonEmpty(range: UIDRange(UID(rawValue: uv)))
             send(.uidFetch(.set(uidSet), [.bodySection(peek: true, .complete, nil)], []))
         case .fetching:
+            guard !didResume else { return }
+            didResume = true
             state = .done
             cont.resume(returning: bodyData)
         case .done: break
         }
     }
 
-    private func fail(_ msg: String) { state = .done; cont.resume(throwing: NSError(domain: "IMAP", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])) }
+    private func fail(_ msg: String) {
+        guard !didResume else { return }
+        didResume = true
+        state = .done
+        cont.resume(throwing: NSError(domain: "IMAP", code: -1, userInfo: [NSLocalizedDescriptionKey: msg]))
+    }
 
     private func tag() -> String { tagNum += 1; pendingTag = "n\(tagNum)"; return pendingTag }
 
