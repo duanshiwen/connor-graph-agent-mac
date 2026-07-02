@@ -145,8 +145,7 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     }
 
     public var totalMessageCount: Int {
-        let mailboxMessageCount = mailboxes.reduce(0) { $0 + $1.status.messageCount }
-        return max(mailboxMessageCount, messages.count)
+        messages.count
     }
 
     public var totalUnreadCount: Int {
