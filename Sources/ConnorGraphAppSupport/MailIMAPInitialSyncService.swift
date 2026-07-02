@@ -763,6 +763,7 @@ private struct BlockingIMAPClient {
 
                 // Find BODY[TEXT] literal starting from after headers
                 var bodyData: Data? = nil
+                var fetchEndPos = headerEndPos // track end of this FETCH response
                 let bodySearch = Array(bytes[headerEndPos..<min(headerEndPos + 500, bytes.count)])
                 if let bodyIdx = findPattern(bodySearch, textMarker) {
                     let afterBody = Array(bytes[(headerEndPos + bodyIdx + textMarker.count)..<min(headerEndPos + bodyIdx + textMarker.count + 100, bytes.count)])
@@ -778,6 +779,7 @@ private struct BlockingIMAPClient {
                             let bodyEnd = bodyStart + bodySize
                             if bodyEnd <= bytes.count {
                                 bodyData = Data(bytes[bodyStart..<bodyEnd])
+                                fetchEndPos = bodyEnd + 2 // skip \r\n before closing paren
                             }
                         }
                     }
@@ -789,8 +791,8 @@ private struct BlockingIMAPClient {
                     rawBodyData: bodyData, fallbackSequenceDate: Date()
                 ))
 
-                // Skip past this FETCH response
-                i = min(headerEndPos + 1, bytes.count)
+                // Jump past this entire FETCH response to next message
+                i = fetchEndPos
                 continue
             }
             i += 1
