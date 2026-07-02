@@ -342,7 +342,17 @@ struct AddMailAccountSheet: View {
 
     @ViewBuilder
     private var setupFeedback: some View {
-        if let setupError {
+        if let testResult {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("连接测试结果")
+                    .font(SettingsListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Text(testResult.summary)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(testResult.isSuccess ? .green : .red)
+                    .textSelection(.enabled)
+            }
+        } else if let setupError {
             Text(setupError)
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.red)
