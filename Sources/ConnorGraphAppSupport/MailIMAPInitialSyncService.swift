@@ -264,6 +264,7 @@ private struct BlockingIMAPClient {
         var flags: String
         var header: String
         var snippet: String
+        var rawBodyData: Data?
         var fallbackSequenceDate: Date
 
         func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress) -> MailMessageDetail {
@@ -273,7 +274,9 @@ private struct BlockingIMAPClient {
             let from = MailAddress.parse(headers.from) ?? MailAddress(email: "unknown@example.com")
             let to = MailAddress.parseList(headers.to)
             let date = headers.date ?? fallbackSequenceDate
-            let fullBodyText = snippet.mimeCleanedBody
+            let charset = ParsedHeaders.extractCharset(from: header)
+            let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset)
+            let fullBodyText = decodedBody.mimeCleanedBody
             let cleanSnippet = fullBodyText.htmlStripped.normalizedWhitespace.prefixString(300)
             let summary = MailMessageSummary(
                 id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
@@ -295,6 +298,32 @@ private struct BlockingIMAPClient {
                 bodyHash: String(abs(fullBodyText.hashValue))
             )
             return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: headers.messageID, rawHeaderHash: String(abs(header.hashValue))), body: body)
+        }
+
+        static func decodeBody(rawData: Data?, fallbackString: String, charset: String?) -> String {
+            guard let rawData, !rawData.isEmpty else { return fallbackString }
+            let charsetLower = charset?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if charsetLower.isEmpty || charsetLower == "utf-8" || charsetLower == "utf8" {
+                return String(data: rawData, encoding: .utf8) ?? fallbackString
+            }
+            let cfEncoding: CFStringEncoding
+            switch charsetLower {
+            case "gb2312", "gbk", "gb18030": cfEncoding = CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+            case "big5": cfEncoding = CFStringEncoding(CFStringEncodings.big5.rawValue)
+            case "iso-2022-jp": cfEncoding = CFStringEncoding(CFStringEncodings.ISO_2022_JP.rawValue)
+            case "euc-jp": cfEncoding = CFStringEncoding(CFStringEncodings.EUC_JP.rawValue)
+            case "shift_jis", "shift-jis": cfEncoding = CFStringEncoding(CFStringEncodings.shiftJIS.rawValue)
+            case "euc-kr": cfEncoding = CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)
+            case "iso-8859-1", "latin1": cfEncoding = CFStringEncoding(0x0201) // kCFStringEncodingISOLatin1
+            case "windows-1252", "cp1252": cfEncoding = CFStringEncoding(0x0500) // kCFStringEncodingWindowsLatin1
+            case "iso-8859-2", "latin2": cfEncoding = CFStringEncoding(0x0202) // kCFStringEncodingISOLatin2
+            case "windows-1251", "cp1251": cfEncoding = CFStringEncoding(0x0501) // kCFStringEncodingWindowsCyrillic
+            case "koi8-r": cfEncoding = CFStringEncoding(0x0A02) // kCFStringEncodingKOI8_R
+            default:
+                return String(data: rawData, encoding: .utf8) ?? String(data: rawData, encoding: .ascii) ?? fallbackString
+            }
+            let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+            return String(data: rawData, encoding: String.Encoding(rawValue: nsEncoding)) ?? fallbackString
         }
     }
 
@@ -459,8 +488,8 @@ private struct BlockingIMAPClient {
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
             try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
-            let fetchResponse = try readUntilTagged(tag: fetchTag, input: input, timeout: 120)
-            allMessages.append(contentsOf: parseFetchedMessages(fetchResponse))
+            let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
+            allMessages.append(contentsOf: parseFetchedMessages(fetchResponse, rawData: fetchRaw))
         }
 
         try logout(input: input, output: output)
@@ -498,20 +527,21 @@ private struct BlockingIMAPClient {
         let start = max(1, exists - max(1, messageLimit) + 1)
         let fetchTag = nextTag()
         try write("\(fetchTag) UID FETCH \(start):\(exists) (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO CC DATE CONTENT-TYPE)] BODY.PEEK[TEXT])\r\n", output: output)
-        let fetchResponse = try readUntilTagged(tag: fetchTag, input: input, timeout: 60)
+        let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
         try logout(input: input, output: output)
-        let messages = parseFetchedMessages(fetchResponse)
+        let messages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
         return Snapshot(exists: exists, unreadCount: statusUnseen ?? messages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: messages.map(\.uid).compactMap(Int.init).max().map(String.init), messages: messages)
     }
 
-    private func parseFetchedMessages(_ response: String) -> [FetchedMessage] {
+    private func parseFetchedMessages(_ response: String, rawData: Data? = nil) -> [FetchedMessage] {
         let chunks = response.components(separatedBy: "\r\n* ").map { $0.hasPrefix("* ") ? $0 : "* " + $0 }
-        return chunks.compactMap { chunk in
+        return chunks.compactMap { chunk -> FetchedMessage? in
             guard chunk.contains(" FETCH "), let uid = chunk.firstString(matching: #"UID\s+(\d+)"#) else { return nil }
             let flags = chunk.firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
             let header = extractHeader(from: chunk)
             let body = extractBody(from: chunk, after: header)
-            return FetchedMessage(uid: uid, flags: flags, header: header, snippet: body, fallbackSequenceDate: Date())
+            let rawBody = extractBodyAsData(from: chunk, rawData: rawData)
+            return FetchedMessage(uid: uid, flags: flags, header: header, snippet: body, rawBodyData: rawBody, fallbackSequenceDate: Date())
         }.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
     }
 
@@ -535,6 +565,25 @@ private struct BlockingIMAPClient {
             body = String(body[..<close.lowerBound])
         }
         return body
+    }
+
+    private func extractBodyAsData(from chunk: String, rawData: Data?) -> Data? {
+        guard let rawData else { return nil }
+        // Find BODY[TEXT] in raw bytes
+        let marker = Array("BODY[TEXT]".utf8)
+        guard let markerRange = rawData.range(of: Data(marker)) else { return nil }
+        let afterMarker = rawData[markerRange.upperBound...]
+        // Find the opening brace for literal size: {NNN}
+
+        guard let openBrace = afterMarker.firstIndex(of: 0x7B) else { return nil } // 0x7B = '{'
+        // Find closing brace
+        guard let closeBrace = afterMarker[openBrace...].firstIndex(of: 0x7D) else { return nil } // 0x7D = '}'
+        let sizeBytes = afterMarker[afterMarker.index(openBrace, offsetBy: 1)..<closeBrace]
+        guard let literalSize = Int(String(data: sizeBytes, encoding: .utf8) ?? "") else { return nil }
+        let bodyStart = afterMarker.index(closeBrace, offsetBy: 3)
+        let bodyStartOffset = bodyStart - rawData.startIndex
+        guard bodyStartOffset >= 0, bodyStartOffset + literalSize <= rawData.count else { return nil }
+        return rawData.subdata(in: bodyStartOffset..<(bodyStartOffset + literalSize))
     }
 
     private func logout(input: InputStream, output: OutputStream) throws {
@@ -575,6 +624,26 @@ private struct BlockingIMAPClient {
         throw IMAPError.connectionFailed("Timed out waiting for IMAP greeting")
     }
 
+    private func readUntilTaggedRaw(tag: String, input: InputStream, timeout: TimeInterval) throws -> (String, Data) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while Date() < deadline {
+            let count = input.read(&buffer, maxLength: buffer.count)
+            if count > 0 {
+                data.append(buffer, count: count)
+                if let string = String(data: data, encoding: .utf8), string.contains("\r\n\(tag) ") || string.hasPrefix("\(tag) ") {
+                    return (string, data)
+                }
+            } else if count < 0 {
+                throw IMAPError.connectionFailed(input.streamError?.localizedDescription ?? "Read failed")
+            } else {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+        throw IMAPError.connectionFailed("Timed out waiting for IMAP response \(tag)")
+    }
+
     private func readUntilTagged(tag: String, input: InputStream, timeout: TimeInterval) throws -> String {
         let deadline = Date().addingTimeInterval(timeout)
         var data = Data()
@@ -610,6 +679,25 @@ private struct ParsedHeaders {
         self.to = unfolded.headerValue("To")
         self.cc = unfolded.headerValue("Cc")
         self.date = Self.parseDate(unfolded.headerValue("Date"))
+    }
+
+    static func extractCharset(from header: String) -> String? {
+        let unfolded = header.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
+        guard let contentType = unfolded.headerValue("Content-Type") else { return nil }
+        if let charsetRange = contentType.range(of: #"charset="#, options: .caseInsensitive) {
+            let afterCharset = contentType[charsetRange.upperBound...]
+            if let endQuote = afterCharset.range(of: "\"") {
+                return String(afterCharset[..<endQuote.lowerBound])
+            }
+            let endChars = CharacterSet(charactersIn: "; \t\r\n")
+            var result = ""
+            for char in afterCharset {
+                if char.unicodeScalars.contains(where: { endChars.contains($0) }) { break }
+                result.append(char)
+            }
+            return result.isEmpty ? nil : result
+        }
+        return nil
     }
 
     private static func parseDate(_ value: String?) -> Date? {
