@@ -130,7 +130,7 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
-    public func syncIncremental(account originalAccount: MailAccount, storedUIDs: Set<String>, onBatch: (@Sendable ([MailMessageDetail]) -> Void)? = nil) async throws -> MailInitialSyncResult {
+    public func syncIncremental(account originalAccount: MailAccount, storedUIDs: Set<String>, storedUIDValidity: String? = nil, onBatch: (@Sendable ([MailMessageDetail]) -> Void)? = nil) async throws -> MailInitialSyncResult {
         guard let endpoint = originalAccount.incoming, endpoint.protocolKind == .imap else {
             return MailInitialSyncResult(
                 account: updatedAccount(originalAccount, status: .blocked, summary: "缺少 IMAP 收件服务器配置", reasons: ["Incoming endpoint is not IMAP"]),
@@ -183,7 +183,7 @@ public struct MailIMAPInitialSyncService: Sendable {
             let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
                 DispatchQueue.global(qos: .utility).async {
                     do {
-                        let result = try client.withPasswordSessionIncremental(usernames: loginUsernames, password: rawCredential, storedUIDs: storedUIDs, onBatch: onBatchWithDetail)
+                        let result = try client.withPasswordSessionIncremental(usernames: loginUsernames, password: rawCredential, storedUIDs: storedUIDs, storedUIDValidity: storedUIDValidity, onBatch: onBatchWithDetail)
                         continuation.resume(returning: result)
                     } catch {
                         continuation.resume(throwing: error)
@@ -480,7 +480,7 @@ private struct BlockingIMAPClient {
         return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit, onBatch: onBatch)
     }
 
-    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, fetchBatchSize: Int = 5, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int = 5, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -504,7 +504,7 @@ private struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
+        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, storedUIDValidity: storedUIDValidity, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
     }
 
     func withOAuth2Session(usernames: [String], accessToken: String, messageLimit: Int) throws -> Snapshot {
@@ -568,7 +568,7 @@ private struct BlockingIMAPClient {
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
     }
 
-    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
         try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
@@ -584,6 +584,12 @@ private struct BlockingIMAPClient {
         }
         let exists = statusMessages ?? selectResponse.firstInt(matching: #"\*\s+(\d+)\s+EXISTS"#) ?? 0
         let uidValidity = statusUIDValidity ?? selectResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
+
+        // Check UIDVALIDITY - if it changed, mailbox was reset, need full resync
+        if let storedValidity = storedUIDValidity, let currentValidity = uidValidity, storedValidity != currentValidity {
+            throw IMAPError.protocolError("UIDVALIDITY changed (\(storedValidity) -> \(currentValidity)), full resync required")
+        }
+
         guard exists > 0 else {
             try logout(input: input, output: output)
             return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
