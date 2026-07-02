@@ -201,6 +201,8 @@ struct AddMailAccountSheet: View {
     @State private var isSubmitting: Bool = false
     @State private var setupMessage: String?
     @State private var setupError: String?
+    @State private var isAutoconfigLoading: Bool = false
+    @State private var autoconfigResult: MailAutoconfigResult?
 
     private var isManualPreset: Bool {
         selectedPreset == .other
@@ -276,9 +278,23 @@ struct AddMailAccountSheet: View {
                 }
 
                 MailAccountSetupRow("邮箱地址", labelWidth: Layout.labelColumnWidth) {
-                    TextField("name@example.com", text: $email)
-                        .textFieldStyle(.roundedBorder)
-                        .textContentType(.emailAddress)
+                    HStack(spacing: 8) {
+                        TextField("name@example.com", text: $email)
+                            .textFieldStyle(.roundedBorder)
+                            .textContentType(.emailAddress)
+
+                        Button {
+                            Task { await runAutoconfig() }
+                        } label: {
+                            if isAutoconfigLoading {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text("自动检测")
+                            }
+                        }
+                        .disabled(isAutoconfigLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
 
                 MailAccountSetupRow("授权凭据", labelWidth: Layout.labelColumnWidth) {
@@ -392,6 +408,32 @@ struct AddMailAccountSheet: View {
             displayName = preset.title
             lastAutofilledDisplayName = preset.title
         }
+    }
+
+    @MainActor
+    private func runAutoconfig() async {
+        let emailValue = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard emailValue.contains("@"), emailValue.contains(".") else { return }
+
+        isAutoconfigLoading = true
+        setupMessage = "正在自动检测服务器配置…"
+        setupError = nil
+
+        let service = MailAutoconfigService()
+        if let result = try? await service.discover(email: emailValue) {
+            autoconfigResult = result
+            incomingHost = result.incomingHost
+            incomingPort = result.incomingPort
+            outgoingHost = result.outgoingHost
+            outgoingPort = result.outgoingPort
+            setupMessage = "已自动检测到服务器配置"
+            selectedPreset = .other
+        } else {
+            setupMessage = nil
+            setupError = "未找到自动配置，请手动填写服务器信息"
+        }
+
+        isAutoconfigLoading = false
     }
 }
 
