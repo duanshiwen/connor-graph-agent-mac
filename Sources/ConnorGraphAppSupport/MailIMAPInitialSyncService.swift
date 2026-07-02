@@ -276,7 +276,7 @@ private struct BlockingIMAPClient {
             let date = headers.date ?? fallbackSequenceDate
             let charset = ParsedHeaders.extractCharset(from: header)
             let isMultipart = header.localizedCaseInsensitiveContains("multipart/")
-            let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset)
+            let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset, transferEncoding: headers.transferEncoding)
             let fullBodyText: String
             if isMultipart, let boundary = ParsedHeaders.extractBoundary(from: header) {
                 fullBodyText = Self.extractPlainTextPart(from: decodedBody, boundary: boundary)
@@ -306,11 +306,51 @@ private struct BlockingIMAPClient {
             return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: headers.messageID, rawHeaderHash: String(abs(header.hashValue))), body: body)
         }
 
-        static func decodeBody(rawData: Data?, fallbackString: String, charset: String?) -> String {
+        static func decodeQuotedPrintable(_ data: Data) -> Data {
+            var result = Data()
+            let bytes = [UInt8](data)
+            var i = 0
+            while i < bytes.count {
+                if bytes[i] == 0x3D { // '='
+                    // Soft line break: =\r\n or =\n
+                    if i + 1 < bytes.count && bytes[i + 1] == 0x0A { // =\n
+                        i += 2; continue
+                    }
+                    if i + 2 < bytes.count && bytes[i + 1] == 0x0D && bytes[i + 2] == 0x0A { // =\r\n
+                        i += 3; continue
+                    }
+                    // Encoded byte: =XX
+                    if i + 2 < bytes.count,
+                       let hex = String(bytes: [bytes[i + 1], bytes[i + 2]], encoding: .utf8),
+                       let byte = UInt8(hex, radix: 16) {
+                        result.append(byte)
+                        i += 3; continue
+                    }
+                }
+                result.append(bytes[i])
+                i += 1
+            }
+            return result
+        }
+
+        static func decodeBody(rawData: Data?, fallbackString: String, charset: String?, transferEncoding: String? = nil) -> String {
             guard let rawData, !rawData.isEmpty else { return fallbackString }
+
+            // Step 1: Decode Content-Transfer-Encoding
+            let decodedData: Data
+            let enc = transferEncoding?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if enc == "quoted-printable" || enc == "qp" {
+                decodedData = decodeQuotedPrintable(rawData)
+            } else if enc == "base64" {
+                decodedData = Data(base64Encoded: rawData) ?? rawData
+            } else {
+                decodedData = rawData
+            }
+
+            // Step 2: Charset conversion
             let charsetLower = charset?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if charsetLower.isEmpty || charsetLower == "utf-8" || charsetLower == "utf8" {
-                return String(data: rawData, encoding: .utf8) ?? fallbackString
+                return String(data: decodedData, encoding: .utf8) ?? fallbackString
             }
             let cfEncoding: CFStringEncoding
             switch charsetLower {
@@ -326,10 +366,10 @@ private struct BlockingIMAPClient {
             case "windows-1251", "cp1251": cfEncoding = CFStringEncoding(0x0501) // kCFStringEncodingWindowsCyrillic
             case "koi8-r": cfEncoding = CFStringEncoding(0x0A02) // kCFStringEncodingKOI8_R
             default:
-                return String(data: rawData, encoding: .utf8) ?? String(data: rawData, encoding: .ascii) ?? fallbackString
+                return String(data: decodedData, encoding: .utf8) ?? String(data: decodedData, encoding: .ascii) ?? fallbackString
             }
             let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
-            return String(data: rawData, encoding: String.Encoding(rawValue: nsEncoding)) ?? fallbackString
+            return String(data: decodedData, encoding: String.Encoding(rawValue: nsEncoding)) ?? fallbackString
         }
 
         static func extractPlainTextPart(from body: String, boundary: String) -> String {
@@ -340,11 +380,30 @@ private struct BlockingIMAPClient {
                 guard !trimmed.isEmpty, !trimmed.hasPrefix("--") else { continue }
                 let isPlainText = trimmed.range(of: #"Content-Type:\s*text/plain"#, options: [.caseInsensitive, .regularExpression]) != nil
                 guard isPlainText else { continue }
-                if let headerEnd = trimmed.range(of: "\r\n\r\n") {
-                    return String(trimmed[headerEnd.upperBound...]).mimeCleanedBody
-                } else if let headerEnd = trimmed.range(of: "\n\n") {
-                    return String(trimmed[headerEnd.upperBound...]).mimeCleanedBody
+
+                // Extract part-level Content-Transfer-Encoding
+                let partHeaderEnd: String.Index?
+                if let r = trimmed.range(of: "\r\n\r\n") { partHeaderEnd = r.upperBound }
+                else if let r = trimmed.range(of: "\n\n") { partHeaderEnd = r.upperBound }
+                else { partHeaderEnd = nil }
+                guard let partBodyStart = partHeaderEnd else { continue }
+                let partHeaders = String(trimmed[..<partBodyStart])
+                var partBody = String(trimmed[partBodyStart...])
+
+                // Decode per-part transfer encoding
+                if let encMatch = partHeaders.range(of: #"Content-Transfer-Encoding:\s*(\S+)"#, options: [.caseInsensitive, .regularExpression]) {
+                    let encValue = String(partHeaders[encMatch.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let encLower = encValue.lowercased()
+                    if encLower.hasPrefix("quoted-printable") {
+                        let decoded = decodeQuotedPrintable(Data(partBody.utf8))
+                        partBody = String(data: decoded, encoding: .utf8) ?? partBody
+                    } else if encLower == "base64" {
+                        if let decoded = Data(base64Encoded: partBody.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                            partBody = String(data: decoded, encoding: .utf8) ?? partBody
+                        }
+                    }
                 }
+                return partBody.mimeCleanedBody
             }
             return body.mimeCleanedBody
         }
@@ -714,6 +773,7 @@ private struct ParsedHeaders {
     var to: String?
     var cc: String?
     var date: Date?
+    var transferEncoding: String?
 
     init(raw: String) {
         let unfolded = raw.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
@@ -723,6 +783,7 @@ private struct ParsedHeaders {
         self.to = unfolded.headerValue("To")?.decodeRFC2047()
         self.cc = unfolded.headerValue("Cc")?.decodeRFC2047()
         self.date = Self.parseDate(unfolded.headerValue("Date"))
+        self.transferEncoding = unfolded.headerValue("Content-Transfer-Encoding")
     }
 
     static func extractCharset(from header: String) -> String? {
@@ -882,7 +943,11 @@ private extension String {
     }
 
     func headerValue(_ name: String) -> String? {
-        firstString(matching: #"(?m)^\#(name):\s*(.+)$"#)
+        // Use anchorsMatchLines but NOT dotMatchesLineSeparators, so . does NOT match \n
+        guard let regex = try? NSRegularExpression(pattern: #"(?m)^\#(name):\s*(.+)$"#, options: [.anchorsMatchLines]) else { return nil }
+        let nsRange = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: nsRange), match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: self) else { return nil }
+        return String(self[range]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
