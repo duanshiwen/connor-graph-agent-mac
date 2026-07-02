@@ -71,7 +71,16 @@ public struct MailIMAPInitialSyncService: Sendable {
             }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
-            let snapshot = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: messageLimit)
+            let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let result = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit)
+                        continuation.resume(returning: result)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
             let accountID = originalAccount.id
             let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let now = Date()

@@ -27,13 +27,13 @@ public struct CalendarProviderProfile: Codable, Sendable, Equatable, Hashable, I
     }
 
     public static let catalog: [CalendarProviderProfile] = [
-        CalendarProviderProfile(sourceKind: .macOSEventKit, displayName: "macOS Calendar", authMode: .none, status: .supported, isUserConfigurable: true, helpText: "Read-only access to calendars already authorized in macOS Calendar."),
-        CalendarProviderProfile(sourceKind: .icsSubscription, displayName: "ICS/Webcal Subscription", authMode: .none, status: .supported, isUserConfigurable: true, helpText: "Read-only subscription URL using http, https, or webcal."),
-        CalendarProviderProfile(sourceKind: .genericCalDAV, displayName: "Generic CalDAV", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "Read-only CalDAV using a server URL, username, and app password."),
-        CalendarProviderProfile(sourceKind: .appleICloudCalDAV, displayName: "Apple iCloud Calendar", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "Use an Apple App-specific password for read-only iCloud CalDAV sync.", defaultServerURL: URL(string: "https://caldav.icloud.com")),
-        CalendarProviderProfile(sourceKind: .fastmailCalDAV, displayName: "Fastmail Calendar", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "Use Fastmail app password with CalDAV read-only sync.", defaultServerURL: URL(string: "https://caldav.fastmail.com")),
-        CalendarProviderProfile(sourceKind: .nextcloudCalDAV, displayName: "Nextcloud Calendar", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "Use your Nextcloud CalDAV endpoint and app password for read-only sync."),
-        CalendarProviderProfile(sourceKind: .googleCalendar, displayName: "Google Calendar", authMode: .oauth2, status: .planned, isUserConfigurable: false, helpText: "Google Calendar API OAuth read-only connector is modeled but not enabled until OAuth runtime is implemented."),
-        CalendarProviderProfile(sourceKind: .microsoft365Calendar, displayName: "Microsoft 365 Calendar", authMode: .oauth2, status: .planned, isUserConfigurable: false, helpText: "Microsoft Graph Calendar OAuth read-only connector is modeled but not enabled until OAuth runtime is implemented.")
+        CalendarProviderProfile(sourceKind: .macOSEventKit, displayName: "macOS Calendar", authMode: .none, status: .supported, isUserConfigurable: true, helpText: "只读访问 macOS 日历中已授权的日历。点击「同步本机日历」后，系统会请求日历权限。"),
+        CalendarProviderProfile(sourceKind: .icsSubscription, displayName: "ICS/Webcal Subscription", authMode: .none, status: .supported, isUserConfigurable: true, helpText: "只读订阅日历，支持 http、https 和 webcal 协议的订阅链接。"),
+        CalendarProviderProfile(sourceKind: .genericCalDAV, displayName: "Generic CalDAV", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "通过服务器 URL、用户名和应用密码连接标准 CalDAV 服务，只读同步。"),
+        CalendarProviderProfile(sourceKind: .appleICloudCalDAV, displayName: "Apple iCloud Calendar", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "使用 Apple 专用密码连接 iCloud CalDAV，只读同步。需要在 appleid.apple.com 生成应用专用密码。", defaultServerURL: URL(string: "https://caldav.icloud.com")),
+        CalendarProviderProfile(sourceKind: .fastmailCalDAV, displayName: "Fastmail Calendar", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "使用 Fastmail 应用密码通过 CalDAV 只读同步日历。", defaultServerURL: URL(string: "https://caldav.fastmail.com")),
+        CalendarProviderProfile(sourceKind: .nextcloudCalDAV, displayName: "Nextcloud Calendar", authMode: .appPassword, status: .supported, isUserConfigurable: true, helpText: "使用 Nextcloud CalDAV 端点和应用密码进行只读同步。"),
+        CalendarProviderProfile(sourceKind: .googleCalendar, displayName: "Google Calendar", authMode: .oauth2, status: .planned, isUserConfigurable: false, helpText: "Google 日历 OAuth 只读连接器已建模，待 OAuth 运行时实现后启用。"),
+        CalendarProviderProfile(sourceKind: .microsoft365Calendar, displayName: "Microsoft 365 Calendar", authMode: .oauth2, status: .planned, isUserConfigurable: false, helpText: "Microsoft 365 日历 OAuth 只读连接器已建模，待 OAuth 运行时实现后启用。")
     ]
 }
