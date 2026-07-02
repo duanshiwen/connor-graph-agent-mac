@@ -552,6 +552,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var contactStore: FileBackedContactSourceStore?
+    private var mailContactStore: SQLiteMailContactStore?
     private var mailCredentialStore = AppMailCredentialStore()
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
@@ -2085,6 +2086,11 @@ final class AppViewModel: NSObject, ObservableObject {
                     .appendingPathComponent("mail.db"),
                 searchService: nativeSourceSearchBackend
             )
+            self.mailContactStore = try? SQLiteMailContactStore(
+                databaseURL: storagePaths.applicationSupportDirectory
+                    .appendingPathComponent("mail", isDirectory: true)
+                    .appendingPathComponent("mail.db")
+            )
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
@@ -2518,6 +2524,15 @@ final class AppViewModel: NSObject, ObservableObject {
         let runtime = MailRuntime(repository: mailStore, cache: mailStore)
         _ = try await runtime.listAccounts(runID: runID, sessionID: selectedChatSessionID)
         await reloadMailBrowserPresentation(preferredAccountID: accounts.first?.id)
+
+        // 同步联系人
+        if let mailContactStore {
+            let extractor = MailContactExtractor()
+            let allMessages = try await mailStore.searchMessages(query: "", accountID: nil)
+            let newContacts = extractor.extract(from: allMessages)
+            try await mailContactStore.saveContacts(newContacts)
+        }
+
         if let sourceInstanceID, !sourceInstanceID.isEmpty {
             return "Mail refreshed account \(sourceInstanceID); fetched \(syncedMessageCount) messages"
         }
