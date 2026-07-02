@@ -106,14 +106,10 @@ private class BlockingSMTPClient {
             throw SMTPError.connectionFailed("无法连接到 \(host):\(port)")
         }
 
-        if security == .tls {
-            let sslSettings: [String: Any] = [
-                kCFStreamSSLLevel as String: kCFStreamSocketSecurityLevelTLSv1,
-                kCFStreamSSLPeerName as String: host,
-                kCFStreamSSLValidatesCertificateChain as String: true
-            ]
-            input.setProperty(sslSettings, forKey: .init(kCFStreamPropertySSLSettings as String))
-            output.setProperty(sslSettings, forKey: .init(kCFStreamPropertySSLSettings as String))
+        // SMTP only supports STARTTLS (port 587), not implicit TLS (port 465)
+        // Port 465 is deprecated by IANA
+        guard security == .startTLS else {
+            throw SMTPError.connectionFailed("SMTP 仅支持 STARTTLS (端口 587)，不支持隐式 TLS")
         }
 
         input.open()
