@@ -537,7 +537,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
     private var globalSearchPreviewTask: Task<Void, Never>?
-    var mailStore: FileBackedMailSourceStore?
+    var mailStore: (any MailStoreProtocol)?
 
     func loadMailBodyText(for messageID: MailMessageID) async -> String? {
         guard let detail = try? await mailStore?.message(id: messageID) else { return nil }
@@ -2073,7 +2073,16 @@ final class AppViewModel: NSObject, ObservableObject {
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
             )
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
+            do {
+                self.mailStore = try SQLiteMailSourceStore(
+                    databaseURL: storagePaths.applicationSupportDirectory
+                        .appendingPathComponent("mail", isDirectory: true)
+                        .appendingPathComponent("mail.db"),
+                    searchService: nativeSourceSearchBackend
+                )
+            } catch {
+                self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
+            }
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)

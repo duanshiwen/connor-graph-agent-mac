@@ -1,7 +1,7 @@
 import Foundation
 import ConnorGraphCore
 
-public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourceCache {
+public actor FileBackedMailSourceStore: MailStoreProtocol {
     private struct Snapshot: Codable, Sendable, Equatable {
         var accounts: [MailAccount]
         var mailboxes: [MailMailbox]
