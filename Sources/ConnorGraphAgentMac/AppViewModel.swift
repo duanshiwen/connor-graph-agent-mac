@@ -400,6 +400,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
     @Published var isPresentingAddMailAccountSheet: Bool = false
+    @Published var isInitialSyncingMail: Bool = false
     @Published var calendarBrowserPresentation: NativeCalendarBrowserPresentation = .empty
     @Published var calendarSearchQuery: String = ""
     @Published var calendarAccounts: [CalendarAccount] = []
@@ -2697,28 +2698,46 @@ final class AppViewModel: NSObject, ObservableObject {
             try await mailStore?.saveMailbox(mailbox)
         }
 
-        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore)
-        let syncResult = try await syncService.sync(account: account)
-        try await mailStore?.saveAccount(syncResult.account)
-        let syncedMailboxIDs = Set(syncResult.mailboxes.map(\.id))
-        for mailbox in syncResult.mailboxes.isEmpty ? defaultMailboxes : syncResult.mailboxes {
-            try await mailStore?.saveMailbox(mailbox)
-        }
-        for message in syncResult.messages {
-            try await mailStore?.saveMessage(message)
-        }
-
         try await reconcileMailAccountRefreshTasks(now: now)
         reloadTaskManagementPresentation()
-        await reloadMailBrowserPresentation(preferredAccountID: accountID, preferredMailboxID: syncedMailboxIDs.first ?? defaultMailboxes.first?.id)
+        await reloadMailBrowserPresentation(preferredAccountID: accountID, preferredMailboxID: defaultMailboxes.first?.id)
         selectedMailMessageID = nil
         isPresentingAddMailAccountSheet = false
-        if syncResult.account.health.status == .ready {
-            setSettingsMessage("已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。", for: .mail)
-        } else {
-            setSettingsMessage("已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。", for: .mail)
-        }
+        isInitialSyncingMail = true
+        setSettingsMessage("已添加邮件账户：\(displayName)，正在后台同步邮件…", for: .mail)
         errorMessage = nil
+
+        // Background IMAP sync
+        let capturedAccount = account
+        let capturedDisplayName = displayName
+        let capturedAccountID = accountID
+        let capturedDefaultMailboxes = defaultMailboxes
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let syncService = MailIMAPInitialSyncService(credentialStore: self.mailCredentialStore)
+                let syncResult = try await syncService.sync(account: capturedAccount)
+                try await self.mailStore?.saveAccount(syncResult.account)
+                let syncedMailboxIDs = Set(syncResult.mailboxes.map(\.id))
+                for mailbox in syncResult.mailboxes.isEmpty ? capturedDefaultMailboxes : syncResult.mailboxes {
+                    try await self.mailStore?.saveMailbox(mailbox)
+                }
+                for message in syncResult.messages {
+                    try await self.mailStore?.saveMessage(message)
+                }
+                try await self.reconcileMailAccountRefreshTasks(now: Date())
+                self.reloadTaskManagementPresentation()
+                await self.reloadMailBrowserPresentation(preferredAccountID: capturedAccountID, preferredMailboxID: syncedMailboxIDs.first ?? capturedDefaultMailboxes.first?.id)
+                if syncResult.account.health.status == .ready {
+                    self.setSettingsMessage("邮件同步完成：\(capturedDisplayName)，拉取 \(syncResult.messages.count) 封邮件。", for: .mail)
+                } else {
+                    self.setSettingsMessage("邮件同步完成：\(capturedDisplayName)，但部分异常：\(syncResult.account.health.summary)。", for: .mail)
+                }
+            } catch {
+                self.setSettingsMessage("邮件后台同步失败：\(error.localizedDescription)。账户已保存，可稍后重试。", for: .mail)
+            }
+            self.isInitialSyncingMail = false
+        }
     }
 
     private func mailProviderKind(for preset: MailAccountProviderPreset) -> MailProviderKind {

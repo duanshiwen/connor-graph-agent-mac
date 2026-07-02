@@ -363,7 +363,7 @@ struct AddMailAccountSheet: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         setupError = nil
-        setupMessage = "正在添加账户并准备同步…"
+        setupMessage = "正在添加账户…"
         do {
             try await viewModel.addMailAccountAndPrepareSync(
                 preset: selectedPreset,
