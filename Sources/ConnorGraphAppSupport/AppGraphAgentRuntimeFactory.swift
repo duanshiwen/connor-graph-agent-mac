@@ -142,18 +142,23 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.registerTimeAnalysisTool()
         if let storagePaths {
             registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
-            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
-            let mailDraftStore = FileBackedMailDraftRepository(
-                storeURL: storagePaths.applicationSupportDirectory
+            if let mailStore = try? SQLiteMailSourceStore(
+                databaseURL: storagePaths.applicationSupportDirectory
                     .appendingPathComponent("mail", isDirectory: true)
-                    .appendingPathComponent("drafts.json")
-            )
-            registry.registerNativeMailTools(runtime: MailRuntime(
-                repository: mailStore,
-                cache: mailStore,
-                draftStore: mailDraftStore,
-                credentialStore: AppMailCredentialStore(credentialStore: settingsRepository.credentialStore)
-            ), recorder: nativeSourceReferenceRecorder)
+                    .appendingPathComponent("mail.db")
+            ) {
+                let mailDraftStore = FileBackedMailDraftRepository(
+                    storeURL: storagePaths.applicationSupportDirectory
+                        .appendingPathComponent("mail", isDirectory: true)
+                        .appendingPathComponent("drafts.json")
+                )
+                registry.registerNativeMailTools(runtime: MailRuntime(
+                    repository: mailStore,
+                    cache: mailStore,
+                    draftStore: mailDraftStore,
+                    credentialStore: AppMailCredentialStore(credentialStore: settingsRepository.credentialStore)
+                ), recorder: nativeSourceReferenceRecorder)
+            }
             registry.registerNativeRSSTools(runtime: RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)

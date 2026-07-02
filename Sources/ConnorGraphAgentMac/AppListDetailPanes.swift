@@ -698,6 +698,10 @@ struct CraftMailListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                if viewModel.isInitialSyncingMail {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Text("邮件系统")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -715,6 +719,19 @@ struct CraftMailListPane: View {
 
             ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
                 viewModel.mailSearchQuery = ""
+            }
+
+            if viewModel.isInitialSyncingMail {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在后台同步邮件…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.accentColor.opacity(0.08))
             }
 
             if presentation.accounts.isEmpty {
@@ -1823,37 +1840,49 @@ private struct MailMessageListRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                // 已读/未读指示器
                 Circle()
-                    .fill(message.flags.isRead ? Color.secondary.opacity(0.24) : Color.accentColor)
+                    .fill(message.flags.isRead ? Color.secondary.opacity(0.18) : Color.accentColor)
                     .frame(width: 8, height: 8)
-                    .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    // 第一行：主题 + 日期
                     HStack(spacing: 6) {
                         Text(message.subject)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
                             .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if message.hasAttachments {
                             Image(systemName: "paperclip")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(message.date, style: .relative)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    
+                    // 第二行：发信人 + 来源
+                    HStack(spacing: 4) {
+                        Text(message.from.name ?? message.from.email)
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if !contextText.isEmpty {
+                            Text(contextText)
+                                .font(AppListTypography.rowCaption)
+                                .foregroundStyle(.quaternary)
+                                .lineLimit(1)
                         }
                     }
-                    Text(message.from.name ?? message.from.email)
-                        .font(AppListTypography.rowCaptionEmphasized)
-                        .lineLimit(1)
-                    Text(contextText)
-                        .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                    Text(message.snippet)
-                        .font(AppListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
             .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }

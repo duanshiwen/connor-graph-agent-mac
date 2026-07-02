@@ -17,7 +17,11 @@ let package = Package(
         .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"]),
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-nio", from: "2.64.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl", from: "2.24.0"),
+        .package(url: "https://github.com/apple/swift-nio-imap", branch: "main"),
+    ],
     targets: [
         .target(name: "ConnorGraphCore"),
         .target(name: "ConnorGraphMemory", dependencies: ["ConnorGraphCore"]),
@@ -35,7 +39,10 @@ let package = Package(
                 "ConnorGraphMemory",
                 "ConnorGraphStore",
                 "ConnorGraphSearch",
-                "ConnorGraphAgent"
+                "ConnorGraphAgent",
+                .product(name: "NIOIMAP", package: "swift-nio-imap"),
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl")
             ],
             linkerSettings: [
                 .linkedFramework("Security"),
