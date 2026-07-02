@@ -288,11 +288,17 @@ private struct BlockingIMAPClient {
             let date = headers.date ?? fallbackSequenceDate
             let charset = ParsedHeaders.extractCharset(from: header)
             let isMultipart = header.localizedCaseInsensitiveContains("multipart/")
-            let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset, transferEncoding: headers.transferEncoding)
+            let mimeParser = MailMIMEParser()
             let fullBodyText: String
-            if isMultipart, let boundary = ParsedHeaders.extractBoundary(from: header) {
-                fullBodyText = Self.extractPlainTextPart(from: decodedBody, boundary: boundary)
+            if isMultipart || rawBodyData.flatMap({ String(data: $0, encoding: .utf8)?.contains("boundary=") }) == true {
+                // Use MIME parser for multipart
+                let boundary = ParsedHeaders.extractBoundary(from: header) ?? rawBodyData.flatMap { data in
+                    let str = String(data: data, encoding: .utf8) ?? ""
+                    return MailMIMEParser().extractBoundaryFromContentType(str)
+                }
+                fullBodyText = mimeParser.parseBody(rawData: rawBodyData, fallbackString: snippet, charset: charset, transferEncoding: headers.transferEncoding, contentType: header, boundary: boundary)
             } else {
+                let decodedBody = Self.decodeBody(rawData: rawBodyData, fallbackString: snippet, charset: charset, transferEncoding: headers.transferEncoding)
                 fullBodyText = decodedBody.mimeCleanedBody
             }
             let cleanSnippet = fullBodyText.htmlStripped.normalizedWhitespace.prefixString(300)
