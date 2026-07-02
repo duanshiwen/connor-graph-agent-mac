@@ -536,7 +536,12 @@ final class AppViewModel: NSObject, ObservableObject {
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
     private var globalSearchPreviewTask: Task<Void, Never>?
-    private var mailStore: FileBackedMailSourceStore?
+    var mailStore: FileBackedMailSourceStore?
+
+    func loadMailBodyText(for messageID: MailMessageID) async -> String? {
+        guard let detail = try? await mailStore?.message(id: messageID) else { return nil }
+        return detail.body?.plainText?.text ?? detail.body?.redactedPreview
+    }
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var contactStore: FileBackedContactSourceStore?
@@ -2474,9 +2479,21 @@ final class AppViewModel: NSObject, ObservableObject {
             accounts = try await mailStore.listAccounts()
         }
 
+        // Get stored UIDs for incremental sync
+        let storedSummaries = try await mailStore.searchMessages(query: "", accountID: nil)
+        let storedUIDs = Set(storedSummaries.compactMap { summary -> String? in
+            let parts = summary.id.rawValue.split(separator: "-")
+            return parts.last.map(String.init)
+        })
+
         var syncedMessageCount = 0
         for account in accounts {
-            let result = try await syncService.sync(account: account)
+            let result: MailInitialSyncResult
+            if storedUIDs.isEmpty {
+                result = try await syncService.sync(account: account)
+            } else {
+                result = try await syncService.syncIncremental(account: account, storedUIDs: storedUIDs)
+            }
             try await mailStore.saveAccount(result.account)
             for mailbox in result.mailboxes {
                 try await mailStore.saveMailbox(mailbox)

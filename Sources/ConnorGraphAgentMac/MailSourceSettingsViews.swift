@@ -27,7 +27,7 @@ struct MailSourceSettingsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
                     Divider().opacity(0.6)
-                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage)
+                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else {
@@ -70,13 +70,15 @@ private struct MailMessageDetailPane: View {
     var account: MailAccount?
     var mailbox: MailMailbox?
     var message: MailMessageSummary
+    @ObservedObject var viewModel: AppViewModel
+    @State private var fullBodyText: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
-                MailInfoSection(title: "邮件摘要", systemImage: "doc.text.magnifyingglass") {
-                    Text(message.snippet)
+                MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
+                    Text(fullBodyText ?? message.snippet)
                         .font(AgentChatTypography.meta)
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
@@ -91,12 +93,12 @@ private struct MailMessageDetailPane: View {
                         }
                     }
                 }
-                MailInfoSection(title: "治理提示", systemImage: "checkmark.shield") {
-                    MailGovernanceHintStrip()
-                }
             }
             .padding(AppShellLayout.spaceXL)
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+        }
+        .task {
+            fullBodyText = await viewModel.loadMailBodyText(for: message.id)
         }
     }
 }
@@ -173,16 +175,6 @@ private struct MailAddressLine: View {
             return "\(name) <\(address.email)>"
         }
         return address.email
-    }
-}
-
-private struct MailGovernanceHintStrip: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-            MailChecklistRow(title: "读取不自动标记已读", isReady: true, detail: "列表和详情预览不会自动把邮件标记为已读。")
-            MailChecklistRow(title: "发信始终需要审批", isReady: true, detail: "发送草稿前，康纳同学会先请求确认。")
-            MailChecklistRow(title: "附件导入受保护", isReady: true, detail: "附件会先保存到当前会话，再供康纳同学使用。")
-        }
     }
 }
 
@@ -507,28 +499,7 @@ private struct MailInfoSection<Content: View>: View {
     }
 }
 
-private struct MailChecklistRow: View {
-    var title: String
-    var isReady: Bool
-    var detail: String
 
-    var body: some View {
-        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
-            Image(systemName: isReady ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(isReady ? .green : .orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(AppListTypography.rowTitleSelected)
-                Text(detail)
-                    .font(AppListTypography.rowSubtitle)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-}
 
 private struct MailStatusPill: View {
     var status: String
