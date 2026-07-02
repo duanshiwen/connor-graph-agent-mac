@@ -2716,14 +2716,22 @@ final class AppViewModel: NSObject, ObservableObject {
             guard let self else { return }
             do {
                 let syncService = MailIMAPInitialSyncService(credentialStore: self.mailCredentialStore)
-                let syncResult = try await syncService.sync(account: capturedAccount)
+                let mailStore = self.mailStore
+                nonisolated(unsafe) var savedCount = 0
+                let syncResult = try await syncService.sync(account: capturedAccount) { batch in
+                    Task { @MainActor [weak self] in
+                        do {
+                            try await mailStore?.saveMessagesBatch(batch)
+                            savedCount += batch.count
+                            self?.setSettingsMessage("正在同步邮件… 已拉取 \(savedCount) 封", for: .mail)
+                            await self?.reloadMailBrowserPresentation(preferredAccountID: capturedAccountID, preferredMailboxID: nil)
+                        } catch { }
+                    }
+                }
                 try await self.mailStore?.saveAccount(syncResult.account)
                 let syncedMailboxIDs = Set(syncResult.mailboxes.map(\.id))
                 for mailbox in syncResult.mailboxes.isEmpty ? capturedDefaultMailboxes : syncResult.mailboxes {
                     try await self.mailStore?.saveMailbox(mailbox)
-                }
-                for message in syncResult.messages {
-                    try await self.mailStore?.saveMessage(message)
                 }
                 try await self.reconcileMailAccountRefreshTasks(now: Date())
                 self.reloadTaskManagementPresentation()
