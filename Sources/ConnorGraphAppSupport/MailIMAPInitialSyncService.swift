@@ -17,7 +17,7 @@ public struct MailIMAPInitialSyncService: Sendable {
     public var credentialStore: AppMailCredentialStore
     public var messageLimit: Int
 
-    public init(credentialStore: AppMailCredentialStore = AppMailCredentialStore(), messageLimit: Int = 200) {
+    public init(credentialStore: AppMailCredentialStore = AppMailCredentialStore(), messageLimit: Int = 0) {
         self.credentialStore = credentialStore
         self.messageLimit = messageLimit
     }
@@ -650,8 +650,8 @@ private struct BlockingIMAPClient {
         let uidResponse = try readUntilTagged(tag: uidTag, input: input, timeout: 60)
         let allUIDs = parseUIDList(uidResponse).compactMap(Int.init).sorted()
 
-        // Phase 2: Take latest N UIDs and batch-fetch content
-        let fetchUIDs = Array(allUIDs.suffix(messageLimit))
+        // Phase 2: Take UIDs (0 = all, >0 = latest N)
+        let fetchUIDs = messageLimit > 0 ? Array(allUIDs.suffix(messageLimit)) : allUIDs
         guard !fetchUIDs.isEmpty else {
             try logout(input: input, output: output)
             return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: [])
