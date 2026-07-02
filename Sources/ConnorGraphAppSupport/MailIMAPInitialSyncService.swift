@@ -231,8 +231,7 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
-    /// Fetch a single message's body from IMAP on demand (lazy loading).
-    /// Used by AppViewModel when user opens a message that has no cached body.
+        /// Fetch a single message's body from IMAP using NIOIMAP (Thunderbird-style).
     public func fetchMessageBody(account: MailAccount, uid: String, messageID: MailMessageID, mailboxID: MailMailboxID, snippet: String) async throws -> MailMessageDetail? {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return nil }
         guard endpoint.security == .tls else { return nil }
@@ -240,31 +239,21 @@ public struct MailIMAPInitialSyncService: Sendable {
               let password = try credentialStore.readCredential(binding: binding),
               !password.isEmpty else { return nil }
         guard let email = account.identities.first?.address.email, !email.isEmpty else { return nil }
+        guard Int(uid) ?? 0 > 0 else { return nil }
 
-        let uidInt = Int(uid) ?? 0
-        guard uidInt > 0 else { return nil }
-
-        let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
+        let fetcher = NIOBodyFetcher(host: endpoint.host, port: endpoint.port)
         let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
-        let accountID = account.id
+        
+        guard let rawData = try await fetcher.fetchRawMessage(
+            usernames: loginUsernames, password: password, uid: uid
+        ) else { return nil }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                do {
-                    let detail = try client.fetchSingleMessageBody(
-                        usernames: loginUsernames, password: password,
-                        uid: uid, accountID: accountID, mailboxID: mailboxID,
-                        fallbackRecipient: MailAddress(email: email), snippet: snippet
-                    )
-                    continuation.resume(returning: detail)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    /// Search emails by query string
+        return NIOBodyFetcher.parseMessage(
+            rawMIME: rawData, uid: uid,
+            accountID: account.id, mailboxID: mailboxID,
+            fallbackRecipient: MailAddress(email: email), snippet: snippet
+        )
+    }/// Search emails by query string
     public func search(account: MailAccount, query: String) async throws -> [String] {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else {
             throw BlockingIMAPClient.IMAPError.protocolError("缺少 IMAP 收件服务器配置")
@@ -1351,34 +1340,39 @@ struct BlockingIMAPClient {
         guard selectResponse.contains("\(selectTag) OK") else {
             throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
         }
-        // Thunderbird-style: fetch complete message as single literal — no state machine
+        // Fetch headers + body text only (avoid downloading large attachments)
         let fetchTag = nextTag()
-        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[])\r\n", output: output)
-        let (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
+        let (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
         try logout(input: input, output: output)
         
-        // Parse the raw IMAP response directly: find BODY[] {NNN}\r\n
-        let marker = Data("BODY[]".utf8)
-        guard let markerEnd = fetchRaw.range(of: marker)?.upperBound else { return nil }
-        let afterMarker = fetchRaw[markerEnd...]
-        // Skip whitespace, find {NNN}\r\n
-        guard let brace = afterMarker.firstIndex(of: 0x7B),
-              let closeBrace = afterMarker[brace...].firstIndex(of: 0x7D) else { return nil }
-        let sizeStr = String(data: afterMarker[afterMarker.index(after: brace)..<closeBrace], encoding: .utf8) ?? ""
-        guard let size = Int(sizeStr), size > 0 else { return nil }
-        let dataStart = afterMarker.index(closeBrace, offsetBy: 3) // skip }\r\n
-        guard dataStart + size <= afterMarker.endIndex else { return nil }
-        let rawMIME = Data(afterMarker[dataStart..<(dataStart + size)])
+        func extractLiteral(after marker: String, in data: Data) -> Data? {
+            guard let markerEnd = data.range(of: Data(marker.utf8))?.upperBound,
+                  markerEnd < data.endIndex else { return nil }
+            var scanIdx = markerEnd
+            while scanIdx < data.endIndex, data[scanIdx] != 0x7B { scanIdx += 1 }
+            guard scanIdx < data.endIndex else { return nil }
+            scanIdx += 1
+            var sizeBytes: [UInt8] = []
+            while scanIdx < data.endIndex, data[scanIdx] != 0x7D {
+                sizeBytes.append(data[scanIdx])
+                scanIdx += 1
+            }
+            guard scanIdx < data.endIndex else { return nil }
+            let sizeStr = String(bytes: sizeBytes, encoding: .utf8) ?? ""
+            guard let size = Int(sizeStr), size >= 0 else { return nil }
+            scanIdx += 1
+            guard scanIdx + 2 <= data.endIndex else { return nil }
+            let dataStart = scanIdx + (data[scanIdx] == 0x0D ? 2 : (data[scanIdx] == 0x0A ? 1 : 0))
+            guard dataStart + size <= data.endIndex else { return nil }
+            return data.subdata(in: dataStart..<(dataStart + size))
+        }
         
-        // Split headers from body
-        let headerEnd: Int
-        if let r = rawMIME.range(of: Data("\r\n\r\n".utf8)) { headerEnd = r.upperBound - rawMIME.startIndex }
-        else if let r = rawMIME.range(of: Data("\n\n".utf8)) { headerEnd = r.upperBound - rawMIME.startIndex }
-        else { headerEnd = 0 }
+        guard let headerData = extractLiteral(after: "BODY[HEADER]", in: fetchRaw),
+              let bodyData = extractLiteral(after: "BODY[TEXT]", in: fetchRaw) else { return nil }
         
-        let headerBytes = rawMIME[..<headerEnd]
-        let bodyBytes = rawMIME[headerEnd...]
-        let headerStr = String(data: headerBytes, encoding: .ascii) ?? String(decoding: headerBytes, as: Unicode.UTF8.self)
+        // Parse headers for MIME metadata
+        let headerStr = String(data: headerData, encoding: .ascii) ?? String(decoding: headerData, as: Unicode.UTF8.self)
         let unfolded = headerStr.replacingOccurrences(of: #"\r\n[ \t]+"#, with: " ", options: .regularExpression)
         
         let subject = (unfolded.headerValue("Subject")?.decodeRFC2047()).flatMap { $0.isEmpty ? nil : $0 } ?? "（无主题）"
@@ -1396,7 +1390,7 @@ struct BlockingIMAPClient {
         
         let mimeParser = MailMIMEParser()
         let bodyResult = mimeParser.parseBodyWithHTML(
-            rawData: Data(bodyBytes), fallbackString: snippet,
+            rawData: Data(bodyData), fallbackString: snippet,
             charset: charset,
             transferEncoding: cteHeader.nilIfEmpty,
             contentType: ctHeader, boundary: boundary
