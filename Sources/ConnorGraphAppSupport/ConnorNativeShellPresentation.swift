@@ -11,7 +11,6 @@ public enum ConnorNativeShellItem: String, Codable, Sendable, Equatable, Hashabl
     case automation
     case localAutomationSurface
     case productOS
-    case mail
     case calendar
     case contacts
     case rss
@@ -181,8 +180,6 @@ public struct ConnorNativeShellRouteResolver: Sendable {
             ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
         case .productOS:
             ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
-        case .mail:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "mail")
         case .calendar:
             ConnorNativeShellRoute(item: item, legacySidebarID: "calendar")
         case .contacts:
@@ -245,7 +242,6 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
                 ConnorNativeShellSidebarItem(id: .productOS, title: "Product OS", subtitle: "Registry, labels, readiness", systemImage: "square.grid.2x2", isPrimary: true)
             ]),
             ConnorNativeShellSidebarGroup(id: "extensions", title: "Extensions", items: [
-                ConnorNativeShellSidebarItem(id: .mail, title: "Mail", subtitle: "Native mail", systemImage: "envelope.badge.shield.half.filled", badgeStyle: .info, isPrimary: true, riskLevel: .high, emptyStateTitle: "还没有连接邮箱", emptyStateActionTitle: "添加邮箱账户"),
                 ConnorNativeShellSidebarItem(id: .calendar, title: "Calendar", subtitle: "Native schedule source", systemImage: "calendar", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接日历", emptyStateActionTitle: "添加账户"),
                 ConnorNativeShellSidebarItem(id: .contacts, title: "Contacts", subtitle: "Native contacts source", systemImage: "person.crop.circle.badge", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接通讯录", emptyStateActionTitle: "添加账户"),
                 ConnorNativeShellSidebarItem(id: .rss, title: "RSS", subtitle: "Native feed intelligence", systemImage: "dot.radiowaves.left.and.right", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有添加 RSS 源", emptyStateActionTitle: "添加 RSS 源"),
