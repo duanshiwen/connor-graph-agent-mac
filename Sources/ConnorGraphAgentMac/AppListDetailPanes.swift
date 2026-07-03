@@ -18,8 +18,6 @@ struct CraftListPaneView: View {
                 CraftSessionListPane(viewModel: viewModel)
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
-            case .mail:
-                CraftMailListPane(viewModel: viewModel)
             case .calendar:
                 CraftCalendarListPane(viewModel: viewModel)
             case .contacts:
@@ -559,8 +557,8 @@ struct CraftContactsListPane: View {
 
 private struct ContactsRowsScrollView: View {
     var rows: [NativeContactRowPresentation]
-    var selectedID: MailContactID?
-    var onSelect: (MailContactID) -> Void
+    var selectedID: ContactID?
+    var onSelect: (ContactID) -> Void
 
     var body: some View {
         ScrollView {
@@ -684,93 +682,8 @@ struct CraftSessionListPane: View {
     }
 }
 
-struct CraftMailListPane: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    private var presentation: NativeMailBrowserPresentation {
-        viewModel.mailBrowserPresentation
-    }
-
-    private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: viewModel.mailSearchQuery)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if viewModel.isInitialSyncingMail {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                Text("邮件系统")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.isPresentingAddMailAccountSheet = true }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("添加邮件帐户")
-                .accessibilityLabel("添加邮件帐户")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-
-            ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
-                viewModel.mailSearchQuery = ""
-            }
-
-            if viewModel.isInitialSyncingMail {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("正在后台同步邮件…")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(Color.accentColor.opacity(0.08))
-            }
-
-            if presentation.accounts.isEmpty {
-                ContentUnavailableView("还没有连接邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮箱账户。之后康纳同学可以在本地读取邮件，并把相关邮件作为会话上下文。"))
-                    .padding(.top, 80)
-            } else if presentation.messages.isEmpty {
-                ContentUnavailableView("邮件还在等待同步", systemImage: "tray", description: Text("账户已经添加，康纳同学正在等待邮箱发现和邮件拉取完成。同步后，邮件会按时间显示在这里。"))
-                    .padding(.top, 80)
-            } else if visibleMessages.isEmpty {
-                ContentUnavailableView("没有找到匹配的邮件", systemImage: "envelope.badge", description: Text("换个关键词试试，或者清除筛选查看全部邮件。"))
-                    .padding(.top, 80)
-            } else {
-                List(visibleMessages) { message in
-                    MailMessageListRow(
-                        message: message,
-                        account: presentation.account(id: message.accountID),
-                        mailbox: presentation.mailbox(id: message.mailboxID),
-                        isSelected: message.id == viewModel.selectedMailMessageID,
-                        onSelect: { selectMessage(message) }
-                    )
-                    .mailListRowStyle()
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .contentMargins(.top, 6, for: .scrollContent)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    private func selectMessage(_ message: MailMessageSummary) {
-        viewModel.selectedMailAccountID = message.accountID
-        viewModel.selectedMailMailboxID = message.mailboxID
-        viewModel.selectedMailMessageID = message.id
-    }
-}
-
 private extension View {
-    func mailListRowStyle() -> some View {
+    func nativeListRowStyle() -> some View {
         self
             .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
             .listRowSeparator(.hidden)
@@ -1211,7 +1124,7 @@ private struct CraftTaskAutomationListPane: View {
                         isSelected: card.id == viewModel.selectedTaskAutomationID,
                         onSelect: { viewModel.selectedTaskAutomationID = card.id }
                     )
-                    .mailListRowStyle()
+                    .nativeListRowStyle()
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -1640,7 +1553,7 @@ struct CraftRSSListPane: View {
                         isSelected: item.id == viewModel.selectedRSSItemID,
                         onSelect: { selectItem(item) }
                     )
-                    .mailListRowStyle()
+                    .nativeListRowStyle()
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -1715,199 +1628,6 @@ private struct RSSItemListRow: View {
     }
 }
 
-private struct MailAccountListRow: View {
-    var account: MailAccount
-    var isSelected: Bool
-    var showsDisclosure: Bool = false
-    var onSelect: () -> Void
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: icon(for: account.provider))
-                    .foregroundStyle(isSelected ? .accentColor : color(for: account.health.status))
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(account.displayName)
-                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Circle()
-                            .fill(color(for: account.health.status))
-                            .frame(width: 7, height: 7)
-                    }
-                    Text(account.identities.map { $0.address.email }.joined(separator: ", "))
-                        .font(AppListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if showsDisclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func icon(for provider: MailProviderKind) -> String {
-        switch provider {
-        case .gmail, .microsoft365: "exclamationmark.triangle.fill"
-        case .jmap: "j.circle.fill"
-        case .genericIMAPSMTP: "envelope"
-        case .localFixture: "shippingbox"
-        }
-    }
-
-    private func color(for status: MailAccountHealthStatus) -> Color {
-        switch status {
-        case .ready: .green
-        case .degraded: .orange
-        case .blocked, .unauthenticated: .red
-        case .unknown: .secondary
-        }
-    }
-}
-
-private struct MailMailboxListRow: View {
-    var mailbox: MailMailbox
-    var isSelected: Bool
-    var showsDisclosure: Bool = false
-    var onSelect: () -> Void
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 10) {
-                Image(systemName: icon(for: mailbox.role))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(mailbox.name)
-                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                        .lineLimit(1)
-                    Text("\(mailbox.status.messageCount) 封 · \(mailbox.status.unreadCount) 未读")
-                        .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                if mailbox.status.unreadCount > 0 {
-                    Text("\(mailbox.status.unreadCount)")
-                        .font(AppListTypography.rowCaptionEmphasized)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .frame(height: 18)
-                        .background(Color.accentColor, in: Capsule())
-                }
-                if showsDisclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func icon(for role: MailMailboxRole) -> String {
-        switch role {
-        case .inbox: "tray"
-        case .sent: "paperplane"
-        case .drafts: "doc.text"
-        case .archive: "archivebox"
-        case .trash: "trash"
-        case .spam: "exclamationmark.octagon"
-        case .custom: "folder"
-        }
-    }
-}
-
-private struct MailMessageListRow: View {
-    var message: MailMessageSummary
-    var account: MailAccount?
-    var mailbox: MailMailbox?
-    var isSelected: Bool
-    var onSelect: () -> Void
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(alignment: .center, spacing: 10) {
-                // 已读/未读指示器
-                Circle()
-                    .fill(message.flags.isRead ? Color.secondary.opacity(0.18) : Color.accentColor)
-                    .frame(width: 8, height: 8)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    // 第一行：主题 + 日期
-                    HStack(spacing: 6) {
-                        Text(message.subject)
-                            .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if message.hasAttachments {
-                            Image(systemName: "paperclip")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        Text(message.date, style: .relative)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                    
-                    // 第二行：发信人 + 来源
-                    HStack(spacing: 4) {
-                        Text(message.from.name ?? message.from.email)
-                            .font(AppListTypography.rowCaptionEmphasized)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if !contextText.isEmpty {
-                            Text(contextText)
-                                .font(AppListTypography.rowCaption)
-                                .foregroundStyle(.quaternary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var contextText: String {
-        [account?.displayName, mailbox?.name]
-            .compactMap { $0 }
-            .joined(separator: " · ")
-    }
-}
-
-private struct MailSmallUnavailableRow: View {
-    var text: String
-
-    var body: some View {
-        Text(text)
-            .font(AppListTypography.rowSubtitle)
-            .foregroundStyle(.secondary)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 enum AppDetailPaneIdentity {
     static func agentChat(sessionID: String?) -> String {
         "agent-chat-\(sessionID ?? "none")"
@@ -1944,8 +1664,6 @@ struct CraftDetailPaneView: View {
                 TaskAutomationDetailPane(viewModel: viewModel, kind: .eventTriggered)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
-            case .mail:
-                MailSourceSettingsView(viewModel: viewModel)
             case .calendar:
                 CalendarSourceSettingsView(viewModel: viewModel)
             case .contacts:

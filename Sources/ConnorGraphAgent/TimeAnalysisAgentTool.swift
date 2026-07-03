@@ -24,7 +24,7 @@ public struct TimeAnalyzeRangesTool: AgentTool {
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: "Analyzed \(ranges.count) time ranges",
-            contentJSON: try MailJSON.encode(result)
+            contentJSON: try ContactJSON.encode(result)
         )
     }
 
