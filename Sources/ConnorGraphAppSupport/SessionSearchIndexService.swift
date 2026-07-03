@@ -72,7 +72,6 @@ public actor SessionSearchIndexService {
             SELECT d.session_id, d.title, d.recent_messages, d.updated_at, d.message_count
             FROM session_search_fts f
             JOIN session_search_docs d ON d.session_id = f.session_id
-            // SAFETY: match is sanitized by NativeSourceSearchFTSQueryBuilder (letters/digits only)
             WHERE session_search_fts MATCH ?
             ORDER BY bm25(session_search_fts) ASC, d.updated_at DESC
             LIMIT ?

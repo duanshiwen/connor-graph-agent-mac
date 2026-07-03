@@ -366,7 +366,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     public func searchStatementsFTS(query: String, limit: Int = 20) throws -> [String] {
-        try queryStrings(sql: "SELECT statement_id FROM memory_l2_statements_fts WHERE memory_l2_statements_fts MATCH \(FTS5QuerySanitizer.sanitizeTerm(query)) LIMIT \(limit)")
+        let match = FTS5QuerySanitizer.sanitizeTerm(query)
+        return try queryStrings(sql: "SELECT statement_id FROM memory_l2_statements_fts WHERE memory_l2_statements_fts MATCH \(quote(match)) LIMIT \(limit)")
     }
 
     // MARK: - L3
@@ -461,7 +462,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
             return cached
         }
         
-        let results = try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(FTS5QuerySanitizer.sanitizeTerm(query)) LIMIT \(limit)")
+        let match = FTS5QuerySanitizer.sanitizeTerm(query)
+        let results = try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(quote(match)) LIMIT \(limit)")
         
         // Cache the result
         cache.setCachedFTSSearch(results, query: query, limit: limit)

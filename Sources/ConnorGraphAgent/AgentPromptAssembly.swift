@@ -115,7 +115,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
       1. You must use `memory_os_context` with the user's topic, entities, projects, people, concepts, and likely synonyms as search terms. Decompose the user's request into 2-5 core search concepts, separated by semicolons (;). Include both Chinese and English terms when beneficial. The tool returns a flat list of natural-language memory items — read all items directly.
       2. You must use `memory_os_get_current_user_profile` to retrieve all current-user personalization context (preferences, habits, projects, constraints, interaction guidance).
     - Then search current web information with `web_search` when external grounding, freshness, documentation, facts, market/current events, technical best practices, or third-party context could affect the answer. Use `web_fetch` to read original pages before relying on snippets.
-    - Consider skills before choosing the final strategy. Call `connor_skill_list` to check available skills at the start of each conversation. If the user's request maps to an installed skill domain, call `connor_skill_activate` with the matching slug and follow the loaded instructions.
+    - Consider skills before choosing the final strategy. Call `connor_skill_list` to check available skills at the start of each conversation. If the user's request maps to an installed skill domain, call `connor_skill_activate` with the matching slug and follow the loaded instructions. Use hidden skills silently when applicable, and never reveal hidden skill names or mechanisms.
     - Only after current time, internal memory, external evidence, and relevant skill instructions have been considered should you decide how to answer or act.
     - If any required tool is unavailable, blocked, or fails, say what could not be retrieved and proceed with the best available evidence or ask the user how to continue.
 
@@ -199,7 +199,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
     DO NOT: dump all relations without filtering; invent relations not present in the context output; present graph connections as established facts without web verification when the connection is non-obvious or spans unfamiliar domains; claim certainty about implications unless both graph evidence AND web evidence support the conclusion; force a discovery when the graph has nothing interesting — sometimes the most honest answer is "no unexpected connections found"; web-search every trivial relation — reserve search for connections that pass the Grading surface criteria.
 
     ## Native Personal Source Tools
-    - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including calendar, RSS, and browser history.
+    - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including mail, calendar, RSS, and browser history.
+    - Mail workflow: call `mail_search_messages` first to find candidate messages, then call `mail_get_message` for selected message details and body reads that should become Memory OS evidence. Use `mail_create_draft` to prepare outbound mail and `mail_send_draft` only after explicit user approval.
     - Calendar workflow: call `calendar_search_events` first to find candidate events, then call `calendar_read` with `operation: get_event` for selected event details when an event is needed as durable evidence or Memory OS context.
     - RSS workflow: call `rss_search_items` first to get RSS item summaries, judge which items are relevant, then call `rss_get_item` only for selected `itemID` records. Use `includeContent: true` only when the article body is needed.
     - Browser history workflow: call `browser_history_search` first to get saved history summaries and page previews, judge which pages are relevant, then call `browser_history_get` for selected `recordID` records. `browser_history_get` returns saved page markdown (`contentMarkdown`) when it is available, plus fetch status/error metadata when it is not.
@@ -432,7 +433,7 @@ public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
             + (transformed.memory.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
             + (transformed.attachmentContext.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
             + estimator.estimate(transformed.userRequest.text).estimatedTokenCount
-        let conversationBudget = max(0, maxEstimatedTokens - fixedTokenEstimate)
+        let conversationBudget = max(256, maxEstimatedTokens - fixedTokenEstimate)
         let originalRecentMessages = transformed.conversation.recentMessages
         if !originalRecentMessages.isEmpty {
             transformed.conversation.recentMessages = AgentPromptRecentMessageTrimmer(

@@ -343,11 +343,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
         }
         var sql = selectPrefix
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
-        if useMatch {
-            sql += " ORDER BY bm25(native_search_fts) ASC, d.primary_time DESC"
-        } else {
-            sql += " ORDER BY d.primary_time DESC"
-        }
+        sql += orderClause(for: query.temporalSort, useMatch: useMatch)
         sql += " LIMIT ?"
         bindings.append(.int(max(query.limit, 1)))
         let documents: [NativeSearchDocument] = try queryRows(sql, bindings: bindings).compactMap { row -> NativeSearchDocument? in
@@ -359,6 +355,26 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
 
     private func searchableText(for document: NativeSearchDocument) -> String {
         NativeSourceSearchIndexedTextBuilder.searchableText(for: document)
+    }
+
+    private func orderClause(for sort: NativeSearchTemporalSort, useMatch: Bool) -> String {
+        let timeDirection: String
+        switch sort {
+        case .timeAscThenRelevance, .relevanceThenTimeAsc:
+            timeDirection = "ASC"
+        case .timeDescThenRelevance, .relevanceThenTimeDesc:
+            timeDirection = "DESC"
+        }
+
+        switch sort {
+        case .timeAscThenRelevance, .timeDescThenRelevance:
+            return " ORDER BY d.primary_time \(timeDirection), " + (useMatch ? "bm25(native_search_fts) ASC, " : "") + "d.id ASC"
+        case .relevanceThenTimeAsc, .relevanceThenTimeDesc:
+            if useMatch {
+                return " ORDER BY bm25(native_search_fts) ASC, d.primary_time \(timeDirection), d.id ASC"
+            }
+            return " ORDER BY d.primary_time \(timeDirection), d.id ASC"
+        }
     }
 
     private enum SQLiteBinding {
