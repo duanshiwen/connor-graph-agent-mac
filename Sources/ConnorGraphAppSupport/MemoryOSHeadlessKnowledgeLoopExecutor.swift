@@ -149,21 +149,11 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                 mergedMetadata.merge(response.metadata) { _, new in new }
                 let calls = Array(response.toolCalls.prefix(configuration.maxToolCallsPerIteration))
 
-                if !response.assistantText.isEmpty || !calls.isEmpty {
-                    let joinedToolNames = calls.map(\.name).joined(separator: ",")
-                    let truncatedToolName = String(joinedToolNames.prefix(64))
-                    let memoryOSToolCalls: [MemoryOSBackgroundToolCall]? = calls.isEmpty ? nil : calls.map { MemoryOSBackgroundToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
-                    let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName, toolCalls: memoryOSToolCalls)
-                    messages.append(assistantMessage)
-                    try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
-                    sequence += 1
+                if calls.isEmpty {
                     if !response.assistantText.isEmpty {
-                        log("Assistant response (\(response.assistantText.count) chars):")
+                        log("Final artifact (\(response.assistantText.count) chars):")
                         log(capped(response.assistantText))
                     }
-                }
-
-                if calls.isEmpty {
                     log("\n✅ LLM completed (\(toolCallCount) tool calls total).")
                     run.status = .succeeded
                     run.finishedAt = now()
@@ -171,11 +161,23 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                     run.toolCallCount = toolCallCount
                     run.metadata = mergedMetadata
                     try store.save(backgroundRun: run)
-                    return MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}", metadata: mergedMetadata.merging([
+                    return MemoryOSBackgroundModelResponse(rawArtifactJSON: response.assistantText.isEmpty ? "{}" : response.assistantText, metadata: mergedMetadata.merging([
                         "background_run_id": runID,
                         "tool_trace_count": String(toolCallCount),
                         "stateless_batch": "true"
                     ]) { _, new in new })
+                }
+
+                let joinedToolNames = calls.map(\.name).joined(separator: ",")
+                let truncatedToolName = String(joinedToolNames.prefix(64))
+                let memoryOSToolCalls: [MemoryOSBackgroundToolCall] = calls.map { MemoryOSBackgroundToolCall(id: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON) }
+                let assistantMessage = MemoryOSBackgroundLoopMessage(role: .assistant, content: response.assistantText, toolName: truncatedToolName, toolCalls: memoryOSToolCalls)
+                messages.append(assistantMessage)
+                try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: assistantMessage.id, runID: runID, sequence: sequence, role: assistantMessage.role, content: assistantMessage.content, toolName: assistantMessage.toolName, metadata: ["iteration": String(iteration)]))
+                sequence += 1
+                if !response.assistantText.isEmpty {
+                    log("Assistant response (\(response.assistantText.count) chars):")
+                    log(capped(response.assistantText))
                 }
                 log("Tool calls: \(calls.map(\.name).joined(separator: ", "))")
                 for call in calls {

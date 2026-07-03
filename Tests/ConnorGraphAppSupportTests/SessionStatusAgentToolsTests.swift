@@ -53,7 +53,7 @@ import ConnorGraphStore
     try repository.saveSession(AgentSession(id: "session-status-invalid"))
     let tool = SessionSetStatusTool(repository: repository)
 
-    await #expect(throws: AgentToolError.invalidArguments("Unsupported status 'complete'. Use one of: todo, in_progress, waiting, needs_review, done, blocked, cancelled, archived")) {
+    await #expect(throws: AgentToolError.invalidArguments("Unsupported status 'complete'. Available status IDs: todo, in_progress, waiting, needs_review, blocked, done, cancelled, archived. Call session_list_statuses to get the current list.")) {
         try await tool.execute(
             arguments: try AgentToolArguments(json: #"{"status":"complete"}"#),
             context: sessionStatusToolContext(sessionID: "session-status-invalid", toolCallID: "set-invalid")
