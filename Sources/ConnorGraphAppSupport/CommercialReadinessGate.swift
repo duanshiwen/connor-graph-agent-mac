@@ -8,6 +8,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
     case sourcesSkillsAutomations
     case graphMemoryLoop
     case nativeCommercialUI
+    case nativeMailSystem
     case localAPICLIAutomationSurface
     public var id: String { rawValue }
 
@@ -18,7 +19,8 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
         case .sourcesSkillsAutomations: "Phase 3 · Sources / Skills / Automations"
         case .graphMemoryLoop: "Phase 4 · Graph Memory Loop"
         case .nativeCommercialUI: "Phase 5 · Native Commercial UI"
-        case .localAPICLIAutomationSurface: "Phase 6 · Local API / CLI / Automation Surface"
+        case .nativeMailSystem: "Phase 6 · Native Mail Data Source"
+        case .localAPICLIAutomationSurface: "Phase 7 · Local API / CLI / Automation Surface"
         }
     }
 
@@ -29,6 +31,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
         case .sourcesSkillsAutomations: .sources
         case .graphMemoryLoop: .graphMemory
         case .nativeCommercialUI: .settings
+        case .nativeMailSystem: .mail
         case .localAPICLIAutomationSurface: .localAutomationSurface
         }
     }
@@ -112,6 +115,23 @@ public enum CommercialNativeUIReadiness: Codable, Sendable, Equatable {
     case missing(String)
 }
 
+public enum CommercialNativeMailSystemReadiness: Codable, Sendable, Equatable {
+    case ready(
+        accountCount: Int,
+        healthyAccountCount: Int,
+        credentialBoundaryReady: Bool,
+        syncCursorReady: Bool,
+        toolAuditReady: Bool,
+        sendApprovalReady: Bool,
+        smtpSendAdapterReady: Bool,
+        persistentDraftStoreReady: Bool,
+        contactApprovalReady: Bool,
+        attachmentImportReady: Bool,
+        evidencePolicyReady: Bool
+    )
+    case missing(String)
+}
+
 public enum CommercialLocalAutomationSurfaceReadiness: Codable, Sendable, Equatable {
     case ready(
         endpointCount: Int,
@@ -132,6 +152,7 @@ public struct CommercialReadinessInput: Codable, Sendable, Equatable {
     public var extensionRuntime: CommercialExtensionRuntimeReadiness
     public var graphMemory: CommercialGraphMemoryReadiness
     public var nativeUI: CommercialNativeUIReadiness
+    public var nativeMailSystem: CommercialNativeMailSystemReadiness
     public var localAutomationSurface: CommercialLocalAutomationSurfaceReadiness
 
     public init(
@@ -140,6 +161,7 @@ public struct CommercialReadinessInput: Codable, Sendable, Equatable {
         extensionRuntime: CommercialExtensionRuntimeReadiness,
         graphMemory: CommercialGraphMemoryReadiness,
         nativeUI: CommercialNativeUIReadiness,
+        nativeMailSystem: CommercialNativeMailSystemReadiness = .missing("Native mail system readiness has not been evaluated"),
         localAutomationSurface: CommercialLocalAutomationSurfaceReadiness = .ready(
             endpointCount: ConnorLocalAutomationSurfacePresentation.default.endpoints.count,
             cliCommandCount: ConnorLocalAutomationSurfacePresentation.default.cliCommands.count,
@@ -155,6 +177,7 @@ public struct CommercialReadinessInput: Codable, Sendable, Equatable {
         self.extensionRuntime = extensionRuntime
         self.graphMemory = graphMemory
         self.nativeUI = nativeUI
+        self.nativeMailSystem = nativeMailSystem
         self.localAutomationSurface = localAutomationSurface
     }
 }
@@ -214,6 +237,7 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             extensionRuntimeCard(input.extensionRuntime),
             graphMemoryCard(input.graphMemory),
             nativeUICard(input.nativeUI),
+            nativeMailSystemCard(input.nativeMailSystem),
             localAutomationSurfaceCard(input.localAutomationSurface),
         ])
     }
@@ -415,6 +439,58 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             )
         case .missing(let reason):
             return blockedCard(phase: .nativeCommercialUI, reason: reason)
+        }
+    }
+
+    private func nativeMailSystemCard(_ readiness: CommercialNativeMailSystemReadiness) -> CommercialReadinessCard {
+        switch readiness {
+        case .ready(
+            let accountCount,
+            let healthyAccountCount,
+            let credentialBoundaryReady,
+            let syncCursorReady,
+            let toolAuditReady,
+            let sendApprovalReady,
+            let smtpSendAdapterReady,
+            let persistentDraftStoreReady,
+            let contactApprovalReady,
+            let attachmentImportReady,
+            let evidencePolicyReady
+        ):
+            let blockingReasons = [
+                accountCount > 0 ? nil : "No mail accounts are configured",
+                healthyAccountCount > 0 ? nil : "No healthy mail accounts are available",
+                credentialBoundaryReady ? nil : "Mail credential boundary is not ready",
+                syncCursorReady ? nil : "Mail sync cursor is not ready",
+                toolAuditReady ? nil : "Mail tool audit log is not ready",
+                sendApprovalReady ? nil : "Mail send approval bridge is not ready",
+                smtpSendAdapterReady ? nil : "SMTP send adapter is not ready",
+                persistentDraftStoreReady ? nil : "Persistent mail draft store is not ready",
+                contactApprovalReady ? nil : "Mail contact approval path is not ready",
+                attachmentImportReady ? nil : "Mail attachment import path is not ready",
+                evidencePolicyReady ? nil : "Mail evidence policy is not ready"
+            ].compactMap { $0 }
+            return CommercialReadinessCard(
+                phase: .nativeMailSystem,
+                status: blockingReasons.isEmpty ? .ready : .blocked,
+                evidence: "\(accountCount) accounts · \(healthyAccountCount) healthy · credentials \(credentialBoundaryReady ? "ready" : "blocked") · sync \(syncCursorReady ? "ready" : "blocked") · approval \(sendApprovalReady ? "ready" : "blocked") · SMTP \(smtpSendAdapterReady ? "ready" : "blocked")",
+                metrics: [
+                    "accounts": "\(accountCount)",
+                    "healthyAccounts": "\(healthyAccountCount)",
+                    "credentials": credentialBoundaryReady ? "ready" : "blocked",
+                    "syncCursor": syncCursorReady ? "ready" : "blocked",
+                    "toolAudit": toolAuditReady ? "ready" : "blocked",
+                    "sendApproval": sendApprovalReady ? "ready" : "blocked",
+                    "smtpSend": smtpSendAdapterReady ? "ready" : "blocked",
+                    "draftStore": persistentDraftStoreReady ? "ready" : "blocked",
+                    "contactApproval": contactApprovalReady ? "ready" : "blocked",
+                    "attachmentImport": attachmentImportReady ? "ready" : "blocked",
+                    "evidencePolicy": evidencePolicyReady ? "ready" : "blocked"
+                ],
+                blockingReasons: blockingReasons
+            )
+        case .missing(let reason):
+            return blockedCard(phase: .nativeMailSystem, reason: reason)
         }
     }
 

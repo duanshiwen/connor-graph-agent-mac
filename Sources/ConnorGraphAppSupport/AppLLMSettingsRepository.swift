@@ -303,9 +303,17 @@ public struct AppLLMSettings: Sendable, Equatable {
         self.init(connections: [connection], defaultConnectionID: id)
     }
 
-    public var defaultConnection: AppLLMConnectionConfig? {
-        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first
+    public var defaultConnection: AppLLMConnectionConfig {
+        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first ?? .defaultOpenAICompatible
     }
+
+    public var baseURLString: String { defaultConnection.baseURLString }
+    public var model: String { defaultConnection.model }
+    public var selectedModel: String { defaultConnection.selectedModel }
+    public var effectiveModel: String { defaultConnection.effectiveModel }
+    public var hasAPIKey: Bool { defaultConnection.hasAPIKey }
+    public var providerMode: AppLLMProviderMode { defaultConnection.providerMode }
+    public var modelOptions: [String] { defaultConnection.modelOptions }
 
     public func connection(id: String?) -> AppLLMConnectionConfig? {
         guard let id, !id.isEmpty else { return defaultConnection }
@@ -455,7 +463,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         settingsStore.set(String(decoding: data, as: UTF8.self), forKey: Keys.connections)
         settingsStore.set(sanitized.defaultConnectionID, forKey: Keys.defaultConnectionID)
 
-        guard let defaultConnection = settings.defaultConnection else { return }
+        let defaultConnection = settings.defaultConnection
         settingsStore.set(defaultConnection.providerMode.rawValue, forKey: Keys.providerMode)
         settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
         settingsStore.set(defaultConnection.model, forKey: Keys.model)
@@ -692,7 +700,7 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
 
     private func fallbackConnections(error: Error) -> [AppLLMModelConnection] {
         let settings = (try? settingsRepository.loadSettings()) ?? .default
-        guard let connection = settings.defaultConnection else { return [] }
+        let connection = settings.defaultConnection
         return [AppLLMModelConnection(id: connection.id, title: connection.name, subtitle: "模型目录不可用：\(error.localizedDescription)", providerMode: connection.providerMode, models: configuredOptions(from: connection), isLiveCatalog: false)]
     }
 

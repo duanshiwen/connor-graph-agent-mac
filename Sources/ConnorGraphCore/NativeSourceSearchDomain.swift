@@ -1,6 +1,7 @@
 import Foundation
 
 public enum NativeSearchSourceKind: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
+    case mail
     case calendar
     case rss
     case browserHistory
@@ -162,6 +163,8 @@ public struct NativeSearchTemporalFilter: Codable, Sendable, Equatable, Hashable
             let preferred = timeFieldPreference.compactMap { temporal.time(for: $0) }.first
             let fallback: Date?
             switch sourceKind {
+            case .mail:
+                fallback = temporal.sentAt ?? temporal.receivedAt ?? temporal.primaryTime
             case .rss:
                 fallback = temporal.publishedAt ?? temporal.fetchedAt ?? temporal.primaryTime
             case .calendar:
