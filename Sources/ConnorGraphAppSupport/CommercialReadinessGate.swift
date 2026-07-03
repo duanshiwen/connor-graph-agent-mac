@@ -481,8 +481,8 @@ public struct CommercialReadinessGate: Sendable, Equatable {
                     "syncCursor": syncCursorReady ? "ready" : "blocked",
                     "toolAudit": toolAuditReady ? "ready" : "blocked",
                     "sendApproval": sendApprovalReady ? "ready" : "blocked",
-                    "smtpSend": smtpSendAdapterReady ? "ready" : "blocked",
-                    "draftStore": persistentDraftStoreReady ? "ready" : "blocked",
+                    "smtpSendAdapter": smtpSendAdapterReady ? "ready" : "blocked",
+                    "persistentDraftStore": persistentDraftStoreReady ? "ready" : "blocked",
                     "contactApproval": contactApprovalReady ? "ready" : "blocked",
                     "attachmentImport": attachmentImportReady ? "ready" : "blocked",
                     "evidencePolicy": evidencePolicyReady ? "ready" : "blocked"
