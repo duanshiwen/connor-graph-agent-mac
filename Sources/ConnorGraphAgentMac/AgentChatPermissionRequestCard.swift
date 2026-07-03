@@ -27,14 +27,14 @@ struct AgentChatPermissionRequestCard: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: AgentChatLayout.spaceM) {
-            Image(systemName: mailApproval == nil ? "shield.lefthalf.filled" : "paperplane.fill")
+            Image(systemName: "shield.lefthalf.filled")
                 .font(.system(size: AgentChatTypography.controlIconSize + 2, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.orange)
                 .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
 
             HStack(spacing: AgentChatLayout.spaceS) {
-                Text(mailApproval == nil ? "需要权限" : "确认发送邮件")
+                Text("需要权限")
                     .font(AgentChatTypography.calloutEmphasis)
                 Text(approval.capability.rawValue)
                     .font(AgentChatTypography.monoMeta)
@@ -49,9 +49,7 @@ struct AgentChatPermissionRequestCard: View {
     private var details: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                if let mail = mailApproval {
-                    mailSendDetails(mail)
-                } else if let toolName = approval.toolName, !toolName.isEmpty {
+                if let toolName = approval.toolName, !toolName.isEmpty {
                     Label("Tool: \(toolName)", systemImage: "wrench.and.screwdriver")
                 } else {
                     Label("Request: \(approval.requestID)", systemImage: "number")
@@ -115,33 +113,9 @@ struct AgentChatPermissionRequestCard: View {
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
-            Text(AppAgentPendingApprovalPresentation(approval).allowsAlwaysAllow ? "Always Allow 会记住当前会话权限模式" : "发送邮件必须逐次 Allow，不支持 Always Allow")
+            Text(AppAgentPendingApprovalPresentation(approval).allowsAlwaysAllow ? "Always Allow 会记住当前会话权限模式" : "此操作需要逐次审批")
                 .font(AgentChatTypography.meta)
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    private var mailApproval: AppMailSendApprovalPresentation? {
-        let presentation = AppMailSendApprovalPresentation(approval)
-        return presentation.isMailSendRequest ? presentation : nil
-    }
-
-    @ViewBuilder
-    private func mailSendDetails(_ mail: AppMailSendApprovalPresentation) -> some View {
-        Label(mail.recipientSummary, systemImage: "person.2")
-        Label(mail.subjectSummary, systemImage: "text.quote")
-        Label(mail.securitySummary, systemImage: "lock.shield")
-        Text(mail.warning)
-            .font(AgentChatTypography.meta)
-            .foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
-        if let preview = mail.bodyPreview, !preview.isEmpty {
-            Text(preview)
-                .font(AgentChatTypography.meta)
-                .lineLimit(2)
-                .padding(AgentChatLayout.spaceS)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
         }
     }
 

@@ -108,7 +108,7 @@ public struct CalendarSearchEventsTool: AgentTool {
             sessionID: context.sessionID
         )
         await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: arguments.string("query"), strength: .summaryCandidate, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event candidates; read a selected event detail to persist it into Memory OS", contentJSON: try MailJSON.encode(events))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event candidates; read a selected event detail to persist it into Memory OS", contentJSON: try ContactJSON.encode(events))
     }
 }
 
@@ -136,22 +136,22 @@ public struct CalendarReadTool: AgentTool {
         switch operation {
         case "list_calendars":
             let calendars = try await runtime.listCalendars(runID: context.runID, sessionID: context.sessionID)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(calendars.count) calendars", contentJSON: try MailJSON.encode(calendars))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(calendars.count) calendars", contentJSON: try ContactJSON.encode(calendars))
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar event candidates", contentJSON: try MailJSON.encode(events))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar event candidates", contentJSON: try ContactJSON.encode(events))
         case "get_event":
             guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
             if let event {
                 await recorder?.record([NativeSourceReference.calendarEvent(event, query: nil, strength: .detailRead, toolName: name, context: context)])
             }
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: event == nil ? "Calendar event not found" : "Loaded calendar event", contentJSON: try MailJSON.encode(event))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: event == nil ? "Calendar event not found" : "Loaded calendar event", contentJSON: try ContactJSON.encode(event))
         case "get_free_busy":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             let blocks = events.map { CalendarFreeBusyBlock(calendarID: $0.calendarID, start: $0.start.date, end: $0.end.date) }
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Computed \(blocks.count) free/busy blocks", contentJSON: try MailJSON.encode(blocks))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Computed \(blocks.count) free/busy blocks", contentJSON: try ContactJSON.encode(blocks))
         default:
             throw AgentToolError.invalidArguments("Unsupported calendar_read operation: \(operation)")
         }

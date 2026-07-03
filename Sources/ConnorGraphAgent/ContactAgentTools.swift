@@ -1,6 +1,19 @@
 import Foundation
 import ConnorGraphCore
 
+enum ContactJSON {
+    private static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
+
+    static func encode<T: Encodable>(_ value: T) throws -> String {
+        let data = try encoder.encode(value)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public protocol AgentContactRuntime: Sendable {
     func search(query: String) async throws -> [ContactRecord]
     func createDraft(record: ContactRecord) async throws -> ContactMutationDraft
@@ -43,7 +56,7 @@ public struct ContactSearchTool: AgentTool {
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let records = try await runtime.search(query: arguments.string("query") ?? "")
-        let json = try MailJSON.encode(records)
+        let json = try ContactJSON.encode(records)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: json)
     }
 }
@@ -57,9 +70,9 @@ public struct ContactCreateDraftTool: AgentTool {
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
-        let record = ContactRecord(id: MailContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
+        let record = ContactRecord(id: ContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
         let draft = try await runtime.createDraft(record: record)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created contact draft \(draft.id); not committed", contentJSON: try MailJSON.encode(draft))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created contact draft \(draft.id); not committed", contentJSON: try ContactJSON.encode(draft))
     }
 }
 
@@ -73,7 +86,7 @@ public struct ContactCommitDraftTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
         let draft = try await runtime.commitDraft(id: draftID, approved: arguments.bool("approved") ?? false)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try MailJSON.encode(draft))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try ContactJSON.encode(draft))
     }
 }
 
@@ -94,11 +107,11 @@ public struct ContactsReadTool: AgentTool {
         switch operation {
         case "list_contacts", "search_contacts", "resolve_contact":
             let records = try await runtime.search(query: arguments.string("query") ?? "")
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: try MailJSON.encode(records))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: try ContactJSON.encode(records))
         case "get_contact":
             let records = try await runtime.search(query: arguments.string("query") ?? "")
             let record = records.first
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: record == nil ? "Contact not found" : "Loaded contact", contentJSON: try MailJSON.encode(record))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: record == nil ? "Contact not found" : "Loaded contact", contentJSON: try ContactJSON.encode(record))
         default:
             throw AgentToolError.invalidArguments("Unsupported contacts_read operation: \(operation)")
         }
@@ -123,10 +136,10 @@ public struct ContactsWriteTool: AgentTool {
         let operation = arguments.string("operation") ?? ""
         guard operation == "create_contact" else { throw AgentToolError.invalidArguments("MVP contacts_write supports create_contact") }
         guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
-        let record = ContactRecord(id: MailContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
+        let record = ContactRecord(id: ContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
         let draft = try await runtime.createDraft(record: record)
         let committed = try await runtime.commitDraft(id: draft.id, approved: arguments.bool("approved") ?? false)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created approved contact \(committed.record.id.rawValue)", contentJSON: try MailJSON.encode(committed))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created approved contact \(committed.record.id.rawValue)", contentJSON: try ContactJSON.encode(committed))
     }
 }
 

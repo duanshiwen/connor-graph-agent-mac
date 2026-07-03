@@ -247,7 +247,6 @@ public actor NativeSourceSearchService {
 
     static func defaultPrimaryTime(for sourceKind: NativeSearchSourceKind, temporal: NativeSearchTemporalMetadata) -> Date? {
         switch sourceKind {
-        case .mail: temporal.sentAt ?? temporal.receivedAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         case .rss: temporal.publishedAt ?? temporal.fetchedAt ?? temporal.updatedAt ?? temporal.indexedAt
         case .calendar: temporal.eventStartAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         case .browserHistory: temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
@@ -256,9 +255,6 @@ public actor NativeSourceSearchService {
 
     static func defaultPrimaryTimeKind(for sourceKind: NativeSearchSourceKind, temporal: NativeSearchTemporalMetadata) -> NativeSearchTimeKind {
         switch sourceKind {
-        case .mail:
-            if temporal.sentAt != nil { return .sentAt }
-            if temporal.receivedAt != nil { return .receivedAt }
         case .rss:
             if temporal.publishedAt != nil { return .publishedAt }
             if temporal.fetchedAt != nil { return .fetchedAt }
@@ -510,8 +506,7 @@ public actor NativeSourceSearchService {
         case .indexedAt: "Indexed"
         case .unknown:
             switch sourceKind {
-            case .mail: "Message time"
-            case .rss: "Item time"
+                case .rss: "Item time"
             case .calendar: "Event time"
             case .browserHistory: "Visited"
             }

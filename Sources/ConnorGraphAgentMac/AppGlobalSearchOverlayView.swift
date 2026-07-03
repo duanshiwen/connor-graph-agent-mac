@@ -85,7 +85,6 @@ struct AppGlobalSearchOverlayView: View {
             tokenChips
 
             chatSessionSection(results: state.chatSessionResults)
-            resultSection(kind: .mail, results: state.mailResults)
             resultSection(kind: .calendar, results: state.calendarResults)
             resultSection(kind: .rss, results: state.rssResults)
             browserHistorySection(results: state.browserHistoryResults)
@@ -584,7 +583,6 @@ private struct GlobalSearchResultRow: View {
 
     private var iconName: String {
         switch result.sourceKind {
-        case .mail: "envelope"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
         case .browserHistory: "clock.arrow.circlepath"
@@ -593,7 +591,6 @@ private struct GlobalSearchResultRow: View {
 
     private var iconColor: Color {
         switch result.sourceKind {
-        case .mail: .blue
         case .calendar: .purple
         case .rss: .orange
         case .browserHistory: .teal
