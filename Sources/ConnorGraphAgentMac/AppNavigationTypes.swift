@@ -13,7 +13,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case scheduledTasks = "定时任务"
     case eventTriggeredTasks = "事件触发"
     case productOS = "Product OS"
-    case mail = "Mail"
     case calendar = "Calendar"
     case contacts = "Contacts"
     case rss = "RSS"
@@ -49,7 +48,6 @@ struct WorkspaceRootDraft: Identifiable, Equatable {
 enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case app
     case ai
-    case mail
     case calendar
     case rss
     case permissions
@@ -64,7 +62,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "应用"
         case .ai: "AI"
-        case .mail: "邮件系统"
         case .calendar: "日历"
         case .rss: "RSS 阅读"
         case .permissions: "权限"
@@ -79,7 +76,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
-        case .mail: "账户、同步、安全"
         case .calendar: "日程、账户能力、轻量管理"
         case .rss: "订阅源、抓取、安全"
         case .permissions: "默认权限和审批"
@@ -94,7 +90,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "app.badge"
         case .ai: "sparkles"
-        case .mail: "envelope.badge"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
         case .permissions: "shield"

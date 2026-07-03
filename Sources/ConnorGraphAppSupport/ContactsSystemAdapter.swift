@@ -75,7 +75,7 @@ public struct ContactsSystemAdapter: Sendable {
 
     public static func map(snapshot: ContactsSystemContactSnapshot) -> ContactRecord {
         ContactRecord(
-            id: MailContactID(rawValue: snapshot.identifier),
+            id: ContactID(rawValue: snapshot.identifier),
             givenName: snapshot.givenName,
             familyName: snapshot.familyName,
             organizationName: snapshot.organizationName,

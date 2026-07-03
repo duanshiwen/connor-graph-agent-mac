@@ -11,17 +11,6 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
     }
 
     @discardableResult
-    public func ingestMailMessage(id: String, subject: String, bodyPreview: String, accountID: String? = nil, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
-        try facade.ingestSourceEvent(
-            sourceID: "mail:\(id)",
-            title: subject,
-            content: bodyPreview,
-            occurredAt: occurredAt,
-            sourceKind: "mail",
-            accountID: accountID,
-            metadata: metadata.merging(["mail_message_id": id]) { current, _ in current }
-        )
-    }
 
     @discardableResult
     public func ingestCalendarEvent(

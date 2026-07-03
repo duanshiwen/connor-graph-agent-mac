@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MailContactID: RawRepresentable, Codable, Sendable, Equatable, Hashable, Identifiable {
+public struct ContactID: RawRepresentable, Codable, Sendable, Equatable, Hashable, Identifiable {
     public var rawValue: String
     public var id: String { rawValue }
     public init(rawValue: String) { self.rawValue = rawValue }
@@ -18,14 +18,14 @@ public struct ContactEmailAddress: Codable, Sendable, Equatable, Hashable, Ident
 }
 
 public struct ContactRecord: Codable, Sendable, Equatable, Hashable, Identifiable {
-    public var id: MailContactID
+    public var id: ContactID
     public var givenName: String
     public var familyName: String
     public var organizationName: String?
     public var emails: [ContactEmailAddress]
     public var source: String
 
-    public init(id: MailContactID, givenName: String, familyName: String = "", organizationName: String? = nil, emails: [ContactEmailAddress], source: String = "connor-cache") {
+    public init(id: ContactID, givenName: String, familyName: String = "", organizationName: String? = nil, emails: [ContactEmailAddress], source: String = "connor-cache") {
         self.id = id
         self.givenName = givenName
         self.familyName = familyName
@@ -45,15 +45,13 @@ public struct ContactCandidate: Codable, Sendable, Equatable, Hashable, Identifi
     public var id: String
     public var candidate: ContactRecord
     public var source: ContactCandidateSource
-    public var relatedMessageID: MailMessageID?
     public var confidence: Double
     public var createdAt: Date
 
-    public init(id: String = UUID().uuidString, candidate: ContactRecord, source: ContactCandidateSource, relatedMessageID: MailMessageID? = nil, confidence: Double, createdAt: Date = Date()) {
+    public init(id: String = UUID().uuidString, candidate: ContactRecord, source: ContactCandidateSource, confidence: Double, createdAt: Date = Date()) {
         self.id = id
         self.candidate = candidate
         self.source = source
-        self.relatedMessageID = relatedMessageID
         self.confidence = confidence
         self.createdAt = createdAt
     }
@@ -79,5 +77,44 @@ public struct ContactMutationDraft: Codable, Sendable, Equatable, Hashable, Iden
         self.status = status
         self.approvalRequired = approvalRequired
         self.createdAt = createdAt
+    }
+}
+
+// MARK: - Mail Contact (from mail header extraction)
+public enum ContactSource: String, Codable, Sendable, Hashable {
+    case mailHeader = "mail-header"
+    case mailBody = "mail-body"
+    case userDraft = "user-draft"
+    case systemContacts = "system-contacts"
+}
+
+public struct MailContact: Codable, Sendable, Identifiable {
+    public let id: ContactID
+    public var email: String
+    public var displayName: String?
+    public var frequency: Int
+    public var lastContactedAt: Date?
+    public var firstSeenAt: Date
+    public var lastSeenAt: Date
+    public var sources: Set<ContactSource>
+
+    public init(
+        id: ContactID,
+        email: String,
+        displayName: String? = nil,
+        frequency: Int = 1,
+        lastContactedAt: Date? = nil,
+        firstSeenAt: Date = Date(),
+        lastSeenAt: Date = Date(),
+        sources: Set<ContactSource> = [.mailHeader]
+    ) {
+        self.id = id
+        self.email = email
+        self.displayName = displayName
+        self.frequency = frequency
+        self.lastContactedAt = lastContactedAt
+        self.firstSeenAt = firstSeenAt
+        self.lastSeenAt = lastSeenAt
+        self.sources = sources
     }
 }
