@@ -255,11 +255,11 @@ struct AgentMessageAttachmentRefsView: View {
 }
 
 /// 助理消息上方的头像 + 昵称行。
-/// 现阶段固定为康纳同学；飞书接入后根据消息来源动态切换头像和名称。
+/// 现阶段固定为康纳同学。
 struct AgentAssistantHeaderView: View {
     var displayName: String = "康纳同学"
     var subtitle: String = "你的主动 AI 助理"
-    var slogan: String = "用知识图谱记住一切，连接邮件日历社交，知识市场共享智慧，可靠地完成任务。"
+    var slogan: String = "用知识图谱记住一切，连接日历社交，知识市场共享智慧，可靠地完成任务。"
     var avatarImage: NSImage? = nil
 
     var body: some View {

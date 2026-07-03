@@ -371,7 +371,7 @@ private func statusIconTitle(for icon: String) -> String {
     case "star": return "星标"
     case "bolt": return "闪电"
     case "flame": return "火焰"
-    case "tray": return "收件箱"
+    case "tray": return "待办"
     case "archivebox": return "归档"
     case "paperplane": return "发送"
     case "hammer": return "构建"

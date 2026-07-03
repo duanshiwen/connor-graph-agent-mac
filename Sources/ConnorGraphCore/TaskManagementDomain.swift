@@ -347,7 +347,7 @@ public extension ConnorTaskDefinition {
 
     func validateSystemTaskTemplate() throws {
         guard origin == .system else { return }
-        guard target.targetKind == "source.runtime", target.operationName == "refresh", ["mail", "calendar", "rss"].contains(target.targetID) else {
+        guard target.targetKind == "source.runtime", target.operationName == "refresh", ["calendar", "rss"].contains(target.targetID) else {
             throw ConnorTaskValidationError.systemTaskTemplateRequired(id)
         }
     }

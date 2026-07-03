@@ -545,7 +545,7 @@ struct CraftContactsListPane: View {
                 .padding(.vertical, 13)
 
             if viewModel.contactsBrowserPresentation.rows.isEmpty {
-                ContentUnavailableView("还没有可显示的联系人", systemImage: "person.crop.circle.badge", description: Text("连接通讯录或邮箱后，康纳同学会把可用联系人整理在这里，方便之后写信、检索和关联会话。"))
+                ContentUnavailableView("还没有可显示的联系人", systemImage: "person.crop.circle.badge", description: Text("连接通讯录后，康纳同学会把可用联系人整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
                 ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
@@ -585,7 +585,7 @@ private struct ContactRowButton: View {
                 Text(row.displayName)
                     .font(AppListTypography.rowTitle)
                     .foregroundStyle(.primary)
-                Text(row.primaryEmail ?? row.organizationName ?? "无邮箱")
+                Text(row.primaryEmail ?? row.organizationName ?? "无联系方式")
                     .font(AppListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
             }

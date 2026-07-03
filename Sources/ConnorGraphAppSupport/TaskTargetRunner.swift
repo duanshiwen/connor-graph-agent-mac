@@ -128,7 +128,7 @@ public struct TaskTargetRunner: Sendable {
     }
 
     private func sourceInstanceID(from parameters: [String: String]) -> String? {
-        ["sourceInstanceID", "sourceID", "accountID", "calendarAccountID", "mailAccountID"]
+        ["sourceInstanceID", "sourceID", "accountID", "calendarAccountID"]
             .compactMap { parameters[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
     }

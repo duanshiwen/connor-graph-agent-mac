@@ -28,7 +28,7 @@ public struct NativeContactsBrowserPresentation: Sendable, Equatable {
         return NativeContactsBrowserPresentation(query: query, rows: rows, emptyMessage: rows.isEmpty ? "没有匹配的联系人" : nil)
     }
 
-    /// 从邮件联系人构建
+    /// 从联系人列表构建
     public static func build(contacts: [MailContact], query: String = "") -> NativeContactsBrowserPresentation {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = normalized.isEmpty ? contacts : contacts.filter { contact in
