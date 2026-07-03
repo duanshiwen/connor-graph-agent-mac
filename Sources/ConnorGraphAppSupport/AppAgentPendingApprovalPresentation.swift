@@ -27,7 +27,7 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         self.statusLabel = approval.status.rawValue
         self.severity = Self.severity(for: approval.status)
         self.createdAt = approval.createdAt
-        self.allowsAlwaysAllow = approval.capability != .sendMail
+        self.allowsAlwaysAllow = true
     }
 
     private static func severity(for status: AgentPendingApprovalStatus) -> AppAgentPendingApprovalSeverity {

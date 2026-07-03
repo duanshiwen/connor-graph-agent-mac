@@ -679,7 +679,7 @@ private struct AgentToolBatchResult: Sendable, Equatable {
 private extension AgentPermissionCapability {
     var isSafeForParallelNativeToolExecution: Bool {
         switch self {
-        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientificBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
+        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
             return true
         case .mutateSessionStatus, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
              .externalNetwork, .modelCall, .costlyModelCall,

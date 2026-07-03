@@ -60,7 +60,7 @@ public actor AgentPolicyEngine: Sendable {
     }
 
     private func outcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
-        if capability ==  || capability == .mutateContacts || capability == .mutateCalendar {
+        if capability == .mutateContacts || capability == .mutateCalendar {
             return .needsApproval
         }
         switch permissionMode {
@@ -68,21 +68,21 @@ public actor AgentPolicyEngine: Sendable {
             return .approved
         case .readOnly:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommandBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
+            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
                 return .approved
             case .mutateSessionStatus, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML:
                 return .denied
             }
         case .askToWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommandBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML:
                 return .approved
             case .mutateSessionStatus, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML:
                 return .needsApproval
             }
         case .trustedWrite:
             switch capability {
-            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommandBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
+            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
                 return .approved
             case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML:
                 return .needsApproval

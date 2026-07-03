@@ -123,7 +123,6 @@ public struct SourceRefreshTaskMaterializer: Sendable {
 
 }
 
-public struct CalendarRefreshTaskMaterializer: Sendable
 public struct CalendarRefreshTaskMaterializer: Sendable {
     public static let sourceInstanceIDParameter = SourceRefreshTaskMaterializer.sourceInstanceIDParameter
     public static let sourceKindParameter = SourceRefreshTaskMaterializer.sourceKindParameter

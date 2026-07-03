@@ -11,8 +11,6 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
     }
 
     @discardableResult
-
-    @discardableResult
     public func ingestCalendarEvent(
         id: String,
         title: String,
