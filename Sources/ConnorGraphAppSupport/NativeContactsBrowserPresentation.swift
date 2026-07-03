@@ -43,12 +43,12 @@ public struct NativeContactsBrowserPresentation: Sendable, Equatable {
 }
 
 public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
-    public var id: MailContactID
+    public var id: ContactID
     public var displayName: String
     public var primaryEmail: String?
     public var organizationName: String?
 
-    public init(id: MailContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil) {
+    public init(id: ContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil) {
         self.id = id
         self.displayName = displayName
         self.primaryEmail = primaryEmail

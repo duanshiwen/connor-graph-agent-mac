@@ -1,36 +1,12 @@
 import Foundation
 import ConnorGraphCore
 
-public protocol TimeAwareMailSourceCache: MailSourceCache {
-    func searchMessages(query: String, accountID: MailAccountID?, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [MailMessageSummary]
-}
 
 public protocol TimeAwareRSSSourceCache: RSSSourceCache {
     func searchItems(query: String, sourceID: RSSSourceID?, includeHidden: Bool, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [RSSItemSummary]
 }
 
 public enum NativeSourceSearchAdapters {
-    public static func mailDocument(from detail: MailMessageDetail) -> NativeSearchDocument {
-        let summary = detail.summary
-        let bodyText = detail.body?.plainText?.text ?? detail.body?.redactedPreview
-        let participants = ([summary.from.email] + summary.to.map(\.email) + summary.cc.map(\.email))
-        let hash = [summary.subject, summary.snippet, bodyText ?? "", summary.date.timeIntervalSince1970.description, summary.flags.isRead.description].joined(separator: "|")
-        return NativeSearchDocument(
-            id: "mail:\(summary.id.rawValue)",
-            sourceKind: .mail,
-            sourceInstanceID: summary.accountID.rawValue,
-            externalID: summary.id.rawValue,
-            title: summary.subject,
-            summary: summary.snippet,
-            body: bodyText,
-            participants: participants,
-            temporal: NativeSearchTemporalMetadata(primaryTime: summary.date, primaryTimeKind: .sentAt, sentAt: summary.date, indexedAt: Date()),
-            visibility: "visible",
-            state: ["isRead": summary.flags.isRead ? "true" : "false"],
-            metadata: ["mailboxID": summary.mailboxID.rawValue, "from": summary.from.email],
-            contentHash: stableHash(hash)
-        )
-    }
 
     public static func rssDocument(from detail: RSSItemDetail) -> NativeSearchDocument {
         let summary = detail.summary
@@ -131,8 +107,6 @@ public extension NativeSearchTemporalFilter {
     static func sourceDefault(start: Date?, end: Date?, sourceKind: NativeSearchSourceKind, timezoneIdentifier: String = TimeZone.current.identifier) -> NativeSearchTemporalFilter? {
         guard start != nil || end != nil else { return nil }
         switch sourceKind {
-        case .mail:
-            return NativeSearchTemporalFilter(start: start, end: end, mode: .pointWithinRange, timeFieldPreference: [.sentAt, .receivedAt], timezoneIdentifier: timezoneIdentifier)
         case .rss:
             return NativeSearchTemporalFilter(start: start, end: end, mode: .pointWithinRange, timeFieldPreference: [.publishedAt, .fetchedAt], timezoneIdentifier: timezoneIdentifier)
         case .calendar:

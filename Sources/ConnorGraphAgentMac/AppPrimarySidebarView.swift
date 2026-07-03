@@ -105,7 +105,6 @@ struct CraftPrimarySidebarView: View {
                     }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
-                        SidebarRow(title: "邮件系统", systemImage: "envelope.badge.shield.half.filled", count: mailMessageCount, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "日历", systemImage: "calendar", count: viewModel.calendarBrowserPresentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
                         SidebarRow(title: "联系人", systemImage: "person.crop.circle.badge", count: viewModel.contactsBrowserPresentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
                         SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: false, isEnabled: false) {}
@@ -165,11 +164,6 @@ struct CraftPrimarySidebarView: View {
 
     private var allSessionsCount: Int {
         countSourceSessions.count
-    }
-
-    private var mailMessageCount: Int? {
-        let count = viewModel.mailBrowserPresentation.totalMessageCount
-        return count > 0 ? count : nil
     }
 
     private var rssUnreadCount: Int? {

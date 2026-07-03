@@ -66,20 +66,17 @@ public struct TaskTargetRunner: Sendable {
     public typealias SessionMessageHandler = @Sendable (_ request: TaskSessionMessageRequest) async throws -> String
     public typealias MemoryOSPipelineHandler = @Sendable (_ request: MemoryOSPipelineTaskRequest) async throws -> String
 
-    public var mailRefresher: RefreshHandler
     public var calendarRefresher: RefreshHandler
     public var rssRefresher: RefreshHandler
     public var sessionMessenger: SessionMessageHandler
     public var memoryOSPipelineRunner: MemoryOSPipelineHandler?
 
     public init(
-        mailRefresher: @escaping RefreshHandler,
         calendarRefresher: @escaping RefreshHandler,
         rssRefresher: @escaping RefreshHandler,
         sessionMessenger: @escaping SessionMessageHandler,
         memoryOSPipelineRunner: MemoryOSPipelineHandler? = nil
     ) {
-        self.mailRefresher = mailRefresher
         self.calendarRefresher = calendarRefresher
         self.rssRefresher = rssRefresher
         self.sessionMessenger = sessionMessenger
@@ -96,7 +93,6 @@ public struct TaskTargetRunner: Sendable {
             )
             let summary: String
             switch task.target.targetID {
-            case "mail": summary = try await mailRefresher(request)
             case "calendar": summary = try await calendarRefresher(request)
             case "rss": summary = try await rssRefresher(request)
             default: throw TaskTargetRunnerError.unsupportedTarget(targetDescription(task))
@@ -140,13 +136,12 @@ public struct TaskTargetRunner: Sendable {
 
 public extension TaskTargetRunner {
     static func appRuntime(
-        mailRefresh: @escaping RefreshHandler,
         calendarRefresh: @escaping RefreshHandler,
         rssRefresh: @escaping RefreshHandler,
         sessionMessage: @escaping SessionMessageHandler,
         memoryOSPipeline: MemoryOSPipelineHandler? = nil
     ) -> TaskTargetRunner {
-        TaskTargetRunner(mailRefresher: mailRefresh, calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, memoryOSPipelineRunner: memoryOSPipeline)
+        TaskTargetRunner(calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, memoryOSPipelineRunner: memoryOSPipeline)
     }
 
 }
