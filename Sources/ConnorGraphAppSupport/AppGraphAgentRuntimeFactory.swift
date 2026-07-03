@@ -146,6 +146,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             ), recorder: nativeSourceReferenceRecorder)
+            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            registry.registerNativeMailTools(runtime: MailRuntime(repository: mailStore, cache: mailStore), recorder: nativeSourceReferenceRecorder)
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
