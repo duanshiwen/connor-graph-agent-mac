@@ -164,7 +164,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - L4: Stable entity/concept graph with controlled entity types and typed entity-to-entity relations.
 
         Trigger and lifecycle:
-        - L1 events accumulate from chat messages, browser selections, native-source events (Mail/RSS/Calendar), and attachments.
+        - L1 events accumulate from chat messages, browser selections, native-source events (RSS/Calendar), and attachments.
         - Processing triggers when: pending count ≥ 100, OR oldest pending event age ≥ 24 hours.
         - Events are batched by time proximity and token limits (≤30 events, ≤12k tokens per batch).
         - After successful processing, the processed L1 events are physically deleted. L0 remains as permanent evidence.
@@ -178,7 +178,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - L4: Use memory_os_l4_update_entities to write L4 stable entities, concept entities, and durable relations.
         - Ignore noise, duplicates, transient wording and unsupported guesses.
         - You must search existing memory (memory_os_context) before writing to check for duplicates or refinements.
-        - When you need raw evidence from data sources (email, calendar, RSS, browser history), use memory_os_search to query them directly.
+        - When you need raw evidence from data sources (calendar, RSS, browser history), use memory_os_search to query them directly.
         - Do not output JSON artifacts. Use the write tools directly.
 
         L2 semantic anchor model:
@@ -307,7 +307,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - memory_os_update_current_user_profile(facts[]) — MANDATORY for current-user facts. Each fact needs statement, factType, and relation.
         - memory_os_l3_update_beliefs(beliefs[]) — Write L3 knowledge. Each belief needs statement (required), domain, relatedEntityNames.
         - memory_os_l4_update_entities(entities[], relations[]) — Write L4 entities and relations.
-        - memory_os_search(query) — Search external data sources (email, calendar, RSS, browser history) for evidence.
+        - memory_os_search(query) — Search external data sources (calendar, RSS, browser history) for evidence.
         - memory_os_expand_l4(entityName, depth, limit) — Expand L4 entity graph for disambiguation. Accepts entity name; internally resolves to matching L4 entity.
         - Do not create entities for every noun phrase; create or update only objects likely to be useful future retrieval anchors.
         - Preserve negative or exclusion semantics directly in the statement text.
@@ -317,7 +317,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - project_state: current project/work-object state, milestone, scope, requirement, constraint, design direction, or active decision context.
         - task_commitment: task, TODO, commitment, responsibility, due date, reminder, follow-up, assignment, completion or postponement.
         - calendar_time: calendar event, schedule, time block, deadline, conflict, occurrence time, start/end time or temporal coordination fact.
-        - communication: mail/message/RSS/chat communication fact: sender, recipient, mention, request, reply, topic or communication-derived action.
+        - communication: message/RSS/chat communication fact: sender, recipient, mention, request, reply, topic or communication-derived action.
         - source_document: fact about an attachment, document, web page, source item, transcript, citation, answer or evidence source.
         - decision: explicit decision, rationale, selected option, supersession, approval, rejection or decision owner.
         - implementation: code, architecture, runtime behavior, dependency, module relation, test result, bug, fix, feature or implementation status.
@@ -336,7 +336,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - project_state: Extract when evidence updates the current state, scope, milestone, requirement, constraint, design direction, active context, open problem, or known limitation of a work_object. Prefer project_state over implementation when the fact is about product/project direction rather than code/runtime behavior.
         - task_commitment: Extract when someone commits to do something, asks for follow-up, creates a TODO, assigns responsibility, sets a due date, completes, cancels, or postpones work.
         - calendar_time: Extract when evidence contains a schedule, event time, deadline, time block, conflict, start/end time, recurrence, or temporal coordination. Do not confuse vague narrative time with actionable calendar/time memory.
-        - communication: Extract when evidence is about a message, email, chat, RSS item, sender, recipient, mention, request, reply, topic, or communication-derived action.
+        - communication: Extract when evidence is about a message, chat, RSS item, sender, recipient, mention, request, reply, topic, or communication-derived action.
         - source_document: Extract when evidence describes an attachment, document, webpage, transcript, citation, source item, or answer.
         - decision: Extract when evidence states a selected option, explicit decision, rejection, approval, rationale, owner, supersession, or tradeoff conclusion. Always preserve negative decisions in the statement text when operationally important.
         - implementation: Extract when evidence concerns code, architecture, runtime behavior, dependency, module relation, bug, fix, feature, test result, migration, API contract, or implementation status. Prefer implementation over project_state when the fact is about actual code/runtime/test behavior.
@@ -748,7 +748,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         - Prefer the provided L1 packet first. It contains the cached events that triggered this processing job.
         - Search memory_os_context before writing to check for duplicates, refinements, and existing graph context.
         - Use memory_os_expand_l4 for entity identity ambiguity or duplicate concept detection.
-        - Use memory_os_search when you need to query external data sources (email, calendar, RSS, browser history) for supporting evidence.
+        - Use memory_os_search when you need to query external data sources (calendar, RSS, browser history) for supporting evidence.
         - Current-user facts: use memory_os_update_current_user_profile (mandatory for current-user identification).
         - Other L2 facts: use memory_os_l2_update_entities.
         - L3 knowledge: use memory_os_l3_update_beliefs (only after all four promotion filters pass).
