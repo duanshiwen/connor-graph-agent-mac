@@ -19,15 +19,15 @@ public enum ConnectedAccountProviderKind: String, Codable, Sendable, Equatable, 
     public var defaultCapabilities: [ConnectedAccountCapabilityKind] {
         switch self {
         case .appleICloud:
-            return [.calendar, .contacts]
+            return [.mail, .calendar, .contacts]
         case .microsoft365, .google:
             return []
         case .qq, .netEase, .genericIMAPSMTP:
-            return []
+            return [.mail]
         case .genericCalDAVCardDAV:
             return [.calendar, .contacts]
         case .localFixture:
-            return [.calendar, .contacts]
+            return [.mail, .calendar, .contacts]
         }
     }
 
@@ -42,6 +42,7 @@ public enum ConnectedAccountProviderKind: String, Codable, Sendable, Equatable, 
 }
 
 public enum ConnectedAccountCapabilityKind: String, Codable, Sendable, Equatable, Hashable, CaseIterable, Comparable {
+    case mail
     case calendar
     case contacts
 
@@ -51,8 +52,9 @@ public enum ConnectedAccountCapabilityKind: String, Codable, Sendable, Equatable
 
     private var sortOrder: Int {
         switch self {
-        case .calendar: return 0
-        case .contacts: return 1
+        case .mail: return 0
+        case .calendar: return 1
+        case .contacts: return 2
         }
     }
 }

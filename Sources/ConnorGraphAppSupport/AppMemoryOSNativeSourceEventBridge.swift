@@ -35,6 +35,19 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
     }
 
     @discardableResult
+    public func ingestMailMessage(id: String, subject: String, bodyPreview: String, accountID: String? = nil, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
+        try facade.ingestSourceEvent(
+            sourceID: "mail:\(id)",
+            title: subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "(No subject)" : subject,
+            content: bodyPreview,
+            occurredAt: occurredAt,
+            sourceKind: "mail",
+            accountID: accountID,
+            metadata: metadata.merging(["mail_message_id": id, "mail_account_id": accountID ?? ""]) { current, _ in current }
+        )
+    }
+
+    @discardableResult
     public func ingestRSSItem(id: String, title: String, snippet: String, sourceID: String? = nil, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
         try facade.ingestSourceEvent(
             sourceID: "rss:\(id)",

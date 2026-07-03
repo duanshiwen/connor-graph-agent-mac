@@ -3,6 +3,7 @@ import ConnorGraphCore
 
 public struct NativeSourceReference: Codable, Sendable, Equatable, Identifiable {
     public enum SourceKind: String, Codable, Sendable, Equatable, CaseIterable {
+        case mail
         case calendar
         case rss
         case browserHistory = "browser_history"
@@ -123,6 +124,72 @@ public struct NoopNativeSourceReferenceRecorder: NativeSourceReferenceRecording 
 }
 
 public extension NativeSourceReference {
+    static func mailSummary(_ summary: MailMessageSummary, query: String?, toolName: String, context: AgentToolExecutionContext) -> NativeSourceReference {
+        NativeSourceReference(
+            sourceKind: .mail,
+            sourceRecordID: summary.id.rawValue,
+            title: summary.subject,
+            content: mailSummaryContent(summary),
+            occurredAt: summary.date,
+            accountID: summary.accountID.rawValue,
+            sessionID: context.sessionID,
+            referenceStrength: .summaryCandidate,
+            toolName: toolName,
+            toolCallID: context.toolCallID,
+            runID: context.runID,
+            query: query,
+            metadata: mailSummaryMetadata(summary)
+        )
+    }
+
+    static func mailDetail(_ detail: MailMessageDetail, includeBody: Bool, toolName: String, context: AgentToolExecutionContext) -> NativeSourceReference {
+        let bodyText: String
+        if includeBody, let body = detail.body {
+            bodyText = body.plainText?.text
+                ?? body.htmlText?.text
+                ?? body.redactedPreview
+        } else {
+            bodyText = detail.body?.redactedPreview ?? detail.summary.snippet
+        }
+        var metadata = mailSummaryMetadata(detail.summary)
+        metadata["include_body"] = String(includeBody)
+        metadata["body_hash"] = detail.body?.bodyHash ?? ""
+        metadata["attachment_count"] = String(detail.attachments.count)
+        return NativeSourceReference(
+            sourceKind: .mail,
+            sourceRecordID: detail.id.rawValue,
+            title: detail.summary.subject,
+            content: mailSummaryContent(detail.summary) + "\n\nBody:\n" + bodyText,
+            occurredAt: detail.summary.date,
+            accountID: detail.summary.accountID.rawValue,
+            sessionID: context.sessionID,
+            referenceStrength: .detailRead,
+            toolName: toolName,
+            toolCallID: context.toolCallID,
+            runID: context.runID,
+            metadata: metadata
+        )
+    }
+
+    private static func mailSummaryContent(_ summary: MailMessageSummary) -> String {
+        """
+        Subject: \(summary.subject)
+        From: \(summary.from.name.map { "\($0) <\(summary.from.email)>" } ?? summary.from.email)
+        To: \(summary.to.map(\.email).joined(separator: ", "))
+        Date: \(ISO8601DateFormatter().string(from: summary.date))
+        Snippet: \(summary.snippet)
+        """
+    }
+
+    private static func mailSummaryMetadata(_ summary: MailMessageSummary) -> [String: String] {
+        [
+            "mail_message_id": summary.id.rawValue,
+            "mailbox_id": summary.mailboxID.rawValue,
+            "from": summary.from.email,
+            "has_attachments": String(summary.hasAttachments)
+        ]
+    }
+
     static func calendarEvent(_ event: CalendarEvent, query: String?, strength: ReferenceStrength, toolName: String, context: AgentToolExecutionContext) -> NativeSourceReference {
         NativeSourceReference(
             sourceKind: .calendar,
