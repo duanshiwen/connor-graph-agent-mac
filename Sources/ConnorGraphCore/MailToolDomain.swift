@@ -135,6 +135,20 @@ public struct MailMessageDetail: Codable, Sendable, Equatable, Hashable, Identif
     }
 }
 
+public struct MailMessageBodyPreviewResult: Codable, Sendable, Equatable, Hashable {
+    public var summary: MailMessageSummary
+    public var bodyPreview: String?
+    public var bodyPreviewTruncated: Bool
+    public var bodySource: String?
+
+    public init(summary: MailMessageSummary, bodyPreview: String?, bodyPreviewTruncated: Bool = false, bodySource: String? = nil) {
+        self.summary = summary
+        self.bodyPreview = bodyPreview
+        self.bodyPreviewTruncated = bodyPreviewTruncated
+        self.bodySource = bodySource
+    }
+}
+
 public enum MailDraftStatus: String, Codable, Sendable, Equatable, Hashable {
     case draft
     case pendingApproval

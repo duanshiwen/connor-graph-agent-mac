@@ -15,6 +15,36 @@ extension MailRuntime: AgentMailRuntime {
         )
     }
 
+    public func listRecentMessagesWithBodyPreview(_ request: MailRuntimeRecentMessagesRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
+        try await listRecentMessagesWithBodyPreview(
+            MailRuntimeRecentMessagesRequest(
+                accountID: request.accountID,
+                direction: MailMessageDirectionFilter(agentFilter: request.direction),
+                limit: request.limit
+            ),
+            bodyPreviewMaxChars: bodyPreviewMaxChars,
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
+    public func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
+        try await searchMessagesWithBodyPreview(
+            MailRuntimeSearchRequest(
+                query: request.query,
+                accountID: request.accountID,
+                limit: request.limit,
+                startDate: request.startDate,
+                endDate: request.endDate,
+                timePreset: request.timePreset.flatMap(NativeSearchTimePreset.init(rawValue:)),
+                timeSort: request.timeSort.flatMap(NativeSearchTemporalSort.init(rawValue:)) ?? .relevanceThenTimeDesc
+            ),
+            bodyPreviewMaxChars: bodyPreviewMaxChars,
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
     public func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
         let payload = try await sendApprovalPayload(draftID: draftID)
         return MailSendApprovalBridge(

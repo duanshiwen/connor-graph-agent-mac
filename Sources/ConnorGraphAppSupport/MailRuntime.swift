@@ -159,6 +159,60 @@ public struct MailRuntime: Sendable {
         return Array(messages.prefix(limit))
     }
 
+    public func listRecentMessagesWithBodyPreview(_ request: MailRuntimeRecentMessagesRequest, bodyPreviewMaxChars: Int, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageBodyPreviewResult] {
+        let summaries = try await listRecentMessages(request, runID: runID, sessionID: sessionID)
+        let results = try await bodyPreviewResults(for: summaries, maxChars: bodyPreviewMaxChars)
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageBodyRead, riskClass: .bodyRead, redactedSummary: "Listed recent mail messages with cached body previews; returned \(results.count) previews without mutating read state"))
+        return results
+    }
+
+    public func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequest, bodyPreviewMaxChars: Int, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageBodyPreviewResult] {
+        let summaries = try await searchMessages(request, runID: runID, sessionID: sessionID)
+        let results = try await bodyPreviewResults(for: summaries, maxChars: bodyPreviewMaxChars)
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageBodyRead, riskClass: .bodyRead, redactedSummary: "Searched mail messages with cached body previews; returned \(results.count) previews without mutating read state"))
+        return results
+    }
+
+    private func bodyPreviewResults(for summaries: [MailMessageSummary], maxChars: Int) async throws -> [MailMessageBodyPreviewResult] {
+        let maxChars = min(max(bodyPreviewMaxCharsLowerBound, maxChars), bodyPreviewMaxCharsUpperBound)
+        var results: [MailMessageBodyPreviewResult] = []
+        results.reserveCapacity(summaries.count)
+        for summary in summaries {
+            let detail = try await cache.message(id: summary.id)
+            let preview = detail.flatMap { Self.bodyPreview(from: $0, maxChars: maxChars) }
+            results.append(MailMessageBodyPreviewResult(summary: summary, bodyPreview: preview?.text, bodyPreviewTruncated: preview?.truncated ?? false, bodySource: preview?.source))
+        }
+        return results
+    }
+
+    private var bodyPreviewMaxCharsLowerBound: Int { 200 }
+    private var bodyPreviewMaxCharsUpperBound: Int { 2_000 }
+
+    private static func bodyPreview(from detail: MailMessageDetail, maxChars: Int) -> (text: String, truncated: Bool, source: String)? {
+        let htmlPreview = (detail.body?.htmlText?.text).map { stripHTMLForPreview($0) }
+        let candidates: [(String, String?)] = [
+            ("plainText", detail.body?.plainText?.text),
+            ("htmlText", htmlPreview),
+            ("redactedPreview", detail.body?.redactedPreview)
+        ]
+        for (source, rawText) in candidates {
+            let normalized = normalizeBodyPreviewText(rawText ?? "")
+            guard !normalized.isEmpty else { continue }
+            let truncated = normalized.count > maxChars
+            return (String(normalized.prefix(maxChars)), truncated, source)
+        }
+        return nil
+    }
+
+    private static func normalizeBodyPreviewText(_ value: String) -> String {
+        value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func stripHTMLForPreview(_ value: String) -> String {
+        value.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+    }
+
     private func mailboxesForRecentMessages(accountID: MailAccountID?, messages: [MailMessageSummary]) async throws -> [MailMailbox] {
         if let accountID {
             return try await cache.listMailboxes(accountID: accountID)
