@@ -1579,6 +1579,8 @@ struct MailMessageListRowPresentation: Equatable {
     var senderText: String
     var contextText: String
     var snippetText: String
+    var directionLabelText: String?
+    var directionLabelSystemImage: String?
 
     init(message: MailMessageSummary, account: MailAccount?, mailbox: MailMailbox?) {
         subjectText = message.subject.isEmpty ? "无主题" : message.subject
@@ -1590,6 +1592,17 @@ struct MailMessageListRowPresentation: Equatable {
             .compactMap { $0 }
             .joined(separator: " · ")
         snippetText = message.snippet
+        switch mailbox?.role {
+        case .sent:
+            directionLabelText = "已发送"
+            directionLabelSystemImage = "paperplane.fill"
+        case .some:
+            directionLabelText = "收件"
+            directionLabelSystemImage = "tray.fill"
+        case nil:
+            directionLabelText = nil
+            directionLabelSystemImage = nil
+        }
     }
 }
 
@@ -1602,6 +1615,14 @@ private struct MailMessageListRow: View {
 
     private var presentation: MailMessageListRowPresentation {
         MailMessageListRowPresentation(message: message, account: account, mailbox: mailbox)
+    }
+
+    private var mailDirectionBadgeForeground: Color {
+        mailbox?.role == .sent ? .accentColor : .secondary
+    }
+
+    private var mailDirectionBadgeBackground: Color {
+        mailbox?.role == .sent ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.12)
     }
 
     var body: some View {
@@ -1625,6 +1646,17 @@ private struct MailMessageListRow: View {
                             Image(systemName: "flag.fill")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.orange)
+                        }
+                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
+                            Spacer(minLength: 4)
+                            Label(label, systemImage: image)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(mailDirectionBadgeForeground)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
+                                .lineLimit(1)
                         }
                     }
                     Text(presentation.senderText)
