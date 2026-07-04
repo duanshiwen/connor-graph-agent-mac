@@ -1516,7 +1516,7 @@ struct CraftMailListPane: View {
 
     private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
     private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: "", direction: directionFilter)
+        viewModel.mailListMessages(direction: directionFilter)
     }
 
     var body: some View {
@@ -1537,6 +1537,10 @@ struct CraftMailListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
+                viewModel.mailSearchQuery = ""
+            }
+
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("还没有添加邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。康纳同学会把邮件同步到本地，并保持发送审批边界。"))
                     .padding(.top, 80)
@@ -1552,7 +1556,7 @@ struct CraftMailListPane: View {
                     .padding(.bottom, 6)
 
                 if visibleMessages.isEmpty {
-                    ContentUnavailableView(directionFilter.emptyListTitle, systemImage: directionFilter.emptyListSystemImage, description: Text(directionFilter.emptyListDescription))
+                    ContentUnavailableView(mailEmptyListTitle, systemImage: mailEmptyListSystemImage, description: Text(mailEmptyListDescription))
                         .padding(.top, 56)
                 } else {
                     List(visibleMessages) { message in
@@ -1575,6 +1579,22 @@ struct CraftMailListPane: View {
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet(viewModel: viewModel)
         }
+    }
+
+    private var isFilteringBySearch: Bool {
+        !viewModel.mailSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var mailEmptyListTitle: String {
+        isFilteringBySearch ? "没有找到匹配的邮件" : directionFilter.emptyListTitle
+    }
+
+    private var mailEmptyListDescription: String {
+        isFilteringBySearch ? "换个关键词试试，或者清除筛选查看全部邮件。" : directionFilter.emptyListDescription
+    }
+
+    private var mailEmptyListSystemImage: String {
+        isFilteringBySearch ? "envelope.badge.magnifyingglass" : directionFilter.emptyListSystemImage
     }
 
     private func selectMessage(_ message: MailMessageSummary) {
