@@ -3,6 +3,41 @@ import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
+struct MailSettingsSummaryPresentation: Equatable {
+    var accountCount: Int
+    var mailboxCount: Int
+    var messageCount: Int
+    var unreadCount: Int
+    var lastSyncedAt: Date?
+
+    init(presentation: NativeMailBrowserPresentation) {
+        accountCount = presentation.accounts.count
+        mailboxCount = presentation.mailboxes.count
+        messageCount = presentation.totalMessageCount
+        unreadCount = presentation.totalUnreadCount
+        lastSyncedAt = presentation.mailboxes
+            .compactMap(\.status.lastSyncedAt)
+            .max()
+    }
+
+    var accountCountText: String { "\(accountCount) 个" }
+    var mailboxCountText: String { "\(mailboxCount) 个" }
+    var messageCountText: String { "\(messageCount) 封" }
+    var unreadCountText: String { "\(unreadCount) 未读" }
+
+    var lastSyncedText: String? {
+        lastSyncedAt?.connorLocalFormatted(date: .medium, time: .short)
+    }
+
+    var emptyStateTitle: String? {
+        accountCount == 0 ? "暂无邮件账户" : nil
+    }
+
+    var emptyStateMessage: String? {
+        accountCount == 0 ? "添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。" : nil
+    }
+}
+
 struct MailSourceSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
 
