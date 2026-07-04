@@ -135,6 +135,27 @@ struct MailAgentToolsTests {
         }
     }
 
+    @Test func getMessageRejectsPseudoResultIDsWithActionableGuidance() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailGetMessageTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "read mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMailBody])
+
+        for pseudoID in ["message1", "msg1", "email1", "mail1", "result1", "message 1", "message-1", "message_1"] {
+            do {
+                _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"messageID\":\"\(pseudoID)\",\"includeBody\":true}"), context: context)
+                Issue.record("Expected pseudo messageID \(pseudoID) to be rejected with actionable guidance")
+            } catch AgentToolError.invalidArguments(let message) {
+                #expect(message.contains("exact messageID"))
+                #expect(message.contains("MailMessageSummary"))
+                #expect(message.contains("pseudo ID"))
+                #expect(message.contains("summary's id"))
+                #expect(message.contains(pseudoID))
+            } catch {
+                Issue.record("Unexpected error for \(pseudoID): \(error)")
+            }
+        }
+    }
+
     @Test func getMessageSchemaExplainsExactMessageIDContract() {
         let tool = MailGetMessageTool(runtime: RecordingMailRuntime())
         guard case .object(let properties, _) = tool.inputSchema,
@@ -145,7 +166,9 @@ struct MailAgentToolsTests {
 
         #expect(description.contains("Exact MailMessageSummary.id"))
         #expect(description.contains("mail_search_messages"))
+        #expect(description.contains("mail_list_recent_messages"))
         #expect(description.contains("Do not pass result numbers"))
+        #expect(description.contains("message1"))
         #expect(description.contains("IMAP UIDs"))
     }
 
