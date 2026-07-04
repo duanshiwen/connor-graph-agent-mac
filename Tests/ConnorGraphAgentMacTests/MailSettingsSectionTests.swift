@@ -20,6 +20,14 @@ struct MailSettingsSectionTests {
         #expect(ConnorSettingsSection.rss.systemImage == "dot.radiowaves.left.and.right")
     }
 
+    @Test func mailSettingsSummaryShowsLocalEncryptedCredentialVaultCopy() {
+        let summary = MailSettingsSummaryPresentation(presentation: .empty)
+
+        #expect(summary.credentialStorageText == "Connor 本地加密凭据库")
+        #expect(summary.credentialStorageText.contains("本地加密"))
+        #expect(!summary.credentialStorageText.contains("macOS"))
+    }
+
     @Test func mailSettingsSummaryShowsEmptyStateWithoutAccounts() {
         let summary = MailSettingsSummaryPresentation(presentation: .empty)
 

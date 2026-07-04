@@ -24,6 +24,7 @@ struct MailSettingsSummaryPresentation: Equatable {
     var mailboxCountText: String { "\(mailboxCount) 个" }
     var messageCountText: String { "\(messageCount) 封" }
     var unreadCountText: String { "\(unreadCount) 未读" }
+    var credentialStorageText: String { "Connor 本地加密凭据库" }
 
     var lastSyncedText: String? {
         lastSyncedAt?.connorLocalFormatted(date: .medium, time: .short)
@@ -135,7 +136,7 @@ struct SettingsMailSection: View {
 
     private var securitySection: some View {
         SettingsGroup(title: "安全与隐私") {
-            SettingsValueRow(title: "凭据存储", value: "macOS Keychain")
+            SettingsValueRow(title: "凭据存储", value: summary.credentialStorageText)
             Divider()
             SettingsValueRow(title: "读取语义", value: "查看详情不会自动改变已读状态")
             Divider()

@@ -181,7 +181,7 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
-Credentials and API keys must not be stored in JSON settings files. Use Keychain-backed or equivalent local credential stores.
+Credentials and API keys must not be stored in JSON settings files. Use Connor's local encrypted credential vault, and keep secrets out of plaintext settings, project files, logs and Git.
 
 ---
 
