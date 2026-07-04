@@ -28,6 +28,48 @@ struct LocalEncryptedCredentialStoreTests {
         #expect(try second.readSecret(service: "svc", account: "acct") == "secret-after-restart")
     }
 
+    @Test func encryptedStoreCreatesMasterKeyWithRestrictedPermissions() throws {
+        let directory = temporaryEncryptedCredentialDirectory()
+        let store = LocalEncryptedCredentialStore(rootDirectory: directory)
+
+        try store.saveSecret("permission-secret", service: "svc", account: "acct")
+
+        let masterKeyURL = directory.appendingPathComponent("master.key")
+        #expect(FileManager.default.fileExists(atPath: masterKeyURL.path))
+        let attributes = try FileManager.default.attributesOfItem(atPath: masterKeyURL.path)
+        let permissions = attributes[.posixPermissions] as? NSNumber
+        #expect(permissions?.intValue == 0o600)
+    }
+
+    @Test func encryptedStoreSupportsMultipleCredentialNamespaces() throws {
+        let directory = temporaryEncryptedCredentialDirectory()
+        let store = LocalEncryptedCredentialStore(rootDirectory: directory)
+
+        try store.saveSecret("llm-secret", service: "ConnorGraphAgent.LLM", account: "shared-account")
+        try store.saveSecret("mail-secret", service: "ConnorGraphAgent.MailCredentials", account: "shared-account")
+        try store.saveSecret("mcp-secret", service: "ConnorGraphAgent.MCPSourceCredentials", account: "shared-account")
+
+        #expect(try store.readSecret(service: "ConnorGraphAgent.LLM", account: "shared-account") == "llm-secret")
+        #expect(try store.readSecret(service: "ConnorGraphAgent.MailCredentials", account: "shared-account") == "mail-secret")
+        #expect(try store.readSecret(service: "ConnorGraphAgent.MCPSourceCredentials", account: "shared-account") == "mcp-secret")
+    }
+
+    @Test func encryptedStoreDoesNotLeakServiceAccountOrSecretPlaintext() throws {
+        let directory = temporaryEncryptedCredentialDirectory()
+        let store = LocalEncryptedCredentialStore(rootDirectory: directory)
+        let secret = "super-sensitive-secret-value"
+        let service = "plain-service-name"
+        let account = "plain-account-name"
+
+        try store.saveSecret(secret, service: service, account: account)
+
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let combined = try files.map { try String(data: Data(contentsOf: $0), encoding: .utf8) ?? "" }.joined(separator: "\n")
+        #expect(!combined.contains(secret))
+        #expect(!combined.contains(service))
+        #expect(!combined.contains(account))
+    }
+
     @Test func encryptedStoreDeletesSecret() throws {
         let directory = temporaryEncryptedCredentialDirectory()
         let store = LocalEncryptedCredentialStore(rootDirectory: directory)

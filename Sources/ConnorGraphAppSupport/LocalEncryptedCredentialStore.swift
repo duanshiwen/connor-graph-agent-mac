@@ -1,6 +1,5 @@
 import Foundation
 import CryptoKit
-import Security
 
 public enum LocalEncryptedCredentialStoreError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidMasterKey
@@ -100,12 +99,11 @@ public struct LocalEncryptedCredentialStore: CredentialStore, @unchecked Sendabl
             }
             return SymmetricKey(data: data)
         }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        let data = Data(bytes)
+        let key = SymmetricKey(size: .bits256)
+        let data = key.withUnsafeBytes { Data($0) }
         try data.base64EncodedString().write(to: masterKeyURL, atomically: true, encoding: .utf8)
         try restrictPermissionsIfPossible(masterKeyURL)
-        return SymmetricKey(data: data)
+        return key
     }
 
     private func restrictPermissionsIfPossible(_ url: URL) throws {
