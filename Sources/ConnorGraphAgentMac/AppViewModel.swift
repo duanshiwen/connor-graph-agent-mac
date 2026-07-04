@@ -392,6 +392,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isSyncingSystemContacts: Bool = false
     @Published var contactsSyncMessage: String?
     @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
+    @Published var mailSearchQuery: String = ""
     @Published var selectedMailAccountID: MailAccountID?
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
@@ -1637,6 +1638,7 @@ final class AppViewModel: NSObject, ObservableObject {
             rssSearchQuery = query
             selection = .rss
         case .mail:
+            mailSearchQuery = query
             selection = .mail
         case .browserHistory:
             browserHistorySearchQuery = query
@@ -1646,6 +1648,10 @@ final class AppViewModel: NSObject, ObservableObject {
             filterBrowserHistory(query: browserHistorySearchQuery)
         }
         dismissGlobalSearchOverlay()
+    }
+
+    func mailListMessages(direction: MailMessageDirectionFilter = .all) -> [MailMessageSummary] {
+        mailBrowserPresentation.messages(accountID: nil, mailboxID: nil, query: mailSearchQuery, direction: direction)
     }
 
     private func rebuildCalendarSearchIndexIfNeeded() async throws {

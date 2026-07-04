@@ -108,6 +108,48 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
     }
 
+    @Test func showAllMailCarriesGlobalSearchQueryIntoMailFilter() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let accountID = MailAccountID(rawValue: "shiwen@example.com")
+        let mailboxID = MailMailboxID(rawValue: "inbox")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "诗闻邮箱", identities: [])
+        let mailbox = MailMailbox(id: mailboxID, accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox)
+        let matching = MailMessageSummary(
+            id: MailMessageID(rawValue: "matching-mail"),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: "林北 全国二线中高端外国岗位",
+            from: MailAddress(email: "jobs@example.com"),
+            to: [MailAddress(email: "shiwen@example.com")],
+            date: Date(timeIntervalSince1970: 1_783_148_400),
+            snippet: "#外国女 #兼职"
+        )
+        let other = MailMessageSummary(
+            id: MailMessageID(rawValue: "other-mail"),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: "Apple Store 订单",
+            from: MailAddress(email: "store@example.com"),
+            to: [MailAddress(email: "shiwen@example.com")],
+            date: Date(timeIntervalSince1970: 1_783_148_401),
+            snippet: "西湖店取货提醒"
+        )
+        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [account],
+            mailboxes: [mailbox],
+            messages: [other, matching]
+        )
+        fixture.viewModel.updateGlobalSearchQuery("外国")
+
+        fixture.viewModel.showAllGlobalSearchResults(kind: .mail)
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.mailSearchQuery == "外国")
+        #expect(fixture.viewModel.mailListMessages(direction: .all).map(\.id.rawValue) == ["matching-mail"])
+    }
+
     @Test func showAllBrowserHistoryCarriesGlobalSearchQueryIntoHistoryFilter() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
