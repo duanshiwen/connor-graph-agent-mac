@@ -59,6 +59,10 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Native Personal Source Tools"))
+    #expect(prompt.contains("mail_list_recent_messages"))
+    #expect(prompt.contains("latest/recent mail browsing across all accounts"))
+    #expect(prompt.contains("`direction` filter supports `all`, `received`, and `sent`"))
+    #expect(prompt.contains("optional `accountID` limits one mailbox account"))
     #expect(prompt.contains("mail_search_messages"))
     #expect(prompt.contains("mail_get_message"))
     #expect(prompt.contains("calendar_search_events"))
