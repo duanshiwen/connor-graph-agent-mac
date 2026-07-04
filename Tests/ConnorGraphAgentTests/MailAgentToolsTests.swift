@@ -10,8 +10,31 @@ struct MailAgentToolsTests {
         registry.registerNativeMailTools(runtime: RecordingMailRuntime())
         let names = registry.definitions.map(\.name)
         #expect(names.contains("mail_search_messages"))
+        #expect(names.contains("mail_list_recent_messages"))
         #expect(names.contains("mail_create_draft"))
         #expect(names.contains("mail_send_draft"))
+    }
+
+    @Test func recentMessagesToolSchemaDocumentsAccountDirectionAndLimit() {
+        let tool = MailListRecentMessagesTool(runtime: RecordingMailRuntime())
+        guard case .object(let properties, let required) = tool.inputSchema else {
+            Issue.record("Expected recent messages object schema")
+            return
+        }
+
+        #expect(required.isEmpty)
+        guard case .string(let accountDescription) = properties["accountID"],
+              case .string(let directionDescription) = properties["direction"],
+              case .integer(let limitDescription) = properties["limit"] else {
+            Issue.record("Expected accountID, direction, and limit schema entries")
+            return
+        }
+
+        #expect(accountDescription.contains("mail_list_accounts"))
+        #expect(directionDescription.contains("all"))
+        #expect(directionDescription.contains("received"))
+        #expect(directionDescription.contains("sent"))
+        #expect(limitDescription.contains("Maximum"))
     }
 
     @Test func createDraftToolPassesCommercialFields() async throws {
