@@ -268,6 +268,9 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(inbox.messageID(accountID: accountID, uid: "123").rawValue == "shiwen@example.com-INBOX-123")
         #expect(sent.messageID(accountID: accountID, uid: "123").rawValue == "shiwen@example.com-Sent-123")
         #expect(inbox.messageID(accountID: accountID, uid: "123") != sent.messageID(accountID: accountID, uid: "123"))
+        #expect(inbox.uid(fromMessageID: inbox.messageID(accountID: accountID, uid: "123"), accountID: accountID) == "123")
+        #expect(sent.uid(fromMessageID: sent.messageID(accountID: accountID, uid: "123"), accountID: accountID) == "123")
+        #expect(sent.uid(fromMessageID: inbox.messageID(accountID: accountID, uid: "123"), accountID: accountID) == nil)
     }
 
     @Test func remoteIMAPUIDChunkingDoesNotLimitWhenMessageLimitIsZero() {

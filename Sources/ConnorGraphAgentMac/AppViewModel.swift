@@ -2504,20 +2504,21 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         guard !accounts.isEmpty else { return "No mail accounts configured" }
 
-        let syncService = MailIMAPInitialSyncService(messageLimit: 50)
+        let syncService = MailIMAPInitialSyncService(messageLimit: 0)
         var syncedMessageCount = 0
         var summaries: [String] = []
 
         for account in accounts {
             let mailboxes = try await mailStore.listMailboxes(accountID: account.id)
-            let inbox = mailboxes.first { $0.role == .inbox } ?? mailboxes.first
-            let storedUIDs = try await storedMailUIDs(for: account.id, in: mailStore)
+            let storedUIDsByMailboxID = try await storedMailUIDsByMailboxID(for: account.id, mailboxes: mailboxes, in: mailStore)
+            let storedUIDValidityByMailboxID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0.status.syncCursor?.uidValidity) })
+            let hasSyncedMailbox = mailboxes.contains { $0.status.lastSyncedAt != nil }
             let result: MailInitialSyncResult
-            if !storedUIDs.isEmpty || inbox?.status.lastSyncedAt != nil {
+            if !storedUIDsByMailboxID.isEmpty || hasSyncedMailbox {
                 result = try await syncService.syncIncremental(
                     account: account,
-                    storedUIDs: storedUIDs,
-                    storedUIDValidity: inbox?.status.syncCursor?.uidValidity
+                    storedUIDsByMailboxID: storedUIDsByMailboxID,
+                    storedUIDValidityByMailboxID: storedUIDValidityByMailboxID
                 )
             } else {
                 result = try await syncService.sync(account: account)
@@ -2542,13 +2543,20 @@ final class AppViewModel: NSObject, ObservableObject {
         return "Mail refreshed \(accounts.count) account(s); synced \(syncedMessageCount) message(s). \(summary)"
     }
 
-    private func storedMailUIDs(for accountID: MailAccountID, in mailStore: any MailStoreProtocol) async throws -> Set<String> {
-        let prefix = "\(accountID.rawValue)-INBOX-"
-        return Set(try await mailStore.allMessageIDs().compactMap { messageID in
-            guard messageID.rawValue.hasPrefix(prefix) else { return nil }
-            let uid = String(messageID.rawValue.dropFirst(prefix.count))
-            return uid.isEmpty ? nil : uid
-        })
+    private func storedMailUIDsByMailboxID(for accountID: MailAccountID, mailboxes: [MailMailbox], in mailStore: any MailStoreProtocol) async throws -> [MailMailboxID: Set<String>] {
+        let remoteMailboxes = mailboxes.map { mailbox in
+            RemoteIMAPMailbox(name: mailbox.name, path: mailbox.path, role: mailbox.role)
+        }
+        var result: [MailMailboxID: Set<String>] = [:]
+        let messageIDs = try await mailStore.allMessageIDs()
+        for remoteMailbox in remoteMailboxes {
+            let mailboxID = remoteMailbox.mailboxID(accountID: accountID)
+            let uids = Set(messageIDs.compactMap { remoteMailbox.uid(fromMessageID: $0, accountID: accountID) })
+            if !uids.isEmpty {
+                result[mailboxID] = uids
+            }
+        }
+        return result
     }
 
     private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
