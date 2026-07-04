@@ -152,6 +152,14 @@ struct MailSettingsSectionTests {
         #expect(presentation.messages(accountID: nil, mailboxID: nil, query: "").map(\.id) == [newer.id, older.id])
     }
 
+    @Test func mailDirectionFilterPresentationProvidesChipAndEmptyStateCopy() {
+        #expect(MailMessageDirectionFilter.all.mailListChipTitle == "全部")
+        #expect(MailMessageDirectionFilter.received.mailListChipTitle == "收件")
+        #expect(MailMessageDirectionFilter.sent.mailListChipTitle == "已发送")
+        #expect(MailMessageDirectionFilter.received.emptyListTitle == "还没有收到邮件")
+        #expect(MailMessageDirectionFilter.sent.emptyListTitle == "还没有已发送邮件")
+    }
+
     @Test func mailSettingsSummaryCountsAccountsMailboxesMessagesAndUnread() {
         let accountID = MailAccountID(rawValue: "shiwen@example.com")
         let account = MailAccount(
