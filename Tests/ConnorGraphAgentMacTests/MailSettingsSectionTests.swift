@@ -104,6 +104,40 @@ struct MailSettingsSectionTests {
         #expect(MailBodyDisplayPresentation(detail: richHTML).html == "<p>Hello</p>")
     }
 
+    @Test func mailBodyDisplayRecoversCachedQuotedPrintableHTMLBeforeRendering() {
+        let accountID = MailAccountID(rawValue: "shiwen@example.com")
+        let mailboxID = MailMailboxID(rawValue: "inbox")
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: "shiwen@example.com-INBOX-45"),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: "LinkedIn digest",
+            from: MailAddress(email: "messaging-digest-noreply@linkedin.com"),
+            to: [MailAddress(email: "shiwen@example.com")],
+            date: Date(timeIntervalSince1970: 1_783_148_400),
+            snippet: "=E6=AE=B5=E8=AF=97=E9=97=BB"
+        )
+        let detail = MailMessageDetail(
+            summary: summary,
+            body: MailMessageBody(
+                plainText: nil,
+                htmlText: MailBodyPart(
+                    mimeType: "text/html",
+                    text: "<html><body><table><tr><td>=E6=AE=B5=E8=AF=97=E9=97=BB</td></tr></table></body></html>",
+                    byteCount: 95
+                ),
+                redactedPreview: "=E6=AE=B5=E8=AF=97=E9=97=BB"
+            )
+        )
+
+        let display = MailBodyDisplayPresentation(detail: detail)
+
+        #expect(display.kind == .html)
+        #expect(display.html?.contains("段诗闻") == true)
+        #expect(display.html?.contains("=E6=AE") == false)
+        #expect(display.text.contains("段诗闻"))
+    }
+
     @Test func mailMessageListPresentationUsesSentDateInContextText() {
         let sentAt = Date(timeIntervalSince1970: 1_783_148_400)
         let account = MailAccount(id: MailAccountID(rawValue: "shiwen@example.com"), provider: .genericIMAPSMTP, displayName: "诗闻邮箱", identities: [])
