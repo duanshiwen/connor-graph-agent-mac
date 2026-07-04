@@ -48,7 +48,7 @@ public struct MailIMAPInitialSyncService: Sendable {
               let rawCredential = try credentialStore.readCredential(binding: binding),
               !rawCredential.isEmpty else {
             return MailInitialSyncResult(
-                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing Keychain credential"]),
+                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing local encrypted credential"]),
                 mailboxes: [],
                 messages: []
             )
@@ -149,7 +149,7 @@ public struct MailIMAPInitialSyncService: Sendable {
               let rawCredential = try credentialStore.readCredential(binding: binding),
               !rawCredential.isEmpty else {
             return MailInitialSyncResult(
-                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing Keychain credential"]),
+                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing local encrypted credential"]),
                 mailboxes: [],
                 messages: []
             )

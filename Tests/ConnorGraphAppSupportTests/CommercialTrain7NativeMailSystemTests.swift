@@ -360,7 +360,7 @@ struct CommercialTrain7NativeMailSystemTests {
                 from: MailAddress(name: "Security", email: "security@example.com"),
                 to: [MailAddress(email: "test@example.com")],
                 date: now.addingTimeInterval(-900),
-                snippet: "Provider auth policy, token refresh, keychain isolation, and audit readiness.",
+                snippet: "Provider auth policy, token refresh, encrypted credential vault isolation, and audit readiness.",
                 flags: MailMessageFlags(isRead: true),
                 hasAttachments: false
             )
