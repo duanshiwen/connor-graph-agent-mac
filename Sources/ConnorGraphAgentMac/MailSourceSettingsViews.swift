@@ -38,7 +38,131 @@ struct MailSettingsSummaryPresentation: Equatable {
     }
 }
 
-struct MailSourceSettingsView: View {
+struct SettingsMailSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var presentation: NativeMailBrowserPresentation {
+        viewModel.mailBrowserPresentation
+    }
+
+    private var summary: MailSettingsSummaryPresentation {
+        MailSettingsSummaryPresentation(presentation: presentation)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            header
+            accountsSection
+            syncSection
+            securitySection
+            protocolSection
+        }
+        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
+            AddMailAccountSheet(viewModel: viewModel)
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+            Text("邮件系统")
+                .font(SettingsListTypography.header)
+            Text("管理 IMAP / SMTP 账户、本地同步、读取安全和发送审批。")
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var accountsSection: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            if presentation.accounts.isEmpty {
+                MailSettingsEmptyStateCard(onAdd: { viewModel.presentAddMailAccountSheet() })
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(presentation.accounts) { account in
+                        MailSettingsAccountRow(
+                            account: account,
+                            mailboxCount: presentation.mailboxes(accountID: account.id).count,
+                            unreadCount: presentation.mailboxes(accountID: account.id).reduce(0) { $0 + $1.status.unreadCount },
+                            onAdd: { viewModel.presentAddMailAccountSheet() }
+                        )
+                        if account.id != presentation.accounts.last?.id {
+                            Divider().padding(.leading, 32)
+                        }
+                    }
+                }
+                .padding(.horizontal, SettingsListLayout.spaceL)
+                .padding(.vertical, SettingsListLayout.spaceS)
+                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
+                .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+
+                Button(action: { viewModel.presentAddMailAccountSheet() }) {
+                    Label("添加邮件账户", systemImage: "plus")
+                        .font(SettingsListTypography.actionTitle)
+                        .padding(.horizontal, SettingsListLayout.spaceM)
+                        .padding(.vertical, SettingsListLayout.spaceXS)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private var syncSection: some View {
+        SettingsGroup(title: "同步") {
+            SettingsValueRow(title: "账户", value: summary.accountCountText)
+            Divider()
+            SettingsValueRow(title: "文件夹", value: summary.mailboxCountText)
+            Divider()
+            SettingsValueRow(title: "已同步邮件", value: summary.messageCountText)
+            Divider()
+            SettingsValueRow(title: "未读邮件", value: summary.unreadCountText)
+            if let lastSyncedText = summary.lastSyncedText {
+                Divider()
+                SettingsValueRow(title: "最近同步", value: lastSyncedText)
+            }
+            Divider()
+            SettingsValueRow(title: "默认策略", value: "添加后立即同步最近 50 封，后台定时刷新")
+            if let message = viewModel.mailSyncMessage {
+                Divider()
+                Text(message)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var securitySection: some View {
+        SettingsGroup(title: "安全与隐私") {
+            SettingsValueRow(title: "凭据存储", value: "macOS Keychain")
+            Divider()
+            SettingsValueRow(title: "读取语义", value: "查看详情不会自动改变已读状态")
+            Divider()
+            SettingsValueRow(title: "HTML 正文", value: "不执行 JavaScript，不主动加载远程资源")
+            Divider()
+            SettingsValueRow(title: "发送保护", value: "发送邮件需要权限审批")
+            Divider()
+            SettingsValueRow(title: "本地治理", value: "邮件索引和正文缓存保存在本地")
+        }
+    }
+
+    private var protocolSection: some View {
+        SettingsGroup(title: "协议与能力") {
+            SettingsValueRow(title: "收件协议", value: "IMAP over TLS")
+            Divider()
+            SettingsValueRow(title: "发件协议", value: "SMTP STARTTLS / TLS")
+            Divider()
+            SettingsValueRow(title: "支持账户", value: "iCloud、QQ、网易、自定义 IMAP/SMTP")
+            Divider()
+            SettingsValueRow(title: "正文解析", value: "纯文本 / HTML 安全渲染")
+            Divider()
+            SettingsValueRow(title: "后续扩展", value: "Google / Microsoft OAuth、附件预览")
+        }
+    }
+}
+
+struct MailSourceDetailView: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var presentation: NativeMailBrowserPresentation {
@@ -67,7 +191,7 @@ struct MailSourceSettingsView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else {
-                Color.clear
+                MailDetailEmptyState(onAdd: { viewModel.presentAddMailAccountSheet() })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -75,6 +199,152 @@ struct MailSourceSettingsView: View {
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet(viewModel: viewModel)
         }
+    }
+}
+
+private struct MailSettingsEmptyStateCard: View {
+    var onAdd: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.13))
+                    Image(systemName: "envelope.badge")
+                        .font(SettingsListTypography.largeIcon)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                    Text("暂无邮件账户")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Button(action: onAdd) {
+                Label("添加邮件账户", systemImage: "plus")
+                    .font(SettingsListTypography.actionTitle)
+                    .padding(.horizontal, SettingsListLayout.spaceM)
+                    .padding(.vertical, SettingsListLayout.spaceXS)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+    }
+}
+
+private struct MailSettingsAccountRow: View {
+    var account: MailAccount
+    var mailboxCount: Int
+    var unreadCount: Int
+    var onAdd: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: statusIcon)
+                .font(SettingsListTypography.icon)
+                .foregroundStyle(statusColor)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.displayName)
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text("\(primaryEmail) · \(providerName) · \(mailboxCount) 个文件夹 · \(account.health.summary)")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Text(unreadCount > 0 ? "\(unreadCount) 未读" : statusTitle)
+                .font(SettingsListTypography.rowCaptionEmphasized)
+                .foregroundStyle(statusColor)
+            Button(action: onAdd) {
+                Label("添加", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .help("添加另一个邮件账户")
+            .accessibilityLabel("添加另一个邮件账户")
+        }
+        .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .center)
+    }
+
+    private var primaryEmail: String {
+        account.identities.first?.address.email ?? account.id.rawValue
+    }
+
+    private var providerName: String {
+        switch account.provider {
+        case .genericIMAPSMTP: "IMAP/SMTP"
+        case .gmail: "Gmail（旧账户）"
+        case .microsoft365: "Microsoft 365（旧账户）"
+        case .jmap: "JMAP"
+        case .localFixture: "本地测试账户"
+        }
+    }
+
+    private var statusTitle: String {
+        switch account.health.status {
+        case .ready: "正常"
+        case .degraded: "降级"
+        case .blocked: "阻止"
+        case .unauthenticated: "需认证"
+        case .unknown: "未知"
+        }
+    }
+
+    private var statusIcon: String {
+        switch account.health.status {
+        case .ready: "checkmark.seal"
+        case .degraded: "exclamationmark.triangle"
+        case .blocked, .unauthenticated: "lock.trianglebadge.exclamationmark"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private var statusColor: Color {
+        switch account.health.status {
+        case .ready: .green
+        case .degraded: .orange
+        case .blocked, .unauthenticated: .red
+        case .unknown: .secondary
+        }
+    }
+}
+
+private struct MailDetailEmptyState: View {
+    var onAdd: () -> Void
+
+    var body: some View {
+        VStack(spacing: AppShellLayout.spaceM) {
+            Image(systemName: "envelope.open")
+                .font(.system(size: 42, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+            Text("选择一封邮件")
+                .font(AgentChatTypography.title)
+            Text("从左侧邮件列表选择邮件查看详情，或添加新的 IMAP/SMTP 账户开始同步。")
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            Button(action: onAdd) {
+                Label("添加邮件账户", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(AppShellLayout.spaceXL)
     }
 }
 

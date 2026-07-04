@@ -1798,7 +1798,7 @@ struct CraftDetailPaneView: View {
             case .contacts:
                 ContactsSourceSettingsView(viewModel: viewModel)
             case .mail:
-                MailSourceSettingsView(viewModel: viewModel)
+                MailSourceDetailView(viewModel: viewModel)
             case .rss:
                 RSSSourceSettingsView(viewModel: viewModel)
             case .sources:
