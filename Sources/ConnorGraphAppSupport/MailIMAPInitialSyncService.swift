@@ -524,7 +524,7 @@ public struct MailIMAPInitialSyncService: Sendable {
     }
 
         /// Fetch a single message's body from IMAP using NIOIMAP (Thunderbird-style).
-    public func fetchMessageBody(account: MailAccount, uid: String, messageID: MailMessageID, mailboxID: MailMailboxID, snippet: String) async throws -> MailMessageDetail? {
+    public func fetchMessageBody(account: MailAccount, uid: String, messageID: MailMessageID, mailboxID: MailMailboxID, mailboxPath: String = "INBOX", mailboxRole: MailMailboxRole = .inbox, snippet: String) async throws -> MailMessageDetail? {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return nil }
         guard endpoint.security == .tls else { return nil }
         guard let binding = account.credentialBinding,
@@ -545,6 +545,8 @@ public struct MailIMAPInitialSyncService: Sendable {
                         uid: uid,
                         accountID: account.id,
                         mailboxID: mailboxID,
+                        mailboxPath: mailboxPath,
+                        mailboxRole: mailboxRole,
                         fallbackRecipient: MailAddress(email: email),
                         snippet: snippet
                     )
@@ -1701,7 +1703,7 @@ struct BlockingIMAPClient {
     /// Fetch a single message's complete raw MIME data from IMAP.
     /// Uses BODY.PEEK[] (Thunderbird-style) — fetches entire message as one literal.
     /// Parses the raw IMAP response directly, bypassing the state machine.
-    func fetchSingleMessageBody(usernames: [String], password: String, uid: String, accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail? {
+    func fetchSingleMessageBody(usernames: [String], password: String, uid: String, accountID: MailAccountID, mailboxID: MailMailboxID, mailboxPath: String = "INBOX", mailboxRole: MailMailboxRole = .inbox, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail? {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -1725,11 +1727,12 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+        let remoteMailbox = RemoteIMAPMailbox(name: mailboxPath, path: mailboxPath, role: mailboxRole)
         let selectTag = nextTag()
-        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        try write("\(selectTag) SELECT \"\(escape(remoteMailbox.path))\"\r\n", output: output)
         let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
         guard selectResponse.contains("\(selectTag) OK") else {
-            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(remoteMailbox.path) failed")
         }
         // Fetch headers + body text only (avoid downloading large attachments)
         let fetchTag = nextTag()
@@ -1789,7 +1792,7 @@ struct BlockingIMAPClient {
         
         let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
         let summary = MailMessageSummary(
-            id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
+            id: remoteMailbox.messageID(accountID: accountID, uid: uid),
             accountID: accountID, mailboxID: mailboxID,
             threadID: msgID.flatMap { MailThreadID(rawValue: $0.trimmingCharacters(in: .whitespaces)) },
             subject: subject, from: from,
