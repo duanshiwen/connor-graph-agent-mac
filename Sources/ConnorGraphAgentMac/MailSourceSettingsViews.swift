@@ -3,6 +3,53 @@ import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
+struct MailBodyDisplayPresentation: Equatable {
+    enum Kind: Equatable {
+        case loading
+        case html
+        case plainText
+        case fallback
+        case error
+    }
+
+    var kind: Kind
+    var text: String
+    var html: String?
+
+    init(kind: Kind, text: String, html: String? = nil) {
+        self.kind = kind
+        self.text = text
+        self.html = html?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? html : nil
+    }
+
+    init(detail: MailMessageDetail) {
+        let plain = detail.body?.plainText?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let html = detail.body?.htmlText?.text
+        let trimmedHTML = html?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let redacted = detail.body?.redactedPreview.trimmingCharacters(in: .whitespacesAndNewlines)
+        let snippet = detail.summary.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let html, trimmedHTML?.isEmpty == false {
+            self.init(kind: .html, text: plain?.isEmpty == false ? plain! : (redacted?.isEmpty == false ? redacted! : snippet), html: html)
+        } else if let plain, !plain.isEmpty {
+            self.init(kind: .plainText, text: plain)
+        } else if let redacted, !redacted.isEmpty {
+            self.init(kind: .fallback, text: redacted)
+        } else if !snippet.isEmpty {
+            self.init(kind: .fallback, text: snippet)
+        } else {
+            self.init(kind: .fallback, text: "（暂无可显示正文）")
+        }
+    }
+
+    static let loading = MailBodyDisplayPresentation(kind: .loading, text: "正在加载邮件正文…")
+
+    static func error(_ message: String, fallback: String) -> MailBodyDisplayPresentation {
+        let fallbackText = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return MailBodyDisplayPresentation(kind: .error, text: fallbackText.isEmpty ? message : "\(message)\n\n\(fallbackText)")
+    }
+}
+
 struct MailSettingsSummaryPresentation: Equatable {
     var accountCount: Int
     var mailboxCount: Int
@@ -422,8 +469,7 @@ private struct MailMessageDetailPane: View {
     var mailbox: MailMailbox?
     var message: MailMessageSummary
     @ObservedObject var viewModel: AppViewModel
-    @State private var fullBodyText: String?
-    @State private var bodyHTML: String?
+    @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var bodyWebViewHeight: CGFloat = 200
 
     var body: some View {
@@ -431,14 +477,14 @@ private struct MailMessageDetailPane: View {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
                 MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
-                    if let bodyHTML {
+                    if bodyDisplay.kind == .html, let bodyHTML = bodyDisplay.html {
                         MailHTMLBodyView(htmlContent: bodyHTML)
                             .frame(minHeight: bodyWebViewHeight)
                             .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
-                        Text(fullBodyText ?? message.snippet)
+                        Text(bodyDisplay.text)
                             .font(AgentChatTypography.meta)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(bodyDisplay.kind == .error ? .secondary : .primary)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -457,9 +503,8 @@ private struct MailMessageDetailPane: View {
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
         }
         .task(id: message.id) {
-            // Load both plain text and HTML content
-            fullBodyText = await viewModel.loadMailBodyText(for: message.id)
-            bodyHTML = await viewModel.loadMailBodyHTML(for: message.id)
+            bodyDisplay = .loading
+            bodyDisplay = await viewModel.loadMailBodyDisplay(for: message.id)
         }
     }
 }

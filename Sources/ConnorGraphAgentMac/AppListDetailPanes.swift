@@ -1574,12 +1574,35 @@ struct CraftMailListPane: View {
     }
 }
 
+struct MailMessageListRowPresentation: Equatable {
+    var subjectText: String
+    var senderText: String
+    var contextText: String
+    var snippetText: String
+
+    init(message: MailMessageSummary, account: MailAccount?, mailbox: MailMailbox?) {
+        subjectText = message.subject.isEmpty ? "无主题" : message.subject
+        senderText = {
+            if let name = message.from.name, !name.isEmpty { return name }
+            return message.from.email
+        }()
+        contextText = [account?.displayName, mailbox?.name, message.date.connorLocalFormatted(date: .medium, time: .short)]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        snippetText = message.snippet
+    }
+}
+
 private struct MailMessageListRow: View {
     var message: MailMessageSummary
     var account: MailAccount?
     var mailbox: MailMailbox?
     var isSelected: Bool
     var onSelect: () -> Void
+
+    private var presentation: MailMessageListRowPresentation {
+        MailMessageListRowPresentation(message: message, account: account, mailbox: mailbox)
+    }
 
     var body: some View {
         Button(action: onSelect) {
@@ -1590,7 +1613,7 @@ private struct MailMessageListRow: View {
                     .padding(.top, 7)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(message.subject.isEmpty ? "无主题" : message.subject)
+                        Text(presentation.subjectText)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
                             .lineLimit(1)
                         if message.hasAttachments {
@@ -1604,14 +1627,14 @@ private struct MailMessageListRow: View {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    Text(senderText)
+                    Text(presentation.senderText)
                         .font(AppListTypography.rowCaptionEmphasized)
                         .lineLimit(1)
-                    Text(contextText)
+                    Text(presentation.contextText)
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                    Text(message.snippet)
+                    Text(presentation.snippetText)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -1623,17 +1646,6 @@ private struct MailMessageListRow: View {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    private var senderText: String {
-        if let name = message.from.name, !name.isEmpty { return name }
-        return message.from.email
-    }
-
-    private var contextText: String {
-        [account?.displayName, mailbox?.name, message.date.connorLocalFormatted(date: .medium, time: .short)]
-            .compactMap { $0 }
-            .joined(separator: " · ")
     }
 }
 

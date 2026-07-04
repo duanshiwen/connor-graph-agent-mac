@@ -2692,26 +2692,27 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func loadMailBodyText(for messageID: MailMessageID) async -> String? {
+    func loadMailBodyDisplay(for messageID: MailMessageID) async -> MailBodyDisplayPresentation {
         do {
-            guard let detail = try await mailStore?.message(id: messageID) else { return nil }
-            if let text = detail.body?.plainText?.text, !text.isEmpty { return text }
-            if let html = detail.body?.htmlText?.text, !html.isEmpty { return Self.mailPlainText(fromHTML: html) }
-            return detail.body?.redactedPreview ?? detail.summary.snippet
+            guard let detail = try await mailStore?.message(id: messageID) else {
+                return MailBodyDisplayPresentation(kind: .error, text: "无法读取邮件正文：本地缓存中找不到这封邮件")
+            }
+            return MailBodyDisplayPresentation(detail: detail)
         } catch {
-            errorMessage = "无法读取邮件正文：\(error.localizedDescription)"
-            return nil
+            let message = "无法读取邮件正文：\(error.localizedDescription)"
+            errorMessage = message
+            return MailBodyDisplayPresentation(kind: .error, text: message)
         }
     }
 
+    func loadMailBodyText(for messageID: MailMessageID) async -> String? {
+        let display = await loadMailBodyDisplay(for: messageID)
+        return display.text
+    }
+
     func loadMailBodyHTML(for messageID: MailMessageID) async -> String? {
-        do {
-            guard let detail = try await mailStore?.message(id: messageID) else { return nil }
-            return detail.body?.htmlText?.text
-        } catch {
-            errorMessage = "无法读取 HTML 邮件正文：\(error.localizedDescription)"
-            return nil
-        }
+        let display = await loadMailBodyDisplay(for: messageID)
+        return display.html
     }
 
     func addMailAccountAndPrepareSync(preset: MailAccountProviderPreset, displayName: String, email: String, credential: String, incomingHost: String, incomingPort: Int, outgoingHost: String, outgoingPort: Int) async throws {
