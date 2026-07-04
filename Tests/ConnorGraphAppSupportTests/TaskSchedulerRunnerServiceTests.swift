@@ -28,6 +28,44 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(history.map(\.status) == [.succeeded, .running])
     }
 
+    @Test func serviceRunsDueMailAccountRefreshTaskThroughMailHandler() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        try saveSystemDefaultsAsNotDue(repository: repository, now: Date(timeIntervalSince1970: 2_000))
+        let task = ConnorTaskDefinition(
+            id: "system.mail.account.mail-a.refresh",
+            name: "检查邮件：Mail A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "mail", operationName: "refresh", parameters: ["sourceKind": "mail", "sourceInstanceID": "mail-a"]),
+            lifecycle: ConnorTaskLifecycle(status: .active, lastFinishedAt: Date(timeIntervalSince1970: 0)),
+            metadata: .protectedSystem,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        try repository.saveTask(task)
+        let calls = RefreshCallCounter(result: "mail refreshed")
+        let runner = TaskTargetRunner(
+            mailRefresher: calls.refresh,
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in "rss" },
+            sessionMessenger: { _ in "session" }
+        )
+        let service = TaskSchedulerRunnerService(repository: repository, scheduler: TaskSchedulerService(), runner: runner)
+
+        let outcomes = try await service.runDueTasks(now: Date(timeIntervalSince1970: 2_000))
+        let reloaded = try #require(try repository.loadTask(id: task.id))
+        let history = try repository.loadRunHistory(taskID: task.id, limit: 10)
+
+        #expect(outcomes.map(\.taskID) == [task.id])
+        #expect(await calls.count == 1)
+        #expect(await calls.requests == [SourceRefreshTaskRequest(sourceKind: "mail", sourceInstanceID: "mail-a", runID: outcomes.first?.runID)])
+        #expect(reloaded.lifecycle.status == .active)
+        #expect(reloaded.lifecycle.nextRunAt == Date(timeIntervalSince1970: 2_600))
+        #expect(history.first?.status == .succeeded)
+    }
+
     @Test func serviceRecordsFailuresWithoutThrowingAwayOtherDueTasks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -160,10 +198,16 @@ struct TaskSchedulerRunnerServiceTests {
 private actor RefreshCallCounter {
     var count = 0
     var requests: [SourceRefreshTaskRequest] = []
+    private let result: String
+
+    init(result: String = "rss refreshed") {
+        self.result = result
+    }
+
     func refresh(_ request: SourceRefreshTaskRequest) async throws -> String {
         count += 1
         requests.append(request)
-        return "rss refreshed"
+        return result
     }
 }
 
