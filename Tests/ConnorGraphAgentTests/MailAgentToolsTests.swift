@@ -46,6 +46,25 @@ struct MailAgentToolsTests {
         #expect(request.intentSummary == "Follow up")
     }
 
+    @Test func getMessageRejectsNumericResultIndexWithActionableGuidance() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailGetMessageTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "read mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMailBody])
+        let arguments = try AgentToolArguments(json: "{\"messageID\":\"1\",\"includeBody\":true}")
+
+        do {
+            _ = try await tool.execute(arguments: arguments, context: context)
+            Issue.record("Expected numeric messageID to be rejected with actionable guidance")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains("exact messageID"))
+            #expect(message.contains("mail_search_messages"))
+            #expect(message.contains("result index"))
+            #expect(message.contains("1"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test func sendDraftApprovalPayloadIncludesMailSummary() async throws {
         let runtime = RecordingMailRuntime()
         let tool = MailSendDraftTool(runtime: runtime)

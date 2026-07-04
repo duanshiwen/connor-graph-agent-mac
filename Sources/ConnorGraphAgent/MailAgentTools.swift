@@ -145,8 +145,23 @@ public struct MailGetMessageTool: AgentTool {
         self.runtime = runtime
         self.recorder = recorder
     }
+
+    private static func guidanceForNumericMessageID(_ value: String) -> AgentToolError {
+        .invalidArguments("mail_get_message expects the exact messageID returned by mail_search_messages. Received \"\(value)\", which looks like a result index. Pass the selected summary's id field instead of a result index or ordinal number.")
+    }
+
+    private static func normalizedMessageID(from arguments: AgentToolArguments) throws -> String {
+        guard let rawMessageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
+        let messageID = rawMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !messageID.isEmpty else { throw AgentToolError.invalidArguments("messageID is required") }
+        if messageID.allSatisfy(\.isNumber) {
+            throw guidanceForNumericMessageID(messageID)
+        }
+        return messageID
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let messageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
+        let messageID = try Self.normalizedMessageID(from: arguments)
         let includeBody = arguments.bool("includeBody") ?? false
         let detail = try await runtime.getMessage(id: MailMessageID(rawValue: messageID), includeBody: includeBody, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record([NativeSourceReference.mailDetail(detail, includeBody: includeBody, toolName: name, context: context)])
