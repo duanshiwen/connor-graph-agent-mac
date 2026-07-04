@@ -10,9 +10,40 @@ struct MailAgentToolsTests {
         registry.registerNativeMailTools(runtime: RecordingMailRuntime())
         let names = registry.definitions.map(\.name)
         #expect(names.contains("mail_search_messages"))
+        #expect(names.contains("mail_search_messages_with_body_preview"))
         #expect(names.contains("mail_list_recent_messages"))
+        #expect(names.contains("mail_list_recent_messages_with_body_preview"))
         #expect(names.contains("mail_create_draft"))
         #expect(names.contains("mail_send_draft"))
+    }
+
+    @Test func bodyPreviewToolsRequireBodyReadPermissionAndDocumentPreviewLimits() {
+        let recentTool = MailListRecentMessagesWithBodyPreviewTool(runtime: RecordingMailRuntime())
+        let searchTool = MailSearchMessagesWithBodyPreviewTool(runtime: RecordingMailRuntime())
+
+        #expect(recentTool.permission == .readMailBody)
+        #expect(searchTool.permission == .readMailBody)
+
+        guard case .object(let recentProperties, _) = recentTool.inputSchema,
+              case .integer(let recentLimitDescription) = recentProperties["bodyPreviewMaxChars"],
+              case .string(let recentDirectionDescription) = recentProperties["direction"] else {
+            Issue.record("Expected recent body preview schema")
+            return
+        }
+        #expect(recentLimitDescription.contains("2000"))
+        #expect(recentLimitDescription.contains("1200"))
+        #expect(recentDirectionDescription.contains("received"))
+        #expect(recentDirectionDescription.contains("sent"))
+
+        guard case .object(let searchProperties, let searchRequired) = searchTool.inputSchema,
+              case .integer(let searchLimitDescription) = searchProperties["bodyPreviewMaxChars"],
+              case .string(let queryDescription) = searchProperties["query"] else {
+            Issue.record("Expected search body preview schema")
+            return
+        }
+        #expect(searchRequired == ["query"])
+        #expect(searchLimitDescription.contains("2000"))
+        #expect(queryDescription.contains("cached body"))
     }
 
     @Test func recentMessagesToolSchemaDocumentsAccountDirectionAndLimit() {
