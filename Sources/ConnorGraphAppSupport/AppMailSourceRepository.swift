@@ -23,11 +23,16 @@ public enum MailBodyOnDemandFetchPlanner {
     }
 
     public static func imapUID(for detail: MailMessageDetail) -> String? {
-        let prefix = "\(detail.summary.accountID.rawValue)-INBOX-"
-        let rawValue = detail.id.rawValue
-        guard rawValue.hasPrefix(prefix) else { return nil }
-        let uid = String(rawValue.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !uid.isEmpty, uid.allSatisfy(\.isNumber) else { return nil }
-        return uid
+        let accountID = detail.summary.accountID
+        let supportedMailboxes = [
+            RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox),
+            RemoteIMAPMailbox(name: "Sent", path: "Sent", role: .sent)
+        ]
+        for mailbox in supportedMailboxes {
+            guard let uid = mailbox.uid(fromMessageID: detail.id, accountID: accountID) else { continue }
+            guard uid.allSatisfy(\.isNumber) else { return nil }
+            return uid
+        }
+        return nil
     }
 }

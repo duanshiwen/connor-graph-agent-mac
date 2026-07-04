@@ -101,11 +101,33 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(MailBodyOnDemandFetchPlanner.imapUID(for: emptyDetail) == "1392")
     }
 
-    @Test func mailBodyOnDemandPlannerRejectsNonInboxMessageIDsForNow() {
+    @Test func mailBodyOnDemandPlannerSupportsInboxAndSentMessageIDs() {
         let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
-        let detail = MailMessageDetail(
+        let inboxDetail = MailMessageDetail(
             summary: MailMessageSummary(
-                id: MailMessageID(rawValue: "yakii_d@icloud.com-Archive-1392"),
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-INBOX-1392"),
+                accountID: accountID,
+                mailboxID: MailMailboxID(rawValue: "yakii_d@icloud.com-inbox"),
+                subject: "Inbox",
+                from: MailAddress(email: "sender@example.com"),
+                to: [MailAddress(email: "yakii_d@icloud.com")],
+                snippet: "摘要"
+            )
+        )
+        let sentDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-Sent-1393"),
+                accountID: accountID,
+                mailboxID: MailMailboxID(rawValue: "yakii_d@icloud.com-sent"),
+                subject: "Sent",
+                from: MailAddress(email: "yakii_d@icloud.com"),
+                to: [MailAddress(email: "sender@example.com")],
+                snippet: "摘要"
+            )
+        )
+        let archiveDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-Archive-1394"),
                 accountID: accountID,
                 mailboxID: MailMailboxID(rawValue: "archive"),
                 subject: "Archive",
@@ -115,7 +137,9 @@ struct CommercialTrain7NativeMailSystemTests {
             )
         )
 
-        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: detail) == nil)
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: inboxDetail) == "1392")
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: sentDetail) == "1393")
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: archiveDetail) == nil)
     }
 
     @Test func agentToolRegistryExposesNativeMailToolsAndBlocksSendWithoutApproval() async throws {

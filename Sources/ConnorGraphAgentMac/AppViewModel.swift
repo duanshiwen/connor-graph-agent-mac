@@ -2731,12 +2731,16 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let uid = MailBodyOnDemandFetchPlanner.imapUID(for: detail) else {
             throw NSError(domain: "Connor.MailBody", code: 2, userInfo: [NSLocalizedDescriptionKey: "缺少邮件 UID"])
         }
-        let service = MailIMAPInitialSyncService(credentialStore: AppMailCredentialStore(), messageLimit: 1)
+        let mailboxes = try await mailStore.listMailboxes(accountID: detail.summary.accountID)
+        let mailbox = mailboxes.first { $0.id == detail.summary.mailboxID }
+        let service = MailIMAPInitialSyncService(credentialStore: AppMailCredentialStore(), messageLimit: 0)
         guard let fetched = try await service.fetchMessageBody(
             account: account,
             uid: uid,
             messageID: detail.id,
             mailboxID: detail.summary.mailboxID,
+            mailboxPath: mailbox?.path ?? "INBOX",
+            mailboxRole: mailbox?.role ?? .inbox,
             snippet: detail.summary.snippet
         ) else {
             throw NSError(domain: "Connor.MailBody", code: 3, userInfo: [NSLocalizedDescriptionKey: "服务器未返回可显示正文"])
