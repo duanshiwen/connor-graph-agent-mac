@@ -188,6 +188,25 @@ struct MailMIMEParserTests {
         #expect(result.plainText.contains("段诗闻"))
     }
 
+    @Test func htmlPlainTextDecodesEntitiesAfterStrippingTags() {
+        let html = """
+        <!DOCTYPE html><html><body><p>Open https://twitter.com/i/u?t=1&amp;cn=ZmxleGlibGVfcmVjcw%3D%3D</p><p>&#x4E2D;&#25991; / &#20013;&#25991;</p></body></html>
+        """
+
+        let result = MailMIMEParser().parseBodyWithHTML(
+            rawData: Data(html.utf8),
+            fallbackString: "fallback",
+            charset: "utf-8",
+            transferEncoding: nil,
+            contentType: "text/html; charset=utf-8",
+            boundary: nil
+        )
+
+        #expect(result.plainText.contains("t=1&cn=ZmxleGlibGVfcmVjcw%3D%3D"))
+        #expect(!result.plainText.contains("&amp;"))
+        #expect(result.plainText.contains("中文 / 中文"))
+    }
+
     @Test func quotedPrintableTransferEncodingDecodesUTF8AndSoftLineBreaks() {
         let encodedBody = """
         hi =E6=AE=B5=E8=AF=97=E9=97=BB=EF=BC=8C

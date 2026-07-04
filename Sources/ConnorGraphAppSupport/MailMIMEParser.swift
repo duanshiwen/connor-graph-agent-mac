@@ -347,8 +347,46 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     private func stripHTML(_ text: String) -> String {
-        text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        decodeHTMLEntities(
+            text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private func decodeHTMLEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        let namedEntities: [String: String] = [
+            "amp": "&",
+            "lt": "<",
+            "gt": ">",
+            "quot": "\"",
+            "apos": "'",
+            "nbsp": " "
+        ]
+        guard let regex = try? NSRegularExpression(pattern: #"&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z][A-Za-z0-9]+);"#) else {
+            return text
+        }
+        let nsText = text as NSString
+        var result = text
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        for match in matches.reversed() where match.numberOfRanges == 2 {
+            let token = nsText.substring(with: match.range(at: 1))
+            let decoded: String?
+            if token.hasPrefix("#x") || token.hasPrefix("#X") {
+                decoded = UInt32(token.dropFirst(2), radix: 16)
+                    .flatMap(UnicodeScalar.init)
+                    .map(String.init)
+            } else if token.hasPrefix("#") {
+                decoded = UInt32(token.dropFirst(), radix: 10)
+                    .flatMap(UnicodeScalar.init)
+                    .map(String.init)
+            } else {
+                decoded = namedEntities[token]
+            }
+            guard let decoded, let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: decoded)
+        }
+        return result
     }
 }
