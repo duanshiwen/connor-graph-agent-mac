@@ -1812,7 +1812,8 @@ struct BlockingIMAPClient {
         let mimeParser = MailMIMEParser()
         let bodyResult: MailMIMEBodyResult
         if let fullMessageData {
-            bodyResult = mimeParser.parseFullMessageBody(rawData: fullMessageData, fallbackString: snippet)
+            bodyResult = (try? MailCore2MIMEParser().parseFullMessageBody(rawData: fullMessageData, fallbackString: snippet))
+                ?? mimeParser.parseFullMessageBody(rawData: fullMessageData, fallbackString: snippet)
         } else {
             bodyResult = mimeParser.parseBodyWithHTML(
                 rawData: Data(bodyData), fallbackString: snippet,
