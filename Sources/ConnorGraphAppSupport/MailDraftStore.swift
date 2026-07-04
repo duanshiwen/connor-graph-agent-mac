@@ -34,6 +34,7 @@ public protocol MailDraftRepository: Sendable {
     func draft(id: MailDraftID) async throws -> MailDraft?
     func listDrafts(accountID: MailAccountID?, status: MailDraftStatus?) async throws -> [MailDraft]
     func updateStatus(id: MailDraftID, status: MailDraftStatus, lastSendError: String?, sentReceiptID: String?) async throws -> MailDraft
+    func updateApprovedEnvelopeHash(id: MailDraftID, envelopeHash: String?) async throws -> MailDraft
     func discard(id: MailDraftID) async throws -> MailDraft
     func recordSendAttempt(_ attempt: MailSendAttempt) async throws
     func sendAttempts(draftID: MailDraftID) async throws -> [MailSendAttempt]
@@ -78,6 +79,14 @@ public actor InMemoryMailDraftRepository: MailDraftRepository {
         draft.status = status
         draft.lastSendError = lastSendError
         draft.sentReceiptID = sentReceiptID
+        draft.updatedAt = Date()
+        drafts[id] = draft
+        return draft
+    }
+
+    public func updateApprovedEnvelopeHash(id: MailDraftID, envelopeHash: String?) async throws -> MailDraft {
+        guard var draft = drafts[id] else { throw MailRuntimeError.draftNotFound(id.rawValue) }
+        draft.approvedEnvelopeHash = envelopeHash
         draft.updatedAt = Date()
         drafts[id] = draft
         return draft
@@ -145,6 +154,17 @@ public actor FileBackedMailDraftRepository: MailDraftRepository {
         draft.status = status
         draft.lastSendError = lastSendError
         draft.sentReceiptID = sentReceiptID
+        draft.updatedAt = Date()
+        snapshot.drafts[index] = draft
+        try saveSnapshot(snapshot)
+        return draft
+    }
+
+    public func updateApprovedEnvelopeHash(id: MailDraftID, envelopeHash: String?) async throws -> MailDraft {
+        var snapshot = try loadSnapshot()
+        guard let index = snapshot.drafts.firstIndex(where: { $0.id == id }) else { throw MailRuntimeError.draftNotFound(id.rawValue) }
+        var draft = snapshot.drafts[index]
+        draft.approvedEnvelopeHash = envelopeHash
         draft.updatedAt = Date()
         snapshot.drafts[index] = draft
         try saveSnapshot(snapshot)

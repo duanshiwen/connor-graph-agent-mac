@@ -12,6 +12,8 @@ public enum MailRuntimeError: Error, Sendable, Equatable, CustomStringConvertibl
     case missingOutgoingEndpoint(String)
     case missingCredential(String)
     case missingRecipients(String)
+    case missingApprovedEnvelopeHash(String)
+    case envelopeHashMismatch(expected: String, actual: String)
     case invalidDraftState(String)
     case unsupportedNetworkOperation(String)
 
@@ -27,6 +29,8 @@ public enum MailRuntimeError: Error, Sendable, Equatable, CustomStringConvertibl
         case .missingOutgoingEndpoint(let id): "Mail account has no outgoing SMTP endpoint: \(id)"
         case .missingCredential(let id): "Missing mail credential: \(id)"
         case .missingRecipients(let id): "Mail draft has no recipients: \(id)"
+        case .missingApprovedEnvelopeHash(let id): "Mail draft has no approved envelope hash: \(id)"
+        case .envelopeHashMismatch(let expected, let actual): "Mail draft envelope hash mismatch: expected \(expected), actual \(actual)"
         case .invalidDraftState(let state): "Mail draft cannot be sent in state: \(state)"
         case .unsupportedNetworkOperation(let op): "Network operation not implemented in commercial skeleton: \(op)"
         }

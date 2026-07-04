@@ -37,6 +37,7 @@ struct MailRuntimeSendPipelineTests {
             smtpClient: smtpClient
         )
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Real send", body: "Hello")
+        _ = try await draftRepository.updateApprovedEnvelopeHash(id: draft.id, envelopeHash: draft.envelopeHash())
 
         let receipt = try await runtime.sendDraft(draftID: draft.id, approved: true, runID: "run", sessionID: "session")
 
@@ -78,6 +79,7 @@ struct MailRuntimeSendPipelineTests {
             smtpClient: FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-history"))
         )
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "History", body: "Body")
+        _ = try await draftRepository.updateApprovedEnvelopeHash(id: draft.id, envelopeHash: draft.envelopeHash())
 
         _ = try await runtime.sendDraft(draftID: draft.id, approved: true, runID: "run-history", sessionID: "session-history")
         let history = try await runtime.sendHistory(draftID: draft.id)
@@ -98,6 +100,106 @@ struct MailRuntimeSendPipelineTests {
         await #expect(throws: MailRuntimeError.self) {
             _ = try await runtime.sendDraft(draftID: draft.id, approved: false)
         }
+    }
+
+    @Test func sendApprovalPayloadStoresEnvelopeHashForLaterApprovedSend() async throws {
+        let accountID = MailAccountID(rawValue: "account-approval-payload")
+        let identityID = MailIdentityID(rawValue: "identity-approval-payload")
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
+        let account = MailAccount(
+            id: accountID,
+            provider: .genericIMAPSMTP,
+            displayName: "Approval Payload Account",
+            identities: [MailIdentity(id: identityID, displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            credentialBinding: binding,
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let rawCredentialStore = TestMailCredentialStore()
+        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        let draftRepository = InMemoryMailDraftRepository()
+        let runtime = MailRuntime(
+            repository: InMemoryMailSourceRepository(accounts: [account]),
+            cache: InMemoryMailSourceCache(),
+            draftStore: draftRepository,
+            credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
+            smtpClient: FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-approval-payload"))
+        )
+        let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Approval", body: "Body")
+
+        let payload = try await runtime.sendApprovalPayload(draftID: draft.id)
+
+        let stored = try #require(try await draftRepository.draft(id: draft.id))
+        #expect(payload.envelopeHash == draft.envelopeHash())
+        #expect(stored.approvedEnvelopeHash == payload.envelopeHash)
+    }
+
+    @Test func approvedSendRequiresApprovedEnvelopeHashAndDoesNotCallSMTPWhenMissing() async throws {
+        let accountID = MailAccountID(rawValue: "account-missing-approved-hash")
+        let identityID = MailIdentityID(rawValue: "identity-missing-approved-hash")
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
+        let account = MailAccount(
+            id: accountID,
+            provider: .genericIMAPSMTP,
+            displayName: "Hash Account",
+            identities: [MailIdentity(id: identityID, displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            credentialBinding: binding,
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let rawCredentialStore = TestMailCredentialStore()
+        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-missing-hash"))
+        let runtime = MailRuntime(
+            repository: InMemoryMailSourceRepository(accounts: [account]),
+            cache: InMemoryMailSourceCache(),
+            draftStore: InMemoryMailDraftRepository(),
+            credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
+            smtpClient: smtpClient
+        )
+        let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Hash", body: "Body")
+
+        await #expect(throws: MailRuntimeError.self) {
+            _ = try await runtime.sendDraft(draftID: draft.id, approved: true)
+        }
+        #expect(await smtpClient.requests.isEmpty)
+    }
+
+    @Test func approvedSendBlocksWhenDraftEnvelopeHashChangedAfterApproval() async throws {
+        let accountID = MailAccountID(rawValue: "account-hash-mismatch")
+        let identityID = MailIdentityID(rawValue: "identity-hash-mismatch")
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
+        let account = MailAccount(
+            id: accountID,
+            provider: .genericIMAPSMTP,
+            displayName: "Hash Mismatch Account",
+            identities: [MailIdentity(id: identityID, displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            credentialBinding: binding,
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let rawCredentialStore = TestMailCredentialStore()
+        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-hash-mismatch"))
+        let draftRepository = InMemoryMailDraftRepository()
+        let runtime = MailRuntime(
+            repository: InMemoryMailSourceRepository(accounts: [account]),
+            cache: InMemoryMailSourceCache(),
+            draftStore: draftRepository,
+            credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
+            smtpClient: smtpClient
+        )
+        var draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Original", body: "Body")
+        _ = try await draftRepository.updateApprovedEnvelopeHash(id: draft.id, envelopeHash: draft.envelopeHash())
+        draft.subject = "Changed after approval"
+        try await draftRepository.save(draft)
+
+        await #expect(throws: MailRuntimeError.self) {
+            _ = try await runtime.sendDraft(draftID: draft.id, approved: true)
+        }
+        #expect(await smtpClient.requests.isEmpty)
+        let stored = try #require(try await draftRepository.draft(id: draft.id))
+        #expect(stored.status != .sent)
     }
 
     @Test func sendFailureMarksDraftFailedAndRecordsAttempt() async throws {
@@ -124,6 +226,7 @@ struct MailRuntimeSendPipelineTests {
             smtpClient: FakeMailSMTPClient(error: MailSMTPClientError.smtpRejected("550 rejected"))
         )
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Fail", body: "Body")
+        _ = try await draftRepository.updateApprovedEnvelopeHash(id: draft.id, envelopeHash: draft.envelopeHash())
 
         await #expect(throws: Error.self) {
             _ = try await runtime.sendDraft(draftID: draft.id, approved: true)

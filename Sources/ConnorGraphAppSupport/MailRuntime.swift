@@ -144,7 +144,9 @@ public struct MailRuntime: Sendable {
         guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
         let account = try await repository.account(id: draft.accountID)
         let from = account?.identities.first { $0.id == draft.identityID }?.address.email ?? "unknown"
-        return MailRuntimeSendApproval(draft: draft, from: from)
+        let payload = MailRuntimeSendApproval(draft: draft, from: from)
+        _ = try await draftStore.updateApprovedEnvelopeHash(id: draftID, envelopeHash: payload.envelopeHash)
+        return payload
     }
 
     public func sendDraft(draftID: MailDraftID, approved: Bool, runID: String? = nil, sessionID: String? = nil) async throws -> MailSendReceipt {
@@ -171,6 +173,15 @@ public struct MailRuntime: Sendable {
         guard let endpoint = account.outgoing else {
             throw MailRuntimeError.missingOutgoingEndpoint(account.id.rawValue)
         }
+        let composed = try messageComposer.compose(draft: draft, identity: identity)
+        guard let approvedEnvelopeHash = draft.approvedEnvelopeHash, !approvedEnvelopeHash.isEmpty else {
+            try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Approved send blocked because draft has no approved envelope hash", payloadHash: composed.envelopeHash))
+            throw MailRuntimeError.missingApprovedEnvelopeHash(draftID.rawValue)
+        }
+        guard approvedEnvelopeHash == composed.envelopeHash else {
+            try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Approved send blocked because draft changed after approval", payloadHash: composed.envelopeHash))
+            throw MailRuntimeError.envelopeHashMismatch(expected: approvedEnvelopeHash, actual: composed.envelopeHash)
+        }
         guard let binding = account.credentialBinding else {
             throw MailRuntimeError.missingCredential(account.id.rawValue)
         }
@@ -178,7 +189,6 @@ public struct MailRuntime: Sendable {
             throw MailRuntimeError.missingCredential(account.id.rawValue)
         }
 
-        let composed = try messageComposer.compose(draft: draft, identity: identity)
         try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sending, envelopeHash: composed.envelopeHash))
         do {
             let response = try await smtpClient.send(MailSMTPSendRequest(
