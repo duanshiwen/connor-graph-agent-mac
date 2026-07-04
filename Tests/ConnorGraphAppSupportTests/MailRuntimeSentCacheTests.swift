@@ -30,6 +30,7 @@ struct MailRuntimeSentCacheTests {
         )
 
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Searchable sent subject", body: "Sent body text")
+        _ = try await runtime.sendApprovalPayload(draftID: draft.id)
         _ = try await runtime.sendDraft(draftID: draft.id, approved: true)
 
         let sentResults = try await runtime.searchMessages(MailRuntimeSearchRequest(query: "Searchable sent", accountID: accountID))
