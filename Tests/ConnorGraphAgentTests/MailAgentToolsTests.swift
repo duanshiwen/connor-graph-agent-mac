@@ -79,6 +79,17 @@ struct MailAgentToolsTests {
         #expect(description.contains("IMAP UIDs"))
     }
 
+    @Test func searchMessagesContentTextExplainsHowToOpenResults() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailSearchMessagesTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "search mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"query\":\"invoice\"}"), context: context)
+
+        #expect(result.contentText.contains("summary's id"))
+        #expect(result.contentText.contains("mail_get_message"))
+        #expect(result.contentText.contains("read state unchanged"))
+    }
+
     @Test func sendDraftApprovalPayloadIncludesMailSummary() async throws {
         let runtime = RecordingMailRuntime()
         let tool = MailSendDraftTool(runtime: runtime)
@@ -155,7 +166,18 @@ private actor RecordingMailRuntime: AgentMailRuntime {
     }
 
     func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount] { [] }
-    func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] { [] }
+    func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
+        [MailMessageSummary(
+            id: MailMessageID(rawValue: "account-INBOX-1"),
+            accountID: MailAccountID(rawValue: "account"),
+            mailboxID: MailMailboxID(rawValue: "account-INBOX"),
+            subject: "Invoice",
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "recipient@example.com")],
+            date: Date(timeIntervalSince1970: 1),
+            snippet: "Invoice snippet"
+        )]
+    }
     func getMessage(id: MailMessageID, includeBody: Bool, runID: String?, sessionID: String?) async throws -> MailMessageDetail { throw AgentToolError.invalidArguments("message not found") }
     func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String?, sessionID: String?) async throws {}
 

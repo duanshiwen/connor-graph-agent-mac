@@ -125,7 +125,7 @@ public struct MailSearchMessagesTool: AgentTool {
         )
         let messages = try await runtime.searchMessages(request, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(messages.map { NativeSourceReference.mailSummary($0, query: request.query, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; read state unchanged", contentJSON: try MailJSON.encode(messages))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; use the selected summary's id as messageID for mail_get_message; read state unchanged", contentJSON: try MailJSON.encode(messages))
     }
 }
 
