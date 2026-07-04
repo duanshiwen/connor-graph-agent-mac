@@ -174,7 +174,15 @@ public struct MailListRecentMessagesTool: AgentTool {
         self.recorder = recorder
     }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let direction = AgentMailMessageDirectionFilter(rawValue: arguments.string("direction") ?? AgentMailMessageDirectionFilter.all.rawValue) ?? .all
+        let direction: AgentMailMessageDirectionFilter
+        if let rawDirection = arguments.string("direction") {
+            guard let parsed = AgentMailMessageDirectionFilter(rawValue: rawDirection) else {
+                throw AgentToolError.invalidArguments("Invalid direction \"\(rawDirection)\". Expected one of: all, received, sent.")
+            }
+            direction = parsed
+        } else {
+            direction = .all
+        }
         let request = MailRuntimeRecentMessagesRequestBridge(
             accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
             direction: direction,

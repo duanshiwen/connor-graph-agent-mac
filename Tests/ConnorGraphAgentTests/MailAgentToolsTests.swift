@@ -37,6 +37,53 @@ struct MailAgentToolsTests {
         #expect(limitDescription.contains("Maximum"))
     }
 
+    @Test func recentMessagesToolPassesDefaultAllAccountsAllDirections() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailListRecentMessagesTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "latest mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
+
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{}"), context: context)
+        let request = try #require(await runtime.lastRecentRequest)
+
+        #expect(request.accountID == nil)
+        #expect(request.direction == .all)
+        #expect(request.limit == NativeSearchLimitPolicy.defaultSearchLimit)
+        #expect(result.contentText.contains("recent mail message summaries"))
+        #expect(result.contentText.contains("mail_get_message"))
+        #expect(result.contentText.contains("read state unchanged"))
+    }
+
+    @Test func recentMessagesToolPassesAccountDirectionAndLimit() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailListRecentMessagesTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "latest sent", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
+
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"accountID\":\"account\",\"direction\":\"sent\",\"limit\":3}"), context: context)
+        let request = try #require(await runtime.lastRecentRequest)
+
+        #expect(request.accountID == MailAccountID(rawValue: "account"))
+        #expect(request.direction == .sent)
+        #expect(request.limit == 3)
+    }
+
+    @Test func recentMessagesToolRejectsInvalidDirection() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailListRecentMessagesTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "latest", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
+
+        do {
+            _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"direction\":\"foo\"}"), context: context)
+            Issue.record("Expected invalid direction to fail")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains("Invalid direction"))
+            #expect(message.contains("all"))
+            #expect(message.contains("received"))
+            #expect(message.contains("sent"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test func createDraftToolPassesCommercialFields() async throws {
         let runtime = RecordingMailRuntime()
         let tool = MailCreateDraftTool(runtime: runtime)
@@ -181,6 +228,7 @@ private actor RecordingMailRuntime: AgentMailRuntime {
     }
 
     var lastCreateDraft: CreateDraftRequest?
+    var lastRecentRequest: MailRuntimeRecentMessagesRequestBridge?
     var lastSendApproved: Bool?
     var approvalPayload: MailSendApprovalBridge?
 
@@ -191,6 +239,19 @@ private actor RecordingMailRuntime: AgentMailRuntime {
     func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount] { [] }
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
         [MailMessageSummary(
+            id: MailMessageID(rawValue: "account-INBOX-1"),
+            accountID: MailAccountID(rawValue: "account"),
+            mailboxID: MailMailboxID(rawValue: "account-INBOX"),
+            subject: "Invoice",
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "recipient@example.com")],
+            date: Date(timeIntervalSince1970: 1),
+            snippet: "Invoice snippet"
+        )]
+    }
+    func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
+        lastRecentRequest = request
+        return [MailMessageSummary(
             id: MailMessageID(rawValue: "account-INBOX-1"),
             accountID: MailAccountID(rawValue: "account"),
             mailboxID: MailMailboxID(rawValue: "account-INBOX"),
