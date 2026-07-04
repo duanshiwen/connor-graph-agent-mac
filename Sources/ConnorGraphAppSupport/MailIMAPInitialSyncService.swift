@@ -13,6 +13,141 @@ public struct MailInitialSyncResult: Sendable, Equatable {
     }
 }
 
+public struct RemoteIMAPMailbox: Sendable, Equatable {
+    public var name: String
+    public var path: String
+    public var role: MailMailboxRole
+    public var attributes: [String]
+    public var delimiter: String?
+
+    public init(name: String, path: String, role: MailMailboxRole, attributes: [String] = [], delimiter: String? = nil) {
+        self.name = name
+        self.path = path
+        self.role = role
+        self.attributes = attributes
+        self.delimiter = delimiter
+    }
+
+    public static func parseListResponse(_ response: String) -> [RemoteIMAPMailbox] {
+        response
+            .components(separatedBy: .newlines)
+            .compactMap { parseListLine($0) }
+    }
+
+    public static func parseListLine(_ line: String) -> RemoteIMAPMailbox? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.localizedCaseInsensitiveContains(" LIST ") || trimmed.hasPrefix("* LIST ") else { return nil }
+        guard let open = trimmed.firstIndex(of: "("), let close = trimmed[open...].firstIndex(of: ")") else { return nil }
+        let attributeString = String(trimmed[trimmed.index(after: open)..<close])
+        let attributes = attributeString
+            .split(separator: " ")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let remainder = trimmed[trimmed.index(after: close)...].trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = parseIMAPQuotedTokens(remainder)
+        let delimiter = tokens.count >= 2 ? tokens[tokens.count - 2] : nil
+        guard let path = tokens.last?.nilIfEmpty else { return nil }
+        let name = path.components(separatedBy: delimiter ?? "/").last?.nilIfEmpty ?? path
+        return RemoteIMAPMailbox(name: name, path: path, role: inferRole(path: path, attributes: attributes), attributes: attributes, delimiter: delimiter)
+    }
+
+    public static func inferRole(path: String, attributes: [String]) -> MailMailboxRole {
+        let loweredAttributes = attributes.map { $0.lowercased() }
+        if loweredAttributes.contains("\\sent") { return .sent }
+        if loweredAttributes.contains("\\drafts") { return .drafts }
+        if loweredAttributes.contains("\\archive") || loweredAttributes.contains("\\all") { return .archive }
+        if loweredAttributes.contains("\\trash") { return .trash }
+        if loweredAttributes.contains("\\junk") { return .spam }
+
+        let normalized = path
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        let leaf = normalized.components(separatedBy: CharacterSet(charactersIn: "/.")).last ?? normalized
+        if normalized == "inbox" || leaf == "inbox" { return .inbox }
+        let sentNames: Set<String> = ["sent", "sent mail", "sent messages", "已发送", "已发送邮件", "寄件备份", "寄件匣"]
+        if sentNames.contains(normalized) || sentNames.contains(leaf) { return .sent }
+        if ["drafts", "draft", "草稿", "草稿箱"].contains(normalized) || ["drafts", "draft", "草稿", "草稿箱"].contains(leaf) { return .drafts }
+        if ["trash", "deleted messages", "deleted", "已删除", "废纸篓", "垃圾桶"].contains(normalized) || ["trash", "deleted messages", "deleted", "已删除", "废纸篓", "垃圾桶"].contains(leaf) { return .trash }
+        if ["junk", "spam", "垃圾邮件"].contains(normalized) || ["junk", "spam", "垃圾邮件"].contains(leaf) { return .spam }
+        if ["archive", "all mail", "归档"].contains(normalized) || ["archive", "all mail", "归档"].contains(leaf) { return .archive }
+        return .custom
+    }
+
+    public var stableIDComponent: String {
+        switch role {
+        case .inbox: return "inbox"
+        case .sent: return "sent"
+        case .drafts: return "drafts"
+        case .archive: return "archive"
+        case .trash: return "trash"
+        case .spam: return "spam"
+        case .custom: return Self.slug(path)
+        }
+    }
+
+    public func mailboxID(accountID: MailAccountID) -> MailMailboxID {
+        MailMailboxID(rawValue: "\(accountID.rawValue)-\(stableIDComponent)")
+    }
+
+    public static func slug(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.lowercased().unicodeScalars.map { scalar -> Character in
+            allowed.contains(scalar) ? Character(scalar) : "-"
+        }
+        let collapsed = String(scalars).replacingOccurrences(of: #"-+"#, with: "-", options: .regularExpression)
+        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-")) .nilIfEmpty ?? "mailbox"
+    }
+
+    private static func parseIMAPQuotedTokens(_ value: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var inQuote = false
+        var escaping = false
+        var tokenStarted = false
+
+        for character in value {
+            if escaping {
+                current.append(character)
+                escaping = false
+                continue
+            }
+            if inQuote {
+                if character == "\\" {
+                    escaping = true
+                } else if character == "\"" {
+                    tokens.append(current)
+                    current = ""
+                    inQuote = false
+                    tokenStarted = false
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+            if character == "\"" {
+                inQuote = true
+                tokenStarted = true
+            } else if character.isWhitespace {
+                if tokenStarted {
+                    tokens.append(current)
+                    current = ""
+                    tokenStarted = false
+                }
+            } else {
+                current.append(character)
+                tokenStarted = true
+            }
+        }
+        if tokenStarted || !current.isEmpty {
+            tokens.append(current)
+        }
+        return tokens.filter { !$0.uppercased().elementsEqual("NIL") }
+    }
+}
+
 public struct MailIMAPInitialSyncService: Sendable {
     public var credentialStore: AppMailCredentialStore
     public var messageLimit: Int

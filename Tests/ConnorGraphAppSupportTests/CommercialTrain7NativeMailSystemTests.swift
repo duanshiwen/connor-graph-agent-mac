@@ -232,6 +232,34 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(result.messages.isEmpty)
     }
 
+    @Test func remoteIMAPMailboxDiscoveryRecognizesSpecialUseSentMailbox() {
+        let response = """
+        * LIST (\\HasNoChildren) "/" "INBOX"
+        * LIST (\\Sent \\HasNoChildren) "/" "Sent Messages"
+        A1 OK LIST completed
+        """
+
+        let mailboxes = RemoteIMAPMailbox.parseListResponse(response)
+
+        #expect(mailboxes.map(\.path) == ["INBOX", "Sent Messages"])
+        #expect(mailboxes.first { $0.path == "INBOX" }?.role == .inbox)
+        #expect(mailboxes.first { $0.path == "Sent Messages" }?.role == .sent)
+    }
+
+    @Test func remoteIMAPMailboxDiscoveryFallsBackToCommonSentNames() {
+        let response = """
+        * LIST (\\HasNoChildren) "/" "INBOX"
+        * LIST (\\HasNoChildren) "/" "已发送"
+        * LIST (\\HasNoChildren) "/" "Sent Mail"
+        A1 OK LIST completed
+        """
+
+        let mailboxes = RemoteIMAPMailbox.parseListResponse(response)
+
+        #expect(mailboxes.first { $0.path == "已发送" }?.role == .sent)
+        #expect(mailboxes.first { $0.path == "Sent Mail" }?.role == .sent)
+    }
+
     @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
         let binding = MailCredentialBinding(credentialNamespace: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
         let credentialStore = CommercialTrain7MemoryCredentialStore()
