@@ -105,6 +105,21 @@ public struct MailBackendMailboxSnapshot: Sendable, Equatable {
     }
 }
 
+public enum MailCore2FolderMapper: Sendable {
+    public static func remoteMailbox(path: String, delimiter: String?, isInbox: Bool, isSent: Bool, isDrafts: Bool, isArchive: Bool, isTrash: Bool, isSpam: Bool) -> RemoteIMAPMailbox {
+        let role: MailMailboxRole
+        if isInbox { role = .inbox }
+        else if isSent { role = .sent }
+        else if isDrafts { role = .drafts }
+        else if isArchive { role = .archive }
+        else if isTrash { role = .trash }
+        else if isSpam { role = .spam }
+        else { role = RemoteIMAPMailbox.inferRole(path: path, attributes: []) }
+        let name = path.components(separatedBy: delimiter ?? "/").last?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return RemoteIMAPMailbox(name: (name?.isEmpty == false ? name! : path), path: path, role: role, delimiter: delimiter)
+    }
+}
+
 public protocol MailProtocolBackend: Sendable {
     var backendName: String { get }
 
@@ -120,7 +135,23 @@ public struct MailCore2MailBackend: MailProtocolBackend {
 
     public func discoverMailboxes(account: MailAccount, credential: String) async throws -> [RemoteIMAPMailbox] {
         try ensureAvailable()
-        throw MailProtocolBackendError.unsupported("MailCore2 mailbox discovery is introduced in a later task")
+        #if canImport(MailCore)
+        guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return [] }
+        guard let email = account.identities.first?.address.email, !email.isEmpty else { return [] }
+        var lastError: Error?
+        for username in MailIMAPInitialSyncService.candidateUsernames(email: email, provider: account.provider) {
+            let session = makeIMAPSession(hostname: endpoint.host, port: UInt32(endpoint.port), username: username, password: credential)
+            do {
+                return try await fetchAllFolders(session: session)
+            } catch {
+                lastError = error
+            }
+        }
+        if let lastError { throw lastError }
+        return []
+        #else
+        throw MailProtocolBackendError.unavailable("MailCore framework cannot be imported")
+        #endif
     }
 
     public func fetchMailboxSnapshots(account: MailAccount, credential: String, mailboxes: [RemoteIMAPMailbox], knownUIDsByMailboxID: [MailMailboxID: Set<String>], uidValidityByMailboxID: [MailMailboxID: String?], messageLimit: Int) async throws -> [MailBackendMailboxSnapshot] {
@@ -169,6 +200,34 @@ public struct MailCore2MailBackend: MailProtocolBackend {
         session.connectionType = .TLS
         session.timeout = 60
         return session
+    }
+
+    private func fetchAllFolders(session: MCOIMAPSession) async throws -> [RemoteIMAPMailbox] {
+        try await withCheckedThrowingContinuation { continuation in
+            let operation = session.fetchAllFoldersOperation()
+            operation?.start { error, folders in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                let mapped = (folders ?? []).compactMap { folder -> RemoteIMAPMailbox? in
+                    let path = folder.path ?? ""
+                    guard !path.isEmpty else { return nil }
+                    let delimiter: String? = folder.delimiter == 0 ? nil : String(UnicodeScalar(UInt8(bitPattern: Int8(folder.delimiter))))
+                    return MailCore2FolderMapper.remoteMailbox(
+                        path: path,
+                        delimiter: delimiter,
+                        isInbox: folder.flags.contains(.inbox),
+                        isSent: folder.flags.contains(.sentMail),
+                        isDrafts: folder.flags.contains(.drafts),
+                        isArchive: folder.flags.contains(.archive) || folder.flags.contains(.allMail),
+                        isTrash: folder.flags.contains(.trash),
+                        isSpam: folder.flags.contains(.spam)
+                    )
+                }
+                continuation.resume(returning: mapped)
+            }
+        }
     }
 
     private func fetchParsedMessageData(session: MCOIMAPSession, folder: String, uid: UInt32) async throws -> Data {
