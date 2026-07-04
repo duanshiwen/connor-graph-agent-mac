@@ -20,7 +20,7 @@ struct MailRuntimeSentCacheTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let credentialStore = MailRuntimeSentCacheCredentialStore()
-        try credentialStore.saveSecret("secret", service: binding.keychainService, account: binding.accountName)
+        try credentialStore.saveSecret("secret", service: binding.credentialNamespace, account: binding.accountName)
         let cache = InMemoryMailSourceCache()
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),
@@ -56,7 +56,7 @@ struct MailRuntimeSentCacheTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let credentialStore = MailRuntimeSentCacheCredentialStore()
-        try credentialStore.saveSecret("secret", service: binding.keychainService, account: binding.accountName)
+        try credentialStore.saveSecret("secret", service: binding.credentialNamespace, account: binding.accountName)
         let cache = InMemoryMailSourceCache()
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),

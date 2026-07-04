@@ -24,7 +24,7 @@ struct AppCalendarCredentialStoreTests {
 
         try store.saveCredential("calendar-app-password", binding: binding)
 
-        #expect(binding.keychainService == AppCalendarCredentialStore.keychainService)
+        #expect(binding.credentialNamespace == AppCalendarCredentialStore.credentialNamespace)
         #expect(binding.accountName == "calendar-account-caldav:shiwen@example.com")
         #expect(try store.readCredential(binding: binding) == "calendar-app-password")
 

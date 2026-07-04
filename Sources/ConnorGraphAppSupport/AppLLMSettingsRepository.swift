@@ -351,7 +351,7 @@ public final class UserDefaultsLLMSettingsStore: LLMSettingsStore, @unchecked Se
 }
 
 public struct AppLLMSettingsRepository: @unchecked Sendable {
-    public static let keychainService = "ConnorGraphAgent"
+    public static let credentialNamespace = "ConnorGraphAgent"
     public static let apiKeyAccount = "openai-compatible-api-key"
     public static let anthropicAuthHeaderKindMetadataKey = "x-connor-anthropic-auth-header-kind"
     public static let openAIAPIKeyHeaderKindMetadataKey = "x-connor-openai-api-key-header-kind"
@@ -419,7 +419,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let fallbackModel = "gpt-4o-mini"
         let modeRaw = settingsStore.string(forKey: Keys.providerMode) ?? fallbackProviderMode.rawValue
         let mode = AppLLMProviderMode(rawValue: modeRaw) ?? fallbackProviderMode
-        let apiKey = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount)
+        let apiKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
         let id: String
         let name: String
         switch mode {
@@ -473,9 +473,9 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         settingsStore.set(defaultConnection.model, forKey: Keys.model)
         settingsStore.set(defaultConnection.effectiveModel, forKey: Keys.selectedModel)
         if let apiKey, !apiKey.isEmpty {
-            try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount(for: defaultConnection.id))
+            try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount(for: defaultConnection.id))
             if defaultConnection.id == "openai-compatible" || defaultConnection.id == "openai-responses" {
-                try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount)
+                try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount)
             }
         }
     }
@@ -486,23 +486,23 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     public func clearAPIKey(connectionID: String) throws {
-        try credentialStore.deleteSecret(service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID))
-        try credentialStore.deleteSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID))
+        try credentialStore.deleteSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount(for: connectionID))
+        try credentialStore.deleteSecret(service: Self.credentialNamespace, account: Self.oauthAccount(for: connectionID))
         if connectionID == "openai-compatible" || connectionID == "openai-responses" {
-            try credentialStore.deleteSecret(service: Self.keychainService, account: Self.apiKeyAccount)
+            try credentialStore.deleteSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
         }
     }
 
     public func saveOAuthTokens(_ tokens: AppLLMOAuthTokens, connectionID: String) throws {
         let data = try JSONEncoder().encode(tokens)
-        try credentialStore.saveSecret(String(decoding: data, as: UTF8.self), service: Self.keychainService, account: Self.oauthAccount(for: connectionID))
+        try credentialStore.saveSecret(String(decoding: data, as: UTF8.self), service: Self.credentialNamespace, account: Self.oauthAccount(for: connectionID))
     }
 
     public func saveAPIKey(_ apiKey: String, connectionID: String) throws {
         guard !apiKey.isEmpty else { return }
-        try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID))
+        try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount(for: connectionID))
         if connectionID == "openai-compatible" || connectionID == "openai-responses" {
-            try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount)
+            try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount)
         }
     }
 
@@ -516,30 +516,30 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     public func oauthTokens(for connectionID: String) throws -> AppLLMOAuthTokens? {
-        guard let raw = try credentialStore.readSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID)),
+        guard let raw = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.oauthAccount(for: connectionID)),
               let data = raw.data(using: .utf8) else { return nil }
         return try JSONDecoder().decode(AppLLMOAuthTokens.self, from: data)
     }
 
     public func hasAPIKey(for connectionID: String) throws -> Bool {
-        if let key = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID)), !key.isEmpty {
+        if let key = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount(for: connectionID)), !key.isEmpty {
             return true
         }
-        if let oauth = try credentialStore.readSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID)), !oauth.isEmpty {
+        if let oauth = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.oauthAccount(for: connectionID)), !oauth.isEmpty {
             return true
         }
-        if (connectionID == "openai-compatible" || connectionID == "openai-responses"), let key = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount), !key.isEmpty {
+        if (connectionID == "openai-compatible" || connectionID == "openai-responses"), let key = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount), !key.isEmpty {
             return true
         }
         return false
     }
 
     public func apiKey(for connectionID: String) throws -> String? {
-        if let key = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID)), !key.isEmpty {
+        if let key = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount(for: connectionID)), !key.isEmpty {
             return key
         }
         if connectionID == "openai-compatible" || connectionID == "openai-responses" {
-            return try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount)
+            return try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
         }
         return nil
     }
