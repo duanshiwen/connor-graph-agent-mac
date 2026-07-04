@@ -13,6 +13,7 @@ public enum ConnorNativeShellItem: String, Codable, Sendable, Equatable, Hashabl
     case productOS
     case calendar
     case contacts
+    case mail
     case rss
     case sources
     case skills
@@ -92,6 +93,7 @@ public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Ha
     case openLocalAutomationSurface
     case openCalendarSources
     case openContactsSources
+    case openMailSources
     case openRSSSources
     case checkCommercialReadiness
     case openSettings
@@ -184,6 +186,8 @@ public struct ConnorNativeShellRouteResolver: Sendable {
             ConnorNativeShellRoute(item: item, legacySidebarID: "calendar")
         case .contacts:
             ConnorNativeShellRoute(item: item, legacySidebarID: "contacts")
+        case .mail:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "mail")
         case .rss:
             ConnorNativeShellRoute(item: item, legacySidebarID: "rss")
         case .sources:
@@ -244,6 +248,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellSidebarGroup(id: "extensions", title: "Extensions", items: [
                 ConnorNativeShellSidebarItem(id: .calendar, title: "Calendar", subtitle: "Native schedule source", systemImage: "calendar", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接日历", emptyStateActionTitle: "添加账户"),
                 ConnorNativeShellSidebarItem(id: .contacts, title: "Contacts", subtitle: "Native contacts source", systemImage: "person.crop.circle.badge", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接通讯录", emptyStateActionTitle: "添加账户"),
+                ConnorNativeShellSidebarItem(id: .mail, title: "Mail", subtitle: "Native mail data source", systemImage: "envelope", badgeStyle: .info, isPrimary: true, riskLevel: .high, emptyStateTitle: "还没有连接邮箱", emptyStateActionTitle: "添加邮箱"),
                 ConnorNativeShellSidebarItem(id: .rss, title: "RSS", subtitle: "Native feed intelligence", systemImage: "dot.radiowaves.left.and.right", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有添加 RSS 源", emptyStateActionTitle: "添加 RSS 源"),
                 ConnorNativeShellSidebarItem(id: .sources, title: "Sources", subtitle: "MCP source runtime", systemImage: "externaldrive.connected.to.line.below", riskLevel: .medium),
                 ConnorNativeShellSidebarItem(id: .skills, title: "Skills", subtitle: "Governed instruction profiles", systemImage: "sparkles.rectangle.stack")
@@ -261,6 +266,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellCommand(id: .openSkills, title: "Open Skills", systemImage: "sparkles.rectangle.stack", keyboardShortcut: "⌘5", target: .skills, groupID: "extensions", keywords: ["skill", "instruction"]),
             ConnorNativeShellCommand(id: .openAutomation, title: "Open Automation", systemImage: "bolt.badge.clock", keyboardShortcut: "⌘6", target: .automation, groupID: "governance", riskLevel: .medium, keywords: ["automation", "rules"]),
             ConnorNativeShellCommand(id: .openLocalAutomationSurface, title: "Open Local API / CLI", systemImage: "terminal", keyboardShortcut: "⌘7", target: .localAutomationSurface, groupID: "governance", isPrimaryAction: true, riskLevel: .medium, keywords: ["local", "api", "cli", "automation", "script"]),
+            ConnorNativeShellCommand(id: .openMailSources, title: "Open Mail", systemImage: "envelope", keyboardShortcut: "⌘8", target: .mail, groupID: "extensions", isPrimaryAction: true, riskLevel: .high, keywords: ["mail", "email", "imap", "smtp", "inbox"]),
             ConnorNativeShellCommand(id: .openCalendarSources, title: "Open Calendar", systemImage: "calendar", target: .calendar, groupID: "extensions", isPrimaryAction: true, riskLevel: .medium, keywords: ["calendar", "caldav", "events", "schedule"]),
             ConnorNativeShellCommand(id: .openContactsSources, title: "Open Contacts", systemImage: "person.crop.circle.badge", target: .contacts, groupID: "extensions", isPrimaryAction: true, riskLevel: .medium, keywords: ["contacts", "carddav", "people", "address book"]),
             ConnorNativeShellCommand(id: .openRSSSources, title: "Open RSS", systemImage: "dot.radiowaves.left.and.right", keyboardShortcut: "⌘9", target: .rss, groupID: "extensions", isPrimaryAction: true, riskLevel: .medium, keywords: ["rss", "feed", "atom", "json feed", "opml"]),

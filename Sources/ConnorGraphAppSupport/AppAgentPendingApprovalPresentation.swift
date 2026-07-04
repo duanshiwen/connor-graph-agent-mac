@@ -21,13 +21,20 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
     public init(_ approval: AgentPendingApproval) {
         self.id = approval.id
         self.requestID = approval.requestID
-        self.title = "Permission requested: \(approval.capability.rawValue)"
-        let tool = approval.toolName.map { " · Tool: \($0)" } ?? ""
-        self.detail = "Request \(approval.requestID)\(tool) · Payload: \(Self.compactJSON(approval.payloadJSON))"
+        let mail = AppMailSendApprovalPresentation(approval)
+        if mail.isMailSendRequest {
+            self.title = mail.title
+            self.detail = [mail.recipientSummary, mail.subjectSummary, mail.securitySummary].joined(separator: " · ")
+            self.allowsAlwaysAllow = false
+        } else {
+            self.title = "Permission requested: \(approval.capability.rawValue)"
+            let tool = approval.toolName.map { " · Tool: \($0)" } ?? ""
+            self.detail = "Request \(approval.requestID)\(tool) · Payload: \(Self.compactJSON(approval.payloadJSON))"
+            self.allowsAlwaysAllow = true
+        }
         self.statusLabel = approval.status.rawValue
         self.severity = Self.severity(for: approval.status)
         self.createdAt = approval.createdAt
-        self.allowsAlwaysAllow = true
     }
 
     private static func severity(for status: AgentPendingApprovalStatus) -> AppAgentPendingApprovalSeverity {

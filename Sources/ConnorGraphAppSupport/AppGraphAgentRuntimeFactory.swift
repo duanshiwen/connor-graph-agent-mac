@@ -146,6 +146,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             ), recorder: nativeSourceReferenceRecorder)
+            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            registry.registerNativeMailTools(runtime: MailRuntime(repository: mailStore, cache: mailStore), recorder: nativeSourceReferenceRecorder)
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
@@ -303,11 +305,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.defaultConnection ?? settings.connections.first else {
-                    return AnyLLMProvider { _, _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
-                    }
-                }
+            let connection = settings.defaultConnection
             switch connection.providerMode {
             case .openAIResponses:
                 guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {

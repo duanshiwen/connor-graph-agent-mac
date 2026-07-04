@@ -6,6 +6,8 @@ public struct ContactID: RawRepresentable, Codable, Sendable, Equatable, Hashabl
     public init(rawValue: String) { self.rawValue = rawValue }
 }
 
+public typealias MailContactID = ContactID
+
 public struct ContactEmailAddress: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var id: String { email.lowercased() }
     public var label: String?

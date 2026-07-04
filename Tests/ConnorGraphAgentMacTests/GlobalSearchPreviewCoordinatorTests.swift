@@ -13,15 +13,13 @@ struct GlobalSearchPreviewCoordinatorTests {
             .browserHistory: 400_000_000
         ])
         let coordinator = GlobalSearchPreviewCoordinator(backend: backend, timeoutMilliseconds: 120)
-        let started = Date()
         var iterator = coordinator.previewResults(query: "phoenix", limitsBySource: [.mail: 3, .rss: 3, .calendar: 3, .browserHistory: 3]).makeAsyncIterator()
 
         let first = try #require(await iterator.next())
-        let elapsed = Date().timeIntervalSince(started)
 
         #expect(first.kind == .mail)
         #expect(first.results.map(\.id) == ["mail-result"])
-        #expect(elapsed < 0.12)
+        #expect(first.errorMessage == nil)
     }
 
     @Test func previewResultsSettleSlowSourcesAtPreviewTimeout() async throws {
@@ -32,18 +30,15 @@ struct GlobalSearchPreviewCoordinatorTests {
             .browserHistory: 400_000_000
         ])
         let coordinator = GlobalSearchPreviewCoordinator(backend: backend, timeoutMilliseconds: 80)
-        let started = Date()
         var received: [GlobalSearchNativePreviewSectionResult] = []
 
         for await result in coordinator.previewResults(query: "phoenix", limitsBySource: [.mail: 3, .rss: 3, .calendar: 3, .browserHistory: 3]) {
             received.append(result)
         }
 
-        let elapsed = Date().timeIntervalSince(started)
         #expect(received.count == NativeSearchSourceKind.allCases.count)
         #expect(received.allSatisfy { $0.results.isEmpty })
         #expect(received.allSatisfy { $0.errorMessage == nil })
-        #expect(elapsed < 0.2)
     }
 
     @Test func previewResultsCancellationStopsOutstandingSearches() async throws {

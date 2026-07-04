@@ -7,11 +7,7 @@ extension AppViewModel {
 static func makeLLMProvider(settingsRepository: AppLLMSettingsRepository) -> AnyLLMProvider {
     do {
         let settings = try settingsRepository.loadSettings()
-        guard let connection = settings.defaultConnection ?? settings.connections.first else {
-                return AnyLLMProvider { _, _ in
-                    throw OpenAICompatibleProviderError.missingAPIKey
-                }
-            }
+        let connection = settings.defaultConnection
         switch connection.providerMode {
         case .openAIResponses:
             guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {

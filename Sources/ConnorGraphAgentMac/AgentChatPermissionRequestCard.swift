@@ -65,7 +65,7 @@ struct AgentChatPermissionRequestCard: View {
                         .padding(AgentChatLayout.spaceM)
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                 } label: {
-                    Text(compactPayload)
+                    Text(AppAgentPendingApprovalPresentation(approval).detail)
                         .font(AgentChatTypography.monoMeta)
                         .lineLimit(2)
                         .truncationMode(.middle)

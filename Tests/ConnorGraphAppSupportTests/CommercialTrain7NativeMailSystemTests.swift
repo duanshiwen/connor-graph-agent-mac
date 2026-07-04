@@ -98,6 +98,7 @@ struct CommercialTrain7NativeMailSystemTests {
         await #expect(throws: MailRuntimeError.self) {
             _ = try await runtime.sendDraft(draftID: draft.id, approved: false)
         }
+        _ = try await runtime.sendApprovalPayload(draftID: draft.id)
         let receipt = try await runtime.sendDraft(draftID: draft.id, approved: true)
         #expect(receipt.draftID == draft.id)
     }

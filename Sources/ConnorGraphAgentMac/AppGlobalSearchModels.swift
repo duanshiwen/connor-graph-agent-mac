@@ -20,6 +20,7 @@ struct GlobalSearchPreviewState: Equatable {
     var chatSessionResults: [GlobalSearchSessionResult] = []
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
+    var mailResults: [NativeSearchResult] = []
     var browserHistoryResults: [NativeSearchResult] = []
     var searchTokens: [String] = []
     var sectionStatusMessages: [GlobalSearchSectionKind: String] = [:]
@@ -32,6 +33,7 @@ struct GlobalSearchPreviewState: Equatable {
         chatSessionResults: [GlobalSearchSessionResult] = [],
         calendarResults: [NativeSearchResult] = [],
         rssResults: [NativeSearchResult] = [],
+        mailResults: [NativeSearchResult] = [],
         browserHistoryResults: [NativeSearchResult] = [],
         searchTokens: [String] = [],
         sectionStatusMessages: [GlobalSearchSectionKind: String] = [:],
@@ -42,6 +44,7 @@ struct GlobalSearchPreviewState: Equatable {
         self.chatSessionResults = chatSessionResults
         self.calendarResults = calendarResults
         self.rssResults = rssResults
+        self.mailResults = mailResults
         self.browserHistoryResults = browserHistoryResults
         self.searchTokens = searchTokens
         self.sectionStatusMessages = sectionStatusMessages
@@ -61,7 +64,7 @@ struct GlobalSearchPreviewState: Equatable {
     }
 
     var hasAnySourceResults: Bool {
-        !chatSessionResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !browserHistoryResults.isEmpty
+        !chatSessionResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
     }
 }
 
@@ -88,12 +91,14 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
     case chatSessions
     case calendar
     case rss
+    case mail
     case browserHistory
 
     init(nativeSourceKind: NativeSearchSourceKind) {
         switch nativeSourceKind {
         case .calendar: self = .calendar
         case .rss: self = .rss
+        case .mail: self = .mail
         case .browserHistory: self = .browserHistory
         }
     }
@@ -105,6 +110,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .chatSessions: "对话历史"
         case .calendar: "日历"
         case .rss: "RSS"
+        case .mail: "邮件"
         case .browserHistory: "浏览历史"
         }
     }
@@ -114,6 +120,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .chatSessions: "bubble.left.and.bubble.right"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
+        case .mail: "envelope"
         case .browserHistory: "clock.arrow.circlepath"
         }
     }
@@ -123,6 +130,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .chatSessions: "没有匹配的对话"
         case .calendar: "没有匹配的日程"
         case .rss: "没有匹配的 RSS"
+        case .mail: "没有匹配的邮件"
         case .browserHistory: "没有匹配的浏览历史"
         }
     }

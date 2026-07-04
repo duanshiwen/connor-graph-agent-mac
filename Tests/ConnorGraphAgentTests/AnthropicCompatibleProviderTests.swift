@@ -373,16 +373,21 @@ private enum AnthropicFixtures {
         httpClient: client
     )
 
-    await #expect(throws: AnthropicCompatibleProviderError.unsupportedVisionInput(model: "text-only-test", reason: "Model text-only-test does not support vision input according to Connor model capability kernel.")) {
-        _ = try await provider.complete(AgentModelRequest(messages: [
-            AgentModelMessage(
-                role: .user,
-                content: "Describe this image",
-                contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png")]
-            )
-        ]))
-    }
-    #expect(client.storage.capturedRequest == nil)
+    let result = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(
+            role: .user,
+            content: "Describe this image",
+            contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png")]
+        )
+    ]))
+
+    #expect(result.text == "OK")
+    #expect(result.warnings.contains("⚠️ 当前模型不支持图片输入，已自动发送文字内容。图片内容已忽略。"))
+    let body = String(decoding: try #require(client.storage.capturedRequest?.body), as: UTF8.self)
+    #expect(body.contains("Describe this image"))
+    #expect(!body.contains("\"type\":\"image\""))
+    #expect(!body.contains("\"type\": " + "\"image\""))
+    #expect(!body.contains("iVBORw0KGgo="))
 }
 
 @Test func anthropicHealthCheckReturnsOKWhenProviderRespondsWithText() async throws {

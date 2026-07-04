@@ -265,9 +265,7 @@ public struct AppLLMSettings: Sendable, Equatable {
         defaultThinkingLevel: AppLLMThinkingLevel = .defaultLevel
     ) {
         self.connections = connections
-        self.defaultConnectionID = connections.contains(where: { $0.id == defaultConnectionID })
-            ? defaultConnectionID
-            : (connections.first?.id ?? "")
+        self.defaultConnectionID = defaultConnectionID
         self.defaultThinkingLevel = defaultThinkingLevel
     }
 
@@ -303,9 +301,17 @@ public struct AppLLMSettings: Sendable, Equatable {
         self.init(connections: [connection], defaultConnectionID: id)
     }
 
-    public var defaultConnection: AppLLMConnectionConfig? {
-        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first
+    public var defaultConnection: AppLLMConnectionConfig {
+        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first ?? .defaultOpenAICompatible
     }
+
+    public var baseURLString: String { defaultConnection.baseURLString }
+    public var model: String { defaultConnection.model }
+    public var selectedModel: String { defaultConnection.selectedModel }
+    public var effectiveModel: String { defaultConnection.effectiveModel }
+    public var hasAPIKey: Bool { defaultConnection.hasAPIKey }
+    public var providerMode: AppLLMProviderMode { defaultConnection.providerMode }
+    public var modelOptions: [String] { defaultConnection.modelOptions }
 
     public func connection(id: String?) -> AppLLMConnectionConfig? {
         guard let id, !id.isEmpty else { return defaultConnection }
@@ -390,6 +396,9 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     public func loadSettings() throws -> AppLLMSettings {
         if let raw = settingsStore.string(forKey: Keys.connections), let data = raw.data(using: .utf8) {
             let decoded = try JSONDecoder().decode([AppLLMConnectionConfig].self, from: data)
+            if decoded.isEmpty {
+                return try loadLegacySettings()
+            }
             let hydrated = try decoded.map { connection in
                 var copy = connection
                 copy.hasAPIKey = try hasAPIKey(for: connection.id)
@@ -401,7 +410,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
                 defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
             )
         }
-        return AppLLMSettings(connections: [], defaultConnectionID: "", defaultThinkingLevel: .defaultLevel)
+        return try loadLegacySettings()
     }
 
     private func loadLegacySettings() throws -> AppLLMSettings {
@@ -441,21 +450,24 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     public func save(settings: AppLLMSettings, apiKey: String?) throws {
+        let effectiveSettings = settings.connections.isEmpty
+            ? AppLLMSettings(connections: [settings.defaultConnection], defaultConnectionID: settings.defaultConnection.id, defaultThinkingLevel: settings.defaultThinkingLevel)
+            : settings
         let sanitized = AppLLMSettings(
-            connections: settings.connections.map { connection in
+            connections: effectiveSettings.connections.map { connection in
                 var copy = connection
                 copy.hasAPIKey = false
                 return copy
             },
-            defaultConnectionID: settings.defaultConnectionID,
-            defaultThinkingLevel: settings.defaultThinkingLevel
+            defaultConnectionID: effectiveSettings.defaultConnectionID,
+            defaultThinkingLevel: effectiveSettings.defaultThinkingLevel
         )
         settingsStore.set(sanitized.defaultThinkingLevel.rawValue, forKey: Keys.defaultThinkingLevel)
         let data = try JSONEncoder().encode(sanitized.connections)
         settingsStore.set(String(decoding: data, as: UTF8.self), forKey: Keys.connections)
         settingsStore.set(sanitized.defaultConnectionID, forKey: Keys.defaultConnectionID)
 
-        guard let defaultConnection = settings.defaultConnection else { return }
+        let defaultConnection = effectiveSettings.defaultConnection
         settingsStore.set(defaultConnection.providerMode.rawValue, forKey: Keys.providerMode)
         settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
         settingsStore.set(defaultConnection.model, forKey: Keys.model)
@@ -692,7 +704,7 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
 
     private func fallbackConnections(error: Error) -> [AppLLMModelConnection] {
         let settings = (try? settingsRepository.loadSettings()) ?? .default
-        guard let connection = settings.defaultConnection else { return [] }
+        let connection = settings.defaultConnection
         return [AppLLMModelConnection(id: connection.id, title: connection.name, subtitle: "模型目录不可用：\(error.localizedDescription)", providerMode: connection.providerMode, models: configuredOptions(from: connection), isLiveCatalog: false)]
     }
 
