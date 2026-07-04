@@ -102,6 +102,42 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(try await reloaded.message(id: messageID)?.summary.flags.isRead == true)
     }
 
+    @Test func fileBackedMailStoreSearchesCachedBodyTextAndRespectsAccountFilter() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-body-search-store-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let accountA = MailAccountID(rawValue: "account-a")
+        let accountB = MailAccountID(rawValue: "account-b")
+        let inboxA = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountA, name: "Inbox", path: "INBOX", role: .inbox)
+        let inboxB = MailMailbox(id: MailMailboxID(rawValue: "account-b-inbox"), accountID: accountB, name: "Inbox", path: "INBOX", role: .inbox)
+        let store = FileBackedMailSourceStore(storeURL: storeURL)
+        try await store.saveAccount(Self.makeMailAccount(id: accountA, displayName: "Account A"))
+        try await store.saveAccount(Self.makeMailAccount(id: accountB, displayName: "Account B"))
+        try await store.saveMailbox(inboxA)
+        try await store.saveMailbox(inboxB)
+        try await store.saveMessage(Self.makeMailDetail(id: "body-a-old", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 100), subject: "No visible keyword", bodyText: "Quarterly body-only AlphaNeedle context"))
+        try await store.saveMessage(Self.makeMailDetail(id: "body-a-new", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 200), subject: "Still no subject keyword", bodyText: "A newer AlphaNeedle body match"))
+        try await store.saveMessage(Self.makeMailDetail(id: "body-b", accountID: accountB, mailboxID: inboxB.id, date: Date(timeIntervalSince1970: 300), subject: "Other account", bodyText: "AlphaNeedle appears in another account"))
+
+        let all = try await store.searchMessages(query: "AlphaNeedle", accountID: nil)
+        #expect(all.map { $0.id.rawValue } == ["body-b", "body-a-new", "body-a-old"])
+
+        let accountAOnly = try await store.searchMessages(query: "AlphaNeedle", accountID: accountA)
+        #expect(accountAOnly.map { $0.id.rawValue } == ["body-a-new", "body-a-old"])
+    }
+
+    @Test func inMemoryMailStoreSearchesCachedBodyText() async throws {
+        let accountID = MailAccountID(rawValue: "account-a")
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let store = InMemoryMailSourceCache(mailboxes: [inbox], messages: [
+            Self.makeMailDetail(id: "body-old", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 100), subject: "No keyword", bodyText: "Body-only MemoryNeedle match"),
+            Self.makeMailDetail(id: "body-new", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 200), subject: "No keyword either", bodyText: "Newer MemoryNeedle match")
+        ])
+
+        let results = try await store.searchMessages(query: "MemoryNeedle", accountID: accountID)
+        #expect(results.map { $0.id.rawValue } == ["body-new", "body-old"])
+    }
+
     @Test func fileBackedMailStoreListsRecentMessagesWithDirectionAndAccountFilters() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-recent-store-\(UUID().uuidString)", isDirectory: true)
         let storeURL = directory.appendingPathComponent("mail-store.json")
@@ -573,7 +609,7 @@ struct CommercialTrain7NativeMailSystemTests {
         )
     }
 
-    private static func makeMailDetail(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String) -> MailMessageDetail {
+    private static func makeMailDetail(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String, bodyText: String? = nil) -> MailMessageDetail {
         let summary = MailMessageSummary(
             id: MailMessageID(rawValue: id),
             accountID: accountID,
@@ -584,7 +620,9 @@ struct CommercialTrain7NativeMailSystemTests {
             date: date,
             snippet: subject
         )
-        return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<\(id)@example.com>"), body: MailMessageBody(redactedPreview: subject))
+        let body = bodyText.map { MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: $0, byteCount: $0.utf8.count), redactedPreview: $0) }
+            ?? MailMessageBody(redactedPreview: subject)
+        return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<\(id)@example.com>"), body: body)
     }
 
     private func makeMailBrowserFixture(now: Date = Date()) -> NativeMailBrowserPresentation {
