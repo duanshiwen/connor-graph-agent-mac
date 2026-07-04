@@ -169,14 +169,15 @@ public struct MailMIMEParser: Sendable, Equatable {
             
             let headerBytes = headerEnd > 0 ? partData.subdata(in: 0..<headerEnd) : Data()
             guard let headerStr = String(data: headerBytes, encoding: .ascii) else { continue }
+            let unfoldedHeader = unfoldMIMEHeader(headerStr)
             let bodySlice = partData.subdata(in: headerEnd..<partData.count)
             
             // Extract Content-Type
-            let headerLower = headerStr.lowercased()
+            let headerLower = unfoldedHeader.lowercased()
             
             if headerLower.contains("text/plain") || headerLower.contains("text/html") {
-                let charset = extractCharsetFromContentType(headerStr)
-                let transferEncoding = extractTransferEncodingFromHeader(headerStr)
+                let charset = extractCharsetFromContentType(unfoldedHeader)
+                let transferEncoding = extractTransferEncodingFromHeader(unfoldedHeader)
                 let decodedBody = decodeTransferEncoding(bodySlice, encoding: transferEncoding)
                 
                 if headerLower.contains("text/html") {
@@ -191,7 +192,7 @@ public struct MailMIMEParser: Sendable, Equatable {
                 }
             } else if headerLower.contains("multipart/") {
                 // Nested multipart — recursive
-                let nestedBoundary = extractBoundaryFromContentType(headerStr)
+                let nestedBoundary = extractBoundaryFromContentType(unfoldedHeader)
                 if let nestedBoundary {
                     let nested = extractBodyComponents(data: bodySlice, boundary: nestedBoundary, fallback: fallback)
                     if bestPlain == nil, !nested.plainText.isEmpty { bestPlain = nested.plainText }
@@ -251,6 +252,14 @@ public struct MailMIMEParser: Sendable, Equatable {
         return result
     }
 
+    private func unfoldMIMEHeader(_ header: String) -> String {
+        header.replacingOccurrences(
+            of: #"\r?\n[ \t]+"#,
+            with: " ",
+            options: .regularExpression
+        )
+    }
+
     private func extractCharsetFromContentType(_ header: String) -> String? {
         guard let charsetRange = header.range(of: "charset=", options: .caseInsensitive) else { return nil }
         let after = header[charsetRange.upperBound...]
@@ -262,10 +271,13 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     private func extractTransferEncodingFromHeader(_ header: String) -> String? {
-        guard let range = header.range(of: "Content-Transfer-Encoding:", options: .caseInsensitive) else { return nil }
-        let after = header[range.upperBound...]
+        let unfolded = unfoldMIMEHeader(header)
+        guard let unfoldedRange = unfolded.range(of: "Content-Transfer-Encoding:", options: .caseInsensitive) else { return nil }
+        let after = unfolded[unfoldedRange.upperBound...]
         let endOfLine = after.firstIndex(of: "\n") ?? after.endIndex
-        return String(after[..<endOfLine]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(after[..<endOfLine])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
     }
 
     public func extractBoundaryFromContentType(_ header: String) -> String? {
