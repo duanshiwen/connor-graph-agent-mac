@@ -202,7 +202,7 @@ public struct MailGetMessageTool: AgentTool {
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "messageID": .string(description: "Exact MailMessageSummary.id returned by mail_search_messages. Do not pass result numbers such as '1' or IMAP UIDs."),
+            "messageID": .string(description: "Exact MailMessageSummary.id returned by mail_search_messages or mail_list_recent_messages. Do not pass result numbers, invented pseudo IDs such as 'message1' or 'msg1', or IMAP UIDs."),
             "includeBody": .boolean(description: "Whether to include body")
         ], required: ["messageID"])
     }
@@ -211,16 +211,23 @@ public struct MailGetMessageTool: AgentTool {
         self.recorder = recorder
     }
 
-    private static func guidanceForNumericMessageID(_ value: String) -> AgentToolError {
-        .invalidArguments("mail_get_message expects the exact messageID returned by mail_search_messages. Received \"\(value)\", which looks like a result index. Pass the selected summary's id field instead of a result index or ordinal number.")
+    private static func guidanceForOrdinalLikeMessageID(_ value: String) -> AgentToolError {
+        .invalidArguments("mail_get_message expects the exact messageID returned in a MailMessageSummary from mail_search_messages or mail_list_recent_messages. Received \"\(value)\", which looks like a result index or invented pseudo ID. Pass the selected summary's id field exactly; do not pass ordinals such as '1', pseudo IDs such as 'message1'/'msg1', or IMAP UIDs.")
+    }
+
+    private static func looksLikeOrdinalOrPseudoResultID(_ value: String) -> Bool {
+        if value.allSatisfy(\.isNumber) { return true }
+        let lowercased = value.lowercased()
+        let pattern = #"^(message|msg|mail|email|result)[ _-]*[0-9]+$"#
+        return lowercased.range(of: pattern, options: .regularExpression) != nil
     }
 
     private static func normalizedMessageID(from arguments: AgentToolArguments) throws -> String {
         guard let rawMessageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
         let messageID = rawMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !messageID.isEmpty else { throw AgentToolError.invalidArguments("messageID is required") }
-        if messageID.allSatisfy(\.isNumber) {
-            throw guidanceForNumericMessageID(messageID)
+        if looksLikeOrdinalOrPseudoResultID(messageID) {
+            throw guidanceForOrdinalLikeMessageID(messageID)
         }
         return messageID
     }
