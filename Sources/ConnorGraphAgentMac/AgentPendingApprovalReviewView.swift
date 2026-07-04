@@ -41,7 +41,7 @@ struct AgentPendingApprovalReviewView: View {
                                 .background(severityColor(row.severity).opacity(0.15), in: Capsule())
                                 .foregroundStyle(severityColor(row.severity))
                             Spacer()
-                            Text(row.createdAt.formatted(date: .abbreviated, time: .shortened))
+                            Text(row.createdAt.connorLocalFormatted(date: .medium, time: .short))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

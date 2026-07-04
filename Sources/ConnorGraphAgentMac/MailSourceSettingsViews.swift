@@ -193,7 +193,7 @@ private struct MailMessageHero: View {
                 HStack(spacing: AppShellLayout.spaceS) {
                     MailStatusPill(status: account?.displayName ?? "未选择账户", color: .secondary, systemImage: "person.crop.circle")
                     MailStatusPill(status: mailbox?.name ?? "未选择文件夹", color: .secondary, systemImage: "folder")
-                    MailStatusPill(status: message.date.formatted(date: .abbreviated, time: .shortened), color: .secondary, systemImage: "clock")
+                    MailStatusPill(status: message.date.connorLocalFormatted(date: .medium, time: .short), color: .secondary, systemImage: "clock")
                 }
             }
             Spacer(minLength: 0)

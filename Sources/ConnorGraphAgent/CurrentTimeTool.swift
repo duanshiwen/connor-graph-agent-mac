@@ -49,7 +49,7 @@ public struct GetCurrentTimeTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Current time: \(display) (\(iso8601))",
+            contentText: "Current time: \(display)",
             contentJSON: contentJSON
         )
     }

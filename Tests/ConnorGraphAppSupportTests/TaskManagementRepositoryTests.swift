@@ -19,16 +19,24 @@ struct TaskManagementRepositoryTests {
         #expect(repository.taskDefinitionsURL.path.contains("/tasks/task-definitions.json"))
     }
 
-    @Test func systemDefaultsDoNotExposeMemoryOSPipelineTasks() throws {
+    @Test func systemDefaultsExposeProtectedMemoryOSL1PipelineTask() throws {
         let now = Date(timeIntervalSince1970: 100)
 
         let tasks = ConnorTaskDefinition.systemDefaults(now: now)
+        let task = try #require(tasks.first { $0.id == "system-memory-os-l1-unified-projection" })
 
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-knowledge" } == false)
-        #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" } == false)
+        #expect(task.name == "Memory OS L1 知识提升")
+        #expect(task.origin == .system)
+        #expect(task.trigger.kind == .scheduled)
+        #expect(task.trigger.intervalSeconds == 86_400)
+        #expect(task.trigger.recurrence == .interval)
+        #expect(task.target.targetKind == "memory_os.pipeline")
+        #expect(task.target.targetID == "l1")
+        #expect(task.target.operationName == "plan_l1_unified_projection_jobs")
+        #expect(task.metadata.isProtectedSystemTask)
     }
 
-    @Test func repositoryDoesNotBackfillMemoryOSPipelineDefaults() throws {
+    @Test func repositoryBackfillsMemoryOSL1PipelineDefault() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
@@ -36,8 +44,8 @@ struct TaskManagementRepositoryTests {
 
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 100))
 
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-knowledge" } == false)
-        #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" } == false)
+        #expect(tasks.contains { $0.id == "system-memory-os-l1-unified-projection" })
+        #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" })
         #expect(tasks.contains { $0.id == "system.calendar.account.calendar-account-a.refresh" })
     }
 

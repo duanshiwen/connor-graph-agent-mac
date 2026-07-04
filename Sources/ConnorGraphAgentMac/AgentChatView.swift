@@ -286,7 +286,7 @@ private struct AgentBackgroundTaskOverlay: View {
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                 }
-                Text(task.updatedAt.formatted(date: .omitted, time: .shortened))
+                Text(task.updatedAt.connorLocalFormatted(date: .none, time: .short))
                     .font(AgentChatTypography.micro)
                     .foregroundStyle(.tertiary)
             }
@@ -780,7 +780,7 @@ private struct AgentChatConversationHeader: View {
                             .font(AgentChatTypography.callout)
                             .textSelection(.enabled)
                         if let freshness = viewModel.latestChatSummaryFreshness {
-                            Text("覆盖 \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) 条消息 · 更新于 \(summary.updatedAt.formatted())")
+                            Text("覆盖 \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) 条消息 · 更新于 \(summary.updatedAt.connorLocalStandardDateTime())")
                                 .font(AgentChatTypography.meta)
                                 .foregroundStyle(.secondary)
                         }
@@ -1047,7 +1047,7 @@ private struct AgentChatInspectorView: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 Text("消息：\(session.messages.count)")
-                Text("更新：\(session.updatedAt.formatted())")
+                Text("更新：\(session.updatedAt.connorLocalStandardDateTime())")
                 Text("会话 ID：\(session.id)")
                     .textSelection(.enabled)
             }

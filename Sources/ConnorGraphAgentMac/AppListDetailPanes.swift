@@ -24,6 +24,8 @@ struct CraftListPaneView: View {
                 CraftContactsListPane(viewModel: viewModel)
             case .rss:
                 CraftRSSListPane(viewModel: viewModel)
+            case .mail:
+                CraftMailListPane(viewModel: viewModel)
             case .sources:
                 CraftSourceListPane(viewModel: viewModel)
             case .skills:
@@ -1508,6 +1510,133 @@ private struct AddTaskAutomationSheet: View {
     }
 }
 
+struct CraftMailListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
+    private var visibleMessages: [MailMessageSummary] {
+        presentation.messages(accountID: nil, mailboxID: nil, query: "")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("邮件")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.presentAddMailAccountSheet() }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加邮件账户")
+                .accessibilityLabel("添加邮件账户")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            if presentation.accounts.isEmpty {
+                ContentUnavailableView("还没有添加邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。康纳同学会把邮件同步到本地，并保持发送审批边界。"))
+                    .padding(.top, 80)
+            } else if presentation.mailboxes.isEmpty {
+                ContentUnavailableView("还没有邮箱文件夹", systemImage: "tray", description: Text("账户添加后，康纳同学会在同步完成时显示收件箱和其他文件夹。"))
+                    .padding(.top, 80)
+            } else if presentation.messages.isEmpty {
+                ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
+                    .padding(.top, 80)
+            } else {
+                List(visibleMessages) { message in
+                    MailMessageListRow(
+                        message: message,
+                        account: presentation.account(id: message.accountID),
+                        mailbox: presentation.mailbox(id: message.mailboxID),
+                        isSelected: message.id == viewModel.selectedMailMessageID,
+                        onSelect: { selectMessage(message) }
+                    )
+                    .nativeListRowStyle()
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .contentMargins(.top, 6, for: .scrollContent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
+            AddMailAccountSheet(viewModel: viewModel)
+        }
+    }
+
+    private func selectMessage(_ message: MailMessageSummary) {
+        viewModel.selectedMailAccountID = message.accountID
+        viewModel.selectedMailMailboxID = message.mailboxID
+        viewModel.selectedMailMessageID = message.id
+    }
+}
+
+private struct MailMessageListRow: View {
+    var message: MailMessageSummary
+    var account: MailAccount?
+    var mailbox: MailMailbox?
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(message.flags.isRead ? Color.secondary.opacity(0.24) : Color.accentColor)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 7)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(message.subject.isEmpty ? "无主题" : message.subject)
+                            .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
+                            .lineLimit(1)
+                        if message.hasAttachments {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        if message.flags.isFlagged {
+                            Image(systemName: "flag.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Text(senderText)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .lineLimit(1)
+                    Text(contextText)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Text(message.snippet)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var senderText: String {
+        if let name = message.from.name, !name.isEmpty { return name }
+        return message.from.email
+    }
+
+    private var contextText: String {
+        [account?.displayName, mailbox?.name, message.date.connorLocalFormatted(date: .medium, time: .short)]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+}
+
 struct CraftRSSListPane: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -1622,7 +1751,7 @@ private struct RSSItemListRow: View {
     }
 
     private var contextText: String {
-        [item.author, item.publishedAt.formatted(date: .abbreviated, time: .shortened)]
+        [item.author, item.publishedAt.connorLocalFormatted(date: .medium, time: .short)]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -1778,7 +1907,7 @@ private struct CalendarEventDetailPane: View {
                         if let accountName, !accountName.isEmpty {
                             CalendarMetadataLine(label: "账户", value: accountName)
                         }
-                        CalendarMetadataLine(label: "更新", value: event.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                        CalendarMetadataLine(label: "更新", value: event.updatedAt.connorLocalFormatted(date: .medium, time: .short))
                         if let recurrence = event.recurrenceSummary?.ruleDescription, !recurrence.isEmpty {
                             CalendarMetadataLine(label: "重复", value: recurrence)
                         }
@@ -1854,10 +1983,10 @@ private struct CalendarEventHero: View {
 
     private var primaryTimeText: String {
         if event.isAllDay {
-            return event.start.date.formatted(date: .complete, time: .omitted)
+            return event.start.date.connorLocalFormatted(date: .full, time: .none)
         }
-        let start = event.start.date.formatted(date: .complete, time: .shortened)
-        let end = event.end.date.formatted(date: .omitted, time: .shortened)
+        let start = event.start.date.connorLocalFormatted(date: .full, time: .short)
+        let end = event.end.date.connorLocalFormatted(date: .none, time: .short)
         return "\(start) – \(end)"
     }
 }
@@ -2381,7 +2510,7 @@ private struct RSSItemHero: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    RSSStatusPill(status: item.publishedAt.formatted(date: .abbreviated, time: .shortened), color: .secondary, systemImage: "clock")
+                    RSSStatusPill(status: item.publishedAt.connorLocalFormatted(date: .medium, time: .short), color: .secondary, systemImage: "clock")
                     RSSStatusPill(status: item.author ?? "未知作者", color: .secondary, systemImage: "person")
                 }
             }

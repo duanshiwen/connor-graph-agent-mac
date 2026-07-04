@@ -498,7 +498,7 @@ private struct GlobalSearchBrowserHistoryRow: View {
                         .font(AppListTypography.rowTitle)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text(record.visitedAt.formatted(date: .abbreviated, time: .shortened))
+                    Text(record.visitedAt.connorLocalFormatted(date: .medium, time: .short))
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)

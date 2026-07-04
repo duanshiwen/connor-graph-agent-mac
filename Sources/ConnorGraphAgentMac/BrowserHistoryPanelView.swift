@@ -248,6 +248,7 @@ private struct BrowserHistoryRow: View {
     private var timeString: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .autoupdatingCurrent
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: record.visitedAt)
     }
@@ -328,6 +329,7 @@ struct BrowserHistoryGrouper {
         default:
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "zh_CN")
+            formatter.timeZone = .autoupdatingCurrent
             formatter.dateFormat = "yyyy年M月"
             return formatter.string(from: bucket)
         }

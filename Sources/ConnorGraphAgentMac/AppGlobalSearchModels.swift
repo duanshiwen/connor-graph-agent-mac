@@ -2,6 +2,28 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
+extension Date {
+    func connorLocalFormatted(date: DateFormatter.Style = .medium, time: DateFormatter.Style = .short) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = date
+        formatter.timeStyle = time
+        return formatter.string(from: self)
+    }
+
+    func connorLocalStandardDateTime() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        return formatter.string(from: self)
+    }
+}
+
 struct GlobalSearchSessionResult: Identifiable, Equatable {
     var id: String
     var title: String
@@ -10,7 +32,7 @@ struct GlobalSearchSessionResult: Identifiable, Equatable {
     var messageCount: Int
 
     var updatedAtLabel: String {
-        updatedAt.formatted(date: .abbreviated, time: .shortened)
+        updatedAt.connorLocalFormatted(date: .medium, time: .short)
     }
 }
 

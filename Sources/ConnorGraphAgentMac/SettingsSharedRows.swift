@@ -244,6 +244,7 @@ struct SettingsBirthDatePickerRow: View {
         let f = DateFormatter()
         f.dateFormat = "yyyy / MM / dd"
         f.locale = Locale(identifier: "zh_CN")
+        f.timeZone = .autoupdatingCurrent
         return f
     }()
 
