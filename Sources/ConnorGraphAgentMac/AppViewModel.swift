@@ -2385,6 +2385,10 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningScheduledTasks = true
         defer { isRunningScheduledTasks = false }
         let runner = TaskTargetRunner.appRuntime(
+            mailRefresh: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
+                return try await self.refreshMailForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
+            },
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
                 return await self.refreshCalendarForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
@@ -2485,6 +2489,66 @@ final class AppViewModel: NSObject, ObservableObject {
         default:
             throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline:\(request.operationName)")
         }
+    }
+
+    private func refreshMailForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
+        guard let mailStore else { return "Mail store unavailable" }
+        let accounts: [MailAccount]
+        if let sourceInstanceID, !sourceInstanceID.isEmpty {
+            guard let account = try await mailStore.account(id: MailAccountID(rawValue: sourceInstanceID)) else {
+                return "Mail account not found: \(sourceInstanceID)"
+            }
+            accounts = [account]
+        } else {
+            accounts = try await mailStore.listAccounts()
+        }
+        guard !accounts.isEmpty else { return "No mail accounts configured" }
+
+        let syncService = MailIMAPInitialSyncService(messageLimit: 50)
+        var syncedMessageCount = 0
+        var summaries: [String] = []
+
+        for account in accounts {
+            let mailboxes = try await mailStore.listMailboxes(accountID: account.id)
+            let inbox = mailboxes.first { $0.role == .inbox } ?? mailboxes.first
+            let storedUIDs = try await storedMailUIDs(for: account.id, in: mailStore)
+            let result: MailInitialSyncResult
+            if !storedUIDs.isEmpty || inbox?.status.lastSyncedAt != nil {
+                result = try await syncService.syncIncremental(
+                    account: account,
+                    storedUIDs: storedUIDs,
+                    storedUIDValidity: inbox?.status.syncCursor?.uidValidity
+                )
+            } else {
+                result = try await syncService.sync(account: account)
+            }
+
+            try await mailStore.saveAccount(result.account)
+            for mailbox in result.mailboxes {
+                try await mailStore.saveMailbox(mailbox)
+            }
+            if !result.messages.isEmpty {
+                try await mailStore.saveMessagesBatch(result.messages)
+            }
+            syncedMessageCount += result.messages.count
+            summaries.append("\(result.account.displayName)：\(result.account.health.summary)")
+        }
+
+        await reloadMailBrowserPresentation()
+        let summary = summaries.joined(separator: "；")
+        if let sourceInstanceID, !sourceInstanceID.isEmpty {
+            return "Mail refreshed account \(sourceInstanceID); synced \(syncedMessageCount) message(s). \(summary)"
+        }
+        return "Mail refreshed \(accounts.count) account(s); synced \(syncedMessageCount) message(s). \(summary)"
+    }
+
+    private func storedMailUIDs(for accountID: MailAccountID, in mailStore: any MailStoreProtocol) async throws -> Set<String> {
+        let prefix = "\(accountID.rawValue)-INBOX-"
+        return Set(try await mailStore.allMessageIDs().compactMap { messageID in
+            guard messageID.rawValue.hasPrefix(prefix) else { return nil }
+            let uid = String(messageID.rawValue.dropFirst(prefix.count))
+            return uid.isEmpty ? nil : uid
+        })
     }
 
     private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
@@ -2674,9 +2738,11 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func addMailAccountAndPrepareSync(displayName: String, email: String, provider: MailProviderKind, incomingHost: String, incomingPort: Int, incomingSecurity: MailConnectionSecurity, outgoingHost: String, outgoingPort: Int, outgoingSecurity: MailConnectionSecurity, username: String, password: String, authMode: MailAuthMode) async throws {
-        let accountID = MailAccountID(rawValue: email.lowercased())
-        let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-\(accountID.rawValue)"), displayName: displayName, address: MailAddress(name: displayName, email: email))
-        let binding = MailCredentialBinding(keychainService: "ConnorGraphAgent.mail", accountName: username.isEmpty ? email : username, authMode: authMode)
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let accountID = MailAccountID(rawValue: normalizedEmail)
+        let resolvedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? normalizedEmail : username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-\(accountID.rawValue)"), displayName: displayName, address: MailAddress(name: displayName, email: normalizedEmail))
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: resolvedUsername, authMode: authMode)
         let account = MailAccount(
             id: accountID,
             provider: provider,
@@ -2688,18 +2754,24 @@ final class AppViewModel: NSObject, ObservableObject {
             health: MailAccountHealth(status: .unknown, summary: "Ready to sync")
         )
         let inbox = MailMailbox(id: MailMailboxID(rawValue: "\(accountID.rawValue)-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        try AppMailCredentialStore().saveCredential(password, binding: binding)
         try await mailStore?.saveAccount(account)
         try await mailStore?.saveMailbox(inbox)
         selectedMailAccountID = accountID
         selectedMailMailboxID = inbox.id
         isPresentingAddMailAccountSheet = false
-        mailSyncMessage = "已添加邮箱：\(account.displayName)。凭据将由邮件凭据边界保存，正文同步可由后台任务执行。"
+        mailSyncMessage = "已添加邮箱：\(account.displayName)，正在同步最近邮件…"
         await reloadMailBrowserPresentation()
         do {
             try await reconcileMailAccountRefreshTasks()
             reloadTaskManagementPresentation()
+            let summary = try await refreshMailForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil)
+            mailSyncMessage = summary
+            reloadTaskManagementPresentation()
         } catch {
-            errorMessage = String(describing: error)
+            let message = String(describing: error)
+            mailSyncMessage = "邮箱已添加，但同步失败：\(message)"
+            errorMessage = message
         }
     }
 
