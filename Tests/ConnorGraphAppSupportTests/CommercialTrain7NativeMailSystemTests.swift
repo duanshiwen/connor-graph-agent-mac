@@ -101,6 +101,38 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(MailBodyOnDemandFetchPlanner.imapUID(for: emptyDetail) == "1392")
     }
 
+    @Test func mailBodyOnDemandPlannerRejectsEncodedGarbageCachedBodies() {
+        let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
+        let mailboxID = MailMailboxID(rawValue: "yakii_d@icloud.com-inbox")
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: "yakii_d@icloud.com-INBOX-1392"),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: "Encoded body",
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "yakii_d@icloud.com")],
+            snippet: "PCFET0NUWVBF"
+        )
+        let base64HTML = "PCFET0NUWVBFIEhUTUw+PGh0bWw+PGJvZHk+PHA+QXBwbGUgUmVjZWlwdDwvcD48L2JvZHk+PC9odG1sPg=="
+        let base64Detail = MailMessageDetail(
+            summary: summary,
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: base64HTML, byteCount: base64HTML.utf8.count),
+                redactedPreview: base64HTML
+            )
+        )
+        let quotedPrintableDetail = MailMessageDetail(
+            summary: summary,
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: "<td>=E6=AE=B5=E8=AF=97=E9=97=BB</td>", byteCount: 42),
+                redactedPreview: "=E6=AE=B5=E8=AF=97=E9=97=BB"
+            )
+        )
+
+        #expect(!MailBodyOnDemandFetchPlanner.hasDisplayableBody(base64Detail))
+        #expect(!MailBodyOnDemandFetchPlanner.hasDisplayableBody(quotedPrintableDetail))
+    }
+
     @Test func mailBodyOnDemandPlannerSupportsInboxAndSentMessageIDs() {
         let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
         let inboxDetail = MailMessageDetail(
