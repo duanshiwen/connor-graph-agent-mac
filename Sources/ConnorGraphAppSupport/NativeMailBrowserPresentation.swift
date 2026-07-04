@@ -101,7 +101,10 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     public init(accounts: [MailAccount], mailboxes: [MailMailbox], messages: [MailMessageSummary]) {
         self.accounts = accounts
         self.mailboxes = mailboxes
-        self.messages = messages
+        // Mail browsers should behave like an inbox: newest sent/received message first.
+        // Normalize here so UI lists, default selection, and any presentation fallback stay
+        // stable even when an upstream cache/store returns insertion order or ascending order.
+        self.messages = Self.sortedNewestFirst(messages)
     }
 
     public func account(id: MailAccountID?) -> MailAccount? {
@@ -126,7 +129,7 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
 
     public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String) -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return messages.filter { message in
+        let filtered = messages.filter { message in
             if let accountID, message.accountID != accountID { return false }
             if let mailboxID, message.mailboxID != mailboxID { return false }
             guard !normalized.isEmpty else { return true }
@@ -135,7 +138,14 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
                 || message.from.email.lowercased().contains(normalized)
                 || (message.from.name?.lowercased().contains(normalized) ?? false)
         }
-        .sorted { lhs, rhs in lhs.date > rhs.date }
+        return Self.sortedNewestFirst(filtered)
+    }
+
+    private static func sortedNewestFirst(_ messages: [MailMessageSummary]) -> [MailMessageSummary] {
+        messages.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.id.rawValue < rhs.id.rawValue
+        }
     }
 
     public var totalMessageCount: Int {
