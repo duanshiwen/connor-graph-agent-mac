@@ -42,6 +42,27 @@ struct NativeMailBrowserPresentationTests {
         #expect(presentation.messages.map { $0.id.rawValue } == ["a", "z"])
     }
 
+    @Test func messagesCanFilterReceivedAndSentDirections() {
+        let accountID = MailAccountID(rawValue: "account")
+        let inboxID = MailMailboxID(rawValue: "inbox")
+        let sentID = MailMailboxID(rawValue: "sent")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Test Mail", identities: [])
+        let inbox = MailMailbox(id: inboxID, accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let sent = MailMailbox(id: sentID, accountID: accountID, name: "Sent", path: "Sent", role: .sent)
+        let received = Self.makeMessage(id: "received", accountID: accountID, mailboxID: inboxID, date: Date(timeIntervalSince1970: 100), subject: "Received")
+        let sentMessage = Self.makeMessage(id: "sent-message", accountID: accountID, mailboxID: sentID, date: Date(timeIntervalSince1970: 200), subject: "Sent")
+
+        let presentation = NativeMailBrowserPresentation(
+            accounts: [account],
+            mailboxes: [inbox, sent],
+            messages: [received, sentMessage]
+        )
+
+        #expect(presentation.messages(accountID: nil, mailboxID: nil, query: "", direction: .all).map { $0.id.rawValue } == ["sent-message", "received"])
+        #expect(presentation.messages(accountID: nil, mailboxID: nil, query: "", direction: .received).map { $0.id.rawValue } == ["received"])
+        #expect(presentation.messages(accountID: nil, mailboxID: nil, query: "", direction: .sent).map { $0.id.rawValue } == ["sent-message"])
+    }
+
     private static func makeMessage(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String) -> MailMessageSummary {
         MailMessageSummary(
             id: MailMessageID(rawValue: id),
