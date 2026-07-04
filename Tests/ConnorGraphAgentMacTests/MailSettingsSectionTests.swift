@@ -104,6 +104,34 @@ struct MailSettingsSectionTests {
         #expect(MailBodyDisplayPresentation(detail: richHTML).html == "<p>Hello</p>")
     }
 
+    @Test func mailBodyDisplayPrefersPlainTextWhenHTMLAlsoExists() {
+        let accountID = MailAccountID(rawValue: "shiwen@example.com")
+        let mailboxID = MailMailboxID(rawValue: "inbox")
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: "shiwen@example.com-INBOX-44"),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: "营销邮件",
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "shiwen@example.com")],
+            snippet: "查看收据"
+        )
+        let detail = MailMessageDetail(
+            summary: summary,
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: "Apple Receipt\nTotal: 10", byteCount: 23),
+                htmlText: MailBodyPart(mimeType: "text/html", text: "<html><body><a style='background:#1d9bf0;color:white'>View receipt</a></body></html>", byteCount: 80),
+                redactedPreview: "Apple Receipt"
+            )
+        )
+
+        let display = MailBodyDisplayPresentation(detail: detail)
+
+        #expect(display.kind == .plainText)
+        #expect(display.text.contains("Apple Receipt"))
+        #expect(display.html == nil)
+    }
+
     @Test func mailBodyDisplayRecoversCachedQuotedPrintableHTMLBeforeRendering() {
         let accountID = MailAccountID(rawValue: "shiwen@example.com")
         let mailboxID = MailMailboxID(rawValue: "inbox")
