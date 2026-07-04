@@ -5,6 +5,12 @@ import ConnorGraphAppSupport
 
 @Suite("App Calendar Credential Store Tests")
 struct AppCalendarCredentialStoreTests {
+    @Test func calendarCredentialStoreDefaultsToLocalEncryptedCredentialStore() {
+        let store = AppCalendarCredentialStore()
+
+        #expect(store.credentialStore is LocalEncryptedCredentialStore)
+    }
+
     @Test func calendarCredentialStoreSavesReadsAndDeletesSecrets() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorCalendarCredentialTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
