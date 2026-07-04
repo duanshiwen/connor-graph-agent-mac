@@ -40,6 +40,38 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(updated.summary.flags.isRead)
     }
 
+    @Test func runtimeListsRecentMessagesWithCachedBodyPreviewsWithoutMutatingReadState() async throws {
+        let accountID = MailAccountID(rawValue: "account-a")
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let longBody = String(repeating: "PreviewNeedle ", count: 40)
+        let detail = Self.makeMailDetail(id: "body-preview", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 100), subject: "Preview", bodyText: longBody)
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [Self.makeMailAccount(id: accountID, displayName: "Account A")]), cache: InMemoryMailSourceCache(mailboxes: [inbox], messages: [detail]))
+
+        let results = try await runtime.listRecentMessagesWithBodyPreview(MailRuntimeRecentMessagesRequest(accountID: accountID, limit: 10), bodyPreviewMaxChars: 220)
+
+        #expect(results.count == 1)
+        #expect(results.first?.summary.id.rawValue == "body-preview")
+        #expect(results.first?.bodyPreview?.contains("PreviewNeedle") == true)
+        #expect(results.first?.bodyPreview?.count == 220)
+        #expect(results.first?.bodyPreviewTruncated == true)
+        #expect(results.first?.bodySource == "plainText")
+        let reloaded = try await runtime.getMessage(id: detail.id, includeBody: false)
+        #expect(reloaded.summary.flags.isRead == false)
+    }
+
+    @Test func runtimeSearchesMessagesWithCachedBodyPreviews() async throws {
+        let accountID = MailAccountID(rawValue: "account-a")
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let detail = Self.makeMailDetail(id: "body-search-preview", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 100), subject: "No keyword", bodyText: "BodySearchNeedle appears only inside the cached body.")
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [Self.makeMailAccount(id: accountID, displayName: "Account A")]), cache: InMemoryMailSourceCache(mailboxes: [inbox], messages: [detail]))
+
+        let results = try await runtime.searchMessagesWithBodyPreview(MailRuntimeSearchRequest(query: "BodySearchNeedle", accountID: accountID), bodyPreviewMaxChars: 500)
+
+        #expect(results.map { $0.summary.id.rawValue } == ["body-search-preview"])
+        #expect(results.first?.bodyPreview?.contains("BodySearchNeedle") == true)
+        #expect(results.first?.bodyPreviewTruncated == false)
+    }
+
     @Test func runtimeListsRecentMessagesAcrossAccountsAndDirections() async throws {
         let accountA = MailAccountID(rawValue: "account-a")
         let accountB = MailAccountID(rawValue: "account-b")

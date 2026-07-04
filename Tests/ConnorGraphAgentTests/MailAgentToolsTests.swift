@@ -68,6 +68,38 @@ struct MailAgentToolsTests {
         #expect(limitDescription.contains("Maximum"))
     }
 
+    @Test func recentBodyPreviewToolPassesRequestAndReturnsPreviewResults() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailListRecentMessagesWithBodyPreviewTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "summarize latest mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMailBody])
+
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"direction\":\"sent\",\"limit\":3,\"bodyPreviewMaxChars\":5000}"), context: context)
+        let request = try #require(await runtime.lastRecentPreviewRequest)
+
+        #expect(request.accountID == nil)
+        #expect(request.direction == .sent)
+        #expect(request.limit == 3)
+        #expect(await runtime.lastPreviewMaxChars == 2_000)
+        #expect(result.contentText.contains("cached body previews"))
+        #expect(result.contentText.contains("missing previews were not fetched remotely"))
+        #expect(result.contentJSON?.contains("bodyPreview") == true)
+        #expect(result.contentJSON?.contains("Preview body") == true)
+    }
+
+    @Test func searchBodyPreviewToolPassesRequestAndReturnsPreviewResults() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailSearchMessagesWithBodyPreviewTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "search body", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMailBody])
+
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"query\":\"needle\",\"bodyPreviewMaxChars\":100}"), context: context)
+        let request = try #require(await runtime.lastSearchPreviewRequest)
+
+        #expect(request.query == "needle")
+        #expect(await runtime.lastPreviewMaxChars == 200)
+        #expect(result.contentText.contains("mail_get_message"))
+        #expect(result.contentJSON?.contains("Preview body") == true)
+    }
+
     @Test func recentMessagesToolPassesDefaultAllAccountsAllDirections() async throws {
         let runtime = RecordingMailRuntime()
         let tool = MailListRecentMessagesTool(runtime: runtime)
@@ -283,6 +315,9 @@ private actor RecordingMailRuntime: AgentMailRuntime {
 
     var lastCreateDraft: CreateDraftRequest?
     var lastRecentRequest: MailRuntimeRecentMessagesRequestBridge?
+    var lastRecentPreviewRequest: MailRuntimeRecentMessagesRequestBridge?
+    var lastSearchPreviewRequest: MailRuntimeSearchRequestBridge?
+    var lastPreviewMaxChars: Int?
     var lastSendApproved: Bool?
     var approvalPayload: MailSendApprovalBridge?
 
@@ -305,7 +340,20 @@ private actor RecordingMailRuntime: AgentMailRuntime {
     }
     func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
         lastRecentRequest = request
-        return [MailMessageSummary(
+        return [Self.fixtureSummary()]
+    }
+    func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
+        lastSearchPreviewRequest = request
+        lastPreviewMaxChars = bodyPreviewMaxChars
+        return [MailMessageBodyPreviewResult(summary: Self.fixtureSummary(), bodyPreview: "Preview body", bodyPreviewTruncated: false, bodySource: "plainText")]
+    }
+    func listRecentMessagesWithBodyPreview(_ request: MailRuntimeRecentMessagesRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
+        lastRecentPreviewRequest = request
+        lastPreviewMaxChars = bodyPreviewMaxChars
+        return [MailMessageBodyPreviewResult(summary: Self.fixtureSummary(), bodyPreview: "Preview body", bodyPreviewTruncated: false, bodySource: "plainText")]
+    }
+    private static func fixtureSummary() -> MailMessageSummary {
+        MailMessageSummary(
             id: MailMessageID(rawValue: "account-INBOX-1"),
             accountID: MailAccountID(rawValue: "account"),
             mailboxID: MailMailboxID(rawValue: "account-INBOX"),
@@ -314,8 +362,9 @@ private actor RecordingMailRuntime: AgentMailRuntime {
             to: [MailAddress(email: "recipient@example.com")],
             date: Date(timeIntervalSince1970: 1),
             snippet: "Invoice snippet"
-        )]
+        )
     }
+
     func getMessage(id: MailMessageID, includeBody: Bool, runID: String?, sessionID: String?) async throws -> MailMessageDetail { throw AgentToolError.invalidArguments("message not found") }
     func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String?, sessionID: String?) async throws {}
 
