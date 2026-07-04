@@ -2879,7 +2879,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return try? calendarCredentialStore.readCredential(binding: binding)
         }
         if let binding = account.credentialBinding {
-            return try? calendarCredentialStore.credentialStore.readSecret(service: binding.keychainService, account: binding.accountName)
+            return try? calendarCredentialStore.credentialStore.readSecret(service: binding.credentialNamespace, account: binding.accountName)
         }
         return nil
     }

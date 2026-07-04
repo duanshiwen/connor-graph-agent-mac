@@ -97,14 +97,41 @@ public enum CalendarSourceSyncMode: String, Codable, Sendable, Equatable, Hashab
 }
 
 public struct CalendarCredentialBinding: Codable, Sendable, Equatable, Hashable {
-    public var keychainService: String
+    public var credentialNamespace: String
     public var accountName: String
     public var authMode: CalendarSourceAuthMode
 
-    public init(keychainService: String, accountName: String, authMode: CalendarSourceAuthMode) {
-        self.keychainService = keychainService
+    public init(credentialNamespace: String, accountName: String, authMode: CalendarSourceAuthMode) {
+        self.credentialNamespace = credentialNamespace
         self.accountName = accountName
         self.authMode = authMode
+    }
+
+    @available(*, deprecated, renamed: "init(credentialNamespace:accountName:authMode:)")
+    public init(keychainService: String, accountName: String, authMode: CalendarSourceAuthMode) {
+        self.init(credentialNamespace: keychainService, accountName: accountName, authMode: authMode)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case credentialNamespace
+        case keychainService
+        case accountName
+        case authMode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        credentialNamespace = try container.decodeIfPresent(String.self, forKey: .credentialNamespace)
+            ?? container.decode(String.self, forKey: .keychainService)
+        accountName = try container.decode(String.self, forKey: .accountName)
+        authMode = try container.decode(CalendarSourceAuthMode.self, forKey: .authMode)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(credentialNamespace, forKey: .credentialNamespace)
+        try container.encode(accountName, forKey: .accountName)
+        try container.encode(authMode, forKey: .authMode)
     }
 }
 

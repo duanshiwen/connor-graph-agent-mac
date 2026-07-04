@@ -159,15 +159,15 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(imapHealth.status == .degraded)
         #expect(smtpHealth.status == .ready)
 
-        let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
+        let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(credentialNamespace: "svc", accountName: "a", authMode: .oauth2))
         let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)
         #expect(syncHealth.status == .ready)
     }
 
     @Test func googleAndMicrosoftMailProvidersAreTreatedAsUnsupportedLegacyAccounts() async throws {
         let credentialStore = CommercialTrain7MemoryCredentialStore()
-        let googleBinding = MailCredentialBinding(keychainService: "test.legacy", accountName: "gmail@example.com", authMode: .appPassword)
-        try credentialStore.saveSecret("app-password", service: googleBinding.keychainService, account: googleBinding.accountName)
+        let googleBinding = MailCredentialBinding(credentialNamespace: "test.legacy", accountName: "gmail@example.com", authMode: .appPassword)
+        try credentialStore.saveSecret("app-password", service: googleBinding.credentialNamespace, account: googleBinding.accountName)
         let account = MailAccount(
             id: MailAccountID(rawValue: "legacy-gmail"),
             provider: .gmail,
@@ -187,9 +187,9 @@ struct CommercialTrain7NativeMailSystemTests {
     }
 
     @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
-        let binding = MailCredentialBinding(keychainService: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
+        let binding = MailCredentialBinding(credentialNamespace: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
         let credentialStore = CommercialTrain7MemoryCredentialStore()
-        try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.keychainService, account: binding.accountName)
+        try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.credentialNamespace, account: binding.accountName)
         let account = MailAccount(
             id: MailAccountID(rawValue: "legacy-oauth"),
             provider: .genericIMAPSMTP,
@@ -319,7 +319,7 @@ struct CommercialTrain7NativeMailSystemTests {
                 identities: [MailIdentity(id: identityID, displayName: "Test User", address: MailAddress(name: "Test User", email: "test@example.com"))],
                 incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
                 outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
-                credentialBinding: MailCredentialBinding(keychainService: "test.mail", accountName: "test@example.com", authMode: .appPassword),
+                credentialBinding: MailCredentialBinding(credentialNamespace: "test.mail", accountName: "test@example.com", authMode: .appPassword),
                 health: MailAccountHealth(status: .ready, summary: "test-ready")
             ),
             MailAccount(
@@ -327,7 +327,7 @@ struct CommercialTrain7NativeMailSystemTests {
                 provider: .genericIMAPSMTP,
                 displayName: "Other Test Account",
                 identities: [MailIdentity(id: otherIdentityID, displayName: "Other", address: MailAddress(name: "Other", email: "other@example.com"))],
-                credentialBinding: MailCredentialBinding(keychainService: "test.mail.other", accountName: "other@example.com", authMode: .appPassword),
+                credentialBinding: MailCredentialBinding(credentialNamespace: "test.mail.other", accountName: "other@example.com", authMode: .appPassword),
                 health: MailAccountHealth(status: .unknown, summary: "test")
             )
         ]
