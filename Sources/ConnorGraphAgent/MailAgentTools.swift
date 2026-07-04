@@ -319,7 +319,7 @@ public struct MailGetMessageTool: AgentTool {
     private static func looksLikeOrdinalOrPseudoResultID(_ value: String) -> Bool {
         if value.allSatisfy(\.isNumber) { return true }
         let lowercased = value.lowercased()
-        let pattern = #"^(message|msg|mail|email|result)[ _-]*[0-9]+$"#
+        let pattern = #"^(message|msg|mail|email|result) ?[0-9]+$"#
         return lowercased.range(of: pattern, options: .regularExpression) != nil
     }
 
