@@ -974,11 +974,9 @@ final class AppViewModel: NSObject, ObservableObject {
         isSubmittingChat = selectedChatSessionID.map { submittingChatSessionIDs.contains($0) } ?? false
     }
 
-    func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
+    func deferViewUpdate(_ operation: @escaping () -> Void) {
         DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                operation()
-            }
+            operation()
         }
     }
 
