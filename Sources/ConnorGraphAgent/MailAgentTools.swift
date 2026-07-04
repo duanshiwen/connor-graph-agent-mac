@@ -137,7 +137,7 @@ public struct MailGetMessageTool: AgentTool {
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "messageID": .string(description: "Message ID"),
+            "messageID": .string(description: "Exact MailMessageSummary.id returned by mail_search_messages. Do not pass result numbers such as '1' or IMAP UIDs."),
             "includeBody": .boolean(description: "Whether to include body")
         ], required: ["messageID"])
     }
