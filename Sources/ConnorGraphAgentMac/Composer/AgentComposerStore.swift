@@ -56,7 +56,7 @@ struct AgentComposerStore {
         case .setPermissionMode(let mode):
             viewModel.setAgentPermissionMode(mode)
         case .setSessionStatus(let status):
-            viewModel.deferViewUpdate {
+            DispatchQueue.main.async {
                 viewModel.setSelectedSessionStatus(status)
             }
         case .toggleBrowserWorkspaceVisibility:

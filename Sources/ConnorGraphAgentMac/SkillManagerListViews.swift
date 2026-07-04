@@ -24,10 +24,8 @@ struct CraftSkillListPane: View {
             EditSkillRequestDialog(viewModel: viewModel)
         }
         .modifier(SkillDeleteConfirmationModifier(viewModel: viewModel))
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadSkillRuntimeDefinitions()
-            }
+        .onAppear {
+            viewModel.reloadSkillRuntimeDefinitions()
         }
     }
 }

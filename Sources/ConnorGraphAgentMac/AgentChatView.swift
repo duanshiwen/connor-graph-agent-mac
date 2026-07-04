@@ -1028,7 +1028,7 @@ private struct AgentChatInspectorView: View {
             Picker("状态", selection: Binding(
                 get: { session.governance.status },
                 set: { newValue in
-                    viewModel.deferViewUpdate {
+                    DispatchQueue.main.async {
                         viewModel.setSelectedSessionStatus(newValue)
                     }
                 }

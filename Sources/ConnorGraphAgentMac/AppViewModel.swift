@@ -974,14 +974,8 @@ final class AppViewModel: NSObject, ObservableObject {
         isSubmittingChat = selectedChatSessionID.map { submittingChatSessionIDs.contains($0) } ?? false
     }
 
-    func deferViewUpdate(_ operation: @escaping () -> Void) {
-        DispatchQueue.main.async {
-            operation()
-        }
-    }
-
     func navigate(to item: ConnorNativeShellItem) {
-        deferViewUpdate { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             self?.applyNavigation(to: item)
         }
     }

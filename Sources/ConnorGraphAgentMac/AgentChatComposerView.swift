@@ -193,10 +193,8 @@ struct AgentChatComposerView: View {
                 speechKeyboardMonitor = nil
             }
         }
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadSkillRuntimeDefinitions()
-            }
+        .onAppear {
+            viewModel.reloadSkillRuntimeDefinitions()
         }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
