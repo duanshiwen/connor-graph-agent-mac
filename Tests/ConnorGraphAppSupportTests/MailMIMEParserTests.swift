@@ -163,6 +163,31 @@ struct MailMIMEParserTests {
         #expect(result.plainText.contains("段诗闻"))
     }
 
+    @Test func malformedHTMLPartWithoutTransferEncodingRecoversQuotedPrintableBody() {
+        let boundary = "connor-html-qp-missing-cte-alt"
+        let raw = """
+        --\(boundary)
+        Content-Type: text/html; charset=UTF-8
+        
+        <html><body><table><tr><td>=E6=AE=B5=E8=AF=97=E9=97=BB</td></tr></table></body></html>
+        --\(boundary)--
+
+        """
+
+        let result = MailMIMEParser().parseBodyWithHTML(
+            rawData: Data(raw.utf8),
+            fallbackString: "fallback",
+            charset: nil,
+            transferEncoding: nil,
+            contentType: "multipart/alternative; boundary=\"\(boundary)\"",
+            boundary: boundary
+        )
+
+        #expect(result.htmlText?.contains("段诗闻") == true)
+        #expect(result.htmlText?.contains("=E6=AE") == false)
+        #expect(result.plainText.contains("段诗闻"))
+    }
+
     @Test func quotedPrintableTransferEncodingDecodesUTF8AndSoftLineBreaks() {
         let encodedBody = """
         hi =E6=AE=B5=E8=AF=97=E9=97=BB=EF=BC=8C
