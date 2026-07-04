@@ -15,6 +15,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case productOS = "Product OS"
     case calendar = "Calendar"
     case contacts = "Contacts"
+    case mail = "Mail"
     case rss = "RSS"
     case sources = "Sources"
     case skills = "Skills"
@@ -50,6 +51,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case ai
     case calendar
     case rss
+    case mail
     case permissions
     case labels
     case statuses
@@ -64,6 +66,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .ai: "AI"
         case .calendar: "日历"
         case .rss: "RSS 阅读"
+        case .mail: "邮件系统"
         case .permissions: "权限"
         case .labels: "标签"
         case .statuses: "状态"
@@ -78,6 +81,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .ai: "模型、思考、连接"
         case .calendar: "日程、账户能力、轻量管理"
         case .rss: "订阅源、抓取、安全"
+        case .mail: "账户、同步、安全"
         case .permissions: "默认权限和审批"
         case .labels: "管理会话标签"
         case .statuses: "管理会话状态"
@@ -92,6 +96,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .ai: "sparkles"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
+        case .mail: "envelope.badge"
         case .permissions: "shield"
         case .labels: "tag"
         case .statuses: "circle.dashed"

@@ -33,6 +33,7 @@ struct MailRuntimeSMTPSendTests {
         )
 
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Approved", body: "Body")
+        _ = try await runtime.sendApprovalPayload(draftID: draft.id)
         let receipt = try await runtime.sendDraft(draftID: draft.id, approved: true)
 
         #expect(receipt.providerMessageID == "smtp-server-id")
@@ -68,6 +69,7 @@ struct MailRuntimeSMTPSendTests {
             smtpClient: smtp
         )
         let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "Missing credential", body: "Body")
+        _ = try await runtime.sendApprovalPayload(draftID: draft.id)
 
         await #expect(throws: MailRuntimeError.self) {
             _ = try await runtime.sendDraft(draftID: draft.id, approved: true)

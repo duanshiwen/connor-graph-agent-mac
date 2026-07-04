@@ -46,6 +46,34 @@ import ConnorGraphCore
     #expect(row.allowsAlwaysAllow == false)
 }
 
+@Test func appPendingApprovalPresentationRedactsMailBccAndIncludesEnvelopeHash() {
+    let approval = AgentPendingApproval(
+        requestID: "request-mail-redacted",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .sendMail,
+        toolName: "mail_send_draft",
+        payloadJSON: """
+        {
+          "draftID": "draft-1",
+          "to": ["alice@example.com"],
+          "bcc": ["hidden@example.com"],
+          "subject": "Hello",
+          "bodyPreview": "Short preview",
+          "envelopeHash": "hash-1"
+        }
+        """
+    )
+
+    let row = AppAgentPendingApprovalPresentation(approval)
+
+    #expect(row.title == "确认发送邮件")
+    #expect(row.detail.contains("Envelope: hash-1"))
+    #expect(row.detail.contains("Bcc: 1 hidden"))
+    #expect(!row.detail.contains("hidden@example.com"))
+    #expect(row.allowsAlwaysAllow == false)
+}
+
 @Test func appPendingApprovalPresentationMapsResolvedStatusesForNativeUI() {
     let statuses: [AgentPendingApprovalStatus] = [.pending, .approved, .denied, .cancelled]
 

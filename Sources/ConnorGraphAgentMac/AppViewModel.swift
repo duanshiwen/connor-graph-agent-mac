@@ -391,6 +391,12 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedContactID: ContactID?
     @Published var isSyncingSystemContacts: Bool = false
     @Published var contactsSyncMessage: String?
+    @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
+    @Published var selectedMailAccountID: MailAccountID?
+    @Published var selectedMailMailboxID: MailMailboxID?
+    @Published var selectedMailMessageID: MailMessageID?
+    @Published var isPresentingAddMailAccountSheet: Bool = false
+    @Published var mailSyncMessage: String?
     @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
     @Published var rssSearchQuery: String = ""
     @Published var selectedRSSSourceID: RSSSourceID?
@@ -516,6 +522,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var contactStore: FileBackedContactSourceStore?
+    private var mailStore: FileBackedMailSourceStore?
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -666,9 +673,9 @@ final class AppViewModel: NSObject, ObservableObject {
         switch agentPermissionMode {
         case .trustedWrite:
             switch approval.capability {
-            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
+            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML, .readMail, .readMailBody, .createMailDraft:
                 return true
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML:
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment:
                 return false
             }
         case .allowAll:
@@ -1007,6 +1014,8 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .calendar
         case .contacts:
             selection = .contacts
+        case .mail:
+            selection = .mail
         case .rss:
             selection = .rss
         case .sources:
@@ -1027,7 +1036,7 @@ final class AppViewModel: NSObject, ObservableObject {
             toggleBrowserWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openCalendarSources, .openContactsSources, .openRSSSources, .openSettings:
+        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openCalendarSources, .openContactsSources, .openMailSources, .openRSSSources, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
             }
@@ -1094,6 +1103,7 @@ final class AppViewModel: NSObject, ObservableObject {
         items.append(contentsOf: globalSearchPreviewState.chatSessionResults.map { .chatSession($0.id) })
         items.append(contentsOf: globalSearchPreviewState.calendarResults.map { .nativeResult($0.id) })
         items.append(contentsOf: globalSearchPreviewState.rssResults.map { .nativeResult($0.id) })
+        items.append(contentsOf: globalSearchPreviewState.mailResults.map { .nativeResult($0.id) })
         items.append(contentsOf: globalSearchPreviewState.browserHistoryResults.prefix(3).map { .nativeResult($0.id) })
         return items
     }
@@ -1140,6 +1150,7 @@ final class AppViewModel: NSObject, ObservableObject {
         case .nativeResult(let resultID):
             let results = globalSearchPreviewState.calendarResults
                 + globalSearchPreviewState.rssResults
+                + globalSearchPreviewState.mailResults
                 + globalSearchPreviewState.browserHistoryResults
             guard let result = results.first(where: { $0.id == resultID }) else { return }
             openGlobalSearchResult(result)
@@ -1288,6 +1299,8 @@ final class AppViewModel: NSObject, ObservableObject {
             state.calendarResults = sectionResult.results
         case .rss:
             state.rssResults = sectionResult.results
+        case .mail:
+            state.mailResults = sectionResult.results
         case .browserHistory:
             state.browserHistoryResults = sectionResult.results
         }
@@ -1441,6 +1454,8 @@ final class AppViewModel: NSObject, ObservableObject {
             return presentationFallbackCalendarResults(query: trimmed, now: now, limit: limit)
         case .rss:
             return presentationFallbackRSSResults(query: trimmed, now: now, limit: limit)
+        case .mail:
+            return presentationFallbackMailResults(query: trimmed, now: now, limit: limit)
         case .browserHistory:
             return presentationFallbackBrowserHistoryResults(query: trimmed, now: now, limit: limit)
         }
@@ -1495,6 +1510,37 @@ final class AppViewModel: NSObject, ObservableObject {
                 resultTimeLabel: item.publishedAt.formatted(date: .abbreviated, time: .shortened)
             )
         }
+    }
+
+    private func presentationFallbackMailResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        let normalized = query.lowercased()
+        return mailBrowserPresentation.messages
+            .filter { message in
+                guard !normalized.isEmpty else { return true }
+                return message.subject.lowercased().contains(normalized)
+                    || message.snippet.lowercased().contains(normalized)
+                    || message.from.email.lowercased().contains(normalized)
+                    || (message.from.name?.lowercased().contains(normalized) ?? false)
+                    || message.to.contains { $0.email.lowercased().contains(normalized) || ($0.name?.lowercased().contains(normalized) ?? false) }
+            }
+            .sorted { $0.date > $1.date }
+            .prefix(limit)
+            .map { message in
+                NativeSearchResult(
+                    id: "mail:\(message.id.rawValue)",
+                    sourceKind: .mail,
+                    externalID: message.id.rawValue,
+                    sourceInstanceID: message.accountID.rawValue,
+                    title: message.subject.isEmpty ? "(No subject)" : message.subject,
+                    snippet: [message.from.name ?? message.from.email, message.snippet].filter { !$0.isEmpty }.joined(separator: " · "),
+                    score: 1,
+                    lexicalScore: 1,
+                    freshnessScore: 0,
+                    fieldScore: 0,
+                    temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, receivedAt: message.date, sentAt: message.date, indexedAt: now),
+                    resultTimeLabel: message.date.formatted(date: .abbreviated, time: .shortened)
+                )
+            }
     }
 
     private func presentationFallbackBrowserHistoryResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
@@ -1566,6 +1612,13 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 selectedRSSItemID = RSSItemID(rawValue: result.externalID)
             }
+        case .mail:
+            selection = .mail
+            selectedMailMessageID = MailMessageID(rawValue: result.externalID)
+            if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
+                selectedMailAccountID = message.accountID
+                selectedMailMailboxID = message.mailboxID
+            }
         case .browserHistory:
             if let id = UUID(uuidString: result.externalID), let record = browserHistoryRecords.first(where: { $0.id == id }) ?? browserHistoryStore?.record(id: id) {
                 navigateToHistoryRecord(record)
@@ -1590,6 +1643,8 @@ final class AppViewModel: NSObject, ObservableObject {
         case .rss:
             rssSearchQuery = query
             selection = .rss
+        case .mail:
+            selection = .mail
         case .browserHistory:
             browserHistorySearchQuery = query
             isBrowserHistoryPanelVisible = true
@@ -2006,6 +2061,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -2367,6 +2423,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func reconcileSourceRefreshTasks(now: Date = Date()) async throws {
         try await reconcileRSSSourceRefreshTasks(now: now)
         try await reconcileCalendarAccountRefreshTasks(now: now)
+        try await reconcileMailAccountRefreshTasks(now: now)
     }
 
     private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
@@ -2382,6 +2439,12 @@ final class AppViewModel: NSObject, ObservableObject {
             calendarSourceRepository: CalendarAccountSnapshotRepository(accounts: calendarAccounts)
         )
         _ = try await materializer.reconcileCalendarAccountRefreshTasks(now: now)
+    }
+
+    private func reconcileMailAccountRefreshTasks(now: Date = Date()) async throws {
+        guard let taskManagementRepository, let mailStore else { return }
+        let materializer = MailRefreshTaskMaterializer(taskRepository: taskManagementRepository, mailSourceRepository: mailStore)
+        _ = try await materializer.reconcileMailAccountRefreshTasks(now: now)
     }
 
     private func refreshCalendarForScheduledTask(sourceInstanceID: String?, runID: String?) async -> String {
@@ -2542,10 +2605,121 @@ final class AppViewModel: NSObject, ObservableObject {
                 contactRecords = records
                 reloadContactsBrowserPresentation()
             }
+            await reloadMailBrowserPresentation()
             errorMessage = nil
         } catch {
-            errorMessage = "无法加载日历/联系人缓存：\(error.localizedDescription)"
+            errorMessage = "无法加载日历/联系人/邮件缓存：\(error.localizedDescription)"
         }
+    }
+
+    func presentAddMailAccountSheet() {
+        isPresentingAddMailAccountSheet = true
+    }
+
+    func reloadMailBrowserPresentation() async {
+        do {
+            guard let mailStore else { return }
+            mailBrowserPresentation = try await mailStore.presentation()
+            if selectedMailAccountID == nil || mailBrowserPresentation.account(id: selectedMailAccountID) == nil {
+                selectedMailAccountID = mailBrowserPresentation.defaultAccountID()
+            }
+            if selectedMailMailboxID == nil || mailBrowserPresentation.mailbox(id: selectedMailMailboxID) == nil {
+                selectedMailMailboxID = mailBrowserPresentation.defaultMailboxID(for: selectedMailAccountID)
+            }
+            if selectedMailMessageID == nil || mailBrowserPresentation.message(id: selectedMailMessageID) == nil {
+                selectedMailMessageID = mailBrowserPresentation.defaultMessageID(accountID: selectedMailAccountID, mailboxID: selectedMailMailboxID)
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法加载邮件缓存：\(error.localizedDescription)"
+        }
+    }
+
+    func loadMailBodyText(for messageID: MailMessageID) async -> String? {
+        do {
+            guard let detail = try await mailStore?.message(id: messageID) else { return nil }
+            if let text = detail.body?.plainText?.text, !text.isEmpty { return text }
+            if let html = detail.body?.htmlText?.text, !html.isEmpty { return Self.mailPlainText(fromHTML: html) }
+            return detail.body?.redactedPreview ?? detail.summary.snippet
+        } catch {
+            errorMessage = "无法读取邮件正文：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func loadMailBodyHTML(for messageID: MailMessageID) async -> String? {
+        do {
+            guard let detail = try await mailStore?.message(id: messageID) else { return nil }
+            return detail.body?.htmlText?.text
+        } catch {
+            errorMessage = "无法读取 HTML 邮件正文：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func addMailAccountAndPrepareSync(preset: MailAccountProviderPreset, displayName: String, email: String, credential: String, incomingHost: String, incomingPort: Int, outgoingHost: String, outgoingPort: Int) async throws {
+        let provider: MailProviderKind = switch preset {
+        case .apple: .genericIMAPSMTP
+        case .qq: .genericIMAPSMTP
+        case .netease: .genericIMAPSMTP
+        case .other: .genericIMAPSMTP
+        }
+        try await addMailAccountAndPrepareSync(
+            displayName: displayName,
+            email: email,
+            provider: provider,
+            incomingHost: incomingHost,
+            incomingPort: incomingPort,
+            incomingSecurity: preset.incomingSecurity,
+            outgoingHost: outgoingHost,
+            outgoingPort: outgoingPort,
+            outgoingSecurity: preset.outgoingSecurity,
+            username: email,
+            password: credential,
+            authMode: preset.authMode
+        )
+    }
+
+    func addMailAccountAndPrepareSync(displayName: String, email: String, provider: MailProviderKind, incomingHost: String, incomingPort: Int, incomingSecurity: MailConnectionSecurity, outgoingHost: String, outgoingPort: Int, outgoingSecurity: MailConnectionSecurity, username: String, password: String, authMode: MailAuthMode) async throws {
+        let accountID = MailAccountID(rawValue: email.lowercased())
+        let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-\(accountID.rawValue)"), displayName: displayName, address: MailAddress(name: displayName, email: email))
+        let binding = MailCredentialBinding(keychainService: "ConnorGraphAgent.mail", accountName: username.isEmpty ? email : username, authMode: authMode)
+        let account = MailAccount(
+            id: accountID,
+            provider: provider,
+            displayName: displayName.isEmpty ? email : displayName,
+            identities: [identity],
+            incoming: MailServerEndpoint(host: incomingHost, port: incomingPort, security: incomingSecurity, protocolKind: .imap),
+            outgoing: MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: outgoingSecurity, protocolKind: .smtp),
+            credentialBinding: binding,
+            health: MailAccountHealth(status: .unknown, summary: "Ready to sync")
+        )
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "\(accountID.rawValue)-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        try await mailStore?.saveAccount(account)
+        try await mailStore?.saveMailbox(inbox)
+        selectedMailAccountID = accountID
+        selectedMailMailboxID = inbox.id
+        isPresentingAddMailAccountSheet = false
+        mailSyncMessage = "已添加邮箱：\(account.displayName)。凭据将由邮件凭据边界保存，正文同步可由后台任务执行。"
+        await reloadMailBrowserPresentation()
+        do {
+            try await reconcileMailAccountRefreshTasks()
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private static func mailPlainText(fromHTML html: String) -> String {
+        var text = html.replacingOccurrences(of: #"<br\s*/?>"#, with: "\n", options: [.regularExpression, .caseInsensitive])
+        text = text.replacingOccurrences(of: #"</p\s*>"#, with: "\n\n", options: [.regularExpression, .caseInsensitive])
+        text = text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+        return text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     private func persistCalendarSnapshot() async {
@@ -3507,15 +3681,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func loadLLMSettings() {
         do {
             let settings = try llmSettingsRepository.loadSettings()
-            guard let connection = settings.defaultConnection else {
-                llmConnectionConfigs = settings.connections
-                llmDefaultConnectionID = ""
-                llmConnectionName = ""
-                llmHasAPIKey = false
-                llmSettingsMessage = nil
-                llmHealthCheckMessage = nil
-                return
-            }
+            let connection = settings.defaultConnection
             llmConnectionConfigs = settings.connections
             llmDefaultConnectionID = settings.defaultConnectionID
             llmConnectionName = connection.name
@@ -3883,7 +4049,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return existing
         }
         guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
-        guard let connection = settings.defaultConnection ?? settings.connections.first else { return nil }
+        let connection = settings.defaultConnection
         let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return nil }
         var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -3933,9 +4099,9 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
-            llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? llmSelectedModel
+            llmSelectedModel = settings?.defaultConnection.effectiveModel ?? llmSelectedModel
             llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-            llmProviderMode = settings?.defaultConnection?.providerMode ?? llmProviderMode
+            llmProviderMode = settings?.defaultConnection.providerMode ?? llmProviderMode
             llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
         }
     }
@@ -3956,9 +4122,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
-        llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? llmSelectedModel
+        llmSelectedModel = settings?.defaultConnection.effectiveModel ?? llmSelectedModel
         llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-        llmProviderMode = settings?.defaultConnection?.providerMode ?? llmProviderMode
+        llmProviderMode = settings?.defaultConnection.providerMode ?? llmProviderMode
         llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
 
         rebuildNativeSessionManagerForActiveSession()

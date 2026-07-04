@@ -1668,6 +1668,8 @@ struct CraftDetailPaneView: View {
                 CalendarSourceSettingsView(viewModel: viewModel)
             case .contacts:
                 ContactsSourceSettingsView(viewModel: viewModel)
+            case .mail:
+                MailSourceSettingsView(viewModel: viewModel)
             case .rss:
                 RSSSourceSettingsView(viewModel: viewModel)
             case .sources:

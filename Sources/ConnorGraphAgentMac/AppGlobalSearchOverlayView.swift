@@ -87,6 +87,7 @@ struct AppGlobalSearchOverlayView: View {
             chatSessionSection(results: state.chatSessionResults)
             resultSection(kind: .calendar, results: state.calendarResults)
             resultSection(kind: .rss, results: state.rssResults)
+            resultSection(kind: .mail, results: state.mailResults)
             browserHistorySection(results: state.browserHistoryResults)
 
             if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
@@ -585,6 +586,7 @@ private struct GlobalSearchResultRow: View {
         switch result.sourceKind {
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
+        case .mail: "envelope"
         case .browserHistory: "clock.arrow.circlepath"
         }
     }
@@ -593,6 +595,7 @@ private struct GlobalSearchResultRow: View {
         switch result.sourceKind {
         case .calendar: .purple
         case .rss: .orange
+        case .mail: .blue
         case .browserHistory: .teal
         }
     }

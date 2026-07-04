@@ -250,7 +250,10 @@ System prompts are deliberately minimal: only context retrieval and user profile
 
 - Native source domains and app-support repositories
 - Mail draft/send governance: AI may create drafts and request send; real SMTP send requires human approval in the same run
-- Sent-message closure: sent cache, audit, receipt and index writeback
+- Mail approval integrity: approval payload stores an envelope hash; SMTP send is blocked if the draft changes after approval
+- Sent-message closure: sent cache, audit, receipt, index writeback and optional outbound Memory OS evidence
+- Governed outbound attachments: multipart composer support, filename injection checks and descriptor-only sent cache metadata
+- Native Mail release/demo docs: [`Docs/native-mail-release-checklist.md`](Docs/native-mail-release-checklist.md), [`Docs/native-mail-commercial-demo.md`](Docs/native-mail-commercial-demo.md)
 - RSS registry/cache/read-state boundaries
 - Contacts and Calendar adapter seams
 - Native Source Indexed Retrieval with time-aware search filters

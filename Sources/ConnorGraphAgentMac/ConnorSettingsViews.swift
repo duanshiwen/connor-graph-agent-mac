@@ -66,6 +66,8 @@ struct ConnorSettingsDetailView: View {
                         SettingsCalendarSection(viewModel: viewModel)
                     case .rss:
                         SettingsRSSSection(viewModel: viewModel)
+                    case .mail:
+                        MailSourceSettingsView(viewModel: viewModel)
                     case .permissions:
                         SettingsPermissionsSection(viewModel: viewModel)
                     case .labels:
