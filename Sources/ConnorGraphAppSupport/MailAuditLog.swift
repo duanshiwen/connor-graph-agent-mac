@@ -49,13 +49,18 @@ public actor InMemoryMailSourceCache: MailSourceCache, RecentMailSourceCache {
 
     public func searchMessages(query: String, accountID: MailAccountID?) async throws -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return messages.values.map(\.summary).filter { summary in
+        return messages.values.filter { detail in
+            let summary = detail.summary
             if let accountID, summary.accountID != accountID { return false }
             if normalized.isEmpty { return true }
             return summary.subject.lowercased().contains(normalized)
                 || summary.snippet.lowercased().contains(normalized)
                 || summary.from.email.lowercased().contains(normalized)
-        }.sorted { lhs, rhs in
+                || (summary.from.name?.lowercased().contains(normalized) ?? false)
+                || (detail.body?.plainText?.text.lowercased().contains(normalized) ?? false)
+                || (detail.body?.htmlText?.text.lowercased().contains(normalized) ?? false)
+                || (detail.body?.redactedPreview.lowercased().contains(normalized) ?? false)
+        }.map(\.summary).sorted { lhs, rhs in
             if lhs.date != rhs.date { return lhs.date > rhs.date }
             return lhs.id.rawValue < rhs.id.rawValue
         }

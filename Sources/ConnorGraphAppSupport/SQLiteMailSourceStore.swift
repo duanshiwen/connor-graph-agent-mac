@@ -233,7 +233,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         if let accountID { sql += " AND account_id = '\(esc(accountID.rawValue))'" }
         if !normalized.isEmpty {
             let escaped = normalized.replacingOccurrences(of: "'", with: "''")
-            sql += " AND (LOWER(subject) LIKE '%\(escaped)%' OR LOWER(snippet) LIKE '%\(escaped)%' OR LOWER(from_email) LIKE '%\(escaped)%' OR LOWER(COALESCE(from_name,'')) LIKE '%\(escaped)%')"
+            sql += " AND (LOWER(subject) LIKE '%\(escaped)%' OR LOWER(snippet) LIKE '%\(escaped)%' OR LOWER(from_email) LIKE '%\(escaped)%' OR LOWER(COALESCE(from_name,'')) LIKE '%\(escaped)%' OR LOWER(COALESCE(body_plain,'')) LIKE '%\(escaped)%')"
         }
         let ascending = temporalSort == .timeAscThenRelevance || temporalSort == .relevanceThenTimeAsc
         sql += " ORDER BY date \(ascending ? "ASC" : "DESC") LIMIT \(limit)"
