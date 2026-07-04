@@ -8,6 +8,12 @@ private func temporaryCommercialMCPStoragePaths(_ name: String = UUID().uuidStri
     AppStoragePaths(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("ConnorCommercialMCPPlatform-\(name)", isDirectory: true))
 }
 
+@Test func mcpSourceCredentialStoreDefaultsToLocalEncryptedCredentialStore() {
+    let store = MCPSourceCredentialStore()
+
+    #expect(store.credentialStore is LocalEncryptedCredentialStore)
+}
+
 @Test func commercialMCPRuntimeUsesModelSafeToolNames() async throws {
     let config = MCPSourceRuntimeConfiguration(
         sourceID: "linear",

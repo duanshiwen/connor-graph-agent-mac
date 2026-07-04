@@ -6,7 +6,7 @@ public struct AppCalendarCredentialStore: Sendable {
 
     public var credentialStore: CredentialStore
 
-    public init(credentialStore: CredentialStore = KeychainCredentialStore()) {
+    public init(credentialStore: CredentialStore = LocalEncryptedCredentialStore()) {
         self.credentialStore = credentialStore
     }
 

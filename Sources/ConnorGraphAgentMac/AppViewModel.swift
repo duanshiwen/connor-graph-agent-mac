@@ -2879,7 +2879,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return try? calendarCredentialStore.readCredential(binding: binding)
         }
         if let binding = account.credentialBinding {
-            return try? KeychainCredentialStore().readSecret(service: binding.keychainService, account: binding.accountName)
+            return try? calendarCredentialStore.credentialStore.readSecret(service: binding.keychainService, account: binding.accountName)
         }
         return nil
     }
@@ -2972,7 +2972,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func addCalendarSourceFromWizard(account: CalendarAccount, credential: String?) {
-        // Save credential to keychain if provided
+        // Save credential to the local encrypted credential store if provided.
         if let credential, !credential.isEmpty, let username = account.configuration.username {
             let binding = AppCalendarCredentialStore.binding(
                 accountID: account.id,
