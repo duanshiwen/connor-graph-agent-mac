@@ -258,11 +258,21 @@ public struct MailRuntime: Sendable {
             redactedPreview: String(draft.body.prefix(500)),
             bodyHash: receipt.envelopeHash
         )
+        let attachments = draft.attachmentIDs.map { attachmentID in
+            MailAttachmentDescriptor(
+                id: attachmentID,
+                messageID: messageID,
+                filename: attachmentID.rawValue,
+                mimeType: "application/octet-stream",
+                byteCount: 0,
+                contentHash: nil
+            )
+        }
         try await cache.saveMessage(MailMessageDetail(
             summary: summary,
             headers: MailMessageHeaders(messageIDHeader: messageIDHeader, inReplyTo: draft.inReplyToHeader, references: draft.referencesHeaders, rawHeaderHash: receipt.envelopeHash),
             body: body,
-            attachments: []
+            attachments: attachments
         ))
     }
 

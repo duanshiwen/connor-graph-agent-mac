@@ -51,6 +51,56 @@ struct MailMessageComposerTests {
         }
     }
 
+    @Test func composerBuildsMultipartMixedWithAttachments() throws {
+        let draft = MailDraft(
+            id: MailDraftID(rawValue: "draft-attachment"),
+            accountID: MailAccountID(rawValue: "account-1"),
+            identityID: MailIdentityID(rawValue: "identity-1"),
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Attachment",
+            body: "Plain body",
+            htmlBody: "<p>Plain body</p>",
+            attachmentIDs: [MailAttachmentID(rawValue: "attachment-1")]
+        )
+        let attachment = OutboundMailAttachment(
+            id: MailAttachmentID(rawValue: "attachment-1"),
+            filename: "brief.txt",
+            mimeType: "text/plain",
+            data: Data("hello attachment".utf8),
+            contentHash: "attachment-hash"
+        )
+
+        let message = try MailMessageComposer().compose(draft: draft, from: MailAddress(email: "connor@example.com"), attachments: [attachment])
+
+        #expect(message.rawMessage.contains("Content-Type: multipart/mixed"))
+        #expect(message.rawMessage.contains("Content-Type: multipart/alternative"))
+        #expect(message.rawMessage.contains("Content-Disposition: attachment; filename=\"brief.txt\""))
+        #expect(message.rawMessage.contains("Content-Transfer-Encoding: base64"))
+        #expect(message.rawMessage.contains(Data("hello attachment".utf8).base64EncodedString()))
+    }
+
+    @Test func composerRejectsAttachmentFilenameHeaderInjection() {
+        let draft = MailDraft(
+            id: MailDraftID(rawValue: "draft-attachment"),
+            accountID: MailAccountID(rawValue: "account-1"),
+            identityID: MailIdentityID(rawValue: "identity-1"),
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Attachment",
+            body: "Plain body",
+            attachmentIDs: [MailAttachmentID(rawValue: "attachment-1")]
+        )
+        let attachment = OutboundMailAttachment(
+            id: MailAttachmentID(rawValue: "attachment-1"),
+            filename: "brief.txt\r\nBcc: attacker@example.com",
+            mimeType: "text/plain",
+            data: Data("hello".utf8)
+        )
+
+        #expect(throws: MailMessageComposerError.self) {
+            _ = try MailMessageComposer().compose(draft: draft, from: MailAddress(email: "connor@example.com"), attachments: [attachment])
+        }
+    }
+
     @Test func dotStuffingEscapesLinesStartingWithDot() {
         let input = "Hello\r\n.World\r\n..Already\r\nBye"
         #expect(MailMessageComposer.dotStuff(input) == "Hello\r\n..World\r\n...Already\r\nBye")
