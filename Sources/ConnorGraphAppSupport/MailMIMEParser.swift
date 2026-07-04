@@ -47,7 +47,7 @@ public struct MailMIMEParser: Sendable, Equatable {
         case "quoted-printable", "qp":
             return decodeQuotedPrintable(data)
         case "base64":
-            return Data(base64Encoded: data) ?? data
+            return decodeMIMEBase64(data) ?? data
         default:
             return data // 7bit, 8bit, binary - no decoding needed
         }
@@ -205,6 +205,19 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     // MARK: - Helpers
+
+    /// Decode MIME base64 data. RFC 2045 allows encoded body lines to be wrapped, commonly
+    /// at 76 characters, so CRLF and other whitespace must be ignored before decoding.
+    private func decodeMIMEBase64(_ data: Data) -> Data? {
+        let base64Alphabet = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+        guard let text = String(data: data, encoding: .ascii) else { return nil }
+        var normalized = text.filter { base64Alphabet.contains($0) }
+        let remainder = normalized.count % 4
+        if remainder != 0 {
+            normalized.append(String(repeating: "=", count: 4 - remainder))
+        }
+        return Data(base64Encoded: normalized)
+    }
 
     /// Decode quoted-printable data. NOTE: _ → space is ONLY for RFC 2047 Q-encoding, NOT for QP transfer encoding.
     private func decodeQuotedPrintable(_ data: Data) -> Data {
