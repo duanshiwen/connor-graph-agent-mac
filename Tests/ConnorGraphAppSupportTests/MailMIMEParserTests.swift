@@ -57,6 +57,28 @@ struct MailMIMEParserTests {
         #expect(result.plainText.contains("Final part body without explicit trailing delimiter."))
     }
 
+    @Test func fullRawMessageParsesBase64HTMLBody() {
+        let html = "<!DOCTYPE HTML><html><body><p>Apple Receipt</p></body></html>"
+        let encoded = Data(html.utf8).base64EncodedString()
+        let raw = [
+            "Subject: Your receipt",
+            "From: Apple <apple@example.com>",
+            "Content-Type: text/html; charset=utf-8",
+            "Content-Transfer-Encoding: base64",
+            "",
+            encoded
+        ].joined(separator: "\r\n")
+
+        let result = MailMIMEParser().parseFullMessageBody(
+            rawData: Data(raw.utf8),
+            fallbackString: "fallback"
+        )
+
+        #expect(result.htmlText?.contains("Apple Receipt") == true)
+        #expect(result.plainText.contains("Apple Receipt"))
+        #expect(!result.plainText.contains("PCFET0"))
+    }
+
     @Test func base64TransferEncodingIgnoresMimeLineBreaks() {
         let encodedBody = """
         aGkg5q616K+X6Ze777yMDQoN

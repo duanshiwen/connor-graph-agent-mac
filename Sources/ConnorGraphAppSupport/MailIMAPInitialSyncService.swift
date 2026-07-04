@@ -1734,12 +1734,6 @@ struct BlockingIMAPClient {
         guard selectResponse.contains("\(selectTag) OK") else {
             throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(remoteMailbox.path) failed")
         }
-        // Fetch headers + body text only (avoid downloading large attachments)
-        let fetchTag = nextTag()
-        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
-        let (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
-        try logout(input: input, output: output)
-        
         func extractLiteral(after marker: String, in data: Data) -> Data? {
             guard let markerEnd = data.range(of: Data(marker.utf8))?.upperBound,
                   markerEnd < data.endIndex else { return nil }
@@ -1761,9 +1755,42 @@ struct BlockingIMAPClient {
             guard dataStart + size <= data.endIndex else { return nil }
             return data.subdata(in: dataStart..<(dataStart + size))
         }
-        
-        guard let headerData = extractLiteral(after: "BODY[HEADER]", in: fetchRaw),
-              let bodyData = extractLiteral(after: "BODY[TEXT]", in: fetchRaw) else { return nil }
+
+        func splitFullMessage(_ data: Data) -> (headers: Data, body: Data)? {
+            if let range = data.range(of: Data("\r\n\r\n".utf8)) {
+                return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+            }
+            if let range = data.range(of: Data("\n\n".utf8)) {
+                return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+            }
+            return nil
+        }
+
+        // Prefer full raw MIME so part-level headers and transfer encodings remain intact.
+        var fetchTag = nextTag()
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[])\r\n", output: output)
+        var (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
+        var fullMessageData = extractLiteral(after: "BODY[]", in: fetchRaw)
+        var splitMessage = fullMessageData.flatMap(splitFullMessage)
+
+        if splitMessage == nil {
+            // Compatibility fallback: some servers/proxies may reject full-message literals.
+            fetchTag = nextTag()
+            try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
+            let (_, fallbackRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
+            fetchRaw = fallbackRaw
+            let headerData = extractLiteral(after: "BODY[HEADER]", in: fetchRaw)
+            let bodyData = extractLiteral(after: "BODY[TEXT]", in: fetchRaw)
+            if let headerData, let bodyData {
+                splitMessage = (headerData, bodyData)
+                fullMessageData = nil
+            }
+        }
+        try logout(input: input, output: output)
+
+        guard let splitMessage else { return nil }
+        let headerData = splitMessage.headers
+        let bodyData = splitMessage.body
         
         // Parse headers for MIME metadata
         let headerStr = String(data: headerData, encoding: .ascii) ?? String(decoding: headerData, as: Unicode.UTF8.self)
@@ -1783,12 +1810,17 @@ struct BlockingIMAPClient {
         let flagsStr = (String(data: fetchRaw.prefix(200), encoding: .utf8) ?? "").firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
         
         let mimeParser = MailMIMEParser()
-        let bodyResult = mimeParser.parseBodyWithHTML(
-            rawData: Data(bodyData), fallbackString: snippet,
-            charset: charset,
-            transferEncoding: cteHeader.nilIfEmpty,
-            contentType: ctHeader, boundary: boundary
-        )
+        let bodyResult: MailMIMEBodyResult
+        if let fullMessageData {
+            bodyResult = mimeParser.parseFullMessageBody(rawData: fullMessageData, fallbackString: snippet)
+        } else {
+            bodyResult = mimeParser.parseBodyWithHTML(
+                rawData: Data(bodyData), fallbackString: snippet,
+                charset: charset,
+                transferEncoding: cteHeader.nilIfEmpty,
+                contentType: ctHeader, boundary: boundary
+            )
+        }
         
         let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
         let summary = MailMessageSummary(
