@@ -230,6 +230,20 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         return rows.map { MailMessageID(rawValue: $0[0]) }
     }
 
+    public func clearCachedMailData() async throws {
+        try execute("BEGIN TRANSACTION;")
+        do {
+            try execute("DELETE FROM mail_messages;")
+            try execute("DELETE FROM mail_mailboxes;")
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+        hasPrimedSearchIndex = false
+        try await searchService?.deleteBySource(kind: .mail, sourceInstanceID: nil)
+    }
+
     public func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws {
         try execute("BEGIN TRANSACTION;")
         do {

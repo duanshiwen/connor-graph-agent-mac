@@ -51,6 +51,7 @@ public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Send
     }
     public func message(id: MailMessageID) async throws -> MailMessageDetail? { try await store.message(id: id) }
     public func allMessageIDs() async throws -> [MailMessageID] { try await store.allMessageIDs() }
+    public func clearCachedMailData() async throws { try await store.clearCachedMailData() }
     public func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws { try await store.updateFlags(messageIDs: messageIDs, transform: transform) }
     public func presentation() async throws -> NativeMailBrowserPresentation { try await store.presentation() }
 }

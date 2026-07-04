@@ -2687,6 +2687,23 @@ final class AppViewModel: NSObject, ObservableObject {
         isPresentingAddMailAccountSheet = true
     }
 
+    func rebuildMailCacheAndRefresh() async -> String {
+        do {
+            guard let mailStore else { return "Mail store unavailable" }
+            try await mailStore.clearCachedMailData()
+            await reloadMailBrowserPresentation()
+            let result = try await refreshMailForScheduledTask(sourceInstanceID: nil, runID: nil)
+            let message = "已清空本地邮件缓存并重新同步。\(result)"
+            mailSyncMessage = message
+            return message
+        } catch {
+            let message = "无法重建邮件缓存：\(error.localizedDescription)"
+            errorMessage = message
+            mailSyncMessage = message
+            return message
+        }
+    }
+
     func reloadMailBrowserPresentation() async {
         do {
             guard let mailStore else { return }
