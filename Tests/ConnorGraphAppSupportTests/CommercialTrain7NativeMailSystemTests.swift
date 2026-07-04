@@ -102,6 +102,39 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(try await reloaded.message(id: messageID)?.summary.flags.isRead == true)
     }
 
+    @Test func fileBackedMailStoreListsRecentMessagesWithDirectionAndAccountFilters() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-recent-store-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let accountA = MailAccountID(rawValue: "account-a")
+        let accountB = MailAccountID(rawValue: "account-b")
+        let inboxA = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountA, name: "Inbox", path: "INBOX", role: .inbox)
+        let sentA = MailMailbox(id: MailMailboxID(rawValue: "account-a-sent"), accountID: accountA, name: "Sent", path: "Sent", role: .sent)
+        let inboxB = MailMailbox(id: MailMailboxID(rawValue: "account-b-inbox"), accountID: accountB, name: "Inbox", path: "INBOX", role: .inbox)
+        let store = FileBackedMailSourceStore(storeURL: storeURL)
+        try await store.saveAccount(Self.makeMailAccount(id: accountA, displayName: "Account A"))
+        try await store.saveAccount(Self.makeMailAccount(id: accountB, displayName: "Account B"))
+        try await store.saveMailbox(inboxA)
+        try await store.saveMailbox(sentA)
+        try await store.saveMailbox(inboxB)
+        try await store.saveMessage(Self.makeMailDetail(id: "z-same-date", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 300), subject: "Tie Z"))
+        try await store.saveMessage(Self.makeMailDetail(id: "a-same-date", accountID: accountA, mailboxID: sentA.id, date: Date(timeIntervalSince1970: 300), subject: "Tie A"))
+        try await store.saveMessage(Self.makeMailDetail(id: "b-inbox-middle", accountID: accountB, mailboxID: inboxB.id, date: Date(timeIntervalSince1970: 200), subject: "Middle inbox"))
+        try await store.saveMessage(Self.makeMailDetail(id: "a-inbox-old", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 100), subject: "Old inbox"))
+
+        let all = try await store.recentMessages(accountID: nil, direction: .all, limit: 10)
+        #expect(all.map { $0.id.rawValue } == ["a-same-date", "z-same-date", "b-inbox-middle", "a-inbox-old"])
+
+        let sent = try await store.recentMessages(accountID: nil, direction: .sent, limit: 10)
+        #expect(sent.map { $0.id.rawValue } == ["a-same-date"])
+
+        let received = try await store.recentMessages(accountID: nil, direction: .received, limit: 10)
+        #expect(received.map { $0.id.rawValue } == ["z-same-date", "b-inbox-middle", "a-inbox-old"])
+
+        let accountAOnly = try await store.recentMessages(accountID: accountA, direction: .all, limit: 2)
+        #expect(accountAOnly.map { $0.id.rawValue } == ["a-same-date", "z-same-date"])
+    }
+
     @Test func mailStoreCanClearCachedMailDataWithoutRemovingAccounts() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-cache-rebuild-\(UUID().uuidString)", isDirectory: true)
         let storeURL = directory.appendingPathComponent("mail-store.json")
