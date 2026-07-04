@@ -975,9 +975,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 10_000_000)
-            operation()
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                operation()
+            }
         }
     }
 
