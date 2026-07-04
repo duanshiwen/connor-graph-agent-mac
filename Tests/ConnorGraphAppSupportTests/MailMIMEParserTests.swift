@@ -109,4 +109,26 @@ struct MailMIMEParserTests {
         #expect(result.plainText.contains("新会员信息已添加"))
         #expect(!result.plainText.contains("aGkg5q616K"))
     }
+
+    @Test func quotedPrintableTransferEncodingDecodesUTF8AndSoftLineBreaks() {
+        let encodedBody = """
+        hi =E6=AE=B5=E8=AF=97=E9=97=BB=EF=BC=8C
+        =E6=96=B0=E4=BC=9A=E5=91=98=E4=BF=A1=E6=81=AF=E5=B7=B2=
+        =E6=B7=BB=E5=8A=A0=EF=BC=8C
+        """
+
+        let result = MailMIMEParser().parseBodyWithHTML(
+            rawData: Data(encodedBody.utf8),
+            fallbackString: "fallback",
+            charset: "utf-8",
+            transferEncoding: "quoted-printable",
+            contentType: "text/plain; charset=utf-8",
+            boundary: nil
+        )
+
+        #expect(result.plainText.contains("hi 段诗闻"))
+        #expect(result.plainText.contains("新会员信息已添加，"))
+        #expect(!result.plainText.contains("=E6"))
+        #expect(!result.plainText.contains("已\n添加"))
+    }
 }
