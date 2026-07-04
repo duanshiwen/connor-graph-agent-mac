@@ -2697,12 +2697,48 @@ final class AppViewModel: NSObject, ObservableObject {
             guard let detail = try await mailStore?.message(id: messageID) else {
                 return MailBodyDisplayPresentation(kind: .error, text: "无法读取邮件正文：本地缓存中找不到这封邮件")
             }
-            return MailBodyDisplayPresentation(detail: detail)
+            if MailBodyOnDemandFetchPlanner.hasDisplayableBody(detail) {
+                return MailBodyDisplayPresentation(detail: detail)
+            }
+            do {
+                let fetched = try await fetchAndCacheMailBodyIfNeeded(detail)
+                return MailBodyDisplayPresentation(detail: fetched)
+            } catch {
+                let message = "无法按需读取邮件正文：\(error.localizedDescription)"
+                errorMessage = message
+                return MailBodyDisplayPresentation.error(message, fallback: detail.summary.snippet)
+            }
         } catch {
             let message = "无法读取邮件正文：\(error.localizedDescription)"
             errorMessage = message
             return MailBodyDisplayPresentation(kind: .error, text: message)
         }
+    }
+
+    private func fetchAndCacheMailBodyIfNeeded(_ detail: MailMessageDetail) async throws -> MailMessageDetail {
+        guard let mailStore else { return detail }
+        guard let account = try await mailStore.account(id: detail.summary.accountID) else {
+            throw NSError(domain: "Connor.MailBody", code: 1, userInfo: [NSLocalizedDescriptionKey: "找不到邮件账户"])
+        }
+        guard let uid = MailBodyOnDemandFetchPlanner.imapUID(for: detail) else {
+            throw NSError(domain: "Connor.MailBody", code: 2, userInfo: [NSLocalizedDescriptionKey: "缺少邮件 UID"])
+        }
+        let service = MailIMAPInitialSyncService(credentialStore: AppMailCredentialStore(), messageLimit: 1)
+        guard let fetched = try await service.fetchMessageBody(
+            account: account,
+            uid: uid,
+            messageID: detail.id,
+            mailboxID: detail.summary.mailboxID,
+            snippet: detail.summary.snippet
+        ) else {
+            throw NSError(domain: "Connor.MailBody", code: 3, userInfo: [NSLocalizedDescriptionKey: "服务器未返回可显示正文"])
+        }
+        guard MailBodyOnDemandFetchPlanner.hasDisplayableBody(fetched) else {
+            throw NSError(domain: "Connor.MailBody", code: 4, userInfo: [NSLocalizedDescriptionKey: "服务器返回的正文为空"])
+        }
+        try await mailStore.saveMessage(fetched)
+        await reloadMailBrowserPresentation()
+        return fetched
     }
 
     func loadMailBodyText(for messageID: MailMessageID) async -> String? {

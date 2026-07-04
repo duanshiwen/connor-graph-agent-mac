@@ -72,6 +72,52 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(try await reloaded.message(id: messageID)?.summary.flags.isRead == true)
     }
 
+    @Test func mailBodyOnDemandPlannerDetectsEmptyCachedBodyAndExtractsUID() {
+        let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
+        let mailboxID = MailMailboxID(rawValue: "yakii_d@icloud.com-inbox")
+        let emptyDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-INBOX-1392"),
+                accountID: accountID,
+                mailboxID: mailboxID,
+                subject: "Empty body",
+                from: MailAddress(email: "sender@example.com"),
+                to: [MailAddress(email: "yakii_d@icloud.com")],
+                snippet: "（无正文摘要）"
+            ),
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: "", byteCount: 0),
+                htmlText: nil,
+                redactedPreview: ""
+            )
+        )
+        let fullDetail = MailMessageDetail(
+            summary: emptyDetail.summary,
+            body: MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: "Hello", byteCount: 5), redactedPreview: "Hello")
+        )
+
+        #expect(MailBodyOnDemandFetchPlanner.hasDisplayableBody(fullDetail))
+        #expect(!MailBodyOnDemandFetchPlanner.hasDisplayableBody(emptyDetail))
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: emptyDetail) == "1392")
+    }
+
+    @Test func mailBodyOnDemandPlannerRejectsNonInboxMessageIDsForNow() {
+        let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
+        let detail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-Archive-1392"),
+                accountID: accountID,
+                mailboxID: MailMailboxID(rawValue: "archive"),
+                subject: "Archive",
+                from: MailAddress(email: "sender@example.com"),
+                to: [MailAddress(email: "yakii_d@icloud.com")],
+                snippet: "摘要"
+            )
+        )
+
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: detail) == nil)
+    }
+
     @Test func agentToolRegistryExposesNativeMailToolsAndBlocksSendWithoutApproval() async throws {
         let runtime = MailRuntime.fixture()
         var registry = AgentToolRegistry()
