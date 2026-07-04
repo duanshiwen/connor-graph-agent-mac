@@ -3,6 +3,18 @@ import ConnorGraphCore
 import ConnorGraphAgent
 
 extension MailRuntime: AgentMailRuntime {
+    public func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
+        try await listRecentMessages(
+            MailRuntimeRecentMessagesRequest(
+                accountID: request.accountID,
+                direction: MailMessageDirectionFilter(agentFilter: request.direction),
+                limit: request.limit
+            ),
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
     public func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
         let payload = try await sendApprovalPayload(draftID: draftID)
         return MailSendApprovalBridge(
@@ -34,5 +46,18 @@ extension MailRuntime: AgentMailRuntime {
             runID: runID,
             sessionID: sessionID
         )
+    }
+}
+
+private extension MailMessageDirectionFilter {
+    init(agentFilter: AgentMailMessageDirectionFilter) {
+        switch agentFilter {
+        case .all:
+            self = .all
+        case .received:
+            self = .received
+        case .sent:
+            self = .sent
+        }
     }
 }

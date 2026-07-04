@@ -40,6 +40,36 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(updated.summary.flags.isRead)
     }
 
+    @Test func runtimeListsRecentMessagesAcrossAccountsAndDirections() async throws {
+        let accountA = MailAccountID(rawValue: "account-a")
+        let accountB = MailAccountID(rawValue: "account-b")
+        let inboxA = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountA, name: "Inbox", path: "INBOX", role: .inbox)
+        let sentA = MailMailbox(id: MailMailboxID(rawValue: "account-a-sent"), accountID: accountA, name: "Sent", path: "Sent", role: .sent)
+        let inboxB = MailMailbox(id: MailMailboxID(rawValue: "account-b-inbox"), accountID: accountB, name: "Inbox", path: "INBOX", role: .inbox)
+        let messages = [
+            Self.makeMailDetail(id: "a-inbox-old", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 100), subject: "Old inbox"),
+            Self.makeMailDetail(id: "a-sent-newest", accountID: accountA, mailboxID: sentA.id, date: Date(timeIntervalSince1970: 300), subject: "Newest sent"),
+            Self.makeMailDetail(id: "b-inbox-middle", accountID: accountB, mailboxID: inboxB.id, date: Date(timeIntervalSince1970: 200), subject: "Middle inbox")
+        ]
+        let accounts = [
+            Self.makeMailAccount(id: accountA, displayName: "Account A"),
+            Self.makeMailAccount(id: accountB, displayName: "Account B")
+        ]
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: accounts), cache: InMemoryMailSourceCache(mailboxes: [inboxA, sentA, inboxB], messages: messages))
+
+        let all = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(limit: 10))
+        #expect(all.map { $0.id.rawValue } == ["a-sent-newest", "b-inbox-middle", "a-inbox-old"])
+
+        let sent = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(direction: .sent, limit: 10))
+        #expect(sent.map { $0.id.rawValue } == ["a-sent-newest"])
+
+        let received = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(direction: .received, limit: 10))
+        #expect(received.map { $0.id.rawValue } == ["b-inbox-middle", "a-inbox-old"])
+
+        let accountAOnly = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(accountID: accountA, direction: .all, limit: 10))
+        #expect(accountAOnly.map { $0.id.rawValue } == ["a-sent-newest", "a-inbox-old"])
+    }
+
     @Test func fileBackedMailStorePersistsAccountsMailboxesMessagesAndReadState() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-store-\(UUID().uuidString)", isDirectory: true)
         let storeURL = directory.appendingPathComponent("mail-store.json")
@@ -498,6 +528,30 @@ struct CommercialTrain7NativeMailSystemTests {
         let other = MailAccountProviderPreset.other
         #expect(other.incomingHost.isEmpty)
         #expect(other.outgoingHost.isEmpty)
+    }
+
+    private static func makeMailAccount(id: MailAccountID, displayName: String) -> MailAccount {
+        MailAccount(
+            id: id,
+            provider: .genericIMAPSMTP,
+            displayName: displayName,
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "\(id.rawValue)-identity"), displayName: displayName, address: MailAddress(email: "\(id.rawValue)@example.com"))],
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+    }
+
+    private static func makeMailDetail(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String) -> MailMessageDetail {
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: id),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: subject,
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "recipient@example.com")],
+            date: date,
+            snippet: subject
+        )
+        return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<\(id)@example.com>"), body: MailMessageBody(redactedPreview: subject))
     }
 
     private func makeMailBrowserFixture(now: Date = Date()) -> NativeMailBrowserPresentation {
