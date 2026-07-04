@@ -1,5 +1,4 @@
 import Foundation
-import Security
 import ConnorGraphCore
 
 /// SMTP client for sending emails. Supports AUTH LOGIN with TLS.

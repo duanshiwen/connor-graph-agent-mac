@@ -1,6 +1,12 @@
 import Foundation
 import CryptoKit
 
+public protocol CredentialStore: Sendable {
+    func saveSecret(_ secret: String, service: String, account: String) throws
+    func readSecret(service: String, account: String) throws -> String?
+    func deleteSecret(service: String, account: String) throws
+}
+
 public enum LocalEncryptedCredentialStoreError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidMasterKey
     case invalidRecord
