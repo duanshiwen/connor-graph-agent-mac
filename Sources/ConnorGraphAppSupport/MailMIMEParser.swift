@@ -100,7 +100,9 @@ public struct MailMIMEParser: Sendable, Equatable {
             return MailMIMEBodyResult(plainText: fallbackString)
         }
 
-        // Step 1: Decode Content-Transfer-Encoding
+        // Step 1: Decode declared top-level Content-Transfer-Encoding. Multipart
+        // messages are decoded per part below; keep the top-level data intact so
+        // boundary parsing cannot be affected by malformed body heuristics.
         let decodedData = decodeTransferEncoding(rawData, encoding: transferEncoding)
 
         // Step 2: If multipart (has boundary), extract parts
@@ -108,8 +110,12 @@ public struct MailMIMEParser: Sendable, Equatable {
             return extractBodyComponents(data: decodedData, boundary: boundary, fallback: fallbackString)
         }
 
-        // Step 3: Single part — charset convert
-        let decodedString = decodeCharset(decodedData, charset: charset) ?? fallbackString
+        // Step 3: Single part — charset convert. Some real-world messages omit
+        // Content-Transfer-Encoding even though their text/html body is plainly
+        // quoted-printable; apply a conservative fallback so encoded UTF-8 bytes
+        // do not leak into the rendered mail body.
+        let decodedSinglePartData = decodeTransferEncodingWithFallback(decodedData, encoding: transferEncoding)
+        let decodedString = decodeCharset(decodedSinglePartData, charset: charset) ?? fallbackString
         let trimmed = decodedString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed.hasPrefix("<html") || trimmed.hasPrefix("<!doctype") {
             return MailMIMEBodyResult(plainText: stripHTML(decodedString), htmlText: decodedString)
@@ -178,7 +184,7 @@ public struct MailMIMEParser: Sendable, Equatable {
             if headerLower.contains("text/plain") || headerLower.contains("text/html") {
                 let charset = extractCharsetFromContentType(unfoldedHeader)
                 let transferEncoding = extractTransferEncodingFromHeader(unfoldedHeader)
-                let decodedBody = decodeTransferEncoding(bodySlice, encoding: transferEncoding)
+                let decodedBody = decodeTransferEncodingWithFallback(bodySlice, encoding: transferEncoding)
                 
                 if headerLower.contains("text/html") {
                     if let html = decodeCharset(decodedBody, charset: charset) {
@@ -206,6 +212,56 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     // MARK: - Helpers
+
+    private func decodeTransferEncodingWithFallback(_ data: Data, encoding: String?) -> Data {
+        let enc = encoding?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if enc == "base64" || enc == "quoted-printable" || enc == "qp" {
+            return decodeTransferEncoding(data, encoding: encoding)
+        }
+        if looksLikeQuotedPrintable(data) {
+            return decodeQuotedPrintable(data)
+        }
+        return data
+    }
+
+    private func looksLikeQuotedPrintable(_ data: Data) -> Bool {
+        let bytes = [UInt8](data)
+        guard !bytes.isEmpty else { return false }
+        var encodedByteCount = 0
+        var hasSoftLineBreak = false
+
+        var i = 0
+        while i < bytes.count {
+            guard bytes[i] == 0x3D else { // '='
+                i += 1
+                continue
+            }
+            if i + 1 < bytes.count, bytes[i + 1] == 0x0A {
+                hasSoftLineBreak = true
+                i += 2
+                continue
+            }
+            if i + 2 < bytes.count, bytes[i + 1] == 0x0D, bytes[i + 2] == 0x0A {
+                hasSoftLineBreak = true
+                i += 3
+                continue
+            }
+            if i + 2 < bytes.count, Self.isHexDigit(bytes[i + 1]), Self.isHexDigit(bytes[i + 2]) {
+                encodedByteCount += 1
+                if encodedByteCount >= 2 { return true }
+                i += 3
+                continue
+            }
+            i += 1
+        }
+        return hasSoftLineBreak
+    }
+
+    private static func isHexDigit(_ byte: UInt8) -> Bool {
+        (byte >= 0x30 && byte <= 0x39) ||
+        (byte >= 0x41 && byte <= 0x46) ||
+        (byte >= 0x61 && byte <= 0x66)
+    }
 
     /// Decode MIME base64 data. RFC 2045 allows encoded body lines to be wrapped, commonly
     /// at 76 characters, so CRLF and other whitespace must be ignored before decoding.
