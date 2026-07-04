@@ -92,6 +92,29 @@ public struct RemoteIMAPMailbox: Sendable, Equatable {
         MailMailboxID(rawValue: "\(accountID.rawValue)-\(stableIDComponent)")
     }
 
+    public func messageID(accountID: MailAccountID, uid: String) -> MailMessageID {
+        let prefix: String
+        switch role {
+        case .inbox:
+            prefix = "INBOX"
+        case .sent:
+            prefix = "Sent"
+        default:
+            prefix = stableIDComponent
+        }
+        return MailMessageID(rawValue: "\(accountID.rawValue)-\(prefix)-\(uid)")
+    }
+
+    public static func chunkUIDs(_ sortedUIDs: [Int], messageLimit: Int, batchSize: Int) -> [[Int]] {
+        let limited = messageLimit > 0 ? Array(sortedUIDs.suffix(messageLimit)) : sortedUIDs
+        let size = max(batchSize, 1)
+        var chunks: [[Int]] = []
+        for start in stride(from: 0, to: limited.count, by: size) {
+            chunks.append(Array(limited[start..<min(start + size, limited.count)]))
+        }
+        return chunks
+    }
+
     public static func slug(_ value: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         let scalars = value.lowercased().unicodeScalars.map { scalar -> Character in
@@ -469,6 +492,11 @@ struct BlockingIMAPClient {
         var messages: [FetchedMessage]
     }
 
+    struct MailboxSnapshot: Sendable, Equatable {
+        var mailbox: RemoteIMAPMailbox
+        var snapshot: Snapshot
+    }
+
     struct FetchedMessage: Sendable, Equatable {
         var uid: String
         var flags: String
@@ -478,7 +506,7 @@ struct BlockingIMAPClient {
         var rawBodyData: Data?
         var fallbackSequenceDate: Date
 
-        func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress) -> MailMessageDetail {
+        func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, remoteMailbox: RemoteIMAPMailbox? = nil) -> MailMessageDetail {
             // Parse headers: prefer raw RFC 822 headers (ASCII-safe, proper RFC 2047 decoding)
             // over synthetic header from ENVELOPE (may have lossy non-ASCII bytes).
             let rawHeaders: ParsedHeaders
@@ -537,7 +565,7 @@ struct BlockingIMAPClient {
             )
             let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
             let summary = MailMessageSummary(
-                id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
+                id: (remoteMailbox ?? RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)).messageID(accountID: accountID, uid: uid),
                 accountID: accountID,
                 mailboxID: mailboxID,
                 threadID: MailThreadID(rawValue: messageID),
@@ -701,6 +729,13 @@ struct BlockingIMAPClient {
     var port: Int
 
     func withPasswordSession(usernames: [String], password: String, messageLimit: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+        let inbox = RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        return try withPasswordSessionMailboxes(usernames: usernames, password: password, mailboxes: [inbox], messageLimit: messageLimit) { _, batch in
+            onBatch?(batch)
+        }.first?.snapshot ?? Snapshot(exists: 0, unreadCount: 0, uidValidity: nil, highestUID: nil, messages: [])
+    }
+
+    func withPasswordSessionMailboxes(usernames: [String], password: String, mailboxes: [RemoteIMAPMailbox], messageLimit: Int, fetchBatchSize: Int = 50, onBatch: (@Sendable (RemoteIMAPMailbox, [FetchedMessage]) -> Void)? = nil) throws -> [MailboxSnapshot] {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -724,7 +759,14 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit, onBatch: onBatch)
+        let snapshots = try mailboxes.map { mailbox in
+            let snapshot = try fetchMailboxSnapshot(input: input, output: output, mailbox: mailbox, messageLimit: messageLimit, fetchBatchSize: fetchBatchSize) { batch in
+                onBatch?(mailbox, batch)
+            }
+            return MailboxSnapshot(mailbox: mailbox, snapshot: snapshot)
+        }
+        try logout(input: input, output: output)
+        return snapshots
     }
 
     func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
@@ -751,7 +793,9 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, storedUIDValidity: storedUIDValidity, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
+        let snapshot = try fetchMailboxIncremental(input: input, output: output, mailbox: RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox), storedUIDs: storedUIDs, storedUIDValidity: storedUIDValidity, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
+        try logout(input: input, output: output)
+        return snapshot
     }
 
     func withOAuth2Session(usernames: [String], accessToken: String, messageLimit: Int) throws -> Snapshot {
@@ -778,7 +822,9 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithOAuth2(usernames: usernames, accessToken: accessToken, input: input, output: output)
-        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
+        let snapshot = try fetchMailboxSnapshot(input: input, output: output, mailbox: RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox), messageLimit: messageLimit)
+        try logout(input: input, output: output)
+        return snapshot
     }
 
     /// Parse RFC 822 date string
@@ -827,19 +873,19 @@ struct BlockingIMAPClient {
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
     }
 
-    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    private func fetchMailboxIncremental(input: InputStream, output: OutputStream, mailbox: RemoteIMAPMailbox, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
-        try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
+        try write("\(statusTag) STATUS \"\(escape(mailbox.path))\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
         let statusMessages = statusResponse.firstInt(matching: #"MESSAGES\s+(\d+)"#)
         let statusUnseen = statusResponse.firstInt(matching: #"UNSEEN\s+(\d+)"#)
         let statusUIDValidity = statusResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
 
         let selectTag = nextTag()
-        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        try write("\(selectTag) SELECT \"\(escape(mailbox.path))\"\r\n", output: output)
         let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
         guard selectResponse.contains("\(selectTag) OK") else {
-            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(mailbox.path) failed")
         }
         let exists = statusMessages ?? selectResponse.firstInt(matching: #"\*\s+(\d+)\s+EXISTS"#) ?? 0
         let uidValidity = statusUIDValidity ?? selectResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
@@ -850,7 +896,6 @@ struct BlockingIMAPClient {
         }
 
         guard exists > 0 else {
-            try logout(input: input, output: output)
             return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
         }
 
@@ -864,14 +909,14 @@ struct BlockingIMAPClient {
         let newUIDs = allServerUIDs.filter { !storedUIDs.contains($0) }.compactMap(Int.init).sorted()
 
         guard !newUIDs.isEmpty else {
-            try logout(input: input, output: output)
             return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allServerUIDs.compactMap(Int.init).max().map(String.init), messages: [])
         }
 
         // Phase 3: Batch-fetch new messages
         var allMessages: [FetchedMessage] = []
-        for batchStart in stride(from: 0, to: newUIDs.count, by: fetchBatchSize) {
-            let batchEnd = min(batchStart + fetchBatchSize, newUIDs.count)
+        let batchSize = max(fetchBatchSize, 1)
+        for batchStart in stride(from: 0, to: newUIDs.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, newUIDs.count)
             let batch = Array(newUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
@@ -883,7 +928,6 @@ struct BlockingIMAPClient {
             if !batchMessages.isEmpty { onBatch?(batchMessages) }
         }
 
-        try logout(input: input, output: output)
         return Snapshot(exists: exists, unreadCount: statusUnseen ?? allMessages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: allServerUIDs.compactMap(Int.init).max().map(String.init), messages: allMessages.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) })
     }
 
@@ -895,24 +939,23 @@ struct BlockingIMAPClient {
         }
     }
 
-    private func fetchInboxSnapshot(input: InputStream, output: OutputStream, messageLimit: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    private func fetchMailboxSnapshot(input: InputStream, output: OutputStream, mailbox: RemoteIMAPMailbox, messageLimit: Int, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
-        try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
+        try write("\(statusTag) STATUS \"\(escape(mailbox.path))\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
         let statusMessages = statusResponse.firstInt(matching: #"MESSAGES\s+(\d+)"#)
         let statusUnseen = statusResponse.firstInt(matching: #"UNSEEN\s+(\d+)"#)
         let statusUIDValidity = statusResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
 
         let selectTag = nextTag()
-        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        try write("\(selectTag) SELECT \"\(escape(mailbox.path))\"\r\n", output: output)
         let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
         guard selectResponse.contains("\(selectTag) OK") else {
-            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(mailbox.path) failed")
         }
         let exists = statusMessages ?? selectResponse.firstInt(matching: #"\*\s+(\d+)\s+EXISTS"#) ?? 0
         let uidValidity = statusUIDValidity ?? selectResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
         guard exists > 0 else {
-            try logout(input: input, output: output)
             return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
         }
 
@@ -922,21 +965,17 @@ struct BlockingIMAPClient {
         let uidResponse = try readUntilTagged(tag: uidTag, input: input, timeout: 60)
         let allUIDs = parseUIDList(uidResponse).compactMap(Int.init).sorted()
 
-        // Phase 2: Take UIDs (0 = all, >0 = latest N)
-        let fetchUIDs = messageLimit > 0 ? Array(allUIDs.suffix(messageLimit)) : allUIDs
-        guard !fetchUIDs.isEmpty else {
-            try logout(input: input, output: output)
+        // Phase 2: Take UIDs (0 = all, >0 = latest N). User requested no fixed limit;
+        // callers should pass 0 for unlimited and this method will still fetch in chunks.
+        let uidChunks = RemoteIMAPMailbox.chunkUIDs(allUIDs, messageLimit: messageLimit, batchSize: fetchBatchSize)
+        guard !uidChunks.isEmpty else {
             return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: [])
         }
 
         var allMessages: [FetchedMessage] = []
         // Initial sync: fetch only headers, envelope and flags. NO body text.
-        // Body is fetched on-demand when user opens a message (see Task 2).
-        // Larger batch size (50 instead of 5) significantly reduces round trips.
-        let batchSize = 50
-        for batchStart in stride(from: 0, to: fetchUIDs.count, by: batchSize) {
-            let batchEnd = min(batchStart + batchSize, fetchUIDs.count)
-            let batch = Array(fetchUIDs[batchStart..<batchEnd])
+        // Body is fetched on-demand when user opens a message.
+        for batch in uidChunks {
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
             // Fetch only envelope and key headers — no body text
@@ -947,7 +986,6 @@ struct BlockingIMAPClient {
             if !batchMessages.isEmpty { onBatch?(batchMessages) }
         }
 
-        try logout(input: input, output: output)
         return Snapshot(exists: exists, unreadCount: statusUnseen ?? allMessages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: allMessages.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) })
     }
 

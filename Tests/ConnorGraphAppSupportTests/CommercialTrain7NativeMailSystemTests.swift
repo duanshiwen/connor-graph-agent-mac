@@ -260,6 +260,28 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(mailboxes.first { $0.path == "Sent Mail" }?.role == .sent)
     }
 
+    @Test func remoteIMAPMailboxBuildsMailboxAwareMessageIDs() {
+        let accountID = MailAccountID(rawValue: "shiwen@example.com")
+        let inbox = RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        let sent = RemoteIMAPMailbox(name: "Sent", path: "Sent", role: .sent)
+
+        #expect(inbox.messageID(accountID: accountID, uid: "123").rawValue == "shiwen@example.com-INBOX-123")
+        #expect(sent.messageID(accountID: accountID, uid: "123").rawValue == "shiwen@example.com-Sent-123")
+        #expect(inbox.messageID(accountID: accountID, uid: "123") != sent.messageID(accountID: accountID, uid: "123"))
+    }
+
+    @Test func remoteIMAPUIDChunkingDoesNotLimitWhenMessageLimitIsZero() {
+        let chunks = RemoteIMAPMailbox.chunkUIDs([1, 2, 3, 4, 5], messageLimit: 0, batchSize: 2)
+
+        #expect(chunks == [[1, 2], [3, 4], [5]])
+    }
+
+    @Test func remoteIMAPUIDChunkingStillSupportsExplicitLatestLimit() {
+        let chunks = RemoteIMAPMailbox.chunkUIDs([1, 2, 3, 4, 5], messageLimit: 3, batchSize: 2)
+
+        #expect(chunks == [[3, 4], [5]])
+    }
+
     @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
         let binding = MailCredentialBinding(credentialNamespace: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
         let credentialStore = CommercialTrain7MemoryCredentialStore()
