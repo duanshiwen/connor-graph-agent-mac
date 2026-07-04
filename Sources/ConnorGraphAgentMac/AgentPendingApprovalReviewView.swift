@@ -84,10 +84,8 @@ struct AgentPendingApprovalReviewView: View {
             }
         }
         .padding()
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadPendingApprovals()
-            }
+        .onAppear {
+            viewModel.reloadPendingApprovals()
         }
     }
 

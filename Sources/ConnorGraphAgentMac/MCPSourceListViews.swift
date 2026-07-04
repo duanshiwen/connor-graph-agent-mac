@@ -45,11 +45,9 @@ struct CraftSourceListPane: View {
                 onSave: viewModel.saveSourceRuntimeDraft
             )
         }
-        .task {
+        .onAppear {
             guard viewModel.sourceRuntimeConfigurations.isEmpty else { return }
-            viewModel.deferViewUpdate {
-                viewModel.reloadSourceRuntimeConfigurations()
-            }
+            viewModel.reloadSourceRuntimeConfigurations()
         }
     }
 }

@@ -193,10 +193,8 @@ struct PromotionQueueView: View {
             }
         }
         .padding()
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadPromotionCandidates()
-            }
+        .onAppear {
+            viewModel.reloadPromotionCandidates()
         }
     }
 }

@@ -68,10 +68,8 @@ struct SourceRuntimePanelView: View {
         } message: {
             Text("This permanently deletes \(viewModel.pendingSourceRuntimeDeletionName ?? "this source") and its persisted health, catalog, and audit files. Archive instead if you need to preserve history.")
         }
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadSourceRuntimeConfigurations()
-            }
+        .onAppear {
+            viewModel.reloadSourceRuntimeConfigurations()
         }
     }
 }
@@ -863,10 +861,8 @@ struct AutomationRuntimePanelView: View {
                 TaskRuntimeCard(card: card, viewModel: viewModel)
             }
         }
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadTaskManagementPresentation()
-            }
+        .onAppear {
+            viewModel.reloadTaskManagementPresentation()
         }
     }
 }
