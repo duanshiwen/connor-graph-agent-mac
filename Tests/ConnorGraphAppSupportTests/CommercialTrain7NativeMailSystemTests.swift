@@ -282,6 +282,26 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(chunks == [[3, 4], [5]])
     }
 
+    @Test func remoteIMAPSyncTargetsPreferInboxAndSentOnly() {
+        let remote = [
+            RemoteIMAPMailbox(name: "Archive", path: "Archive", role: .archive),
+            RemoteIMAPMailbox(name: "Sent", path: "Sent Messages", role: .sent),
+            RemoteIMAPMailbox(name: "Inbox", path: "INBOX", role: .inbox),
+            RemoteIMAPMailbox(name: "Custom", path: "Projects", role: .custom)
+        ]
+
+        let targets = RemoteIMAPMailbox.syncTargets(from: remote)
+
+        #expect(targets.map(\.role) == [.inbox, .sent])
+        #expect(targets.map(\.path) == ["INBOX", "Sent Messages"])
+    }
+
+    @Test func remoteIMAPSyncTargetsFallbackToInboxWhenSentMissing() {
+        let targets = RemoteIMAPMailbox.syncTargets(from: [RemoteIMAPMailbox(name: "Inbox", path: "INBOX", role: .inbox)])
+
+        #expect(targets.map(\.role) == [.inbox])
+    }
+
     @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
         let binding = MailCredentialBinding(credentialNamespace: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
         let credentialStore = CommercialTrain7MemoryCredentialStore()

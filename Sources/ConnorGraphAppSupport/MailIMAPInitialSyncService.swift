@@ -115,6 +115,15 @@ public struct RemoteIMAPMailbox: Sendable, Equatable {
         return chunks
     }
 
+    public static func syncTargets(from discovered: [RemoteIMAPMailbox]) -> [RemoteIMAPMailbox] {
+        let inbox = discovered.first { $0.role == .inbox } ?? RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        var targets = [inbox]
+        if let sent = discovered.first(where: { $0.role == .sent }) {
+            targets.append(sent)
+        }
+        return targets
+    }
+
     public static func slug(_ value: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         let scalars = value.lowercased().unicodeScalars.map { scalar -> Character in
@@ -230,17 +239,17 @@ public struct MailIMAPInitialSyncService: Sendable {
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
             let accountID = originalAccount.id
-            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
-            let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
-                return { @Sendable (batch: [BlockingIMAPClient.FetchedMessage]) in
-                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email)) }
+            let onBatchWithDetail: (@Sendable (RemoteIMAPMailbox, [BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
+                return { @Sendable (remoteMailbox: RemoteIMAPMailbox, batch: [BlockingIMAPClient.FetchedMessage]) in
+                    let mailboxID = remoteMailbox.mailboxID(accountID: accountID)
+                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: MailAddress(email: email), remoteMailbox: remoteMailbox) }
                     callback(details)
                 }
             }
-            let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
+            let mailboxSnapshots = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[BlockingIMAPClient.MailboxSnapshot], Error>) in
                 DispatchQueue.global(qos: .utility).async {
                     do {
-                        let result = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit, onBatch: onBatchWithDetail)
+                        let result = try client.withPasswordSessionDiscoveredMailboxes(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit, onBatch: onBatchWithDetail)
                         continuation.resume(returning: result)
                     } catch {
                         continuation.resume(throwing: error)
@@ -248,31 +257,36 @@ public struct MailIMAPInitialSyncService: Sendable {
                 }
             }
             let now = Date()
-            let mailbox = MailMailbox(
-                id: inboxID,
-                accountID: accountID,
-                name: "收件箱",
-                path: "INBOX",
-                role: .inbox,
-                status: MailMailboxStatus(
-                    messageCount: snapshot.exists,
-                    unreadCount: snapshot.unreadCount,
-                    syncCursor: snapshot.highestUID.map { MailSyncCursor(value: $0, updatedAt: now, uidValidity: snapshot.uidValidity) },
-                    lastSyncedAt: now
+            let mailboxes = mailboxSnapshots.map { entry in
+                MailMailbox(
+                    id: entry.mailbox.mailboxID(accountID: accountID),
+                    accountID: accountID,
+                    name: displayName(for: entry.mailbox),
+                    path: entry.mailbox.path,
+                    role: entry.mailbox.role,
+                    status: MailMailboxStatus(
+                        messageCount: entry.snapshot.exists,
+                        unreadCount: entry.snapshot.unreadCount,
+                        syncCursor: entry.snapshot.highestUID.map { MailSyncCursor(value: $0, updatedAt: now, uidValidity: entry.snapshot.uidValidity) },
+                        lastSyncedAt: now
+                    )
                 )
-            )
-            let messages = snapshot.messages.map { fetched in
-                fetched.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email))
+            }
+            let messages = mailboxSnapshots.flatMap { entry in
+                let mailboxID = entry.mailbox.mailboxID(accountID: accountID)
+                return entry.snapshot.messages.map { fetched in
+                    fetched.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: MailAddress(email: email), remoteMailbox: entry.mailbox)
+                }
             }
             var account = originalAccount
             account.health = MailAccountHealth(
                 status: .ready,
                 checkedAt: now,
-                summary: "首次同步完成 · INBOX \(snapshot.exists) 封 · 已拉取最近 \(messages.count) 封",
+                summary: Self.initialSyncSummary(mailboxSnapshots: mailboxSnapshots, pulledMessageCount: messages.count),
                 blockingReasons: []
             )
             account.updatedAt = now
-            return MailInitialSyncResult(account: account, mailboxes: [mailbox], messages: messages)
+            return MailInitialSyncResult(account: account, mailboxes: mailboxes, messages: messages)
         } catch let error as BlockingIMAPClient.IMAPError {
             let health: MailAccountHealth
             switch error {
@@ -461,6 +475,26 @@ public struct MailIMAPInitialSyncService: Sendable {
             usernames.append(local)
         }
         return Array(NSOrderedSet(array: usernames)) as? [String] ?? usernames
+    }
+
+    private func displayName(for mailbox: RemoteIMAPMailbox) -> String {
+        switch mailbox.role {
+        case .inbox: "收件箱"
+        case .sent: "已发送"
+        default: mailbox.name
+        }
+    }
+
+    private static func initialSyncSummary(mailboxSnapshots: [BlockingIMAPClient.MailboxSnapshot], pulledMessageCount: Int) -> String {
+        let parts = mailboxSnapshots.map { entry -> String in
+            switch entry.mailbox.role {
+            case .inbox: "收件箱 \(entry.snapshot.exists) 封"
+            case .sent: "已发送 \(entry.snapshot.exists) 封"
+            default: "\(entry.mailbox.name) \(entry.snapshot.exists) 封"
+            }
+        }
+        let mailboxSummary = parts.isEmpty ? "未发现邮箱" : parts.joined(separator: " · ")
+        return "首次同步完成 · \(mailboxSummary) · 已拉取 \(pulledMessageCount) 封"
     }
 
     private func updatedAccount(_ account: MailAccount, status: MailAccountHealthStatus, summary: String, reasons: [String]) -> MailAccount {
@@ -759,7 +793,9 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        let snapshots = try mailboxes.map { mailbox in
+        let discovered = try discoverRemoteMailboxes(input: input, output: output)
+        let targets = mailboxes.isEmpty ? RemoteIMAPMailbox.syncTargets(from: discovered) : mailboxes
+        let snapshots = try targets.map { mailbox in
             let snapshot = try fetchMailboxSnapshot(input: input, output: output, mailbox: mailbox, messageLimit: messageLimit, fetchBatchSize: fetchBatchSize) { batch in
                 onBatch?(mailbox, batch)
             }
@@ -767,6 +803,10 @@ struct BlockingIMAPClient {
         }
         try logout(input: input, output: output)
         return snapshots
+    }
+
+    func withPasswordSessionDiscoveredMailboxes(usernames: [String], password: String, messageLimit: Int, fetchBatchSize: Int = 50, onBatch: (@Sendable (RemoteIMAPMailbox, [FetchedMessage]) -> Void)? = nil) throws -> [MailboxSnapshot] {
+        try withPasswordSessionMailboxes(usernames: usernames, password: password, mailboxes: [], messageLimit: messageLimit, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
     }
 
     func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
@@ -871,6 +911,19 @@ struct BlockingIMAPClient {
             lastLoginError = response.lastLine ?? response
         }
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
+    }
+
+    private func discoverRemoteMailboxes(input: InputStream, output: OutputStream) throws -> [RemoteIMAPMailbox] {
+        let tag = nextTag()
+        try write("\(tag) LIST \"\" \"*\" RETURN (SPECIAL-USE)\r\n", output: output)
+        let response = try readUntilTagged(tag: tag, input: input, timeout: 30)
+        let parsed = RemoteIMAPMailbox.parseListResponse(response)
+        if !parsed.isEmpty { return parsed }
+
+        let fallbackTag = nextTag()
+        try write("\(fallbackTag) LIST \"\" \"*\"\r\n", output: output)
+        let fallbackResponse = try readUntilTagged(tag: fallbackTag, input: input, timeout: 30)
+        return RemoteIMAPMailbox.parseListResponse(fallbackResponse)
     }
 
     private func fetchMailboxIncremental(input: InputStream, output: OutputStream, mailbox: RemoteIMAPMailbox, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
