@@ -533,6 +533,23 @@ public struct MailIMAPInitialSyncService: Sendable {
         guard let email = account.identities.first?.address.email, !email.isEmpty else { return nil }
         guard Int(uid) ?? 0 > 0 else { return nil }
 
+        let remoteMailbox = RemoteIMAPMailbox(name: mailboxPath.components(separatedBy: "/").last ?? mailboxPath, path: mailboxPath, role: mailboxRole)
+        if MailCore2Availability.isAvailable {
+            do {
+                return try await MailCore2MailBackend().fetchMessageBody(
+                    account: account,
+                    credential: password,
+                    uid: uid,
+                    mailbox: remoteMailbox,
+                    fallbackRecipient: MailAddress(email: email),
+                    snippet: snippet
+                )
+            } catch {
+                // Keep the legacy CFStream implementation as compatibility fallback for
+                // providers where MailCore2 cannot authenticate or parse a server response.
+            }
+        }
+
         let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
         let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
 
