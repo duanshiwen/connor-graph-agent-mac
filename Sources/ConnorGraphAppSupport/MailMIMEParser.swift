@@ -140,11 +140,15 @@ public struct MailMIMEParser: Sendable, Equatable {
             let remaining = data[partStart...]
             if let nextBoundary = remaining.range(of: delimiter) {
                 let partData = data[partStart..<nextBoundary.lowerBound]
-                parts.append(partData)
+                // Data slices keep the base collection's indices. Normalize each MIME part
+                // before later using 0-based subdata(in:) ranges; otherwise a slice whose
+                // startIndex is not 0 can trap with EXC_BREAKPOINT during body parsing.
+                parts.append(Data(partData))
                 searchStart = nextBoundary.lowerBound
             } else {
                 // Last part (no trailing boundary)
-                parts.append(remaining)
+                // Normalize for the same reason as above.
+                parts.append(Data(remaining))
                 searchStart = data.endIndex
             }
         }
