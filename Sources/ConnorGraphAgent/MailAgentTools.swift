@@ -78,20 +78,6 @@ public struct MailRuntimeSearchRequestBridge: Sendable, Equatable {
     }
 }
 
-public struct MailMessageBodyPreviewResult: Codable, Sendable, Equatable {
-    public var summary: MailMessageSummary
-    public var bodyPreview: String?
-    public var bodyPreviewTruncated: Bool
-    public var bodySource: String?
-
-    public init(summary: MailMessageSummary, bodyPreview: String?, bodyPreviewTruncated: Bool = false, bodySource: String? = nil) {
-        self.summary = summary
-        self.bodyPreview = bodyPreview
-        self.bodyPreviewTruncated = bodyPreviewTruncated
-        self.bodySource = bodySource
-    }
-}
-
 public struct MailSendApprovalBridge: Codable, Sendable, Equatable {
     public var draftID: MailDraftID
     public var title: String
