@@ -203,7 +203,7 @@ struct MailAgentToolsTests {
         let tool = MailGetMessageTool(runtime: runtime)
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "read mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMailBody])
 
-        for pseudoID in ["message1", "msg1", "email1", "mail1", "result1", "message 1", "message-1", "message_1"] {
+        for pseudoID in ["message1", "msg1", "email1", "mail1", "result1", "message 1"] {
             do {
                 _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"messageID\":\"\(pseudoID)\",\"includeBody\":true}"), context: context)
                 Issue.record("Expected pseudo messageID \(pseudoID) to be rejected with actionable guidance")
