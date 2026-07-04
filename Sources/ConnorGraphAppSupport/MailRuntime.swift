@@ -39,6 +39,7 @@ public struct MailRuntime: Sendable {
     public var credentialStore: AppMailCredentialStore
     public var smtpClient: any MailSMTPClient
     public var messageComposer: MailMessageComposer
+    public var memoryOSFacade: AppMemoryOSFacade?
 
     public init(
         repository: any MailSourceRepository,
@@ -47,7 +48,8 @@ public struct MailRuntime: Sendable {
         draftStore: any MailDraftRepository = MailDraftStore(),
         credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         smtpClient: any MailSMTPClient = NetworkMailSMTPClient(),
-        messageComposer: MailMessageComposer = MailMessageComposer()
+        messageComposer: MailMessageComposer = MailMessageComposer(),
+        memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
         self.repository = repository
         self.cache = cache
@@ -56,6 +58,7 @@ public struct MailRuntime: Sendable {
         self.credentialStore = credentialStore
         self.smtpClient = smtpClient
         self.messageComposer = messageComposer
+        self.memoryOSFacade = memoryOSFacade
     }
 
     public static func fixture() -> MailRuntime {
@@ -204,6 +207,7 @@ public struct MailRuntime: Sendable {
             try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: response.providerMessageID, envelopeHash: composed.envelopeHash))
             _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
             try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
+            try captureOutboundMemoryEvidence(draft: draft, identity: identity, receipt: receipt, runID: runID, sessionID: sessionID)
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
             return receipt
         } catch {
@@ -260,6 +264,38 @@ public struct MailRuntime: Sendable {
             body: body,
             attachments: []
         ))
+    }
+
+    private func captureOutboundMemoryEvidence(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, runID: String?, sessionID: String?) throws {
+        guard let memoryOSFacade else { return }
+        let content = """
+        Direction: outbound
+        Subject: \(draft.subject)
+        From: \(identity.address.name.map { "\($0) <\(identity.address.email)>" } ?? identity.address.email)
+        To: \(draft.to.map(\.email).joined(separator: ", "))
+        Cc: \(draft.cc.map(\.email).joined(separator: ", "))
+        Bcc Count: \(draft.bcc.count)
+        Body Preview: \(String(draft.body.prefix(500)))
+        """
+        _ = try memoryOSFacade.ingestSourceEvent(
+            sourceID: "mail:sent:\(receipt.providerMessageID)",
+            title: draft.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "(No subject)" : draft.subject,
+            content: content,
+            occurredAt: receipt.sentAt,
+            sourceKind: "mail",
+            accountID: draft.accountID.rawValue,
+            sessionID: sessionID,
+            metadata: [
+                "direction": "outbound",
+                "mail_draft_id": draft.id.rawValue,
+                "provider_message_id": receipt.providerMessageID,
+                "envelope_hash": receipt.envelopeHash,
+                "run_id": runID ?? "",
+                "identity_id": draft.identityID.rawValue,
+                "recipient_count": String(draft.to.count + draft.cc.count + draft.bcc.count),
+                "attachment_count": String(draft.attachmentIDs.count)
+            ]
+        )
     }
 
     public func evidenceCandidate(for messageID: MailMessageID) async throws -> MailEvidenceCandidate {
