@@ -241,19 +241,30 @@ public struct MailIMAPInitialSyncService: Sendable {
         guard let email = account.identities.first?.address.email, !email.isEmpty else { return nil }
         guard Int(uid) ?? 0 > 0 else { return nil }
 
-        let fetcher = NIOBodyFetcher(host: endpoint.host, port: endpoint.port)
+        let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
         let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
-        
-        guard let rawData = try await fetcher.fetchRawMessage(
-            usernames: loginUsernames, password: password, uid: uid
-        ) else { return nil }
 
-        return NIOBodyFetcher.parseMessage(
-            rawMIME: rawData, uid: uid,
-            accountID: account.id, mailboxID: mailboxID,
-            fallbackRecipient: MailAddress(email: email), snippet: snippet
-        )
-    }/// Search emails by query string
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MailMessageDetail?, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let detail = try client.fetchSingleMessageBody(
+                        usernames: loginUsernames,
+                        password: password,
+                        uid: uid,
+                        accountID: account.id,
+                        mailboxID: mailboxID,
+                        fallbackRecipient: MailAddress(email: email),
+                        snippet: snippet
+                    )
+                    continuation.resume(returning: detail)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Search emails by query string
     public func search(account: MailAccount, query: String) async throws -> [String] {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else {
             throw BlockingIMAPClient.IMAPError.protocolError("缺少 IMAP 收件服务器配置")
@@ -1717,7 +1728,6 @@ private extension String {
             if gapStart < gapEnd {
                 let gap = nsString.substring(with: NSRange(location: gapStart, length: gapEnd - gapStart))
                 let isOnlyWhitespace = gap.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let hasAdjacentEncoded = gapStart > 0 && nsString.substring(with: NSRange(location: gapStart - 1, length: 1)) != " "
                 if !isOnlyWhitespace {
                     result += gap
                 }
