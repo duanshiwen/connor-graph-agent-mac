@@ -101,6 +101,13 @@ public struct MailConnectionTestResult: Sendable {
     public let smtpConnect: TestStepResult
     public let smtpAuth: TestStepResult
 
+    public init(imapConnect: TestStepResult, imapAuth: TestStepResult, smtpConnect: TestStepResult, smtpAuth: TestStepResult) {
+        self.imapConnect = imapConnect
+        self.imapAuth = imapAuth
+        self.smtpConnect = smtpConnect
+        self.smtpAuth = smtpAuth
+    }
+
     public var isSuccess: Bool {
         imapConnect.isSuccess && imapAuth.isSuccess &&
         smtpConnect.isSuccess && smtpAuth.isSuccess
@@ -112,7 +119,21 @@ public struct MailConnectionTestResult: Sendable {
         messages.append("IMAP 认证: \(imapAuth.description)")
         messages.append("SMTP 连接: \(smtpConnect.description)")
         messages.append("SMTP 认证: \(smtpAuth.description)")
-        return messages.joined(separator: "\n")
+        return Self.redactSecrets(messages.joined(separator: "\n"))
+    }
+
+    private static func redactSecrets(_ value: String) -> String {
+        var redacted = value
+        let patterns = [
+            #"(?i)(password\s*[=:]\s*)[^\s,;]+"#,
+            #"(?i)(access_token\s*[=:]\s*)[^\s,;]+"#,
+            #"(?i)(refresh_token\s*[=:]?\s*)[^\s,;]+"#,
+            #"(?i)(token\s*[=:]\s*)[^\s,;]+"#
+        ]
+        for pattern in patterns {
+            redacted = redacted.replacingOccurrences(of: pattern, with: "$1[redacted]", options: .regularExpression)
+        }
+        return redacted
     }
 }
 
