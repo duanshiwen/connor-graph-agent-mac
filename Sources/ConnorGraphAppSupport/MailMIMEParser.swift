@@ -93,6 +93,31 @@ public struct MailMIMEParser: Sendable, Equatable {
         return String(data: data, encoding: String.Encoding(rawValue: nsEncoding))
     }
 
+    /// Parse a complete RFC 822 / MIME message by separating top-level headers from body,
+    /// then applying MIME Content-Type / Content-Transfer-Encoding metadata to the body.
+    public func parseFullMessageBody(rawData: Data?, fallbackString: String) -> MailMIMEBodyResult {
+        guard let rawData, !rawData.isEmpty else {
+            return MailMIMEBodyResult(plainText: fallbackString)
+        }
+        let split = splitFullMessage(rawData)
+        let headerString = String(data: split.headers, encoding: .ascii)
+            ?? String(data: split.headers, encoding: .utf8)
+            ?? ""
+        let unfoldedHeader = unfoldMIMEHeader(headerString)
+        let contentType = headerValue("Content-Type", in: unfoldedHeader)
+        let transferEncoding = headerValue("Content-Transfer-Encoding", in: unfoldedHeader)
+        let charset = contentType.flatMap { extractCharsetFromContentType("Content-Type: \($0)") }
+        let boundary = contentType.flatMap { extractBoundaryFromContentType("Content-Type: \($0)") }
+        return parseBodyWithHTML(
+            rawData: split.body,
+            fallbackString: fallbackString,
+            charset: charset,
+            transferEncoding: transferEncoding,
+            contentType: contentType,
+            boundary: boundary
+        )
+    }
+
     /// Parse raw email body and return plain text + HTML.
     /// Works entirely in Data domain — no String round-trip for multipart splitting.
     public func parseBodyWithHTML(rawData: Data?, fallbackString: String, charset: String?, transferEncoding: String?, contentType: String?, boundary: String?) -> MailMIMEBodyResult {
@@ -100,21 +125,19 @@ public struct MailMIMEParser: Sendable, Equatable {
             return MailMIMEBodyResult(plainText: fallbackString)
         }
 
-        // Step 1: Decode declared top-level Content-Transfer-Encoding. Multipart
-        // messages are decoded per part below; keep the top-level data intact so
-        // boundary parsing cannot be affected by malformed body heuristics.
-        let decodedData = decodeTransferEncoding(rawData, encoding: transferEncoding)
-
-        // Step 2: If multipart (has boundary), extract parts
+        // Multipart messages are decoded per part below; keep top-level data intact so
+        // boundary parsing cannot be affected by malformed body heuristics or by applying
+        // Content-Transfer-Encoding twice.
         if let boundary, !boundary.isEmpty {
-            return extractBodyComponents(data: decodedData, boundary: boundary, fallback: fallbackString)
+            let multipartData = decodeTransferEncoding(rawData, encoding: transferEncoding)
+            return extractBodyComponents(data: multipartData, boundary: boundary, fallback: fallbackString)
         }
 
-        // Step 3: Single part — charset convert. Some real-world messages omit
-        // Content-Transfer-Encoding even though their text/html body is plainly
-        // quoted-printable; apply a conservative fallback so encoded UTF-8 bytes
-        // do not leak into the rendered mail body.
-        let decodedSinglePartData = decodeTransferEncodingWithFallback(decodedData, encoding: transferEncoding)
+        // Single part — apply declared transfer encoding exactly once, then charset convert.
+        // Some real-world messages omit Content-Transfer-Encoding even though their text/html
+        // body is plainly quoted-printable; apply a conservative fallback only when no
+        // declared encoding is present.
+        let decodedSinglePartData = decodeTransferEncodingWithFallback(rawData, encoding: transferEncoding)
         let decodedString = decodeCharset(decodedSinglePartData, charset: charset) ?? fallbackString
         let trimmed = decodedString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed.hasPrefix("<html") || trimmed.hasPrefix("<!doctype") {
@@ -314,6 +337,26 @@ public struct MailMIMEParser: Sendable, Equatable {
             with: " ",
             options: .regularExpression
         )
+    }
+
+    private func splitFullMessage(_ data: Data) -> (headers: Data, body: Data) {
+        if let range = data.range(of: Data("\r\n\r\n".utf8)) {
+            return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+        }
+        if let range = data.range(of: Data("\n\n".utf8)) {
+            return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+        }
+        return (Data(), data)
+    }
+
+    private func headerValue(_ name: String, in header: String) -> String? {
+        let prefix = name.lowercased() + ":"
+        for line in header.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix(prefix) else { continue }
+            return String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     private func extractCharsetFromContentType(_ header: String) -> String? {
