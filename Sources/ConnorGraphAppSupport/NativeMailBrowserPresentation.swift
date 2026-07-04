@@ -93,6 +93,12 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
     }
 }
 
+public enum MailMessageDirectionFilter: String, Sendable, Equatable, Hashable, CaseIterable {
+    case all
+    case received
+    case sent
+}
+
 public struct NativeMailBrowserPresentation: Sendable, Equatable {
     public var accounts: [MailAccount]
     public var mailboxes: [MailMailbox]
@@ -128,10 +134,15 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     }
 
     public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String) -> [MailMessageSummary] {
+        messages(accountID: accountID, mailboxID: mailboxID, query: query, direction: .all)
+    }
+
+    public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String, direction: MailMessageDirectionFilter) -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = messages.filter { message in
             if let accountID, message.accountID != accountID { return false }
             if let mailboxID, message.mailboxID != mailboxID { return false }
+            if !matchesDirection(message, direction: direction) { return false }
             guard !normalized.isEmpty else { return true }
             return message.subject.lowercased().contains(normalized)
                 || message.snippet.lowercased().contains(normalized)
@@ -139,6 +150,17 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
                 || (message.from.name?.lowercased().contains(normalized) ?? false)
         }
         return Self.sortedNewestFirst(filtered)
+    }
+
+    private func matchesDirection(_ message: MailMessageSummary, direction: MailMessageDirectionFilter) -> Bool {
+        switch direction {
+        case .all:
+            return true
+        case .received:
+            return mailbox(id: message.mailboxID)?.role != .sent
+        case .sent:
+            return mailbox(id: message.mailboxID)?.role == .sent
+        }
     }
 
     private static func sortedNewestFirst(_ messages: [MailMessageSummary]) -> [MailMessageSummary] {
