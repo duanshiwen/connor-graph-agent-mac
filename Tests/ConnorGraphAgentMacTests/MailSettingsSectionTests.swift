@@ -126,6 +126,22 @@ struct MailSettingsSectionTests {
         #expect(row.contextText.contains(sentAt.connorLocalFormatted(date: .medium, time: .short)))
     }
 
+    @Test func mailMessageListPresentationLabelsReceivedAndSentRows() {
+        let account = MailAccount(id: MailAccountID(rawValue: "shiwen@example.com"), provider: .genericIMAPSMTP, displayName: "诗闻邮箱", identities: [])
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "inbox"), accountID: account.id, name: "收件箱", path: "INBOX", role: .inbox)
+        let sent = MailMailbox(id: MailMailboxID(rawValue: "sent"), accountID: account.id, name: "已发送", path: "Sent", role: .sent)
+        let receivedMessage = MailMessageSummary(id: MailMessageID(rawValue: "received"), accountID: account.id, mailboxID: inbox.id, subject: "收到", from: MailAddress(email: "sender@example.com"), to: [], snippet: "摘要")
+        let sentMessage = MailMessageSummary(id: MailMessageID(rawValue: "sent-message"), accountID: account.id, mailboxID: sent.id, subject: "发出", from: MailAddress(email: "shiwen@example.com"), to: [], snippet: "摘要")
+
+        let receivedRow = MailMessageListRowPresentation(message: receivedMessage, account: account, mailbox: inbox)
+        let sentRow = MailMessageListRowPresentation(message: sentMessage, account: account, mailbox: sent)
+
+        #expect(receivedRow.directionLabelText == "收件")
+        #expect(receivedRow.directionLabelSystemImage == "tray.fill")
+        #expect(sentRow.directionLabelText == "已发送")
+        #expect(sentRow.directionLabelSystemImage == "paperplane.fill")
+    }
+
     @Test func mailBrowserPresentationReturnsMessagesNewestFirst() {
         let accountID = MailAccountID(rawValue: "shiwen@example.com")
         let mailboxID = MailMailboxID(rawValue: "inbox")
