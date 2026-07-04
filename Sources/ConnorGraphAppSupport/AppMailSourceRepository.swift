@@ -11,6 +11,7 @@ public protocol MailSourceRepository: Sendable {
 public protocol MailStoreProtocol: MailSourceRepository, TimeAwareMailSourceCache {
     func saveMessagesBatch(_ messages: [MailMessageDetail]) async throws
     func allMessageIDs() async throws -> [MailMessageID]
+    func clearCachedMailData() async throws
     func presentation() async throws -> NativeMailBrowserPresentation
 }
 

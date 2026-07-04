@@ -72,6 +72,28 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(try await reloaded.message(id: messageID)?.summary.flags.isRead == true)
     }
 
+    @Test func mailStoreCanClearCachedMailDataWithoutRemovingAccounts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-cache-rebuild-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        let accountID = MailAccountID(rawValue: "mail-test")
+        let mailboxID = MailMailboxID(rawValue: "mail-test-inbox")
+        let messageID = MailMessageID(rawValue: "mail-test-INBOX-42")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Test Mail", identities: [MailIdentity(id: MailIdentityID(rawValue: "identity"), displayName: "Test", address: MailAddress(email: "test@example.com"))], health: MailAccountHealth(status: .ready, summary: "ready"))
+        let mailbox = MailMailbox(id: mailboxID, accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 1, unreadCount: 1, syncCursor: MailSyncCursor(value: "42", uidValidity: "7"), lastSyncedAt: Date()))
+        let summary = MailMessageSummary(id: messageID, accountID: accountID, mailboxID: mailboxID, subject: "Cached", from: MailAddress(email: "sender@example.com"), to: [MailAddress(email: "test@example.com")], snippet: "hello", flags: MailMessageFlags(isRead: false))
+        let detail = MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<msg@example.com>"), body: MailMessageBody(redactedPreview: "hello"))
+        let store = FileBackedMailSourceStore(storeURL: storeURL)
+        try await store.saveAccount(account)
+        try await store.saveMailbox(mailbox)
+        try await store.saveMessage(detail)
+
+        try await store.clearCachedMailData()
+
+        #expect(try await store.account(id: accountID) != nil)
+        #expect(try await store.listMailboxes(accountID: accountID).isEmpty)
+        #expect(try await store.allMessageIDs().isEmpty)
+    }
+
     @Test func mailBodyOnDemandPlannerDetectsEmptyCachedBodyAndExtractsUID() {
         let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
         let mailboxID = MailMailboxID(rawValue: "yakii_d@icloud.com-inbox")
