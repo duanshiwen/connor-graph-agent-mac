@@ -195,6 +195,28 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         try await searchMessages(query: query, accountID: accountID, temporalFilter: nil, temporalSort: .relevanceThenTimeDesc, limit: Int.max)
     }
 
+    public func recentMessages(accountID: MailAccountID?, direction: MailMessageDirectionFilter, limit: Int) async throws -> [MailMessageSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+        var sql = """
+            SELECT m.raw_json
+            FROM mail_messages m
+            LEFT JOIN mail_mailboxes b ON m.mailbox_id = b.id
+            WHERE 1=1
+        """
+        if let accountID { sql += " AND m.account_id = '\(esc(accountID.rawValue))'" }
+        switch direction {
+        case .all:
+            break
+        case .received:
+            sql += " AND COALESCE(b.role, '') != 'sent'"
+        case .sent:
+            sql += " AND b.role = 'sent'"
+        }
+        sql += " ORDER BY m.date DESC, m.id ASC LIMIT \(limit)"
+        let rows = try querySQL(sql)
+        return try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)).summary }
+    }
+
     public func searchMessages(query: String, accountID: MailAccountID?, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [MailMessageSummary] {
         let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         if let searchService {

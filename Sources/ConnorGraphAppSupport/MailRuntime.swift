@@ -118,21 +118,26 @@ public struct MailRuntime: Sendable {
 
     public func listRecentMessages(_ request: MailRuntimeRecentMessagesRequest, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageSummary] {
         let limit = NativeSearchLimitPolicy.clampSearchLimit(request.limit)
-        let all = try await cache.searchMessages(query: "", accountID: request.accountID)
-        let mailboxes = try await mailboxesForRecentMessages(accountID: request.accountID, messages: all)
-        let byID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0) })
-        let messages = all.filter { summary in
-            switch request.direction {
-            case .all:
-                return true
-            case .received:
-                return byID[summary.mailboxID]?.role != .sent
-            case .sent:
-                return byID[summary.mailboxID]?.role == .sent
+        let messages: [MailMessageSummary]
+        if let recentCache = cache as? any RecentMailSourceCache {
+            messages = try await recentCache.recentMessages(accountID: request.accountID, direction: request.direction, limit: limit)
+        } else {
+            let all = try await cache.searchMessages(query: "", accountID: request.accountID)
+            let mailboxes = try await mailboxesForRecentMessages(accountID: request.accountID, messages: all)
+            let byID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0) })
+            messages = all.filter { summary in
+                switch request.direction {
+                case .all:
+                    return true
+                case .received:
+                    return byID[summary.mailboxID]?.role != .sent
+                case .sent:
+                    return byID[summary.mailboxID]?.role == .sent
+                }
+            }.sorted { lhs, rhs in
+                if lhs.date != rhs.date { return lhs.date > rhs.date }
+                return lhs.id.rawValue < rhs.id.rawValue
             }
-        }.sorted { lhs, rhs in
-            if lhs.date != rhs.date { return lhs.date > rhs.date }
-            return lhs.id.rawValue < rhs.id.rawValue
         }
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Listed recent mail messages; returned \(min(messages.count, limit)) summaries"))
         return Array(messages.prefix(limit))
