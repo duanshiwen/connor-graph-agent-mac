@@ -30,7 +30,8 @@ struct MailBodyDisplayPresentation: Equatable {
         let snippet = detail.summary.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let html, trimmedHTML?.isEmpty == false {
-            self.init(kind: .html, text: plain?.isEmpty == false ? plain! : (redacted?.isEmpty == false ? redacted! : snippet), html: html)
+            let recovered = Self.recoverCachedHTMLIfNeeded(html, fallback: plain ?? redacted ?? snippet)
+            self.init(kind: .html, text: recovered.plainText, html: recovered.html)
         } else if let plain, !plain.isEmpty {
             self.init(kind: .plainText, text: plain)
         } else if let redacted, !redacted.isEmpty {
@@ -43,6 +44,19 @@ struct MailBodyDisplayPresentation: Equatable {
     }
 
     static let loading = MailBodyDisplayPresentation(kind: .loading, text: "正在加载邮件正文…")
+
+    private static func recoverCachedHTMLIfNeeded(_ html: String, fallback: String) -> (html: String, plainText: String) {
+        let parser = MailMIMEParser()
+        let result = parser.parseBodyWithHTML(
+            rawData: Data(html.utf8),
+            fallbackString: fallback,
+            charset: "utf-8",
+            transferEncoding: nil,
+            contentType: "text/html; charset=utf-8",
+            boundary: nil
+        )
+        return (result.htmlText ?? html, result.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : result.plainText)
+    }
 
     static func error(_ message: String, fallback: String) -> MailBodyDisplayPresentation {
         let fallbackText = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
