@@ -135,6 +135,7 @@ struct AgentChatTimelineAdapter {
         }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_Hans_CN")
+        formatter.timeZone = .autoupdatingCurrent
         if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
             formatter.dateFormat = "M月d日"
         } else {

@@ -1337,7 +1337,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 let totalScore = titleScore + bestMessageScore
                 guard totalScore > 0 else { return nil }
                 let snippet = titleScore > 0 && bestMessageScore == 0
-                    ? "最近更新：\(session.updatedAt.formatted(date: .abbreviated, time: .shortened))"
+                    ? "最近更新：\(session.updatedAt.connorLocalFormatted(date: .medium, time: .short))"
                     : bestSnippet
                 return (
                     GlobalSearchSessionResult(
@@ -1481,7 +1481,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     freshnessScore: 0,
                     fieldScore: 0,
                     temporal: NativeSearchTemporalMetadata(primaryTime: event.start.date, primaryTimeKind: .eventStartAt, eventStartAt: event.start.date, eventEndAt: event.end.date, indexedAt: now),
-                    resultTimeLabel: event.start.date.formatted(date: .abbreviated, time: .shortened)
+                    resultTimeLabel: event.start.date.connorLocalFormatted(date: .medium, time: .short)
                 )
             }
     }
@@ -1500,7 +1500,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 freshnessScore: 0,
                 fieldScore: 0,
                 temporal: NativeSearchTemporalMetadata(primaryTime: item.publishedAt, primaryTimeKind: .publishedAt, publishedAt: item.publishedAt, fetchedAt: item.fetchedAt, indexedAt: now),
-                resultTimeLabel: item.publishedAt.formatted(date: .abbreviated, time: .shortened)
+                resultTimeLabel: item.publishedAt.connorLocalFormatted(date: .medium, time: .short)
             )
         }
     }
@@ -1531,7 +1531,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     freshnessScore: 0,
                     fieldScore: 0,
                     temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, receivedAt: message.date, sentAt: message.date, indexedAt: now),
-                    resultTimeLabel: message.date.formatted(date: .abbreviated, time: .shortened)
+                    resultTimeLabel: message.date.connorLocalFormatted(date: .medium, time: .short)
                 )
             }
     }
@@ -1550,7 +1550,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 freshnessScore: 0,
                 fieldScore: 0,
                 temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
-                resultTimeLabel: record.visitedAt.formatted(date: .abbreviated, time: .shortened)
+                resultTimeLabel: record.visitedAt.connorLocalFormatted(date: .medium, time: .short)
             )
         }
     }

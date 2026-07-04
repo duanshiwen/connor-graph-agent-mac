@@ -137,8 +137,8 @@ private struct MCPSourceDetailView: View {
                         ("Transport", card.transportLabel),
                         ("Credentials", card.credentialLabel),
                         ("Tool Prefix", card.toolPrefixLabel),
-                        ("Created", configuration.createdAt.ISO8601Format()),
-                        ("Updated", configuration.updatedAt.ISO8601Format())
+                        ("Created", configuration.createdAt.connorLocalStandardDateTime()),
+                        ("Updated", configuration.updatedAt.connorLocalStandardDateTime())
                     ])
                 }
 
@@ -424,7 +424,7 @@ private struct MCPAuditPreview: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             SkillPill(text: record.eventKind.rawValue, color: color(for: record.eventKind))
-                            Text(record.timestamp.ISO8601Format())
+                            Text(record.timestamp.connorLocalStandardDateTime())
                                 .font(AgentChatTypography.micro)
                                 .foregroundStyle(.secondary)
                             Spacer(minLength: 0)

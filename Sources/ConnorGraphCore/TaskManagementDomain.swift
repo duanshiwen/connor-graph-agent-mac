@@ -269,7 +269,23 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
     }
 
     public static func systemDefaults(now: Date = Date()) -> [ConnorTaskDefinition] {
-        []
+        [
+            ConnorTaskDefinition(
+                id: "system-memory-os-l1-unified-projection",
+                name: "Memory OS L1 知识提升",
+                origin: .system,
+                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 86_400, recurrence: .interval),
+                target: ConnorTaskTarget(
+                    targetKind: "memory_os.pipeline",
+                    targetID: "l1",
+                    operationName: "plan_l1_unified_projection_jobs"
+                ),
+                lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: now),
+                metadata: ConnorTaskMetadata.protectedSystem,
+                createdAt: now,
+                updatedAt: now
+            )
+        ]
     }
 }
 
@@ -347,7 +363,13 @@ public extension ConnorTaskDefinition {
 
     func validateSystemTaskTemplate() throws {
         guard origin == .system else { return }
-        guard target.targetKind == "source.runtime", target.operationName == "refresh", ["calendar", "rss"].contains(target.targetID) else {
+        let isSourceRefreshTask = target.targetKind == "source.runtime"
+            && target.operationName == "refresh"
+            && ["calendar", "mail", "rss"].contains(target.targetID)
+        let isMemoryOSL1ProjectionTask = target.targetKind == "memory_os.pipeline"
+            && target.targetID == "l1"
+            && target.operationName == "plan_l1_unified_projection_jobs"
+        guard isSourceRefreshTask || isMemoryOSL1ProjectionTask else {
             throw ConnorTaskValidationError.systemTaskTemplateRequired(id)
         }
     }

@@ -146,8 +146,8 @@ private extension TaskManagementUICard {
             triggerLabel: task.trigger.kind.uiLabel,
             statusLabel: task.lifecycle.status.rawValue,
             targetLabel: "\(task.target.targetKind):\(task.target.targetID).\(task.target.operationName)",
-            nextRunLabel: task.lifecycle.nextRunAt?.ISO8601Format() ?? "",
-            lastRunLabel: latestRun?.startedAt.ISO8601Format() ?? task.lifecycle.lastRunAt?.ISO8601Format() ?? "",
+            nextRunLabel: task.lifecycle.nextRunAt?.taskManagementLocalDateTimeLabel ?? "",
+            lastRunLabel: latestRun?.startedAt.taskManagementLocalDateTimeLabel ?? task.lifecycle.lastRunAt?.taskManagementLocalDateTimeLabel ?? "",
             lastErrorLabel: latestRun?.errorMessage ?? task.lifecycle.lastErrorMessage ?? "",
             rationaleLabel: task.metadata.rationale ?? "",
             canStop: !protected && task.lifecycle.status != .stopped && task.lifecycle.status != .deleted,
@@ -156,6 +156,18 @@ private extension TaskManagementUICard {
             deleteDisabledReason: protected ? "系统任务受保护，不可暂停或删除" : nil,
             severity: task.lifecycle.status.taskUISeverity(latestRun: latestRun)
         )
+    }
+}
+
+private extension Date {
+    var taskManagementLocalDateTimeLabel: String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        return formatter.string(from: self)
     }
 }
 

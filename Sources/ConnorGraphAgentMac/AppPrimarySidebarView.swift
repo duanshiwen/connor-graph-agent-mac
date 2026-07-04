@@ -108,6 +108,7 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "日历", systemImage: "calendar", count: viewModel.calendarBrowserPresentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
+                        SidebarRow(title: "邮件", systemImage: "envelope", count: mailSidebarCount, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: rssUnreadCount, isSelected: selection == .rss) { select(.rss) }
                         SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
                     }
@@ -164,6 +165,13 @@ struct CraftPrimarySidebarView: View {
 
     private var allSessionsCount: Int {
         countSourceSessions.count
+    }
+
+    private var mailSidebarCount: Int? {
+        let unreadCount = viewModel.mailBrowserPresentation.totalUnreadCount
+        if unreadCount > 0 { return unreadCount }
+        let totalCount = viewModel.mailBrowserPresentation.totalMessageCount
+        return totalCount > 0 ? totalCount : nil
     }
 
     private var rssUnreadCount: Int? {

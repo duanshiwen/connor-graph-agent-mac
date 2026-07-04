@@ -153,13 +153,25 @@ private extension SourceRuntimeUICard {
             healthLabel: healthRecord?.healthStatus.rawValue ?? "unknown",
             lifecycleLabel: healthRecord?.lifecycleState.rawValue ?? configuration.status.rawValue,
             toolCountLabel: "\(healthRecord?.discoveredToolCount ?? 0) tools",
-            lastCheckedLabel: healthRecord?.lastCheckedAt.ISO8601Format() ?? "never checked",
+            lastCheckedLabel: healthRecord?.lastCheckedAt.sourceRuntimeLocalDateTimeLabel ?? "never checked",
             lastErrorLabel: healthRecord?.lastErrorMessage ?? "",
             platformCapabilityLabels: capabilityLabels,
             auditCountLabel: "\(auditCount) audits",
             tags: configuration.tags,
             severity: healthRecord?.healthStatus.sourceUISeverity ?? configuration.status.sourceUISeverity
         )
+    }
+}
+
+private extension Date {
+    var sourceRuntimeLocalDateTimeLabel: String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        return formatter.string(from: self)
     }
 }
 

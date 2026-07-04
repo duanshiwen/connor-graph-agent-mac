@@ -132,7 +132,7 @@ struct ObserveLogView: View {
                 Text("\(entry.kind.rawValue) · \(entry.status.rawValue)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("过期时间：\(entry.expiresAt.formatted())")
+                Text("过期时间：\(entry.expiresAt.connorLocalStandardDateTime())")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -174,7 +174,7 @@ struct PromotionQueueView: View {
                             }
                             Text("重要性：\(entry.importance, format: .number.precision(.fractionLength(2)))")
                             Text("置信度：\(entry.confidence, format: .number.precision(.fractionLength(2)))")
-                            Text("过期时间：\(entry.expiresAt.formatted())")
+                            Text("过期时间：\(entry.expiresAt.connorLocalStandardDateTime())")
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)

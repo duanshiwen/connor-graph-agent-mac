@@ -332,6 +332,7 @@ struct BrowserBookmarkRow: View {
     private var timeString: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .autoupdatingCurrent
         formatter.dateFormat = "M/d"
         return formatter.string(from: record.updatedAt)
     }
