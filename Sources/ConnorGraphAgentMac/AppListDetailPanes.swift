@@ -1512,10 +1512,11 @@ private struct AddTaskAutomationSheet: View {
 
 struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var directionFilter: MailMessageDirectionFilter = .all
 
     private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
     private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: "")
+        presentation.messages(accountID: nil, mailboxID: nil, query: "", direction: directionFilter)
     }
 
     var body: some View {
@@ -1546,19 +1547,28 @@ struct CraftMailListPane: View {
                 ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else {
-                List(visibleMessages) { message in
-                    MailMessageListRow(
-                        message: message,
-                        account: presentation.account(id: message.accountID),
-                        mailbox: presentation.mailbox(id: message.mailboxID),
-                        isSelected: message.id == viewModel.selectedMailMessageID,
-                        onSelect: { selectMessage(message) }
-                    )
-                    .nativeListRowStyle()
+                MailDirectionFilterChips(selection: $directionFilter)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+
+                if visibleMessages.isEmpty {
+                    ContentUnavailableView(directionFilter.emptyListTitle, systemImage: directionFilter.emptyListSystemImage, description: Text(directionFilter.emptyListDescription))
+                        .padding(.top, 56)
+                } else {
+                    List(visibleMessages) { message in
+                        MailMessageListRow(
+                            message: message,
+                            account: presentation.account(id: message.accountID),
+                            mailbox: presentation.mailbox(id: message.mailboxID),
+                            isSelected: message.id == viewModel.selectedMailMessageID,
+                            onSelect: { selectMessage(message) }
+                        )
+                        .nativeListRowStyle()
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .contentMargins(.top, 6, for: .scrollContent)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .contentMargins(.top, 6, for: .scrollContent)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1571,6 +1581,62 @@ struct CraftMailListPane: View {
         viewModel.selectedMailAccountID = message.accountID
         viewModel.selectedMailMailboxID = message.mailboxID
         viewModel.selectedMailMessageID = message.id
+    }
+}
+
+extension MailMessageDirectionFilter {
+    var mailListChipTitle: String {
+        switch self {
+        case .all: "全部"
+        case .received: "收件"
+        case .sent: "已发送"
+        }
+    }
+
+    var emptyListTitle: String {
+        switch self {
+        case .all: "还没有同步到邮件"
+        case .received: "还没有收到邮件"
+        case .sent: "还没有已发送邮件"
+        }
+    }
+
+    var emptyListDescription: String {
+        switch self {
+        case .all: "邮件同步完成后，最近邮件会按时间显示在这里。"
+        case .received: "收到的邮件同步后会显示在这里。"
+        case .sent: "通过康纳同学发送的邮件会保存到已发送并显示在这里。"
+        }
+    }
+
+    var emptyListSystemImage: String {
+        switch self {
+        case .all: "envelope.open"
+        case .received: "tray"
+        case .sent: "paperplane"
+        }
+    }
+}
+
+private struct MailDirectionFilterChips: View {
+    @Binding var selection: MailMessageDirectionFilter
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(MailMessageDirectionFilter.allCases, id: \.self) { filter in
+                Button(action: { selection = filter }) {
+                    Text(filter.mailListChipTitle)
+                        .font(.system(size: 12, weight: selection == filter ? .semibold : .medium))
+                        .foregroundStyle(selection == filter ? Color.accentColor : Color.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(selection == filter ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10), in: Capsule(style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("邮件筛选：\(filter.mailListChipTitle)")
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 
