@@ -65,6 +65,20 @@ struct MailAgentToolsTests {
         }
     }
 
+    @Test func getMessageSchemaExplainsExactMessageIDContract() {
+        let tool = MailGetMessageTool(runtime: RecordingMailRuntime())
+        guard case .object(let properties, _) = tool.inputSchema,
+              case .string(let description) = properties["messageID"] else {
+            Issue.record("Expected mail_get_message messageID string schema")
+            return
+        }
+
+        #expect(description.contains("Exact MailMessageSummary.id"))
+        #expect(description.contains("mail_search_messages"))
+        #expect(description.contains("Do not pass result numbers"))
+        #expect(description.contains("IMAP UIDs"))
+    }
+
     @Test func sendDraftApprovalPayloadIncludesMailSummary() async throws {
         let runtime = RecordingMailRuntime()
         let tool = MailSendDraftTool(runtime: runtime)
