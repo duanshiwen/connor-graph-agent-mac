@@ -65,6 +65,7 @@ struct MailBodyDisplayPresentation: Equatable {
 }
 
 struct MailSettingsSummaryPresentation: Equatable {
+    var presentation: NativeMailBrowserPresentation
     var accountCount: Int
     var mailboxCount: Int
     var messageCount: Int
@@ -72,6 +73,7 @@ struct MailSettingsSummaryPresentation: Equatable {
     var lastSyncedAt: Date?
 
     init(presentation: NativeMailBrowserPresentation) {
+        self.presentation = presentation
         accountCount = presentation.accounts.count
         mailboxCount = presentation.mailboxes.count
         messageCount = presentation.totalMessageCount
@@ -98,6 +100,23 @@ struct MailSettingsSummaryPresentation: Equatable {
     var emptyStateMessage: String? {
         accountCount == 0 ? "添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。" : nil
     }
+
+    func defaultSendAccountText(preferences: MailPreferences) -> String {
+        guard let accountID = preferences.defaultSendAccountID,
+              let account = presentation.account(id: accountID) else { return "尚未设置" }
+        let email = account.identities.first?.address.email ?? account.id.rawValue
+        return "\(account.displayName) <\(email)>"
+    }
+
+    func defaultSendIdentityText(preferences: MailPreferences) -> String {
+        guard let accountID = preferences.defaultSendAccountID,
+              let account = presentation.account(id: accountID) else { return "尚未设置" }
+        let identity = preferences.defaultSendIdentityID.flatMap { identityID in
+            account.identities.first(where: { $0.id == identityID })
+        } ?? account.identities.first(where: \.canSend)
+        guard let identity else { return "尚未设置" }
+        return "\(identity.displayName) <\(identity.address.email)>"
+    }
 }
 
 struct SettingsMailSection: View {
@@ -115,6 +134,7 @@ struct SettingsMailSection: View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             header
             accountsSection
+            sendingSection
             syncSection
             securitySection
             protocolSection
@@ -167,6 +187,33 @@ struct SettingsMailSection: View {
                 .buttonStyle(.bordered)
             }
         }
+    }
+
+    private var sendingSection: some View {
+        SettingsGroup(title: "发信设置") {
+            if presentation.accounts.isEmpty {
+                SettingsValueRow(title: "默认发信账户", value: summary.defaultSendAccountText(preferences: viewModel.mailPreferences))
+            } else {
+                Picker("默认发信账户", selection: Binding(
+                    get: { viewModel.mailPreferences.defaultSendAccountID ?? presentation.defaultAccountID() ?? MailAccountID(rawValue: "") },
+                    set: { accountID in Task { @MainActor in await viewModel.setDefaultMailSendAccount(accountID) } }
+                )) {
+                    ForEach(presentation.accounts) { account in
+                        Text(defaultAccountPickerTitle(for: account)).tag(account.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                Divider()
+                SettingsValueRow(title: "默认发件身份", value: summary.defaultSendIdentityText(preferences: viewModel.mailPreferences))
+                Divider()
+                SettingsValueRow(title: "发送确认", value: "Compose 审批卡会显示实际 From，允许后才发送")
+            }
+        }
+    }
+
+    private func defaultAccountPickerTitle(for account: MailAccount) -> String {
+        let email = account.identities.first?.address.email ?? account.id.rawValue
+        return "\(account.displayName) <\(email)>"
     }
 
     private var syncSection: some View {

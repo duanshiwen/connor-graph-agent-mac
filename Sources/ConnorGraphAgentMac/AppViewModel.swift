@@ -396,6 +396,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailAccountID: MailAccountID?
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
+    @Published var mailPreferences: MailPreferences = MailPreferences()
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var mailSyncMessage: String?
     @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
@@ -524,6 +525,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var contactStore: FileBackedContactSourceStore?
     private var mailStore: FileBackedMailSourceStore?
+    private var mailPreferencesStore: (any MailPreferencesStore)?
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -2061,6 +2063,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -2144,6 +2147,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSkillRuntimeDefinitions()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadCalendarContactsFromStorage() }
+        Task { await reloadMailBrowserPresentation() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -2708,6 +2712,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             guard let mailStore else { return }
             mailBrowserPresentation = try await mailStore.presentation()
+            try await reconcileMailDefaultSendPreferences(accounts: mailBrowserPresentation.accounts)
             if selectedMailAccountID == nil || mailBrowserPresentation.account(id: selectedMailAccountID) == nil {
                 selectedMailAccountID = mailBrowserPresentation.defaultAccountID()
             }
@@ -2720,6 +2725,35 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "无法加载邮件缓存：\(error.localizedDescription)"
+        }
+    }
+
+    private func reconcileMailDefaultSendPreferences(accounts: [MailAccount]) async throws {
+        guard let mailPreferencesStore else { return }
+        let loaded = try await mailPreferencesStore.load()
+        let reconciled = MailDefaultSendAccountReconciler.reconcile(preferences: loaded, accounts: accounts)
+        mailPreferences = reconciled
+        if reconciled != loaded {
+            try await mailPreferencesStore.save(reconciled)
+        }
+    }
+
+    func setDefaultMailSendAccount(_ accountID: MailAccountID) async {
+        do {
+            guard let account = mailBrowserPresentation.account(id: accountID) else {
+                errorMessage = "无法设置默认发信账户：账户不存在"
+                return
+            }
+            guard let identity = account.identities.first(where: \.canSend) else {
+                errorMessage = "无法设置默认发信账户：该账户没有可发送身份"
+                return
+            }
+            let preferences = MailPreferences(defaultSendAccountID: account.id, defaultSendIdentityID: identity.id)
+            mailPreferences = preferences
+            try await mailPreferencesStore?.save(preferences)
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法保存默认发信账户：\(error.localizedDescription)"
         }
     }
 

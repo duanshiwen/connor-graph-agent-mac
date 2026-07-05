@@ -37,6 +37,22 @@ struct MailSettingsSectionTests {
         #expect(summary.unreadCountText == "0 未读")
         #expect(summary.emptyStateTitle == "暂无邮件账户")
         #expect(summary.emptyStateMessage == "添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。")
+        #expect(summary.defaultSendAccountText(preferences: MailPreferences()) == "尚未设置")
+    }
+
+    @Test func mailSettingsSummaryShowsConfiguredDefaultSendAccount() {
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "shiwen@example.com"),
+            provider: .genericIMAPSMTP,
+            displayName: "诗闻邮箱",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "identity-shiwen@example.com"), displayName: "诗闻", address: MailAddress(name: "诗闻", email: "shiwen@example.com"))]
+        )
+        let presentation = NativeMailBrowserPresentation(accounts: [account], mailboxes: [], messages: [])
+        let summary = MailSettingsSummaryPresentation(presentation: presentation)
+        let preferences = MailPreferences(defaultSendAccountID: account.id, defaultSendIdentityID: account.identities.first?.id)
+
+        #expect(summary.defaultSendAccountText(preferences: preferences) == "诗闻邮箱 <shiwen@example.com>")
+        #expect(summary.defaultSendIdentityText(preferences: preferences) == "诗闻 <shiwen@example.com>")
     }
 
     @Test func mailBodyDisplayFallsBackToSnippetWhenCachedBodyFieldsAreEmpty() {
