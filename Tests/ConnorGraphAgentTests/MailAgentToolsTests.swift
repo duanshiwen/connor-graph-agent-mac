@@ -168,7 +168,7 @@ struct MailAgentToolsTests {
         }
         """)
 
-        _ = try await tool.execute(arguments: arguments, context: context)
+        let result = try await tool.execute(arguments: arguments, context: context)
         let request = try #require(await runtime.lastCreateDraft)
         #expect(request.cc.map(\.email) == ["carol@example.com"])
         #expect(request.bcc.map(\.email) == ["hidden@example.com"])
@@ -177,6 +177,24 @@ struct MailAgentToolsTests {
         #expect(request.inReplyToMessageID == MailMessageID(rawValue: "message-1"))
         #expect(request.attachmentIDs == [MailAttachmentID(rawValue: "attachment-1")])
         #expect(request.intentSummary == "Follow up")
+        #expect(result.contentText.contains("mail_send_draft"))
+        #expect(result.contentText.contains("draftID=\"draft-1\""))
+        #expect(result.contentText.contains("Do not ask the user to provide the draft ID"))
+    }
+
+    @Test func sendDraftSchemaExplainsDraftIDComesFromCreateDraftAndTriggersComposeApproval() {
+        let tool = MailSendDraftTool(runtime: RecordingMailRuntime())
+        guard case .object(let properties, let required) = tool.inputSchema,
+              case .string(let draftIDDescription) = properties["draftID"] else {
+            Issue.record("Expected mail_send_draft draftID schema")
+            return
+        }
+
+        #expect(required == ["draftID"])
+        #expect(draftIDDescription.contains("Exact MailDraft.id"))
+        #expect(draftIDDescription.contains("mail_create_draft"))
+        #expect(draftIDDescription.contains("native Compose approval card"))
+        #expect(draftIDDescription.contains("Do not ask the user"))
     }
 
     @Test func getMessageRejectsNumericResultIndexWithActionableGuidance() async throws {
