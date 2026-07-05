@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
+    var onExpandApprovalReview: ((AgentPendingApproval) -> Void)? = nil
     @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
@@ -160,9 +161,13 @@ struct AgentChatComposerView: View {
                         RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
 
-                        AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
-                            .padding(AgentChatLayout.spaceM)
-                            .frame(maxHeight: 220)
+                        AgentChatPermissionRequestCard(
+                            approval: approval,
+                            viewModel: viewModel,
+                            onExpandReview: { onExpandApprovalReview?(approval) }
+                        )
+                        .padding(AgentChatLayout.spaceM)
+                        .frame(maxHeight: 220)
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
