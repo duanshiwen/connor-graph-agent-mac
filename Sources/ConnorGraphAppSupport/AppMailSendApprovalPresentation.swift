@@ -10,6 +10,8 @@ public struct AppMailSendApprovalPresentation: Sendable, Equatable {
     public var bccCount: Int
     public var subject: String?
     public var bodyPreview: String?
+    public var riskSummary: String?
+    public var attachmentCount: Int
     public var envelopeHash: String?
     public var warning: String
 
@@ -23,6 +25,8 @@ public struct AppMailSendApprovalPresentation: Sendable, Equatable {
         self.bccCount = Self.stringArray(payload["bcc"]).count
         self.subject = Self.stringValue(payload["subject"])
         self.bodyPreview = Self.stringValue(payload["bodyPreview"]) ?? Self.stringValue(payload["body_preview"])
+        self.riskSummary = Self.stringValue(payload["riskSummary"]) ?? Self.stringValue(payload["risk_summary"])
+        self.attachmentCount = Self.intValue(payload["attachmentCount"]) ?? Self.intValue(payload["attachment_count"]) ?? 0
         self.envelopeHash = Self.stringValue(payload["envelopeHash"]) ?? Self.stringValue(payload["envelope_hash"])
         self.warning = "点击 Allow 后，Connor 会继续执行这一次 mail_send_draft，并通过已配置 SMTP 账号发送真实邮件。请确认草稿收件人、主题和正文。"
     }
@@ -56,6 +60,13 @@ public struct AppMailSendApprovalPresentation: Sendable, Equatable {
     private static func stringValue(_ value: Any?) -> String? {
         if let value = value as? String { return value }
         if let value = value as? NSNumber { return value.stringValue }
+        return nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
         return nil
     }
 
