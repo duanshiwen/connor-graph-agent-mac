@@ -60,18 +60,51 @@ import ConnorGraphCore
           "bcc": ["hidden@example.com"],
           "subject": "Hello",
           "bodyPreview": "Short preview",
+          "riskSummary": "External email send",
+          "attachmentCount": 2,
           "envelopeHash": "hash-1"
         }
         """
     )
 
     let row = AppAgentPendingApprovalPresentation(approval)
+    let mail = AppMailSendApprovalPresentation(approval)
 
     #expect(row.title == "确认发送邮件")
     #expect(row.detail.contains("Envelope: hash-1"))
     #expect(row.detail.contains("Bcc: 1 hidden"))
     #expect(!row.detail.contains("hidden@example.com"))
     #expect(row.allowsAlwaysAllow == false)
+    #expect(mail.bodyPreview == "Short preview")
+    #expect(mail.riskSummary == "External email send")
+    #expect(mail.attachmentCount == 2)
+}
+
+@Test func appMailSendApprovalPresentationParsesSnakeCaseRiskAndAttachmentFields() {
+    let approval = AgentPendingApproval(
+        requestID: "request-mail-snake",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .sendMail,
+        toolName: "mail_send_draft",
+        payloadJSON: """
+        {
+          "draft_id": "draft-2",
+          "body_preview": "Preview body",
+          "risk_summary": "Approval gated",
+          "attachment_count": 3,
+          "envelope_hash": "hash-2"
+        }
+        """
+    )
+
+    let mail = AppMailSendApprovalPresentation(approval)
+
+    #expect(mail.draftID == "draft-2")
+    #expect(mail.bodyPreview == "Preview body")
+    #expect(mail.riskSummary == "Approval gated")
+    #expect(mail.attachmentCount == 3)
+    #expect(mail.envelopeHash == "hash-2")
 }
 
 @Test func appPendingApprovalPresentationMapsResolvedStatusesForNativeUI() {
