@@ -147,8 +147,78 @@ struct MailAgentToolsTests {
         }
     }
 
+    @Test func createDraftUsesConfiguredDefaultSendAccountWhenAccountAndIdentityOmitted() async throws {
+        let account = RecordingMailRuntime.sendableAccount("shiwen@example.com")
+        let runtime = RecordingMailRuntime(accounts: [account], mailPreferences: MailSendPreferencesBridge(defaultSendAccountID: account.id, defaultSendIdentityID: account.identities.first?.id))
+        let tool = MailCreateDraftTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
+
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"to\":[\"alice@example.com\"],\"subject\":\"Hello\",\"body\":\"Plain\"}"), context: context)
+        let request = try #require(await runtime.lastCreateDraft)
+
+        #expect(request.accountID == MailAccountID(rawValue: "shiwen@example.com"))
+        #expect(request.identityID == MailIdentityID(rawValue: "identity-shiwen@example.com"))
+        #expect(result.contentText.contains("account=\"shiwen@example.com\""))
+        #expect(result.contentText.contains("from=\"shiwen@example.com\""))
+        #expect(result.contentText.contains("mail_send_draft"))
+    }
+
+    @Test func createDraftTreatsDefaultAliasAsConfiguredDefaultSendIdentity() async throws {
+        let account = RecordingMailRuntime.sendableAccount("shiwen@example.com")
+        let runtime = RecordingMailRuntime(accounts: [account], mailPreferences: MailSendPreferencesBridge(defaultSendAccountID: account.id, defaultSendIdentityID: account.identities.first?.id))
+        let tool = MailCreateDraftTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
+
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"accountID\":\"default\",\"identityID\":\"default\",\"to\":[\"alice@example.com\"],\"subject\":\"Hello\",\"body\":\"Plain\"}"), context: context)
+        let request = try #require(await runtime.lastCreateDraft)
+
+        #expect(request.accountID == account.id)
+        #expect(request.identityID == account.identities.first?.id)
+    }
+
+    @Test func createDraftRejectsMultipleAccountsWithoutConfiguredDefault() async throws {
+        let runtime = RecordingMailRuntime(accounts: [RecordingMailRuntime.sendableAccount("shiwen@example.com"), RecordingMailRuntime.sendableAccount("work@example.com")], mailPreferences: MailSendPreferencesBridge())
+        let tool = MailCreateDraftTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
+
+        do {
+            _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"to\":[\"alice@example.com\"],\"subject\":\"Hello\",\"body\":\"Plain\"}"), context: context)
+            Issue.record("Expected multiple accounts without default to fail")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains("default send account"))
+            #expect(message.contains("Settings"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+        #expect(await runtime.lastCreateDraft == nil)
+    }
+
+    @Test func createDraftRejectsUnknownExplicitAccountBeforeSavingDraft() async throws {
+        let runtime = RecordingMailRuntime(accounts: [RecordingMailRuntime.sendableAccount("shiwen@example.com")], mailPreferences: MailSendPreferencesBridge())
+        let tool = MailCreateDraftTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
+
+        do {
+            _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"accountID\":\"missing@example.com\",\"identityID\":\"identity-missing@example.com\",\"to\":[\"alice@example.com\"],\"subject\":\"Hello\",\"body\":\"Plain\"}"), context: context)
+            Issue.record("Expected unknown account to fail")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains("Unknown mail account"))
+            #expect(message.contains("shiwen@example.com"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+        #expect(await runtime.lastCreateDraft == nil)
+    }
+
     @Test func createDraftToolPassesCommercialFields() async throws {
-        let runtime = RecordingMailRuntime()
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "account-1"),
+            provider: .genericIMAPSMTP,
+            displayName: "Account 1",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "identity-1"), displayName: "Identity 1", address: MailAddress(email: "account-1@example.com"), canSend: true)],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 465, security: .tls, protocolKind: .smtp)
+        )
+        let runtime = RecordingMailRuntime(accounts: [account])
         let tool = MailCreateDraftTool(runtime: runtime)
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
         let arguments = try AgentToolArguments(json: """
@@ -168,7 +238,7 @@ struct MailAgentToolsTests {
         }
         """)
 
-        _ = try await tool.execute(arguments: arguments, context: context)
+        let result = try await tool.execute(arguments: arguments, context: context)
         let request = try #require(await runtime.lastCreateDraft)
         #expect(request.cc.map(\.email) == ["carol@example.com"])
         #expect(request.bcc.map(\.email) == ["hidden@example.com"])
@@ -177,6 +247,24 @@ struct MailAgentToolsTests {
         #expect(request.inReplyToMessageID == MailMessageID(rawValue: "message-1"))
         #expect(request.attachmentIDs == [MailAttachmentID(rawValue: "attachment-1")])
         #expect(request.intentSummary == "Follow up")
+        #expect(result.contentText.contains("mail_send_draft"))
+        #expect(result.contentText.contains("draftID=\"draft-1\""))
+        #expect(result.contentText.contains("Do not ask the user to provide the draft ID"))
+    }
+
+    @Test func sendDraftSchemaExplainsDraftIDComesFromCreateDraftAndTriggersComposeApproval() {
+        let tool = MailSendDraftTool(runtime: RecordingMailRuntime())
+        guard case .object(let properties, let required) = tool.inputSchema,
+              case .string(let draftIDDescription) = properties["draftID"] else {
+            Issue.record("Expected mail_send_draft draftID schema")
+            return
+        }
+
+        #expect(required == ["draftID"])
+        #expect(draftIDDescription.contains("Exact MailDraft.id"))
+        #expect(draftIDDescription.contains("mail_create_draft"))
+        #expect(draftIDDescription.contains("native Compose approval card"))
+        #expect(draftIDDescription.contains("Do not ask the user"))
     }
 
     @Test func getMessageRejectsNumericResultIndexWithActionableGuidance() async throws {
@@ -313,6 +401,9 @@ private actor RecordingMailRuntime: AgentMailRuntime {
         var intentSummary: String?
     }
 
+    var accounts: [MailAccount]
+    var mailPreferences: MailSendPreferencesBridge
+    var savedMailSendPreferencesBridge: MailSendPreferencesBridge?
     var lastCreateDraft: CreateDraftRequest?
     var lastRecentRequest: MailRuntimeRecentMessagesRequestBridge?
     var lastRecentPreviewRequest: MailRuntimeRecentMessagesRequestBridge?
@@ -321,11 +412,22 @@ private actor RecordingMailRuntime: AgentMailRuntime {
     var lastSendApproved: Bool?
     var approvalPayload: MailSendApprovalBridge?
 
+    init(accounts: [MailAccount]? = nil, mailPreferences: MailSendPreferencesBridge? = nil) {
+        let defaultAccount = RecordingMailRuntime.sendableAccount("account-1")
+        self.accounts = accounts ?? [defaultAccount]
+        self.mailPreferences = mailPreferences ?? MailSendPreferencesBridge(defaultSendAccountID: defaultAccount.id, defaultSendIdentityID: defaultAccount.identities.first?.id)
+    }
+
     func setApprovalPayload(_ payload: MailSendApprovalBridge) {
         self.approvalPayload = payload
     }
 
-    func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount] { [] }
+    func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount] { accounts }
+    func loadMailSendPreferencesBridge(runID: String?, sessionID: String?) async throws -> MailSendPreferencesBridge { mailPreferences }
+    func saveMailSendPreferencesBridge(_ preferences: MailSendPreferencesBridge, runID: String?, sessionID: String?) async throws {
+        mailPreferences = preferences
+        savedMailSendPreferencesBridge = preferences
+    }
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
         [MailMessageSummary(
             id: MailMessageID(rawValue: "account-INBOX-1"),
@@ -352,6 +454,18 @@ private actor RecordingMailRuntime: AgentMailRuntime {
         lastPreviewMaxChars = bodyPreviewMaxChars
         return [MailMessageBodyPreviewResult(summary: Self.fixtureSummary(), bodyPreview: "Preview body", bodyPreviewTruncated: false, bodySource: "plainText")]
     }
+    static func sendableAccount(_ email: String) -> MailAccount {
+        MailAccount(
+            id: MailAccountID(rawValue: email),
+            provider: .genericIMAPSMTP,
+            displayName: email,
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "identity-\(email)"), displayName: email, address: MailAddress(email: email), canSend: true)],
+            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 465, security: .tls, protocolKind: .smtp),
+            health: MailAccountHealth(status: .ready, summary: "Ready")
+        )
+    }
+
     private static func fixtureSummary() -> MailMessageSummary {
         MailMessageSummary(
             id: MailMessageID(rawValue: "account-INBOX-1"),

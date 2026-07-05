@@ -30,6 +30,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     private let memoryOSRepository: AppMemoryOSRepository?
     private let memoryOSIngestionService: MemoryOSIngestionService
     private let memoryOSFacade: AppMemoryOSFacade?
+    private let memoryOSIngestionWriter: MemoryOSIngestionWriter?
 
     public init(
         loopController: AgentLoopController<Provider>,
@@ -51,6 +52,11 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.memoryOSRepository = memoryOSRepository
         self.memoryOSIngestionService = memoryOSIngestionService
         self.memoryOSFacade = memoryOSFacade
+        self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
+    }
+
+    public func flushMemoryOSIngestion() async throws {
+        try await memoryOSIngestionWriter?.flush()
     }
 
     @discardableResult
@@ -58,7 +64,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(prompt)
         transcript = session.messages
-        try persistMemoryOSAfterUserMessage(userMessage)
+        try await persistMemoryOSAfterUserMessage(userMessage)
         let request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
@@ -86,7 +92,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                     )
                     transcript = session.messages
                     if let assistantMessage {
-                        try persistMemoryOSAfterAssistantMessage(assistantMessage)
+                        try await persistMemoryOSAfterAssistantMessage(assistantMessage)
                     }
                 }
             }
@@ -105,9 +111,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
-    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
-        if let memoryOSFacade {
-            _ = try memoryOSFacade.ingestChatMessage(
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) async throws {
+        if let memoryOSIngestionWriter {
+            await memoryOSIngestionWriter.enqueueChatMessage(
                 messageID: message.id,
                 sessionID: session.id,
                 role: "user",
@@ -128,9 +134,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         try memoryOSRepository.save(result)
     }
 
-    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
-        if let memoryOSFacade {
-            _ = try memoryOSFacade.ingestChatMessage(
+    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) async throws {
+        if let memoryOSIngestionWriter {
+            await memoryOSIngestionWriter.enqueueChatMessage(
                 messageID: message.id,
                 sessionID: session.id,
                 role: "assistant",

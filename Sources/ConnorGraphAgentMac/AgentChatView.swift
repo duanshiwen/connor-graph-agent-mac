@@ -425,6 +425,7 @@ private struct AgentChatConversationView: View {
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
     @State private var selectedToolInvocation: AgentToolInvocationPresentation?
+    @State private var expandedApprovalID: String?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
     @State private var visibleMessageLimit: Int = Self.initialVisibleMessageLimit
@@ -459,6 +460,22 @@ private struct AgentChatConversationView: View {
 
     private var hasOlderMessages: Bool {
         visibleMessageLimit < viewModel.transcript.count
+    }
+
+    private var expandedApproval: AgentPendingApproval? {
+        guard let expandedApprovalID else { return nil }
+        return viewModel.activeChatPendingApprovals.first { $0.id == expandedApprovalID }
+    }
+
+    @ViewBuilder
+    private var expandedApprovalOverlay: some View {
+        if let approval = expandedApproval {
+            AgentPermissionExpandedReviewOverlay(approval: approval, viewModel: viewModel) {
+                expandedApprovalID = nil
+            }
+            .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
+            .zIndex(20)
+        }
     }
 
     @MainActor
@@ -706,7 +723,10 @@ private struct AgentChatConversationView: View {
 
             AgentChatComposerView(
                 viewModel: viewModel,
-                isSessionInfoPresented: $isSessionInfoPresented
+                isSessionInfoPresented: $isSessionInfoPresented,
+                onExpandApprovalReview: { approval in
+                    expandedApprovalID = approval.id
+                }
             )
             .padding(.horizontal, 0)
             .padding(.top, noteFullscreen ? 0 : AgentChatLayout.spaceM)
@@ -730,6 +750,14 @@ private struct AgentChatConversationView: View {
                     selectedToolInvocation = nil
                 }
                 .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
+            }
+        }
+        .overlay {
+            expandedApprovalOverlay
+        }
+        .onChange(of: viewModel.activeChatPendingApprovals.map(\.id)) { _, activeIDs in
+            if let expandedApprovalID, !activeIDs.contains(expandedApprovalID) {
+                self.expandedApprovalID = nil
             }
         }
         .padding(.horizontal, AgentChatLayout.spaceL)

@@ -86,6 +86,20 @@ import ConnorGraphAgent
     #expect(prompt.contains("Do not attempt to write to memory directly"))
 }
 
+@Test func defaultSystemPromptDocumentsOutboundMailApprovalWorkflow() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Outbound mail approval workflow"))
+    #expect(prompt.contains("MailDraft.id"))
+    #expect(prompt.contains("mail_send_draft"))
+    #expect(prompt.contains("native Compose approval card"))
+    #expect(prompt.contains("Do not replace this native approval flow"))
+    #expect(prompt.contains("never ask the user to provide or find a draft ID"))
+    #expect(prompt.contains("omit accountID and identityID to use the Settings default send account"))
+    #expect(prompt.contains("never invent default as a literal mail account ID"))
+    #expect(prompt.contains("mail_list_accounts"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

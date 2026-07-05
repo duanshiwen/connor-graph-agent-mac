@@ -283,6 +283,13 @@ struct MCPSourceDraft: Equatable {
 
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
+#if DEBUG
+    private let mainActorStallMonitor = AppMainActorStallMonitor()
+#endif
+    private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
+    private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
+    private let chatSessionTitleGenerationWorker = ChatSessionTitleGenerationWorker()
+
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -396,6 +403,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailAccountID: MailAccountID?
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
+    @Published var mailPreferences: MailPreferences = MailPreferences()
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var mailSyncMessage: String?
     @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
@@ -503,6 +511,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var memoryOSStore: SQLiteMemoryOSStore?
     private var memoryOSFacade: AppMemoryOSFacade?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
@@ -524,6 +533,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var contactStore: FileBackedContactSourceStore?
     private var mailStore: FileBackedMailSourceStore?
+    private var mailPreferencesStore: (any MailPreferencesStore)?
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -898,77 +908,27 @@ final class AppViewModel: NSObject, ObservableObject {
         perAttachmentCharacterLimit: Int = 20_000,
         totalCharacterLimit: Int = 60_000
     ) -> AttachmentContextPlan {
-        guard !attachments.isEmpty, let storagePaths else { return AttachmentContextPlan() }
-        let store = AppSessionAttachmentStore(paths: storagePaths)
-        var inlineBlocks: [AttachmentInlineBlock] = []
-        var imageBlocks: [AttachmentImageBlock] = []
-        var omissions: [AttachmentOmission] = []
-        var remainingBudget = totalCharacterLimit
-        for attachment in attachments {
-            guard remainingBudget > 0 else {
-                omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Total attachment prompt budget exhausted."))
-                continue
-            }
-            do {
-                let manifest = try store.loadManifest(sessionID: sessionID, attachmentID: attachment.id)
-                if manifest.kind == .image {
-                    let imageURL = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(manifest.storedRelativePath)
-                    let data = try Data(contentsOf: imageURL)
-                    let mimeType = manifest.mimeType ?? "image/png"
-                    let dataURL = "data:\(mimeType);base64,\(data.base64EncodedString())"
-                    imageBlocks.append(AttachmentImageBlock(
-                        attachmentID: manifest.id,
-                        displayName: manifest.displayName,
-                        mimeType: mimeType,
-                        dataURL: dataURL,
-                        sourceRelativePath: manifest.storedRelativePath
-                    ))
-                    continue
-                }
-                guard let relativePath = manifest.extractedTextRelativePath else {
-                    omissions.append(AttachmentOmission(
-                        attachmentID: attachment.id,
-                        displayName: attachment.displayName,
-                        reason: Self.attachmentOmissionReason(for: manifest)
-                    ))
-                    continue
-                }
-                let url = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(relativePath)
-                let content = try String(contentsOf: url, encoding: .utf8)
-                let limit = min(perAttachmentCharacterLimit, remainingBudget)
-                let isTruncated = content.count > limit
-                let inlineContent = isTruncated ? String(content.prefix(limit)) : content
-                remainingBudget -= inlineContent.count
-                inlineBlocks.append(AttachmentInlineBlock(
-                    attachmentID: manifest.id,
-                    displayName: manifest.displayName,
-                    kind: manifest.kind,
-                    content: inlineContent,
-                    sourceRelativePath: relativePath,
-                    isTruncated: isTruncated
-                ))
-            } catch {
-                omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Failed to read extracted text: \(error)"))
-            }
-        }
-        let estimatedTokens = max(1, inlineBlocks.reduce(0) { $0 + $1.content.count } / 4 + imageBlocks.count * 85)
-        return AttachmentContextPlan(inlineBlocks: inlineBlocks, omittedAttachments: omissions, imageBlocks: imageBlocks, estimatedTokens: estimatedTokens)
+        AgentAttachmentContextPlanBuilder(
+            storagePaths: storagePaths,
+            perAttachmentCharacterLimit: perAttachmentCharacterLimit,
+            totalCharacterLimit: totalCharacterLimit
+        ).build(sessionID: sessionID, attachments: attachments)
     }
 
-    private static func attachmentOmissionReason(for manifest: AgentAttachmentManifest) -> String {
-        switch manifest.extractionStatus {
-        case .pending:
-            return "Text extraction is still pending; this attachment is saved locally but its contents are not included in this prompt yet."
-        case .unsupported:
-            return "Text extraction is unsupported or no extractor is currently available; the original file is saved locally but its contents are not included in this prompt."
-        case .failed:
-            let details = manifest.extractionReports.last?.errors.joined(separator: " ") ?? "unknown error"
-            return "Text extraction failed (\(details)); the original file is saved locally but its contents are not included in this prompt."
-        case .skippedOversize:
-            return "Text extraction was skipped because the attachment is too large; the original file is saved locally but its contents are not included in this prompt."
-        case .extracted:
-            return "No extracted text file is available even though extraction is marked complete."
-        }
+    private func buildAttachmentContextPlanOffMain(
+        sessionID: String,
+        attachments: [AgentMessageAttachmentRef],
+        perAttachmentCharacterLimit: Int = 20_000,
+        totalCharacterLimit: Int = 60_000
+    ) async -> AttachmentContextPlan {
+        let builder = AgentAttachmentContextPlanBuilder(
+            storagePaths: storagePaths,
+            perAttachmentCharacterLimit: perAttachmentCharacterLimit,
+            totalCharacterLimit: totalCharacterLimit
+        )
+        return await Task.detached(priority: .utility) {
+            builder.build(sessionID: sessionID, attachments: attachments)
+        }.value
     }
 
     private func refreshSelectedSubmittingState() {
@@ -2061,11 +2021,14 @@ final class AppViewModel: NSObject, ObservableObject {
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
-            self.chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
+            let chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
+            self.chatSessionRepository = chatSessionRepository
+            self.activityTimelineCacheWriter = ActivityTimelineCacheWriter(persistor: chatSessionRepository)
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
@@ -2090,6 +2053,9 @@ final class AppViewModel: NSObject, ObservableObject {
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
         super.init()
+#if DEBUG
+        mainActorStallMonitor.start()
+#endif
         browserLiveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             guard let self else { return }
             self.recordBrowserWebViewEviction(key: key, webView: webView, metadata: metadata)
@@ -2144,6 +2110,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSkillRuntimeDefinitions()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadCalendarContactsFromStorage() }
+        Task { await reloadMailBrowserPresentation() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -2258,9 +2225,16 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            _ = try AppMemoryOSBackgroundJobRunner(
-                aiExecutorProvider: backgroundAIExecutorProvider
-            ).runOnce(facade: memoryOSFacade)
+            let aiExecutorProvider = backgroundAIExecutorProvider
+            let startedAt = ContinuousClock.now
+            let summary = try await memoryOSMaintenanceWorker.runBackgroundJobs(
+                facade: memoryOSFacade,
+                aiExecutorProvider: aiExecutorProvider,
+                now: Date()
+            )
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("memoryOS.backgroundJobs.completed projectionRuns=\(summary.projectionRunCount, privacy: .public) aiRuns=\(summary.aiJobRunCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
@@ -2272,8 +2246,13 @@ final class AppViewModel: NSObject, ObservableObject {
         guard lastMemoryOSDailySweep.map({ now.timeIntervalSince($0) > 86400 }) ?? true else { return }
         lastMemoryOSDailySweep = now
         do {
-            _ = try AppMemoryOSPipelineTriggerCoordinator(facade: memoryOSFacade).runDailySweep(now: now)
+            let startedAt = ContinuousClock.now
+            let items = try await memoryOSMaintenanceWorker.runDailySweep(facade: memoryOSFacade, now: now)
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("memoryOS.dailySweep.completed queued=\(items.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
+            AppPerformanceLog.chatTurnLogger.warning("memoryOS.dailySweep.failed error=\(String(describing: error), privacy: .public)")
             // silent failure — does not block main flow
         }
     }
@@ -2708,6 +2687,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             guard let mailStore else { return }
             mailBrowserPresentation = try await mailStore.presentation()
+            try await reconcileMailDefaultSendPreferences(accounts: mailBrowserPresentation.accounts)
             if selectedMailAccountID == nil || mailBrowserPresentation.account(id: selectedMailAccountID) == nil {
                 selectedMailAccountID = mailBrowserPresentation.defaultAccountID()
             }
@@ -2720,6 +2700,35 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "无法加载邮件缓存：\(error.localizedDescription)"
+        }
+    }
+
+    private func reconcileMailDefaultSendPreferences(accounts: [MailAccount]) async throws {
+        guard let mailPreferencesStore else { return }
+        let loaded = try await mailPreferencesStore.load()
+        let reconciled = MailDefaultSendAccountReconciler.reconcile(preferences: loaded, accounts: accounts)
+        mailPreferences = reconciled
+        if reconciled != loaded {
+            try await mailPreferencesStore.save(reconciled)
+        }
+    }
+
+    func setDefaultMailSendAccount(_ accountID: MailAccountID) async {
+        do {
+            guard let account = mailBrowserPresentation.account(id: accountID) else {
+                errorMessage = "无法设置默认发信账户：账户不存在"
+                return
+            }
+            guard let identity = account.identities.first(where: \.canSend) else {
+                errorMessage = "无法设置默认发信账户：该账户没有可发送身份"
+                return
+            }
+            let preferences = MailPreferences(defaultSendAccountID: account.id, defaultSendIdentityID: identity.id)
+            mailPreferences = preferences
+            try await mailPreferencesStore?.save(preferences)
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法保存默认发信账户：\(error.localizedDescription)"
         }
     }
 
@@ -3683,7 +3692,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         if let timeline = agentEventTimelinesBySessionID[sessionID] {
-            try chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+            scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: timeline)
         }
     }
 
@@ -5304,20 +5313,19 @@ final class AppViewModel: NSObject, ObservableObject {
         updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .running)
         Task {
             do {
-                guard let chatSessionRepository,
-                      let session = try chatSessionRepository.loadSession(id: sessionID)
-                else { return }
-                let userPrompts = session.messages
-                    .filter { $0.role == .user }
-                    .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
+                guard let chatSessionRepository else { return }
+                let userPrompts = try await chatSessionTitleGenerationWorker.userPrompts(repository: chatSessionRepository, sessionID: sessionID)
                 guard !userPrompts.isEmpty else {
-                    renameChatSession(sessionID, title: "新对话")
+                    let updated = try await chatSessionTitleGenerationWorker.renameSession(repository: chatSessionRepository, sessionID: sessionID, title: "新对话")
+                    synchronizeRenamedChatSession(updated)
+                    scheduleChatSessionListRefresh(reason: "titleGenerationCompleted")
                     updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
                     return
                 }
                 let title = try await generateTitleFromUserPrompts(userPrompts, sessionID: sessionID)
-                renameChatSession(sessionID, title: title)
+                let updated = try await chatSessionTitleGenerationWorker.renameSession(repository: chatSessionRepository, sessionID: sessionID, title: title)
+                synchronizeRenamedChatSession(updated)
+                scheduleChatSessionListRefresh(reason: "titleGenerationCompleted")
                 updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
             } catch {
                 updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .failed, errorMessage: String(describing: error))
@@ -5837,7 +5845,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil))
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
-                try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
+                scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
                 agentEventTimeline = restored
                 return
             }
@@ -5869,7 +5877,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let restored = presentations(from: runEvents)
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
-                try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
+                scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
                 agentEventTimeline = restored
                 return
             }
@@ -6212,6 +6220,50 @@ final class AppViewModel: NSObject, ObservableObject {
         await submitChat(prompt: prompt, clearComposer: true)
     }
 
+    private func scheduleActivityTimelineCacheSave(sessionID: String, timeline: [AgentEventPresentation]) {
+        guard let activityTimelineCacheWriter else { return }
+        Task(priority: .utility) {
+            await activityTimelineCacheWriter.scheduleSave(sessionID: sessionID, timeline: timeline)
+        }
+    }
+
+    private func flushActivityTimelineCache(sessionID: String) async {
+        guard let activityTimelineCacheWriter else { return }
+        let startedAt = ContinuousClock.now
+        do {
+            try await activityTimelineCacheWriter.flush(sessionID: sessionID)
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("timelineCache.flush session=\(sessionID, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+        } catch {
+            AppPerformanceLog.chatTurnLogger.warning("timelineCache.flush.failed session=\(sessionID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+        }
+    }
+
+    private func scheduleChatSessionListRefresh(reason: String) {
+        guard let chatSessionRepository else { return }
+        let filter = sessionListFilter
+        let coordinator = chatSessionListRefreshCoordinator
+        Task(priority: .utility) { [weak self] in
+            let startedAt = ContinuousClock.now
+            do {
+                let result = try await coordinator.refresh(repository: chatSessionRepository, filter: filter)
+                let elapsed = startedAt.duration(to: ContinuousClock.now)
+                let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.chatSessions = result.visibleSessions
+                    self.allChatSessions = result.allSessions
+                    self.rebuildSessionSearchIndexSoon(sessions: result.allSessions)
+                    self.synchronizeSessionReadStates(from: result.allSessions)
+                    AppPerformanceLog.chatTurnLogger.info("sessionList.asyncRefresh reason=\(reason, privacy: .public) visible=\(result.visibleSessions.count, privacy: .public) all=\(result.allSessions.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+                }
+            } catch {
+                AppPerformanceLog.chatTurnLogger.warning("sessionList.asyncRefresh.failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     func cancelActiveChatRun() {
         guard let submittingSessionID = selectedChatSessionID,
               submittingChatSessionIDs.contains(submittingSessionID)
@@ -6264,7 +6316,7 @@ final class AppViewModel: NSObject, ObservableObject {
         var timeline = agentEventTimelinesBySessionID[sessionID] ?? agentEventTimeline
         timeline.append(cancellation)
         agentEventTimelinesBySessionID[sessionID] = timeline
-        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: timeline)
         if selectedChatSessionID == sessionID {
             agentEventTimeline = timeline
         }
@@ -6407,7 +6459,7 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 sessionSummary = nil
             }
-            let attachmentContextPlan = buildAttachmentContextPlan(
+            let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
@@ -6423,6 +6475,7 @@ final class AppViewModel: NSObject, ObservableObject {
             if resolvedSkillInstructions != nil {
                 clearActiveSkill()
             }
+            let submitStartedAt = ContinuousClock.now
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
@@ -6448,7 +6501,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     var timeline = self.agentEventTimelinesBySessionID[submittingSessionID] ?? []
                     timeline.append(presentation)
                     self.agentEventTimelinesBySessionID[submittingSessionID] = timeline
-                    try? self.chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
+                    self.scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: timeline)
                     if self.selectedChatSessionID == submittingSessionID {
                         self.agentEventTimeline = timeline
                     }
@@ -6458,8 +6511,12 @@ final class AppViewModel: NSObject, ObservableObject {
                     self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
                 }
             )
+            let submitElapsed = submitStartedAt.duration(to: ContinuousClock.now)
+            let submitMilliseconds = Double(submitElapsed.components.seconds) * 1_000 + Double(submitElapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("nativeSubmit.completed session=\(submittingSessionID, privacy: .public) events=\(manager.eventPresentations.count, privacy: .public) duration=\(submitMilliseconds, privacy: .public)ms")
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
-            try? chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: manager.eventPresentations)
+            scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: manager.eventPresentations)
+            await flushActivityTimelineCache(sessionID: submittingSessionID)
             if selectedChatSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = response.session
@@ -6471,17 +6528,14 @@ final class AppViewModel: NSObject, ObservableObject {
                 lastPromptInspection = nil
             }
             reloadPendingApprovals()
-            if let chatSessionRepository {
-                chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-                allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
-            }
+            scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
             if shouldAutoGenerateInitialTitle {
                 regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
             let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
-                .last(where: { $0.role == .assistant })
+                .last(where: { $0.role == AgentRole.assistant })
             noteSessionUpdate(
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,

@@ -82,6 +82,7 @@ public struct NativeSessionManager: Sendable {
 
     private let presenter: AgentEventPresenter
     private let memoryOSFacade: AppMemoryOSFacade?
+    private let memoryOSIngestionWriter: MemoryOSIngestionWriter?
     private let eventRecorder: AgentEventRecorder?
     private let pendingApprovalRepository: (any AgentPendingApprovalRepository)?
 
@@ -110,6 +111,7 @@ public struct NativeSessionManager: Sendable {
         self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
         self.memoryOSFacade = memoryOSFacade
+        self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.compressionProvider = compressionProvider
@@ -132,6 +134,10 @@ public struct NativeSessionManager: Sendable {
             permissionMode: loopController.configuration.permissionMode,
             memoryOSFacade: memoryOSFacade
         )
+    }
+
+    public func flushMemoryOSIngestion() async throws {
+        try await memoryOSIngestionWriter?.flush()
     }
 
     @discardableResult
@@ -161,7 +167,7 @@ public struct NativeSessionManager: Sendable {
         }()
         let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, contextSnapshot: activeSkillContextSnapshot)
         try persistSession()
-        try persistMemoryOSAfterUserMessage(userMessage)
+        try await persistMemoryOSAfterUserMessage(userMessage)
 
         let request = AgentChatRequest(
             sessionID: session.id,
@@ -227,7 +233,7 @@ public struct NativeSessionManager: Sendable {
             runtimeState.lastRunID = run.id
             runtimeState.lastCompletedAt = Date()
             runtimeState.cancellationReason = reason
-            _ = try appendTerminationMessage(
+            _ = try await appendTerminationMessage(
                 "操作已终止：\(reason)",
                 runID: run.id
             )
@@ -311,7 +317,7 @@ public struct NativeSessionManager: Sendable {
                     )
                     try persistSession()
                     if let assistantMessage {
-                        try persistMemoryOSAfterAssistantMessage(assistantMessage)
+                        try await persistMemoryOSAfterAssistantMessage(assistantMessage)
                     }
                 }
             }
@@ -322,7 +328,7 @@ public struct NativeSessionManager: Sendable {
                 return nil
             }.last
             if assistantMessage == nil, let runFailure {
-                assistantMessage = try appendTerminationMessage(
+                assistantMessage = try await appendTerminationMessage(
                     "操作已终止：\(runFailure.message)",
                     runID: run.id
                 )
@@ -367,7 +373,7 @@ public struct NativeSessionManager: Sendable {
                 cancelledRun.metadata["cancellation_reason"] = cancelledRun.metadata["cancellation_reason"] ?? reason
                 try? sessionRepository.saveRun(cancelledRun)
             }
-            _ = try appendTerminationMessage(
+            _ = try await appendTerminationMessage(
                 "操作已终止：\(reason)",
                 runID: run.id
             )
@@ -381,7 +387,7 @@ public struct NativeSessionManager: Sendable {
             if let existingRun = try? sessionRepository.loadRun(id: run.id), existingRun.status == .cancelled {
                 let reason = existingRun.metadata["cancellation_reason"] ?? "cancelled by user"
                 runtimeState.cancellationReason = reason
-                _ = try appendTerminationMessage(
+                _ = try await appendTerminationMessage(
                     "操作已终止：\(reason)",
                     runID: run.id
                 )
@@ -403,7 +409,7 @@ public struct NativeSessionManager: Sendable {
                 )
         }
             // Connor owns session state. A backend failure must not roll back the user's input.
-            _ = try appendTerminationMessage(
+            _ = try await appendTerminationMessage(
                 "操作已终止：\(String(describing: error))",
                 runID: run.id
             )
@@ -516,7 +522,7 @@ public struct NativeSessionManager: Sendable {
     }
 
     @discardableResult
-    private mutating func appendTerminationMessage(_ content: String, runID: String) throws -> AgentMessage {
+    private mutating func appendTerminationMessage(_ content: String, runID: String) async throws -> AgentMessage {
         if let last = session.messages.last,
            last.role == .assistant,
            last.content.hasPrefix("操作已终止：") {
@@ -525,7 +531,7 @@ public struct NativeSessionManager: Sendable {
         }
         let message = session.appendAssistantMessage(content)
         try persistSession()
-        try persistMemoryOSAfterAssistantMessage(message)
+        try await persistMemoryOSAfterAssistantMessage(message)
         return message
     }
 
@@ -561,9 +567,9 @@ public struct NativeSessionManager: Sendable {
         try sessionRepository.savePendingApproval(approval)
     }
 
-    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
-        guard let memoryOSFacade else { return }
-        _ = try memoryOSFacade.ingestChatMessage(
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) async throws {
+        guard let memoryOSIngestionWriter else { return }
+        await memoryOSIngestionWriter.enqueueChatMessage(
             messageID: message.id,
             sessionID: session.id,
             role: "user",
@@ -572,9 +578,9 @@ public struct NativeSessionManager: Sendable {
         )
     }
 
-    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
-        guard let memoryOSFacade else { return }
-        _ = try memoryOSFacade.ingestChatMessage(
+    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) async throws {
+        guard let memoryOSIngestionWriter else { return }
+        await memoryOSIngestionWriter.enqueueChatMessage(
             messageID: message.id,
             sessionID: session.id,
             role: "assistant",

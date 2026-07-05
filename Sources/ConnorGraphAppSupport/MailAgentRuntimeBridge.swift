@@ -3,6 +3,16 @@ import ConnorGraphCore
 import ConnorGraphAgent
 
 extension MailRuntime: AgentMailRuntime {
+    public func loadMailPreferences(runID: String?, sessionID: String?) async throws -> MailSendPreferencesBridge {
+        guard let preferencesStore else { return MailSendPreferencesBridge() }
+        let preferences = try await preferencesStore.load()
+        return MailSendPreferencesBridge(defaultSendAccountID: preferences.defaultSendAccountID, defaultSendIdentityID: preferences.defaultSendIdentityID)
+    }
+
+    public func saveMailPreferences(_ preferences: MailSendPreferencesBridge, runID: String?, sessionID: String?) async throws {
+        try await preferencesStore?.save(MailPreferences(defaultSendAccountID: preferences.defaultSendAccountID, defaultSendIdentityID: preferences.defaultSendIdentityID))
+    }
+
     public func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
         try await listRecentMessages(
             MailRuntimeRecentMessagesRequest(
