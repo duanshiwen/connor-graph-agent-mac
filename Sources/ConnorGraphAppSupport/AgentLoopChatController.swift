@@ -30,6 +30,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     private let memoryOSRepository: AppMemoryOSRepository?
     private let memoryOSIngestionService: MemoryOSIngestionService
     private let memoryOSFacade: AppMemoryOSFacade?
+    private let memoryOSIngestionWriter: MemoryOSIngestionWriter?
 
     public init(
         loopController: AgentLoopController<Provider>,
@@ -51,6 +52,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.memoryOSRepository = memoryOSRepository
         self.memoryOSIngestionService = memoryOSIngestionService
         self.memoryOSFacade = memoryOSFacade
+        self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
     }
 
     @discardableResult
@@ -106,14 +108,16 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     }
 
     private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
-        if let memoryOSFacade {
-            _ = try memoryOSFacade.ingestChatMessage(
-                messageID: message.id,
-                sessionID: session.id,
-                role: "user",
-                content: message.content,
-                occurredAt: message.createdAt
-            )
+        if let memoryOSIngestionWriter {
+            Task(priority: .utility) {
+                await memoryOSIngestionWriter.enqueueChatMessage(
+                    messageID: message.id,
+                    sessionID: session.id,
+                    role: "user",
+                    content: message.content,
+                    occurredAt: message.createdAt
+                )
+            }
             return
         }
         guard let memoryOSRepository else { return }
@@ -129,14 +133,16 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     }
 
     private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
-        if let memoryOSFacade {
-            _ = try memoryOSFacade.ingestChatMessage(
-                messageID: message.id,
-                sessionID: session.id,
-                role: "assistant",
-                content: message.content,
-                occurredAt: message.createdAt
-            )
+        if let memoryOSIngestionWriter {
+            Task(priority: .utility) {
+                await memoryOSIngestionWriter.enqueueChatMessage(
+                    messageID: message.id,
+                    sessionID: session.id,
+                    role: "assistant",
+                    content: message.content,
+                    occurredAt: message.createdAt
+                )
+            }
             return
         }
         guard let memoryOSRepository else { return }

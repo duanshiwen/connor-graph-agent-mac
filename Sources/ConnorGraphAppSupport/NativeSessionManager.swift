@@ -82,6 +82,7 @@ public struct NativeSessionManager: Sendable {
 
     private let presenter: AgentEventPresenter
     private let memoryOSFacade: AppMemoryOSFacade?
+    private let memoryOSIngestionWriter: MemoryOSIngestionWriter?
     private let eventRecorder: AgentEventRecorder?
     private let pendingApprovalRepository: (any AgentPendingApprovalRepository)?
 
@@ -110,6 +111,7 @@ public struct NativeSessionManager: Sendable {
         self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
         self.memoryOSFacade = memoryOSFacade
+        self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.compressionProvider = compressionProvider
@@ -562,24 +564,28 @@ public struct NativeSessionManager: Sendable {
     }
 
     private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
-        guard let memoryOSFacade else { return }
-        _ = try memoryOSFacade.ingestChatMessage(
-            messageID: message.id,
-            sessionID: session.id,
-            role: "user",
-            content: message.content,
-            occurredAt: message.createdAt
-        )
+        guard let memoryOSIngestionWriter else { return }
+        Task(priority: .utility) {
+            await memoryOSIngestionWriter.enqueueChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "user",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
+        }
     }
 
     private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
-        guard let memoryOSFacade else { return }
-        _ = try memoryOSFacade.ingestChatMessage(
-            messageID: message.id,
-            sessionID: session.id,
-            role: "assistant",
-            content: message.content,
-            occurredAt: message.createdAt
-        )
+        guard let memoryOSIngestionWriter else { return }
+        Task(priority: .utility) {
+            await memoryOSIngestionWriter.enqueueChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "assistant",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
+        }
     }
 }
