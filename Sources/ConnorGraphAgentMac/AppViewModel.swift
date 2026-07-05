@@ -288,6 +288,7 @@ final class AppViewModel: NSObject, ObservableObject {
 #endif
     private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
+    private let chatSessionTitleGenerationWorker = ChatSessionTitleGenerationWorker()
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -5362,20 +5363,19 @@ final class AppViewModel: NSObject, ObservableObject {
         updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .running)
         Task {
             do {
-                guard let chatSessionRepository,
-                      let session = try chatSessionRepository.loadSession(id: sessionID)
-                else { return }
-                let userPrompts = session.messages
-                    .filter { $0.role == .user }
-                    .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
+                guard let chatSessionRepository else { return }
+                let userPrompts = try await chatSessionTitleGenerationWorker.userPrompts(repository: chatSessionRepository, sessionID: sessionID)
                 guard !userPrompts.isEmpty else {
-                    renameChatSession(sessionID, title: "新对话")
+                    let updated = try await chatSessionTitleGenerationWorker.renameSession(repository: chatSessionRepository, sessionID: sessionID, title: "新对话")
+                    synchronizeRenamedChatSession(updated)
+                    scheduleChatSessionListRefresh(reason: "titleGenerationCompleted")
                     updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
                     return
                 }
                 let title = try await generateTitleFromUserPrompts(userPrompts, sessionID: sessionID)
-                renameChatSession(sessionID, title: title)
+                let updated = try await chatSessionTitleGenerationWorker.renameSession(repository: chatSessionRepository, sessionID: sessionID, title: title)
+                synchronizeRenamedChatSession(updated)
+                scheduleChatSessionListRefresh(reason: "titleGenerationCompleted")
                 updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
             } catch {
                 updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .failed, errorMessage: String(describing: error))
