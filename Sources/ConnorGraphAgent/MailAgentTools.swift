@@ -365,7 +365,7 @@ public struct MailSetReadStateTool: AgentTool {
 public struct MailCreateDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_create_draft" }
-    public var description: String { "Create a governed mail draft without sending." }
+    public var description: String { "Create a governed mail draft without sending. The returned MailDraft.id is the exact draftID to pass to mail_send_draft when requesting the native send-approval card; never ask the user to provide this ID." }
     public var permission: AgentPermissionCapability { .createMailDraft }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
@@ -396,16 +396,22 @@ public struct MailCreateDraftTool: AgentTool {
         let attachmentIDs = (arguments.array("attachmentIDs") ?? []).compactMap(\.stringValue).map(MailAttachmentID.init(rawValue:))
         let inReplyToMessageID = arguments.string("inReplyToMessageID").map(MailMessageID.init(rawValue:))
         let draft = try await runtime.createDraft(accountID: MailAccountID(rawValue: accountID), identityID: MailIdentityID(rawValue: identityID), to: to, cc: cc, bcc: bcc, replyTo: replyTo, subject: arguments.string("subject") ?? "", body: arguments.string("body") ?? "", htmlBody: arguments.string("htmlBody"), inReplyToMessageID: inReplyToMessageID, attachmentIDs: attachmentIDs, intentSummary: arguments.string("intentSummary"), runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created draft \(draft.id.rawValue); not sent", contentJSON: try MailJSON.encode(draft))
+        let draftID = draft.id.rawValue
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Created draft \(draftID); not sent. To request the native Compose approval card for sending, call mail_send_draft with draftID=\"\(draftID)\". Do not ask the user to provide the draft ID.",
+            contentJSON: try MailJSON.encode(draft)
+        )
     }
 }
 
 public struct MailSendDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_send_draft" }
-    public var description: String { "Send a draft only after explicit user approval. This tool is never auto-approved." }
+    public var description: String { "Request native Compose approval to send an existing mail draft. Use the exact MailDraft.id returned by mail_create_draft; this tool is never auto-approved and must not be replaced with a natural-language confirmation." }
     public var permission: AgentPermissionCapability { .sendMail }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Draft ID")], required: ["draftID"]) }
+    public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Exact MailDraft.id returned by mail_create_draft. Do not ask the user to provide this ID; pass the ID from the prior tool result to trigger the native Compose approval card.")], required: ["draftID"]) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         guard let args = try? AgentToolArguments(json: call.argumentsJSON), let draftID = args.string("draftID"), let payload = try? await runtime.sendApprovalBridgePayload(draftID: MailDraftID(rawValue: draftID)) else {
