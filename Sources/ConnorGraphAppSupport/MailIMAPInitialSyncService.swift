@@ -13,6 +13,179 @@ public struct MailInitialSyncResult: Sendable, Equatable {
     }
 }
 
+public struct RemoteIMAPMailbox: Sendable, Equatable {
+    public var name: String
+    public var path: String
+    public var role: MailMailboxRole
+    public var attributes: [String]
+    public var delimiter: String?
+
+    public init(name: String, path: String, role: MailMailboxRole, attributes: [String] = [], delimiter: String? = nil) {
+        self.name = name
+        self.path = path
+        self.role = role
+        self.attributes = attributes
+        self.delimiter = delimiter
+    }
+
+    public static func parseListResponse(_ response: String) -> [RemoteIMAPMailbox] {
+        response
+            .components(separatedBy: .newlines)
+            .compactMap { parseListLine($0) }
+    }
+
+    public static func parseListLine(_ line: String) -> RemoteIMAPMailbox? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.localizedCaseInsensitiveContains(" LIST ") || trimmed.hasPrefix("* LIST ") else { return nil }
+        guard let open = trimmed.firstIndex(of: "("), let close = trimmed[open...].firstIndex(of: ")") else { return nil }
+        let attributeString = String(trimmed[trimmed.index(after: open)..<close])
+        let attributes = attributeString
+            .split(separator: " ")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let remainder = trimmed[trimmed.index(after: close)...].trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = parseIMAPQuotedTokens(remainder)
+        let delimiter = tokens.count >= 2 ? tokens[tokens.count - 2] : nil
+        guard let path = tokens.last?.nilIfEmpty else { return nil }
+        let name = path.components(separatedBy: delimiter ?? "/").last?.nilIfEmpty ?? path
+        return RemoteIMAPMailbox(name: name, path: path, role: inferRole(path: path, attributes: attributes), attributes: attributes, delimiter: delimiter)
+    }
+
+    public static func inferRole(path: String, attributes: [String]) -> MailMailboxRole {
+        let loweredAttributes = attributes.map { $0.lowercased() }
+        if loweredAttributes.contains("\\sent") { return .sent }
+        if loweredAttributes.contains("\\drafts") { return .drafts }
+        if loweredAttributes.contains("\\archive") || loweredAttributes.contains("\\all") { return .archive }
+        if loweredAttributes.contains("\\trash") { return .trash }
+        if loweredAttributes.contains("\\junk") { return .spam }
+
+        let normalized = path
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        let leaf = normalized.components(separatedBy: CharacterSet(charactersIn: "/.")).last ?? normalized
+        if normalized == "inbox" || leaf == "inbox" { return .inbox }
+        let sentNames: Set<String> = ["sent", "sent mail", "sent messages", "已发送", "已发送邮件", "寄件备份", "寄件匣"]
+        if sentNames.contains(normalized) || sentNames.contains(leaf) { return .sent }
+        if ["drafts", "draft", "草稿", "草稿箱"].contains(normalized) || ["drafts", "draft", "草稿", "草稿箱"].contains(leaf) { return .drafts }
+        if ["trash", "deleted messages", "deleted", "已删除", "废纸篓", "垃圾桶"].contains(normalized) || ["trash", "deleted messages", "deleted", "已删除", "废纸篓", "垃圾桶"].contains(leaf) { return .trash }
+        if ["junk", "spam", "垃圾邮件"].contains(normalized) || ["junk", "spam", "垃圾邮件"].contains(leaf) { return .spam }
+        if ["archive", "all mail", "归档"].contains(normalized) || ["archive", "all mail", "归档"].contains(leaf) { return .archive }
+        return .custom
+    }
+
+    public var stableIDComponent: String {
+        switch role {
+        case .inbox: return "inbox"
+        case .sent: return "sent"
+        case .drafts: return "drafts"
+        case .archive: return "archive"
+        case .trash: return "trash"
+        case .spam: return "spam"
+        case .custom: return Self.slug(path)
+        }
+    }
+
+    public func mailboxID(accountID: MailAccountID) -> MailMailboxID {
+        MailMailboxID(rawValue: "\(accountID.rawValue)-\(stableIDComponent)")
+    }
+
+    public var messageIDPrefixComponent: String {
+        switch role {
+        case .inbox: "INBOX"
+        case .sent: "Sent"
+        default: stableIDComponent
+        }
+    }
+
+    public func messageID(accountID: MailAccountID, uid: String) -> MailMessageID {
+        MailMessageID(rawValue: "\(accountID.rawValue)-\(messageIDPrefixComponent)-\(uid)")
+    }
+
+    public func uid(fromMessageID messageID: MailMessageID, accountID: MailAccountID) -> String? {
+        let prefix = "\(accountID.rawValue)-\(messageIDPrefixComponent)-"
+        guard messageID.rawValue.hasPrefix(prefix) else { return nil }
+        let uid = String(messageID.rawValue.dropFirst(prefix.count))
+        return uid.isEmpty ? nil : uid
+    }
+
+    public static func chunkUIDs(_ sortedUIDs: [Int], messageLimit: Int, batchSize: Int) -> [[Int]] {
+        let limited = messageLimit > 0 ? Array(sortedUIDs.suffix(messageLimit)) : sortedUIDs
+        let size = max(batchSize, 1)
+        var chunks: [[Int]] = []
+        for start in stride(from: 0, to: limited.count, by: size) {
+            chunks.append(Array(limited[start..<min(start + size, limited.count)]))
+        }
+        return chunks
+    }
+
+    public static func syncTargets(from discovered: [RemoteIMAPMailbox]) -> [RemoteIMAPMailbox] {
+        let inbox = discovered.first { $0.role == .inbox } ?? RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        var targets = [inbox]
+        if let sent = discovered.first(where: { $0.role == .sent }) {
+            targets.append(sent)
+        }
+        return targets
+    }
+
+    public static func slug(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.lowercased().unicodeScalars.map { scalar -> Character in
+            allowed.contains(scalar) ? Character(scalar) : "-"
+        }
+        let collapsed = String(scalars).replacingOccurrences(of: #"-+"#, with: "-", options: .regularExpression)
+        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-")) .nilIfEmpty ?? "mailbox"
+    }
+
+    private static func parseIMAPQuotedTokens(_ value: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var inQuote = false
+        var escaping = false
+        var tokenStarted = false
+
+        for character in value {
+            if escaping {
+                current.append(character)
+                escaping = false
+                continue
+            }
+            if inQuote {
+                if character == "\\" {
+                    escaping = true
+                } else if character == "\"" {
+                    tokens.append(current)
+                    current = ""
+                    inQuote = false
+                    tokenStarted = false
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+            if character == "\"" {
+                inQuote = true
+                tokenStarted = true
+            } else if character.isWhitespace {
+                if tokenStarted {
+                    tokens.append(current)
+                    current = ""
+                    tokenStarted = false
+                }
+            } else {
+                current.append(character)
+                tokenStarted = true
+            }
+        }
+        if tokenStarted || !current.isEmpty {
+            tokens.append(current)
+        }
+        return tokens.filter { !$0.uppercased().elementsEqual("NIL") }
+    }
+}
+
 public struct MailIMAPInitialSyncService: Sendable {
     public var credentialStore: AppMailCredentialStore
     public var messageLimit: Int
@@ -48,7 +221,7 @@ public struct MailIMAPInitialSyncService: Sendable {
               let rawCredential = try credentialStore.readCredential(binding: binding),
               !rawCredential.isEmpty else {
             return MailInitialSyncResult(
-                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing Keychain credential"]),
+                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing local encrypted credential"]),
                 mailboxes: [],
                 messages: []
             )
@@ -72,17 +245,17 @@ public struct MailIMAPInitialSyncService: Sendable {
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
             let accountID = originalAccount.id
-            let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
-            let onBatchWithDetail: (@Sendable ([BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
-                return { @Sendable (batch: [BlockingIMAPClient.FetchedMessage]) in
-                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email)) }
+            let onBatchWithDetail: (@Sendable (RemoteIMAPMailbox, [BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
+                return { @Sendable (remoteMailbox: RemoteIMAPMailbox, batch: [BlockingIMAPClient.FetchedMessage]) in
+                    let mailboxID = remoteMailbox.mailboxID(accountID: accountID)
+                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: MailAddress(email: email), remoteMailbox: remoteMailbox) }
                     callback(details)
                 }
             }
-            let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<BlockingIMAPClient.Snapshot, Error>) in
+            let mailboxSnapshots = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[BlockingIMAPClient.MailboxSnapshot], Error>) in
                 DispatchQueue.global(qos: .utility).async {
                     do {
-                        let result = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit, onBatch: onBatchWithDetail)
+                        let result = try client.withPasswordSessionDiscoveredMailboxes(usernames: loginUsernames, password: rawCredential, messageLimit: self.messageLimit, onBatch: onBatchWithDetail)
                         continuation.resume(returning: result)
                     } catch {
                         continuation.resume(throwing: error)
@@ -90,31 +263,36 @@ public struct MailIMAPInitialSyncService: Sendable {
                 }
             }
             let now = Date()
-            let mailbox = MailMailbox(
-                id: inboxID,
-                accountID: accountID,
-                name: "收件箱",
-                path: "INBOX",
-                role: .inbox,
-                status: MailMailboxStatus(
-                    messageCount: snapshot.exists,
-                    unreadCount: snapshot.unreadCount,
-                    syncCursor: snapshot.highestUID.map { MailSyncCursor(value: $0, updatedAt: now, uidValidity: snapshot.uidValidity) },
-                    lastSyncedAt: now
+            let mailboxes = mailboxSnapshots.map { entry in
+                MailMailbox(
+                    id: entry.mailbox.mailboxID(accountID: accountID),
+                    accountID: accountID,
+                    name: displayName(for: entry.mailbox),
+                    path: entry.mailbox.path,
+                    role: entry.mailbox.role,
+                    status: MailMailboxStatus(
+                        messageCount: entry.snapshot.exists,
+                        unreadCount: entry.snapshot.unreadCount,
+                        syncCursor: entry.snapshot.highestUID.map { MailSyncCursor(value: $0, updatedAt: now, uidValidity: entry.snapshot.uidValidity) },
+                        lastSyncedAt: now
+                    )
                 )
-            )
-            let messages = snapshot.messages.map { fetched in
-                fetched.detail(accountID: accountID, mailboxID: inboxID, fallbackRecipient: MailAddress(email: email))
+            }
+            let messages = mailboxSnapshots.flatMap { entry in
+                let mailboxID = entry.mailbox.mailboxID(accountID: accountID)
+                return entry.snapshot.messages.map { fetched in
+                    fetched.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: MailAddress(email: email), remoteMailbox: entry.mailbox)
+                }
             }
             var account = originalAccount
             account.health = MailAccountHealth(
                 status: .ready,
                 checkedAt: now,
-                summary: "首次同步完成 · INBOX \(snapshot.exists) 封 · 已拉取最近 \(messages.count) 封",
+                summary: Self.initialSyncSummary(mailboxSnapshots: mailboxSnapshots, pulledMessageCount: messages.count),
                 blockingReasons: []
             )
             account.updatedAt = now
-            return MailInitialSyncResult(account: account, mailboxes: [mailbox], messages: messages)
+            return MailInitialSyncResult(account: account, mailboxes: mailboxes, messages: messages)
         } catch let error as BlockingIMAPClient.IMAPError {
             let health: MailAccountHealth
             switch error {
@@ -149,7 +327,7 @@ public struct MailIMAPInitialSyncService: Sendable {
               let rawCredential = try credentialStore.readCredential(binding: binding),
               !rawCredential.isEmpty else {
             return MailInitialSyncResult(
-                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing Keychain credential"]),
+                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing local encrypted credential"]),
                 mailboxes: [],
                 messages: []
             )
@@ -231,8 +409,122 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
     }
 
+
+    public func syncIncremental(account originalAccount: MailAccount, storedUIDsByMailboxID: [MailMailboxID: Set<String>], storedUIDValidityByMailboxID: [MailMailboxID: String?] = [:], onBatch: (@Sendable ([MailMessageDetail]) -> Void)? = nil) async throws -> MailInitialSyncResult {
+        guard let endpoint = originalAccount.incoming, endpoint.protocolKind == .imap else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "缺少 IMAP 收件服务器配置", reasons: ["Incoming endpoint is not IMAP"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+        guard endpoint.security == .tls else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "增量同步仅允许 TLS IMAP", reasons: ["Direct TLS on port 993 is required"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+        guard let binding = originalAccount.credentialBinding,
+              let rawCredential = try credentialStore.readCredential(binding: binding),
+              !rawCredential.isEmpty else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing local encrypted credential"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+        guard let email = originalAccount.identities.first?.address.email, !email.isEmpty else {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "缺少邮箱地址", reasons: ["Missing mail identity address"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
+
+        do {
+            if binding.authMode == .oauth2 {
+                return MailInitialSyncResult(
+                    account: updatedAccount(originalAccount, status: .blocked, summary: "OAuth 邮件登录已不再支持", reasons: ["请删除此旧账户后使用授权码、App Password 或通用 IMAP/SMTP 凭据重新添加。"]),
+                    mailboxes: [],
+                    messages: []
+                )
+            }
+            let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
+            let loginUsernames = Self.candidateUsernames(email: email, provider: originalAccount.provider)
+            let accountID = originalAccount.id
+            let onBatchWithDetail: (@Sendable (RemoteIMAPMailbox, [BlockingIMAPClient.FetchedMessage]) -> Void)? = onBatch.map { callback in
+                return { @Sendable (remoteMailbox: RemoteIMAPMailbox, batch: [BlockingIMAPClient.FetchedMessage]) in
+                    let mailboxID = remoteMailbox.mailboxID(accountID: accountID)
+                    let details = batch.map { $0.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: MailAddress(email: email), remoteMailbox: remoteMailbox) }
+                    callback(details)
+                }
+            }
+            let mailboxSnapshots = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[BlockingIMAPClient.MailboxSnapshot], Error>) in
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let result = try client.withPasswordSessionIncrementalMailboxes(
+                            usernames: loginUsernames,
+                            password: rawCredential,
+                            storedUIDsByMailbox: storedUIDsByMailboxID,
+                            storedUIDValidityByMailbox: storedUIDValidityByMailboxID,
+                            accountID: accountID,
+                            onBatch: onBatchWithDetail
+                        )
+                        continuation.resume(returning: result)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            let now = Date()
+            let mailboxes = mailboxSnapshots.map { entry in
+                MailMailbox(
+                    id: entry.mailbox.mailboxID(accountID: accountID),
+                    accountID: accountID,
+                    name: displayName(for: entry.mailbox),
+                    path: entry.mailbox.path,
+                    role: entry.mailbox.role,
+                    status: MailMailboxStatus(
+                        messageCount: entry.snapshot.exists,
+                        unreadCount: entry.snapshot.unreadCount,
+                        syncCursor: entry.snapshot.highestUID.map { MailSyncCursor(value: $0, updatedAt: now, uidValidity: entry.snapshot.uidValidity) },
+                        lastSyncedAt: now
+                    )
+                )
+            }
+            let messages = mailboxSnapshots.flatMap { entry in
+                let mailboxID = entry.mailbox.mailboxID(accountID: accountID)
+                return entry.snapshot.messages.map { fetched in
+                    fetched.detail(accountID: accountID, mailboxID: mailboxID, fallbackRecipient: MailAddress(email: email), remoteMailbox: entry.mailbox)
+                }
+            }
+            var account = originalAccount
+            account.health = MailAccountHealth(
+                status: .ready,
+                checkedAt: now,
+                summary: Self.incrementalSyncSummary(mailboxSnapshots: mailboxSnapshots, pulledMessageCount: messages.count),
+                blockingReasons: []
+            )
+            account.updatedAt = now
+            return MailInitialSyncResult(account: account, mailboxes: mailboxes, messages: messages)
+        } catch let error as BlockingIMAPClient.IMAPError {
+            let health: MailAccountHealth
+            switch error {
+            case .authenticationFailed(let message):
+                health = MailAccountHealth(status: .unauthenticated, summary: "IMAP 登录失败", blockingReasons: [message])
+            case .connectionFailed(let message), .protocolError(let message):
+                health = MailAccountHealth(status: .degraded, summary: "IMAP 增量同步失败", blockingReasons: [message])
+            }
+            var account = originalAccount
+            account.health = health
+            account.updatedAt = Date()
+            return MailInitialSyncResult(account: account, mailboxes: [], messages: [])
+        }
+    }
+
         /// Fetch a single message's body from IMAP using NIOIMAP (Thunderbird-style).
-    public func fetchMessageBody(account: MailAccount, uid: String, messageID: MailMessageID, mailboxID: MailMailboxID, snippet: String) async throws -> MailMessageDetail? {
+    public func fetchMessageBody(account: MailAccount, uid: String, messageID: MailMessageID, mailboxID: MailMailboxID, mailboxPath: String = "INBOX", mailboxRole: MailMailboxRole = .inbox, snippet: String) async throws -> MailMessageDetail? {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else { return nil }
         guard endpoint.security == .tls else { return nil }
         guard let binding = account.credentialBinding,
@@ -241,19 +533,49 @@ public struct MailIMAPInitialSyncService: Sendable {
         guard let email = account.identities.first?.address.email, !email.isEmpty else { return nil }
         guard Int(uid) ?? 0 > 0 else { return nil }
 
-        let fetcher = NIOBodyFetcher(host: endpoint.host, port: endpoint.port)
-        let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
-        
-        guard let rawData = try await fetcher.fetchRawMessage(
-            usernames: loginUsernames, password: password, uid: uid
-        ) else { return nil }
+        let remoteMailbox = RemoteIMAPMailbox(name: mailboxPath.components(separatedBy: "/").last ?? mailboxPath, path: mailboxPath, role: mailboxRole)
+        if MailCore2Availability.isAvailable {
+            do {
+                return try await MailCore2MailBackend().fetchMessageBody(
+                    account: account,
+                    credential: password,
+                    uid: uid,
+                    mailbox: remoteMailbox,
+                    fallbackRecipient: MailAddress(email: email),
+                    snippet: snippet
+                )
+            } catch {
+                // Keep the legacy CFStream implementation as compatibility fallback for
+                // providers where MailCore2 cannot authenticate or parse a server response.
+            }
+        }
 
-        return NIOBodyFetcher.parseMessage(
-            rawMIME: rawData, uid: uid,
-            accountID: account.id, mailboxID: mailboxID,
-            fallbackRecipient: MailAddress(email: email), snippet: snippet
-        )
-    }/// Search emails by query string
+        let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
+        let loginUsernames = Self.candidateUsernames(email: email, provider: account.provider)
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MailMessageDetail?, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let detail = try client.fetchSingleMessageBody(
+                        usernames: loginUsernames,
+                        password: password,
+                        uid: uid,
+                        accountID: account.id,
+                        mailboxID: mailboxID,
+                        mailboxPath: mailboxPath,
+                        mailboxRole: mailboxRole,
+                        fallbackRecipient: MailAddress(email: email),
+                        snippet: snippet
+                    )
+                    continuation.resume(returning: detail)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Search emails by query string
     public func search(account: MailAccount, query: String) async throws -> [String] {
         guard let endpoint = account.incoming, endpoint.protocolKind == .imap else {
             throw BlockingIMAPClient.IMAPError.protocolError("缺少 IMAP 收件服务器配置")
@@ -294,6 +616,38 @@ public struct MailIMAPInitialSyncService: Sendable {
         return Array(NSOrderedSet(array: usernames)) as? [String] ?? usernames
     }
 
+    private func displayName(for mailbox: RemoteIMAPMailbox) -> String {
+        switch mailbox.role {
+        case .inbox: "收件箱"
+        case .sent: "已发送"
+        default: mailbox.name
+        }
+    }
+
+    private static func initialSyncSummary(mailboxSnapshots: [BlockingIMAPClient.MailboxSnapshot], pulledMessageCount: Int) -> String {
+        let parts = mailboxSnapshots.map { entry -> String in
+            switch entry.mailbox.role {
+            case .inbox: "收件箱 \(entry.snapshot.exists) 封"
+            case .sent: "已发送 \(entry.snapshot.exists) 封"
+            default: "\(entry.mailbox.name) \(entry.snapshot.exists) 封"
+            }
+        }
+        let mailboxSummary = parts.isEmpty ? "未发现邮箱" : parts.joined(separator: " · ")
+        return "首次同步完成 · \(mailboxSummary) · 已拉取 \(pulledMessageCount) 封"
+    }
+
+    private static func incrementalSyncSummary(mailboxSnapshots: [BlockingIMAPClient.MailboxSnapshot], pulledMessageCount: Int) -> String {
+        let parts = mailboxSnapshots.map { entry -> String in
+            switch entry.mailbox.role {
+            case .inbox: "收件箱 \(entry.snapshot.exists) 封"
+            case .sent: "已发送 \(entry.snapshot.exists) 封"
+            default: "\(entry.mailbox.name) \(entry.snapshot.exists) 封"
+            }
+        }
+        let mailboxSummary = parts.isEmpty ? "未发现邮箱" : parts.joined(separator: " · ")
+        return "增量同步完成 · \(mailboxSummary) · 新拉取 \(pulledMessageCount) 封"
+    }
+
     private func updatedAccount(_ account: MailAccount, status: MailAccountHealthStatus, summary: String, reasons: [String]) -> MailAccount {
         var copy = account
         copy.health = MailAccountHealth(status: status, summary: summary, blockingReasons: reasons)
@@ -323,6 +677,11 @@ struct BlockingIMAPClient {
         var messages: [FetchedMessage]
     }
 
+    struct MailboxSnapshot: Sendable, Equatable {
+        var mailbox: RemoteIMAPMailbox
+        var snapshot: Snapshot
+    }
+
     struct FetchedMessage: Sendable, Equatable {
         var uid: String
         var flags: String
@@ -332,7 +691,7 @@ struct BlockingIMAPClient {
         var rawBodyData: Data?
         var fallbackSequenceDate: Date
 
-        func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress) -> MailMessageDetail {
+        func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, remoteMailbox: RemoteIMAPMailbox? = nil) -> MailMessageDetail {
             // Parse headers: prefer raw RFC 822 headers (ASCII-safe, proper RFC 2047 decoding)
             // over synthetic header from ENVELOPE (may have lossy non-ASCII bytes).
             let rawHeaders: ParsedHeaders
@@ -391,7 +750,7 @@ struct BlockingIMAPClient {
             )
             let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
             let summary = MailMessageSummary(
-                id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
+                id: (remoteMailbox ?? RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)).messageID(accountID: accountID, uid: uid),
                 accountID: accountID,
                 mailboxID: mailboxID,
                 threadID: MailThreadID(rawValue: messageID),
@@ -555,6 +914,13 @@ struct BlockingIMAPClient {
     var port: Int
 
     func withPasswordSession(usernames: [String], password: String, messageLimit: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+        let inbox = RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        return try withPasswordSessionMailboxes(usernames: usernames, password: password, mailboxes: [inbox], messageLimit: messageLimit) { _, batch in
+            onBatch?(batch)
+        }.first?.snapshot ?? Snapshot(exists: 0, unreadCount: 0, uidValidity: nil, highestUID: nil, messages: [])
+    }
+
+    func withPasswordSessionMailboxes(usernames: [String], password: String, mailboxes: [RemoteIMAPMailbox], messageLimit: Int, fetchBatchSize: Int = 50, onBatch: (@Sendable (RemoteIMAPMailbox, [FetchedMessage]) -> Void)? = nil) throws -> [MailboxSnapshot] {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -578,10 +944,30 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit, onBatch: onBatch)
+        let discovered = try discoverRemoteMailboxes(input: input, output: output)
+        let targets = mailboxes.isEmpty ? RemoteIMAPMailbox.syncTargets(from: discovered) : mailboxes
+        let snapshots = try targets.map { mailbox in
+            let snapshot = try fetchMailboxSnapshot(input: input, output: output, mailbox: mailbox, messageLimit: messageLimit, fetchBatchSize: fetchBatchSize) { batch in
+                onBatch?(mailbox, batch)
+            }
+            return MailboxSnapshot(mailbox: mailbox, snapshot: snapshot)
+        }
+        try logout(input: input, output: output)
+        return snapshots
+    }
+
+    func withPasswordSessionDiscoveredMailboxes(usernames: [String], password: String, messageLimit: Int, fetchBatchSize: Int = 50, onBatch: (@Sendable (RemoteIMAPMailbox, [FetchedMessage]) -> Void)? = nil) throws -> [MailboxSnapshot] {
+        try withPasswordSessionMailboxes(usernames: usernames, password: password, mailboxes: [], messageLimit: messageLimit, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
     }
 
     func withPasswordSessionIncremental(usernames: [String], password: String, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+        let inbox = RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        return try withPasswordSessionIncrementalMailboxes(usernames: usernames, password: password, storedUIDsByMailbox: [inbox.mailboxID(accountID: MailAccountID(rawValue: "")): storedUIDs], storedUIDValidityByMailbox: [inbox.mailboxID(accountID: MailAccountID(rawValue: "")): storedUIDValidity], explicitMailboxes: [inbox], fetchBatchSize: fetchBatchSize) { _, batch in
+            onBatch?(batch)
+        }.first?.snapshot ?? Snapshot(exists: 0, unreadCount: 0, uidValidity: nil, highestUID: nil, messages: [])
+    }
+
+    func withPasswordSessionIncrementalMailboxes(usernames: [String], password: String, storedUIDsByMailbox: [MailMailboxID: Set<String>], storedUIDValidityByMailbox: [MailMailboxID: String?], explicitMailboxes: [RemoteIMAPMailbox] = [], accountID: MailAccountID = MailAccountID(rawValue: ""), fetchBatchSize: Int = 50, onBatch: (@Sendable (RemoteIMAPMailbox, [FetchedMessage]) -> Void)? = nil) throws -> [MailboxSnapshot] {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -605,7 +991,24 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
-        return try fetchInboxIncremental(input: input, output: output, storedUIDs: storedUIDs, storedUIDValidity: storedUIDValidity, fetchBatchSize: fetchBatchSize, onBatch: onBatch)
+        let discovered = try discoverRemoteMailboxes(input: input, output: output)
+        let targets = explicitMailboxes.isEmpty ? RemoteIMAPMailbox.syncTargets(from: discovered) : explicitMailboxes
+        let snapshots = try targets.map { mailbox in
+            let mailboxID = mailbox.mailboxID(accountID: accountID)
+            let snapshot = try fetchMailboxIncremental(
+                input: input,
+                output: output,
+                mailbox: mailbox,
+                storedUIDs: storedUIDsByMailbox[mailboxID] ?? [],
+                storedUIDValidity: storedUIDValidityByMailbox[mailboxID] ?? nil,
+                fetchBatchSize: fetchBatchSize
+            ) { batch in
+                onBatch?(mailbox, batch)
+            }
+            return MailboxSnapshot(mailbox: mailbox, snapshot: snapshot)
+        }
+        try logout(input: input, output: output)
+        return snapshots
     }
 
     func withOAuth2Session(usernames: [String], accessToken: String, messageLimit: Int) throws -> Snapshot {
@@ -632,7 +1035,9 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithOAuth2(usernames: usernames, accessToken: accessToken, input: input, output: output)
-        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
+        let snapshot = try fetchMailboxSnapshot(input: input, output: output, mailbox: RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox), messageLimit: messageLimit)
+        try logout(input: input, output: output)
+        return snapshot
     }
 
     /// Parse RFC 822 date string
@@ -681,19 +1086,32 @@ struct BlockingIMAPClient {
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
     }
 
-    private func fetchInboxIncremental(input: InputStream, output: OutputStream, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    private func discoverRemoteMailboxes(input: InputStream, output: OutputStream) throws -> [RemoteIMAPMailbox] {
+        let tag = nextTag()
+        try write("\(tag) LIST \"\" \"*\" RETURN (SPECIAL-USE)\r\n", output: output)
+        let response = try readUntilTagged(tag: tag, input: input, timeout: 30)
+        let parsed = RemoteIMAPMailbox.parseListResponse(response)
+        if !parsed.isEmpty { return parsed }
+
+        let fallbackTag = nextTag()
+        try write("\(fallbackTag) LIST \"\" \"*\"\r\n", output: output)
+        let fallbackResponse = try readUntilTagged(tag: fallbackTag, input: input, timeout: 30)
+        return RemoteIMAPMailbox.parseListResponse(fallbackResponse)
+    }
+
+    private func fetchMailboxIncremental(input: InputStream, output: OutputStream, mailbox: RemoteIMAPMailbox, storedUIDs: Set<String>, storedUIDValidity: String? = nil, fetchBatchSize: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
-        try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
+        try write("\(statusTag) STATUS \"\(escape(mailbox.path))\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
         let statusMessages = statusResponse.firstInt(matching: #"MESSAGES\s+(\d+)"#)
         let statusUnseen = statusResponse.firstInt(matching: #"UNSEEN\s+(\d+)"#)
         let statusUIDValidity = statusResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
 
         let selectTag = nextTag()
-        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        try write("\(selectTag) SELECT \"\(escape(mailbox.path))\"\r\n", output: output)
         let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
         guard selectResponse.contains("\(selectTag) OK") else {
-            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(mailbox.path) failed")
         }
         let exists = statusMessages ?? selectResponse.firstInt(matching: #"\*\s+(\d+)\s+EXISTS"#) ?? 0
         let uidValidity = statusUIDValidity ?? selectResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
@@ -704,7 +1122,6 @@ struct BlockingIMAPClient {
         }
 
         guard exists > 0 else {
-            try logout(input: input, output: output)
             return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
         }
 
@@ -718,14 +1135,14 @@ struct BlockingIMAPClient {
         let newUIDs = allServerUIDs.filter { !storedUIDs.contains($0) }.compactMap(Int.init).sorted()
 
         guard !newUIDs.isEmpty else {
-            try logout(input: input, output: output)
             return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allServerUIDs.compactMap(Int.init).max().map(String.init), messages: [])
         }
 
         // Phase 3: Batch-fetch new messages
         var allMessages: [FetchedMessage] = []
-        for batchStart in stride(from: 0, to: newUIDs.count, by: fetchBatchSize) {
-            let batchEnd = min(batchStart + fetchBatchSize, newUIDs.count)
+        let batchSize = max(fetchBatchSize, 1)
+        for batchStart in stride(from: 0, to: newUIDs.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, newUIDs.count)
             let batch = Array(newUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
@@ -737,7 +1154,6 @@ struct BlockingIMAPClient {
             if !batchMessages.isEmpty { onBatch?(batchMessages) }
         }
 
-        try logout(input: input, output: output)
         return Snapshot(exists: exists, unreadCount: statusUnseen ?? allMessages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: allServerUIDs.compactMap(Int.init).max().map(String.init), messages: allMessages.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) })
     }
 
@@ -749,24 +1165,23 @@ struct BlockingIMAPClient {
         }
     }
 
-    private func fetchInboxSnapshot(input: InputStream, output: OutputStream, messageLimit: Int, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
+    private func fetchMailboxSnapshot(input: InputStream, output: OutputStream, mailbox: RemoteIMAPMailbox, messageLimit: Int, fetchBatchSize: Int = 50, onBatch: (@Sendable ([FetchedMessage]) -> Void)? = nil) throws -> Snapshot {
         let statusTag = nextTag()
-        try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
+        try write("\(statusTag) STATUS \"\(escape(mailbox.path))\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)
         let statusMessages = statusResponse.firstInt(matching: #"MESSAGES\s+(\d+)"#)
         let statusUnseen = statusResponse.firstInt(matching: #"UNSEEN\s+(\d+)"#)
         let statusUIDValidity = statusResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
 
         let selectTag = nextTag()
-        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        try write("\(selectTag) SELECT \"\(escape(mailbox.path))\"\r\n", output: output)
         let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
         guard selectResponse.contains("\(selectTag) OK") else {
-            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(mailbox.path) failed")
         }
         let exists = statusMessages ?? selectResponse.firstInt(matching: #"\*\s+(\d+)\s+EXISTS"#) ?? 0
         let uidValidity = statusUIDValidity ?? selectResponse.firstString(matching: #"UIDVALIDITY\s+(\d+)"#)
         guard exists > 0 else {
-            try logout(input: input, output: output)
             return Snapshot(exists: 0, unreadCount: 0, uidValidity: uidValidity, highestUID: nil, messages: [])
         }
 
@@ -776,21 +1191,17 @@ struct BlockingIMAPClient {
         let uidResponse = try readUntilTagged(tag: uidTag, input: input, timeout: 60)
         let allUIDs = parseUIDList(uidResponse).compactMap(Int.init).sorted()
 
-        // Phase 2: Take UIDs (0 = all, >0 = latest N)
-        let fetchUIDs = messageLimit > 0 ? Array(allUIDs.suffix(messageLimit)) : allUIDs
-        guard !fetchUIDs.isEmpty else {
-            try logout(input: input, output: output)
+        // Phase 2: Take UIDs (0 = all, >0 = latest N). User requested no fixed limit;
+        // callers should pass 0 for unlimited and this method will still fetch in chunks.
+        let uidChunks = RemoteIMAPMailbox.chunkUIDs(allUIDs, messageLimit: messageLimit, batchSize: fetchBatchSize)
+        guard !uidChunks.isEmpty else {
             return Snapshot(exists: exists, unreadCount: statusUnseen ?? 0, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: [])
         }
 
         var allMessages: [FetchedMessage] = []
         // Initial sync: fetch only headers, envelope and flags. NO body text.
-        // Body is fetched on-demand when user opens a message (see Task 2).
-        // Larger batch size (50 instead of 5) significantly reduces round trips.
-        let batchSize = 50
-        for batchStart in stride(from: 0, to: fetchUIDs.count, by: batchSize) {
-            let batchEnd = min(batchStart + batchSize, fetchUIDs.count)
-            let batch = Array(fetchUIDs[batchStart..<batchEnd])
+        // Body is fetched on-demand when user opens a message.
+        for batch in uidChunks {
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
             // Fetch only envelope and key headers — no body text
@@ -801,7 +1212,6 @@ struct BlockingIMAPClient {
             if !batchMessages.isEmpty { onBatch?(batchMessages) }
         }
 
-        try logout(input: input, output: output)
         return Snapshot(exists: exists, unreadCount: statusUnseen ?? allMessages.filter { !$0.flags.localizedCaseInsensitiveContains("\\Seen") }.count, uidValidity: uidValidity, highestUID: allUIDs.last.map(String.init), messages: allMessages.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) })
     }
 
@@ -1310,7 +1720,7 @@ struct BlockingIMAPClient {
     /// Fetch a single message's complete raw MIME data from IMAP.
     /// Uses BODY.PEEK[] (Thunderbird-style) — fetches entire message as one literal.
     /// Parses the raw IMAP response directly, bypassing the state machine.
-    func fetchSingleMessageBody(usernames: [String], password: String, uid: String, accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail? {
+    func fetchSingleMessageBody(usernames: [String], password: String, uid: String, accountID: MailAccountID, mailboxID: MailMailboxID, mailboxPath: String = "INBOX", mailboxRole: MailMailboxRole = .inbox, fallbackRecipient: MailAddress, snippet: String) throws -> MailMessageDetail? {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -1334,18 +1744,13 @@ struct BlockingIMAPClient {
         }
         _ = try readUntilLine(input: input, timeout: 20)
         try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+        let remoteMailbox = RemoteIMAPMailbox(name: mailboxPath, path: mailboxPath, role: mailboxRole)
         let selectTag = nextTag()
-        try write("\(selectTag) SELECT \"INBOX\"\r\n", output: output)
+        try write("\(selectTag) SELECT \"\(escape(remoteMailbox.path))\"\r\n", output: output)
         let selectResponse = try readUntilTagged(tag: selectTag, input: input, timeout: 30)
         guard selectResponse.contains("\(selectTag) OK") else {
-            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT INBOX failed")
+            throw IMAPError.protocolError(selectResponse.lastLine ?? "SELECT \(remoteMailbox.path) failed")
         }
-        // Fetch headers + body text only (avoid downloading large attachments)
-        let fetchTag = nextTag()
-        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
-        let (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
-        try logout(input: input, output: output)
-        
         func extractLiteral(after marker: String, in data: Data) -> Data? {
             guard let markerEnd = data.range(of: Data(marker.utf8))?.upperBound,
                   markerEnd < data.endIndex else { return nil }
@@ -1367,9 +1772,42 @@ struct BlockingIMAPClient {
             guard dataStart + size <= data.endIndex else { return nil }
             return data.subdata(in: dataStart..<(dataStart + size))
         }
-        
-        guard let headerData = extractLiteral(after: "BODY[HEADER]", in: fetchRaw),
-              let bodyData = extractLiteral(after: "BODY[TEXT]", in: fetchRaw) else { return nil }
+
+        func splitFullMessage(_ data: Data) -> (headers: Data, body: Data)? {
+            if let range = data.range(of: Data("\r\n\r\n".utf8)) {
+                return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+            }
+            if let range = data.range(of: Data("\n\n".utf8)) {
+                return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+            }
+            return nil
+        }
+
+        // Prefer full raw MIME so part-level headers and transfer encodings remain intact.
+        var fetchTag = nextTag()
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[])\r\n", output: output)
+        var (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
+        var fullMessageData = extractLiteral(after: "BODY[]", in: fetchRaw)
+        var splitMessage = fullMessageData.flatMap(splitFullMessage)
+
+        if splitMessage == nil {
+            // Compatibility fallback: some servers/proxies may reject full-message literals.
+            fetchTag = nextTag()
+            try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
+            let (_, fallbackRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
+            fetchRaw = fallbackRaw
+            let headerData = extractLiteral(after: "BODY[HEADER]", in: fetchRaw)
+            let bodyData = extractLiteral(after: "BODY[TEXT]", in: fetchRaw)
+            if let headerData, let bodyData {
+                splitMessage = (headerData, bodyData)
+                fullMessageData = nil
+            }
+        }
+        try logout(input: input, output: output)
+
+        guard let splitMessage else { return nil }
+        let headerData = splitMessage.headers
+        let bodyData = splitMessage.body
         
         // Parse headers for MIME metadata
         let headerStr = String(data: headerData, encoding: .ascii) ?? String(decoding: headerData, as: Unicode.UTF8.self)
@@ -1389,16 +1827,22 @@ struct BlockingIMAPClient {
         let flagsStr = (String(data: fetchRaw.prefix(200), encoding: .utf8) ?? "").firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
         
         let mimeParser = MailMIMEParser()
-        let bodyResult = mimeParser.parseBodyWithHTML(
-            rawData: Data(bodyData), fallbackString: snippet,
-            charset: charset,
-            transferEncoding: cteHeader.nilIfEmpty,
-            contentType: ctHeader, boundary: boundary
-        )
+        let bodyResult: MailMIMEBodyResult
+        if let fullMessageData {
+            bodyResult = (try? MailCore2MIMEParser().parseFullMessageBody(rawData: fullMessageData, fallbackString: snippet))
+                ?? mimeParser.parseFullMessageBody(rawData: fullMessageData, fallbackString: snippet)
+        } else {
+            bodyResult = mimeParser.parseBodyWithHTML(
+                rawData: Data(bodyData), fallbackString: snippet,
+                charset: charset,
+                transferEncoding: cteHeader.nilIfEmpty,
+                contentType: ctHeader, boundary: boundary
+            )
+        }
         
         let cleanSnippet = bodyResult.plainText.htmlStripped.normalizedWhitespace.prefixString(300)
         let summary = MailMessageSummary(
-            id: MailMessageID(rawValue: "\(accountID.rawValue)-INBOX-\(uid)"),
+            id: remoteMailbox.messageID(accountID: accountID, uid: uid),
             accountID: accountID, mailboxID: mailboxID,
             threadID: msgID.flatMap { MailThreadID(rawValue: $0.trimmingCharacters(in: .whitespaces)) },
             subject: subject, from: from,
@@ -1717,7 +2161,6 @@ private extension String {
             if gapStart < gapEnd {
                 let gap = nsString.substring(with: NSRange(location: gapStart, length: gapEnd - gapStart))
                 let isOnlyWhitespace = gap.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let hasAdjacentEncoded = gapStart > 0 && nsString.substring(with: NSRange(location: gapStart - 1, length: 1)) != " "
                 if !isOnlyWhitespace {
                     result += gap
                 }

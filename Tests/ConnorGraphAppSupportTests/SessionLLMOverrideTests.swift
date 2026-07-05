@@ -116,7 +116,7 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     settingsStore.values["llm.selectedModel"] = "gpt-4o-mini"
 
     let credentialStore = SessionLLMOverrideCredentialStore()
-    credentialStore.secrets["\(AppLLMSettingsRepository.keychainService):\(AppLLMSettingsRepository.apiKeyAccount)"] = "test-api-key"
+    credentialStore.secrets["\(AppLLMSettingsRepository.credentialNamespace):\(AppLLMSettingsRepository.apiKeyAccount)"] = "test-api-key"
 
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: settingsStore,
@@ -149,7 +149,7 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     settingsStore.values["llm.selectedModel"] = "gpt-4o"
 
     let credentialStore = SessionLLMOverrideCredentialStore()
-    credentialStore.secrets["\(AppLLMSettingsRepository.keychainService):\(AppLLMSettingsRepository.apiKeyAccount)"] = "test-api-key"
+    credentialStore.secrets["\(AppLLMSettingsRepository.credentialNamespace):\(AppLLMSettingsRepository.apiKeyAccount)"] = "test-api-key"
 
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: settingsStore,
@@ -176,7 +176,7 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     settingsStore.values["llm.selectedModel"] = "gpt-4o-mini"
 
     let credentialStore = SessionLLMOverrideCredentialStore()
-    credentialStore.secrets["\(AppLLMSettingsRepository.keychainService):\(AppLLMSettingsRepository.apiKeyAccount)"] = "test-api-key"
+    credentialStore.secrets["\(AppLLMSettingsRepository.credentialNamespace):\(AppLLMSettingsRepository.apiKeyAccount)"] = "test-api-key"
 
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: settingsStore,

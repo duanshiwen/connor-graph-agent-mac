@@ -93,6 +93,12 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
     }
 }
 
+public enum MailMessageDirectionFilter: String, Sendable, Equatable, Hashable, CaseIterable {
+    case all
+    case received
+    case sent
+}
+
 public struct NativeMailBrowserPresentation: Sendable, Equatable {
     public var accounts: [MailAccount]
     public var mailboxes: [MailMailbox]
@@ -101,7 +107,10 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     public init(accounts: [MailAccount], mailboxes: [MailMailbox], messages: [MailMessageSummary]) {
         self.accounts = accounts
         self.mailboxes = mailboxes
-        self.messages = messages
+        // Mail browsers should behave like an inbox: newest sent/received message first.
+        // Normalize here so UI lists, default selection, and any presentation fallback stay
+        // stable even when an upstream cache/store returns insertion order or ascending order.
+        self.messages = Self.sortedNewestFirst(messages)
     }
 
     public func account(id: MailAccountID?) -> MailAccount? {
@@ -125,17 +134,40 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     }
 
     public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String) -> [MailMessageSummary] {
+        messages(accountID: accountID, mailboxID: mailboxID, query: query, direction: .all)
+    }
+
+    public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String, direction: MailMessageDirectionFilter) -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return messages.filter { message in
+        let filtered = messages.filter { message in
             if let accountID, message.accountID != accountID { return false }
             if let mailboxID, message.mailboxID != mailboxID { return false }
+            if !matchesDirection(message, direction: direction) { return false }
             guard !normalized.isEmpty else { return true }
             return message.subject.lowercased().contains(normalized)
                 || message.snippet.lowercased().contains(normalized)
                 || message.from.email.lowercased().contains(normalized)
                 || (message.from.name?.lowercased().contains(normalized) ?? false)
         }
-        .sorted { lhs, rhs in lhs.date > rhs.date }
+        return Self.sortedNewestFirst(filtered)
+    }
+
+    private func matchesDirection(_ message: MailMessageSummary, direction: MailMessageDirectionFilter) -> Bool {
+        switch direction {
+        case .all:
+            return true
+        case .received:
+            return mailbox(id: message.mailboxID)?.role != .sent
+        case .sent:
+            return mailbox(id: message.mailboxID)?.role == .sent
+        }
+    }
+
+    private static func sortedNewestFirst(_ messages: [MailMessageSummary]) -> [MailMessageSummary] {
+        messages.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.id.rawValue < rhs.id.rawValue
+        }
     }
 
     public var totalMessageCount: Int {

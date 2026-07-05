@@ -195,6 +195,28 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         try await searchMessages(query: query, accountID: accountID, temporalFilter: nil, temporalSort: .relevanceThenTimeDesc, limit: Int.max)
     }
 
+    public func recentMessages(accountID: MailAccountID?, direction: MailMessageDirectionFilter, limit: Int) async throws -> [MailMessageSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+        var sql = """
+            SELECT m.raw_json
+            FROM mail_messages m
+            LEFT JOIN mail_mailboxes b ON m.mailbox_id = b.id
+            WHERE 1=1
+        """
+        if let accountID { sql += " AND m.account_id = '\(esc(accountID.rawValue))'" }
+        switch direction {
+        case .all:
+            break
+        case .received:
+            sql += " AND COALESCE(b.role, '') != 'sent'"
+        case .sent:
+            sql += " AND b.role = 'sent'"
+        }
+        sql += " ORDER BY m.date DESC, m.id ASC LIMIT \(limit)"
+        let rows = try querySQL(sql)
+        return try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)).summary }
+    }
+
     public func searchMessages(query: String, accountID: MailAccountID?, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [MailMessageSummary] {
         let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         if let searchService {
@@ -211,7 +233,7 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         if let accountID { sql += " AND account_id = '\(esc(accountID.rawValue))'" }
         if !normalized.isEmpty {
             let escaped = normalized.replacingOccurrences(of: "'", with: "''")
-            sql += " AND (LOWER(subject) LIKE '%\(escaped)%' OR LOWER(snippet) LIKE '%\(escaped)%' OR LOWER(from_email) LIKE '%\(escaped)%' OR LOWER(COALESCE(from_name,'')) LIKE '%\(escaped)%')"
+            sql += " AND (LOWER(subject) LIKE '%\(escaped)%' OR LOWER(snippet) LIKE '%\(escaped)%' OR LOWER(from_email) LIKE '%\(escaped)%' OR LOWER(COALESCE(from_name,'')) LIKE '%\(escaped)%' OR LOWER(COALESCE(body_plain,'')) LIKE '%\(escaped)%')"
         }
         let ascending = temporalSort == .timeAscThenRelevance || temporalSort == .relevanceThenTimeAsc
         sql += " ORDER BY date \(ascending ? "ASC" : "DESC") LIMIT \(limit)"
@@ -228,6 +250,20 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
     public func allMessageIDs() async throws -> [MailMessageID] {
         let rows = try querySQL("SELECT id FROM mail_messages ORDER BY date DESC")
         return rows.map { MailMessageID(rawValue: $0[0]) }
+    }
+
+    public func clearCachedMailData() async throws {
+        try execute("BEGIN TRANSACTION;")
+        do {
+            try execute("DELETE FROM mail_messages;")
+            try execute("DELETE FROM mail_mailboxes;")
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+        hasPrimedSearchIndex = false
+        try await searchService?.deleteBySource(kind: .mail, sourceInstanceID: nil)
     }
 
     public func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws {

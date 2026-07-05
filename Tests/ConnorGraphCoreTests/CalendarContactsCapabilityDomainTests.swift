@@ -10,7 +10,7 @@ struct CalendarContactsCapabilityDomainTests {
             provider: .google,
             displayName: "Alice Google",
             primaryIdentifier: "alice@example.com",
-            credentialBinding: ConnectedAccountCredentialBinding(keychainService: "Connor", accountName: "alice@example.com", authMode: .oauth2),
+            credentialBinding: ConnectedAccountCredentialBinding(credentialNamespace: "Connor", accountName: "alice@example.com", authMode: .oauth2),
             capabilities: [
                 ConnectedAccountCapability(kind: .mail, status: .enabled),
                 ConnectedAccountCapability(kind: .calendar, status: .enabled),
@@ -26,6 +26,28 @@ struct CalendarContactsCapabilityDomainTests {
         #expect(decoded == account)
         #expect(decoded.enabledCapabilities == [.mail, .calendar])
         #expect(decoded.capability(.contacts)?.status == .disabled)
+    }
+
+    @Test func credentialBindingsDecodeLegacyKeychainServiceAndEncodeCredentialNamespace() throws {
+        let decoder = JSONDecoder()
+
+        let mail = try decoder.decode(MailCredentialBinding.self, from: Data(#"{"keychainService":"ConnorGraphAgent.MailCredentials","accountName":"mail:user@example.com","authMode":"appPassword"}"#.utf8))
+        #expect(mail.credentialNamespace == "ConnorGraphAgent.MailCredentials")
+        let encodedMail = String(decoding: try JSONEncoder().encode(mail), as: UTF8.self)
+        #expect(encodedMail.contains("credentialNamespace"))
+        #expect(!encodedMail.contains("keychainService"))
+
+        let calendar = try decoder.decode(CalendarCredentialBinding.self, from: Data(#"{"keychainService":"ConnorGraphAgent.CalendarCredentials","accountName":"calendar:user@example.com","authMode":"appPassword"}"#.utf8))
+        #expect(calendar.credentialNamespace == "ConnorGraphAgent.CalendarCredentials")
+        let encodedCalendar = String(decoding: try JSONEncoder().encode(calendar), as: UTF8.self)
+        #expect(encodedCalendar.contains("credentialNamespace"))
+        #expect(!encodedCalendar.contains("keychainService"))
+
+        let connected = try decoder.decode(ConnectedAccountCredentialBinding.self, from: Data(#"{"keychainService":"ConnorGraphAgent.ConnectedAccounts","accountName":"connected:user@example.com","authMode":"oauth2"}"#.utf8))
+        #expect(connected.credentialNamespace == "ConnorGraphAgent.ConnectedAccounts")
+        let encodedConnected = String(decoding: try JSONEncoder().encode(connected), as: UTF8.self)
+        #expect(encodedConnected.contains("credentialNamespace"))
+        #expect(!encodedConnected.contains("keychainService"))
     }
 
     @Test func providerPresetsExposeDefaultCapabilities() {

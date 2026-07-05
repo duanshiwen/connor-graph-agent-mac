@@ -26,7 +26,7 @@ public actor InMemoryMailSourceRepository: MailSourceRepository {
     }
 }
 
-public actor InMemoryMailSourceCache: MailSourceCache {
+public actor InMemoryMailSourceCache: MailSourceCache, RecentMailSourceCache {
     private var mailboxes: [MailMailboxID: MailMailbox]
     private var messages: [MailMessageID: MailMessageDetail]
 
@@ -49,13 +49,40 @@ public actor InMemoryMailSourceCache: MailSourceCache {
 
     public func searchMessages(query: String, accountID: MailAccountID?) async throws -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return messages.values.map(\.summary).filter { summary in
+        return messages.values.filter { detail in
+            let summary = detail.summary
             if let accountID, summary.accountID != accountID { return false }
             if normalized.isEmpty { return true }
             return summary.subject.lowercased().contains(normalized)
                 || summary.snippet.lowercased().contains(normalized)
                 || summary.from.email.lowercased().contains(normalized)
-        }.sorted { $0.date > $1.date }
+                || (summary.from.name?.lowercased().contains(normalized) ?? false)
+                || (detail.body?.plainText?.text.lowercased().contains(normalized) ?? false)
+                || (detail.body?.htmlText?.text.lowercased().contains(normalized) ?? false)
+                || (detail.body?.redactedPreview.lowercased().contains(normalized) ?? false)
+        }.map(\.summary).sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.id.rawValue < rhs.id.rawValue
+        }
+    }
+
+    public func recentMessages(accountID: MailAccountID?, direction: MailMessageDirectionFilter, limit: Int) async throws -> [MailMessageSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+        let filtered = messages.values.map(\.summary).filter { summary in
+            if let accountID, summary.accountID != accountID { return false }
+            switch direction {
+            case .all:
+                return true
+            case .received:
+                return mailboxes[summary.mailboxID]?.role != .sent
+            case .sent:
+                return mailboxes[summary.mailboxID]?.role == .sent
+            }
+        }.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date > rhs.date }
+            return lhs.id.rawValue < rhs.id.rawValue
+        }
+        return Array(filtered.prefix(limit))
     }
 
     public func message(id: MailMessageID) async throws -> MailMessageDetail? {

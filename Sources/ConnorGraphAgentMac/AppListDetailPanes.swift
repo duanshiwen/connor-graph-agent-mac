@@ -1512,10 +1512,11 @@ private struct AddTaskAutomationSheet: View {
 
 struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var directionFilter: MailMessageDirectionFilter = .all
 
     private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
     private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: "")
+        viewModel.mailListMessages(direction: directionFilter)
     }
 
     var body: some View {
@@ -1536,6 +1537,10 @@ struct CraftMailListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
+                viewModel.mailSearchQuery = ""
+            }
+
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("还没有添加邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。康纳同学会把邮件同步到本地，并保持发送审批边界。"))
                     .padding(.top, 80)
@@ -1546,19 +1551,28 @@ struct CraftMailListPane: View {
                 ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else {
-                List(visibleMessages) { message in
-                    MailMessageListRow(
-                        message: message,
-                        account: presentation.account(id: message.accountID),
-                        mailbox: presentation.mailbox(id: message.mailboxID),
-                        isSelected: message.id == viewModel.selectedMailMessageID,
-                        onSelect: { selectMessage(message) }
-                    )
-                    .nativeListRowStyle()
+                MailDirectionFilterChips(selection: $directionFilter)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+
+                if visibleMessages.isEmpty {
+                    ContentUnavailableView(mailEmptyListTitle, systemImage: mailEmptyListSystemImage, description: Text(mailEmptyListDescription))
+                        .padding(.top, 56)
+                } else {
+                    List(visibleMessages) { message in
+                        MailMessageListRow(
+                            message: message,
+                            account: presentation.account(id: message.accountID),
+                            mailbox: presentation.mailbox(id: message.mailboxID),
+                            isSelected: message.id == viewModel.selectedMailMessageID,
+                            onSelect: { selectMessage(message) }
+                        )
+                        .nativeListRowStyle()
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .contentMargins(.top, 6, for: .scrollContent)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .contentMargins(.top, 6, for: .scrollContent)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1567,10 +1581,114 @@ struct CraftMailListPane: View {
         }
     }
 
+    private var isFilteringBySearch: Bool {
+        !viewModel.mailSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var mailEmptyListTitle: String {
+        isFilteringBySearch ? "没有找到匹配的邮件" : directionFilter.emptyListTitle
+    }
+
+    private var mailEmptyListDescription: String {
+        isFilteringBySearch ? "换个关键词试试，或者清除筛选查看全部邮件。" : directionFilter.emptyListDescription
+    }
+
+    private var mailEmptyListSystemImage: String {
+        isFilteringBySearch ? "envelope.badge.magnifyingglass" : directionFilter.emptyListSystemImage
+    }
+
     private func selectMessage(_ message: MailMessageSummary) {
         viewModel.selectedMailAccountID = message.accountID
         viewModel.selectedMailMailboxID = message.mailboxID
         viewModel.selectedMailMessageID = message.id
+    }
+}
+
+extension MailMessageDirectionFilter {
+    var mailListChipTitle: String {
+        switch self {
+        case .all: "全部"
+        case .received: "收件"
+        case .sent: "已发送"
+        }
+    }
+
+    var emptyListTitle: String {
+        switch self {
+        case .all: "还没有同步到邮件"
+        case .received: "还没有收到邮件"
+        case .sent: "还没有已发送邮件"
+        }
+    }
+
+    var emptyListDescription: String {
+        switch self {
+        case .all: "邮件同步完成后，最近邮件会按时间显示在这里。"
+        case .received: "收到的邮件同步后会显示在这里。"
+        case .sent: "通过康纳同学发送的邮件会保存到已发送并显示在这里。"
+        }
+    }
+
+    var emptyListSystemImage: String {
+        switch self {
+        case .all: "envelope.open"
+        case .received: "tray"
+        case .sent: "paperplane"
+        }
+    }
+}
+
+private struct MailDirectionFilterChips: View {
+    @Binding var selection: MailMessageDirectionFilter
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(MailMessageDirectionFilter.allCases, id: \.self) { filter in
+                Button(action: { selection = filter }) {
+                    Text(filter.mailListChipTitle)
+                        .font(.system(size: 12, weight: selection == filter ? .semibold : .medium))
+                        .foregroundStyle(selection == filter ? Color.accentColor : Color.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(selection == filter ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10), in: Capsule(style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("邮件筛选：\(filter.mailListChipTitle)")
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+struct MailMessageListRowPresentation: Equatable {
+    var subjectText: String
+    var senderText: String
+    var contextText: String
+    var snippetText: String
+    var directionLabelText: String?
+    var directionLabelSystemImage: String?
+
+    init(message: MailMessageSummary, account: MailAccount?, mailbox: MailMailbox?) {
+        subjectText = message.subject.isEmpty ? "无主题" : message.subject
+        senderText = {
+            if let name = message.from.name, !name.isEmpty { return name }
+            return message.from.email
+        }()
+        contextText = [account?.displayName, mailbox?.name, message.date.connorLocalFormatted(date: .medium, time: .short)]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        snippetText = message.snippet
+        switch mailbox?.role {
+        case .sent:
+            directionLabelText = "已发送"
+            directionLabelSystemImage = "paperplane.fill"
+        case .some:
+            directionLabelText = "收件"
+            directionLabelSystemImage = "tray.fill"
+        case nil:
+            directionLabelText = nil
+            directionLabelSystemImage = nil
+        }
     }
 }
 
@@ -1581,6 +1699,18 @@ private struct MailMessageListRow: View {
     var isSelected: Bool
     var onSelect: () -> Void
 
+    private var presentation: MailMessageListRowPresentation {
+        MailMessageListRowPresentation(message: message, account: account, mailbox: mailbox)
+    }
+
+    private var mailDirectionBadgeForeground: Color {
+        mailbox?.role == .sent ? .accentColor : .secondary
+    }
+
+    private var mailDirectionBadgeBackground: Color {
+        mailbox?.role == .sent ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.12)
+    }
+
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .top, spacing: 10) {
@@ -1590,7 +1720,7 @@ private struct MailMessageListRow: View {
                     .padding(.top, 7)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(message.subject.isEmpty ? "无主题" : message.subject)
+                        Text(presentation.subjectText)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
                             .lineLimit(1)
                         if message.hasAttachments {
@@ -1603,15 +1733,26 @@ private struct MailMessageListRow: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.orange)
                         }
+                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
+                            Spacer(minLength: 4)
+                            Label(label, systemImage: image)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(mailDirectionBadgeForeground)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
+                                .lineLimit(1)
+                        }
                     }
-                    Text(senderText)
+                    Text(presentation.senderText)
                         .font(AppListTypography.rowCaptionEmphasized)
                         .lineLimit(1)
-                    Text(contextText)
+                    Text(presentation.contextText)
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                    Text(message.snippet)
+                    Text(presentation.snippetText)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -1623,17 +1764,6 @@ private struct MailMessageListRow: View {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    private var senderText: String {
-        if let name = message.from.name, !name.isEmpty { return name }
-        return message.from.email
-    }
-
-    private var contextText: String {
-        [account?.displayName, mailbox?.name, message.date.connorLocalFormatted(date: .medium, time: .short)]
-            .compactMap { $0 }
-            .joined(separator: " · ")
     }
 }
 

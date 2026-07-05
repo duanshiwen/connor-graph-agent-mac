@@ -34,27 +34,27 @@ public enum MCPSourceCredentialStoreError: Error, Sendable, Equatable, CustomStr
 /// Secret values are stored in the injected `CredentialStore` and are materialized only as
 /// source-scoped subprocess environment overrides immediately before stdio MCP startup.
 public struct MCPSourceCredentialStore: Sendable {
-    public static let keychainService = "ConnorGraphAgent.MCPSourceCredentials"
+    public static let credentialNamespace = "ConnorGraphAgent.MCPSourceCredentials"
 
     public var credentialStore: CredentialStore
 
-    public init(credentialStore: CredentialStore = KeychainCredentialStore()) {
+    public init(credentialStore: CredentialStore = LocalEncryptedCredentialStore()) {
         self.credentialStore = credentialStore
     }
 
     public func saveSecret(_ secret: String, sourceID: String, environmentVariable: String) throws {
         let normalized = try Self.normalizedEnvironmentVariable(environmentVariable)
-        try credentialStore.saveSecret(secret, service: Self.keychainService, account: Self.account(sourceID: sourceID, environmentVariable: normalized))
+        try credentialStore.saveSecret(secret, service: Self.credentialNamespace, account: Self.account(sourceID: sourceID, environmentVariable: normalized))
     }
 
     public func readSecret(sourceID: String, environmentVariable: String) throws -> String? {
         let normalized = try Self.normalizedEnvironmentVariable(environmentVariable)
-        return try credentialStore.readSecret(service: Self.keychainService, account: Self.account(sourceID: sourceID, environmentVariable: normalized))
+        return try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.account(sourceID: sourceID, environmentVariable: normalized))
     }
 
     public func deleteSecret(sourceID: String, environmentVariable: String) throws {
         let normalized = try Self.normalizedEnvironmentVariable(environmentVariable)
-        try credentialStore.deleteSecret(service: Self.keychainService, account: Self.account(sourceID: sourceID, environmentVariable: normalized))
+        try credentialStore.deleteSecret(service: Self.credentialNamespace, account: Self.account(sourceID: sourceID, environmentVariable: normalized))
     }
 
     public func deleteSecrets(sourceID: String, bindings: [MCPSourceCredentialBinding]) throws {
