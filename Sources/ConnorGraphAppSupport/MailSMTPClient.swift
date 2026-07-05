@@ -48,6 +48,9 @@ public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvert
     case invalidEndpoint(String)
     case missingRecipients
     case unsupportedSecurity(String)
+    case connectionFailed(String)
+    case startTLSUnavailable(String)
+    case authenticationFailed(String)
     case networkSendNotAvailable(String)
     case smtpRejected(String)
 
@@ -56,6 +59,9 @@ public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvert
         case .invalidEndpoint(let value): "Invalid SMTP endpoint: \(value)"
         case .missingRecipients: "SMTP send requires at least one recipient"
         case .unsupportedSecurity(let value): "Unsupported SMTP security: \(value)"
+        case .connectionFailed(let value): "SMTP connection failed: \(value)"
+        case .startTLSUnavailable(let value): "SMTP STARTTLS unavailable: \(value)"
+        case .authenticationFailed(let value): "SMTP authentication failed: \(value)"
         case .networkSendNotAvailable(let value): "SMTP network send unavailable: \(value)"
         case .smtpRejected(let value): "SMTP rejected send: \(value)"
         }
