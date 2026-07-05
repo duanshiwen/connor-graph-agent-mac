@@ -95,6 +95,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("native Compose approval card"))
     #expect(prompt.contains("Do not replace this native approval flow"))
     #expect(prompt.contains("never ask the user to provide or find a draft ID"))
+    #expect(prompt.contains("omit accountID and identityID to use the Settings default send account"))
+    #expect(prompt.contains("never invent default as a literal mail account ID"))
+    #expect(prompt.contains("mail_list_accounts"))
 }
 
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
