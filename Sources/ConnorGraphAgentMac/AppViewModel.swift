@@ -287,6 +287,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private let mainActorStallMonitor = AppMainActorStallMonitor()
 #endif
     private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
+    private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -6289,6 +6290,30 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func scheduleChatSessionListRefresh(reason: String) {
+        guard let chatSessionRepository else { return }
+        let filter = sessionListFilter
+        let coordinator = chatSessionListRefreshCoordinator
+        Task(priority: .utility) { [weak self] in
+            let startedAt = ContinuousClock.now
+            do {
+                let result = try await coordinator.refresh(repository: chatSessionRepository, filter: filter)
+                let elapsed = startedAt.duration(to: ContinuousClock.now)
+                let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.chatSessions = result.visibleSessions
+                    self.allChatSessions = result.allSessions
+                    self.rebuildSessionSearchIndexSoon(sessions: result.allSessions)
+                    self.synchronizeSessionReadStates(from: result.allSessions)
+                    AppPerformanceLog.chatTurnLogger.info("sessionList.asyncRefresh reason=\(reason, privacy: .public) visible=\(result.visibleSessions.count, privacy: .public) all=\(result.allSessions.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+                }
+            } catch {
+                AppPerformanceLog.chatTurnLogger.warning("sessionList.asyncRefresh.failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     func cancelActiveChatRun() {
         guard let submittingSessionID = selectedChatSessionID,
               submittingChatSessionIDs.contains(submittingSessionID)
@@ -6553,13 +6578,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 lastPromptInspection = nil
             }
             reloadPendingApprovals()
-            if let chatSessionRepository {
-                let duration = try AppPerformanceLog.measure {
-                    self.chatSessions = try chatSessionRepository.loadSessions(filter: self.sessionListFilter)
-                    self.allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
-                }
-                AppPerformanceLog.chatTurnLogger.info("sessionList.reloadAfterSubmit session=\(submittingSessionID, privacy: .public) visible=\(self.chatSessions.count, privacy: .public) all=\(self.allChatSessions.count, privacy: .public) duration=\(duration.milliseconds, privacy: .public)ms")
-            }
+            scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
             if shouldAutoGenerateInitialTitle {
                 regenerateChatSessionTitle(submittingSessionID)
             }
