@@ -247,6 +247,18 @@ public struct MailRuntime: Sendable {
     }
 
     public func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress] = [], bcc: [MailAddress] = [], replyTo: [MailAddress] = [], subject: String, body: String, htmlBody: String? = nil, inReplyToMessageID: MailMessageID? = nil, attachmentIDs: [MailAttachmentID] = [], intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
+        guard let account = try await repository.account(id: accountID) else {
+            throw MailRuntimeError.accountNotFound(accountID.rawValue)
+        }
+        guard let identity = account.identities.first(where: { $0.id == identityID }) else {
+            throw MailRuntimeError.identityNotFound(identityID.rawValue)
+        }
+        guard identity.canSend else {
+            throw MailRuntimeError.identityCannotSend(identityID.rawValue)
+        }
+        guard account.outgoing != nil else {
+            throw MailRuntimeError.missingOutgoingEndpoint(accountID.rawValue)
+        }
         let draft = MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary)
         try await draftStore.save(draft)
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: accountID, draftID: draft.id, kind: .draftCreated, riskClass: .mutation, redactedSummary: "Created mail draft to \(to.map(\.email).joined(separator: ", "))"))
