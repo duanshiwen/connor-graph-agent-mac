@@ -38,7 +38,7 @@ struct MailRuntimeSMTPSendTests {
 
         #expect(receipt.providerMessageID == "smtp-server-id")
         let request = try #require(await smtp.requests.first)
-        #expect(request.username == binding.accountName)
+        #expect(request.username == "connor@example.com")
         #expect(request.password == "app-password")
         #expect(request.from.email == "connor@example.com")
         #expect(request.recipients.map(\.email) == ["alice@example.com"])
