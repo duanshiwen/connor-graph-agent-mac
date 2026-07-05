@@ -99,6 +99,58 @@ struct MailSMTPProtocolClientTests {
         }
     }
 
+    @Test func networkClientUsesInjectedTransportInsteadOfPlaceholderFailure() async throws {
+        let connection = ScriptedSMTPConnection(responses: [
+            "220 smtp.example.com ESMTP ready",
+            "250-smtp.example.com\r\n250-STARTTLS\r\n250 AUTH LOGIN",
+            "220 Ready to start TLS",
+            "250-smtp.example.com\r\n250 AUTH LOGIN",
+            "334 VXNlcm5hbWU6",
+            "334 UGFzc3dvcmQ6",
+            "235 Authentication successful",
+            "250 Sender OK",
+            "250 Recipient OK",
+            "354 End data with <CR><LF>.<CR><LF>",
+            "250 Queued as provider-456",
+            "221 Bye"
+        ])
+        let client = NetworkMailSMTPClient(connectionFactory: { _ in connection })
+        let request = MailSMTPSendRequest(
+            endpoint: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            username: "user@example.com",
+            password: "secret",
+            from: MailAddress(email: "user@example.com"),
+            recipients: [MailAddress(email: "to@example.com")],
+            rawMessage: "Subject: Approved\r\n\r\nHello",
+            envelopeHash: "hash-456"
+        )
+
+        let response = try await client.send(request)
+
+        #expect(response.providerMessageID == "provider-456")
+        #expect(await connection.transcript().contains("DATA"))
+    }
+
+    @Test func networkClientRejectsImplicitTLSWithActionableGuidance() async throws {
+        let client = NetworkMailSMTPClient(connectionFactory: { _ in
+            Issue.record("implicit TLS should fail before creating a connection")
+            return ScriptedSMTPConnection(responses: [])
+        })
+        let request = MailSMTPSendRequest(
+            endpoint: MailServerEndpoint(host: "smtp.example.com", port: 465, security: .tls, protocolKind: .smtp),
+            username: "user@example.com",
+            password: "secret",
+            from: MailAddress(email: "user@example.com"),
+            recipients: [MailAddress(email: "to@example.com")],
+            rawMessage: "Subject: Approved\r\n\r\nHello",
+            envelopeHash: "hash-456"
+        )
+
+        await #expect(throws: MailSMTPClientError.unsupportedSecurity("tls; use SMTP STARTTLS on port 587")) {
+            _ = try await client.send(request)
+        }
+    }
+
     @Test func rejectedRecipientReportsSMTPRejection() async throws {
         let connection = ScriptedSMTPConnection(responses: [
             "220 smtp.example.com ESMTP ready",
