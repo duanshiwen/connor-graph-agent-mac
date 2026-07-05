@@ -48,7 +48,7 @@ struct MailRuntimeSendPipelineTests {
         #expect(stored.sentReceiptID == "provider-123")
         #expect(await smtpClient.requests.count == 1)
         let request = try #require(await smtpClient.requests.first)
-        #expect(request.username == "account-send:connor@example.com")
+        #expect(request.username == "connor@example.com")
         #expect(request.password == "app-password")
         #expect(request.rawMessage.contains("Subject: Real send"))
     }
