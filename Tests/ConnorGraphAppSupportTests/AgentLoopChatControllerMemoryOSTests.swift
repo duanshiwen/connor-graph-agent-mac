@@ -50,6 +50,7 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     )
 
     _ = try await controller.submit("请记住：Memory OS facade 是 App 层唯一新入口")
+    try await controller.flushMemoryOSIngestion()
 
     let summary = try facade.operationalSummary()
     #expect(summary.l0ProvenanceObjectCount == 2)

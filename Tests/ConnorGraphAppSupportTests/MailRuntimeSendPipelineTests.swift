@@ -93,6 +93,47 @@ struct MailRuntimeSendPipelineTests {
         #expect(history.isTerminal)
     }
 
+    @Test func createDraftRejectsUnknownAccountBeforeSavingDraft() async throws {
+        let draftRepository = InMemoryMailDraftRepository()
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: []), cache: InMemoryMailSourceCache(), draftStore: draftRepository)
+
+        await #expect(throws: MailRuntimeError.self) {
+            _ = try await runtime.createDraft(accountID: MailAccountID(rawValue: "default"), identityID: MailIdentityID(rawValue: "identity-default"), to: [MailAddress(email: "alice@example.com")], subject: "Bad", body: "Body")
+        }
+    }
+
+    @Test func createDraftRejectsUnknownIdentityBeforeSavingDraft() async throws {
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "account-create"),
+            provider: .genericIMAPSMTP,
+            displayName: "Create Account",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "identity-create"), displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [account]), cache: InMemoryMailSourceCache(), draftStore: InMemoryMailDraftRepository())
+
+        await #expect(throws: MailRuntimeError.self) {
+            _ = try await runtime.createDraft(accountID: account.id, identityID: MailIdentityID(rawValue: "missing-identity"), to: [MailAddress(email: "alice@example.com")], subject: "Bad", body: "Body")
+        }
+    }
+
+    @Test func createDraftRejectsAccountWithoutOutgoingEndpoint() async throws {
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "account-no-smtp"),
+            provider: .genericIMAPSMTP,
+            displayName: "No SMTP",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "identity-no-smtp"), displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: nil,
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [account]), cache: InMemoryMailSourceCache(), draftStore: InMemoryMailDraftRepository())
+
+        await #expect(throws: MailRuntimeError.self) {
+            _ = try await runtime.createDraft(accountID: account.id, identityID: account.identities[0].id, to: [MailAddress(email: "alice@example.com")], subject: "Bad", body: "Body")
+        }
+    }
+
     @Test func unapprovedSendDoesNotCallSMTPAndKeepsApprovalGate() async throws {
         let runtime = MailRuntime.fixture()
         let draft = try await runtime.createDraft(accountID: MailAccountID(rawValue: "fixture-account"), identityID: MailIdentityID(rawValue: "fixture-identity"), to: [MailAddress(email: "alice@example.com")], subject: "Needs approval", body: "Body")

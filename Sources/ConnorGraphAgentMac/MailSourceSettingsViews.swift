@@ -65,6 +65,7 @@ struct MailBodyDisplayPresentation: Equatable {
 }
 
 struct MailSettingsSummaryPresentation: Equatable {
+    var presentation: NativeMailBrowserPresentation
     var accountCount: Int
     var mailboxCount: Int
     var messageCount: Int
@@ -72,6 +73,7 @@ struct MailSettingsSummaryPresentation: Equatable {
     var lastSyncedAt: Date?
 
     init(presentation: NativeMailBrowserPresentation) {
+        self.presentation = presentation
         accountCount = presentation.accounts.count
         mailboxCount = presentation.mailboxes.count
         messageCount = presentation.totalMessageCount
@@ -98,6 +100,23 @@ struct MailSettingsSummaryPresentation: Equatable {
     var emptyStateMessage: String? {
         accountCount == 0 ? "添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。" : nil
     }
+
+    func defaultSendAccountText(preferences: MailPreferences) -> String {
+        guard let accountID = preferences.defaultSendAccountID,
+              let account = presentation.account(id: accountID) else { return "尚未设置" }
+        let email = account.identities.first?.address.email ?? account.id.rawValue
+        return "\(account.displayName) <\(email)>"
+    }
+
+    func defaultSendIdentityText(preferences: MailPreferences) -> String {
+        guard let accountID = preferences.defaultSendAccountID,
+              let account = presentation.account(id: accountID) else { return "尚未设置" }
+        let identity = preferences.defaultSendIdentityID.flatMap { identityID in
+            account.identities.first(where: { $0.id == identityID })
+        } ?? account.identities.first(where: \.canSend)
+        guard let identity else { return "尚未设置" }
+        return "\(identity.displayName) <\(identity.address.email)>"
+    }
 }
 
 struct SettingsMailSection: View {
@@ -115,6 +134,7 @@ struct SettingsMailSection: View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             header
             accountsSection
+            sendingSection
             syncSection
             securitySection
             protocolSection
@@ -169,6 +189,30 @@ struct SettingsMailSection: View {
         }
     }
 
+    private var sendingSection: some View {
+        SettingsGroup(title: "发信设置") {
+            if presentation.accounts.isEmpty {
+                SettingsValueRow(title: "默认发信账户", value: summary.defaultSendAccountText(preferences: viewModel.mailPreferences))
+            } else {
+                MailDefaultSendAccountRow(
+                    accounts: presentation.accounts,
+                    selectedAccountID: viewModel.mailPreferences.defaultSendAccountID ?? presentation.defaultAccountID(),
+                    titleFor: defaultAccountPickerTitle(for:),
+                    onSelect: { accountID in Task { @MainActor in await viewModel.setDefaultMailSendAccount(accountID) } }
+                )
+                Divider()
+                SettingsValueRow(title: "默认发件身份", value: summary.defaultSendIdentityText(preferences: viewModel.mailPreferences))
+                Divider()
+                SettingsValueRow(title: "发送确认", value: "Compose 审批卡会显示实际 From，允许后才发送")
+            }
+        }
+    }
+
+    private func defaultAccountPickerTitle(for account: MailAccount) -> String {
+        let email = account.identities.first?.address.email ?? account.id.rawValue
+        return "\(account.displayName) <\(email)>"
+    }
+
     private var syncSection: some View {
         SettingsGroup(title: "同步") {
             SettingsValueRow(title: "账户", value: summary.accountCountText)
@@ -221,6 +265,73 @@ struct SettingsMailSection: View {
             Divider()
             SettingsValueRow(title: "后续扩展", value: "Google / Microsoft OAuth、附件预览")
         }
+    }
+}
+
+private struct MailDefaultSendAccountRow: View {
+    var accounts: [MailAccount]
+    var selectedAccountID: MailAccountID?
+    var titleFor: (MailAccount) -> String
+    var onSelect: (MailAccountID) -> Void
+
+    private var selectedAccount: MailAccount? {
+        accounts.first { $0.id == selectedAccountID } ?? accounts.first
+    }
+
+    private var selectedTitle: String {
+        selectedAccount.map(titleFor) ?? "尚未设置"
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: SettingsListLayout.spaceM) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text("默认发信账户")
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text("普通发信默认使用此账户；审批卡仍会显示实际 From。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: SettingsListLayout.spaceM)
+
+            Menu {
+                ForEach(accounts) { account in
+                    Button {
+                        onSelect(account.id)
+                    } label: {
+                        HStack {
+                            Text(titleFor(account))
+                            if account.id == selectedAccount?.id {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(selectedTitle)
+                        .font(SettingsListTypography.rowTitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.secondary.opacity(0.08), in: Capsule(style: .continuous))
+                .overlay(Capsule(style: .continuous).stroke(Color.secondary.opacity(0.10), lineWidth: 1))
+                .contentShape(Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .frame(maxWidth: 360, alignment: .trailing)
+            .accessibilityLabel("默认发信账户")
+            .accessibilityValue(selectedTitle)
+        }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 

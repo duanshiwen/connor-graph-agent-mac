@@ -2,6 +2,22 @@ import SwiftUI
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
+enum AgentMarkdownPreviewRenderStrategy: Equatable {
+    case inlineOnly
+    case plainText
+    case deferredPreview
+    case compiledDocument
+
+    static let deferredPreviewCharacterThreshold = 12_000
+
+    static func strategy(lineLimit: Int?, monospacedFallback: Bool, markdownCharacterCount: Int) -> AgentMarkdownPreviewRenderStrategy {
+        if lineLimit != nil { return .inlineOnly }
+        if monospacedFallback { return .plainText }
+        if markdownCharacterCount >= deferredPreviewCharacterThreshold { return .deferredPreview }
+        return .compiledDocument
+    }
+}
+
 struct AgentMarkdownPreviewText: View {
     var markdown: String
     var font: Font = AgentChatTypography.body
@@ -50,11 +66,15 @@ struct AgentMarkdownPreviewText: View {
         )
     }
 
-    private var inlineRendered: AttributedString {
+    private var compiledInlineRendered: AttributedString {
         if let block = compiledDocument.blocks.first,
            case .paragraph(_, let inline) = block.content {
             return inline
         }
+        return lightweightInlineRendered
+    }
+
+    private var lightweightInlineRendered: AttributedString {
         if let attributed = try? AttributedString(
             markdown: markdown,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
@@ -64,20 +84,41 @@ struct AgentMarkdownPreviewText: View {
         return AttributedString(markdown)
     }
 
+    private var renderStrategy: AgentMarkdownPreviewRenderStrategy {
+        AgentMarkdownPreviewRenderStrategy.strategy(
+            lineLimit: lineLimit,
+            monospacedFallback: monospacedFallback,
+            markdownCharacterCount: markdown.count
+        )
+    }
+
     @ViewBuilder
     var body: some View {
-        if let lineLimit {
-            Text(inlineRendered)
+        switch renderStrategy {
+        case .inlineOnly:
+            Text(lightweightInlineRendered)
                 .font(monospacedFallback ? AgentChatTypography.monoMeta : font)
                 .lineLimit(lineLimit)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } else if monospacedFallback {
+        case .plainText:
             Text(markdown)
                 .font(AgentChatTypography.monoMeta)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
+        case .deferredPreview:
+            VStack(alignment: .leading, spacing: 7) {
+                Text(lightweightInlineRendered)
+                    .font(font)
+                    .lineLimit(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("内容较长，已先显示轻量预览以保持界面响应。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        case .compiledDocument:
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(renderWindow.blocks) { block in
                     view(for: block)
