@@ -509,6 +509,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var memoryOSStore: SQLiteMemoryOSStore?
     private var memoryOSFacade: AppMemoryOSFacade?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
@@ -2073,7 +2074,9 @@ final class AppViewModel: NSObject, ObservableObject {
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
-            self.chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
+            let chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
+            self.chatSessionRepository = chatSessionRepository
+            self.activityTimelineCacheWriter = ActivityTimelineCacheWriter(persistor: chatSessionRepository)
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
@@ -3737,7 +3740,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         if let timeline = agentEventTimelinesBySessionID[sessionID] {
-            try chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+            scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: timeline)
         }
     }
 
@@ -5891,7 +5894,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil))
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
-                try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
+                scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
                 agentEventTimeline = restored
                 return
             }
@@ -5923,7 +5926,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let restored = presentations(from: runEvents)
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
-                try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
+                scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
                 agentEventTimeline = restored
                 return
             }
@@ -6266,6 +6269,26 @@ final class AppViewModel: NSObject, ObservableObject {
         await submitChat(prompt: prompt, clearComposer: true)
     }
 
+    private func scheduleActivityTimelineCacheSave(sessionID: String, timeline: [AgentEventPresentation]) {
+        guard let activityTimelineCacheWriter else { return }
+        Task(priority: .utility) {
+            await activityTimelineCacheWriter.scheduleSave(sessionID: sessionID, timeline: timeline)
+        }
+    }
+
+    private func flushActivityTimelineCache(sessionID: String) async {
+        guard let activityTimelineCacheWriter else { return }
+        let startedAt = ContinuousClock.now
+        do {
+            try await activityTimelineCacheWriter.flush(sessionID: sessionID)
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("timelineCache.flush session=\(sessionID, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+        } catch {
+            AppPerformanceLog.chatTurnLogger.warning("timelineCache.flush.failed session=\(sessionID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+        }
+    }
+
     func cancelActiveChatRun() {
         guard let submittingSessionID = selectedChatSessionID,
               submittingChatSessionIDs.contains(submittingSessionID)
@@ -6318,7 +6341,7 @@ final class AppViewModel: NSObject, ObservableObject {
         var timeline = agentEventTimelinesBySessionID[sessionID] ?? agentEventTimeline
         timeline.append(cancellation)
         agentEventTimelinesBySessionID[sessionID] = timeline
-        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: timeline)
         if selectedChatSessionID == sessionID {
             agentEventTimeline = timeline
         }
@@ -6503,18 +6526,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     var timeline = self.agentEventTimelinesBySessionID[submittingSessionID] ?? []
                     timeline.append(presentation)
                     self.agentEventTimelinesBySessionID[submittingSessionID] = timeline
-                    if let repository = self.chatSessionRepository {
-                        let duration = AppPerformanceLog.measure {
-                            do {
-                                try repository.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
-                            } catch {
-                                AppPerformanceLog.chatTurnLogger.warning("timelineCache.eventSave.failed session=\(submittingSessionID, privacy: .public) error=\(String(describing: error), privacy: .public)")
-                            }
-                        }
-                        if duration.milliseconds >= 25 {
-                            AppPerformanceLog.chatTurnLogger.warning("timelineCache.eventSave session=\(submittingSessionID, privacy: .public) events=\(timeline.count, privacy: .public) duration=\(duration.milliseconds, privacy: .public)ms")
-                        }
-                    }
+                    self.scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: timeline)
                     if self.selectedChatSessionID == submittingSessionID {
                         self.agentEventTimeline = timeline
                     }
@@ -6528,16 +6540,8 @@ final class AppViewModel: NSObject, ObservableObject {
             let submitMilliseconds = Double(submitElapsed.components.seconds) * 1_000 + Double(submitElapsed.components.attoseconds) / 1_000_000_000_000_000
             AppPerformanceLog.chatTurnLogger.info("nativeSubmit.completed session=\(submittingSessionID, privacy: .public) events=\(manager.eventPresentations.count, privacy: .public) duration=\(submitMilliseconds, privacy: .public)ms")
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
-            if let chatSessionRepository {
-                let duration = AppPerformanceLog.measure {
-                    do {
-                        try chatSessionRepository.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: manager.eventPresentations)
-                    } catch {
-                        AppPerformanceLog.chatTurnLogger.warning("timelineCache.finalSave.failed session=\(submittingSessionID, privacy: .public) error=\(String(describing: error), privacy: .public)")
-                    }
-                }
-                AppPerformanceLog.chatTurnLogger.info("timelineCache.finalSave session=\(submittingSessionID, privacy: .public) events=\(manager.eventPresentations.count, privacy: .public) duration=\(duration.milliseconds, privacy: .public)ms")
-            }
+            scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: manager.eventPresentations)
+            await flushActivityTimelineCache(sessionID: submittingSessionID)
             if selectedChatSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = response.session
