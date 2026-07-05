@@ -30,6 +30,7 @@ private actor NativeSessionMemoryOSProvider: AgentModelProvider {
     )
 
     _ = try await manager.submit("请将 NativeSessionManager 接入 Memory OS")
+    try await manager.flushMemoryOSIngestion()
 
     let summary = try facade.operationalSummary()
     #expect(summary.l0ProvenanceObjectCount == 2)

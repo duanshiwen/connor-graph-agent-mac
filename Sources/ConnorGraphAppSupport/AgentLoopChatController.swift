@@ -55,12 +55,16 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
     }
 
+    public func flushMemoryOSIngestion() async throws {
+        try await memoryOSIngestionWriter?.flush()
+    }
+
     @discardableResult
     public mutating func submit(_ prompt: String) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(prompt)
         transcript = session.messages
-        try persistMemoryOSAfterUserMessage(userMessage)
+        try await persistMemoryOSAfterUserMessage(userMessage)
         let request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
@@ -88,7 +92,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                     )
                     transcript = session.messages
                     if let assistantMessage {
-                        try persistMemoryOSAfterAssistantMessage(assistantMessage)
+                        try await persistMemoryOSAfterAssistantMessage(assistantMessage)
                     }
                 }
             }
@@ -107,17 +111,15 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
-    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) async throws {
         if let memoryOSIngestionWriter {
-            Task(priority: .utility) {
-                await memoryOSIngestionWriter.enqueueChatMessage(
-                    messageID: message.id,
-                    sessionID: session.id,
-                    role: "user",
-                    content: message.content,
-                    occurredAt: message.createdAt
-                )
-            }
+            await memoryOSIngestionWriter.enqueueChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "user",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
             return
         }
         guard let memoryOSRepository else { return }
@@ -132,17 +134,15 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         try memoryOSRepository.save(result)
     }
 
-    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
+    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) async throws {
         if let memoryOSIngestionWriter {
-            Task(priority: .utility) {
-                await memoryOSIngestionWriter.enqueueChatMessage(
-                    messageID: message.id,
-                    sessionID: session.id,
-                    role: "assistant",
-                    content: message.content,
-                    occurredAt: message.createdAt
-                )
-            }
+            await memoryOSIngestionWriter.enqueueChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "assistant",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
             return
         }
         guard let memoryOSRepository else { return }
