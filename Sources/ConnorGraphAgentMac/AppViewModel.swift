@@ -283,6 +283,10 @@ struct MCPSourceDraft: Equatable {
 
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
+#if DEBUG
+    private let mainActorStallMonitor = AppMainActorStallMonitor()
+#endif
+
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -2093,6 +2097,9 @@ final class AppViewModel: NSObject, ObservableObject {
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
         super.init()
+#if DEBUG
+        mainActorStallMonitor.start()
+#endif
         browserLiveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             guard let self else { return }
             self.recordBrowserWebViewEviction(key: key, webView: webView, metadata: metadata)
@@ -2262,9 +2269,12 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            _ = try AppMemoryOSBackgroundJobRunner(
-                aiExecutorProvider: backgroundAIExecutorProvider
-            ).runOnce(facade: memoryOSFacade)
+            let duration = try AppPerformanceLog.measure {
+                _ = try AppMemoryOSBackgroundJobRunner(
+                    aiExecutorProvider: backgroundAIExecutorProvider
+                ).runOnce(facade: memoryOSFacade)
+            }
+            AppPerformanceLog.chatTurnLogger.info("memoryOS.backgroundJobs.completed duration=\(duration.milliseconds, privacy: .public)ms")
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
@@ -2276,8 +2286,12 @@ final class AppViewModel: NSObject, ObservableObject {
         guard lastMemoryOSDailySweep.map({ now.timeIntervalSince($0) > 86400 }) ?? true else { return }
         lastMemoryOSDailySweep = now
         do {
-            _ = try AppMemoryOSPipelineTriggerCoordinator(facade: memoryOSFacade).runDailySweep(now: now)
+            let duration = try AppPerformanceLog.measure {
+                _ = try AppMemoryOSPipelineTriggerCoordinator(facade: memoryOSFacade).runDailySweep(now: now)
+            }
+            AppPerformanceLog.chatTurnLogger.info("memoryOS.dailySweep.completed duration=\(duration.milliseconds, privacy: .public)ms")
         } catch {
+            AppPerformanceLog.chatTurnLogger.warning("memoryOS.dailySweep.failed error=\(String(describing: error), privacy: .public)")
             // silent failure — does not block main flow
         }
     }
@@ -6457,6 +6471,7 @@ final class AppViewModel: NSObject, ObservableObject {
             if resolvedSkillInstructions != nil {
                 clearActiveSkill()
             }
+            let submitStartedAt = ContinuousClock.now
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
@@ -6482,7 +6497,18 @@ final class AppViewModel: NSObject, ObservableObject {
                     var timeline = self.agentEventTimelinesBySessionID[submittingSessionID] ?? []
                     timeline.append(presentation)
                     self.agentEventTimelinesBySessionID[submittingSessionID] = timeline
-                    try? self.chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
+                    if let repository = self.chatSessionRepository {
+                        let duration = AppPerformanceLog.measure {
+                            do {
+                                try repository.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
+                            } catch {
+                                AppPerformanceLog.chatTurnLogger.warning("timelineCache.eventSave.failed session=\(submittingSessionID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+                            }
+                        }
+                        if duration.milliseconds >= 25 {
+                            AppPerformanceLog.chatTurnLogger.warning("timelineCache.eventSave session=\(submittingSessionID, privacy: .public) events=\(timeline.count, privacy: .public) duration=\(duration.milliseconds, privacy: .public)ms")
+                        }
+                    }
                     if self.selectedChatSessionID == submittingSessionID {
                         self.agentEventTimeline = timeline
                     }
@@ -6492,8 +6518,20 @@ final class AppViewModel: NSObject, ObservableObject {
                     self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
                 }
             )
+            let submitElapsed = submitStartedAt.duration(to: ContinuousClock.now)
+            let submitMilliseconds = Double(submitElapsed.components.seconds) * 1_000 + Double(submitElapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("nativeSubmit.completed session=\(submittingSessionID, privacy: .public) events=\(manager.eventPresentations.count, privacy: .public) duration=\(submitMilliseconds, privacy: .public)ms")
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
-            try? chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: manager.eventPresentations)
+            if let chatSessionRepository {
+                let duration = AppPerformanceLog.measure {
+                    do {
+                        try chatSessionRepository.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: manager.eventPresentations)
+                    } catch {
+                        AppPerformanceLog.chatTurnLogger.warning("timelineCache.finalSave.failed session=\(submittingSessionID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+                    }
+                }
+                AppPerformanceLog.chatTurnLogger.info("timelineCache.finalSave session=\(submittingSessionID, privacy: .public) events=\(manager.eventPresentations.count, privacy: .public) duration=\(duration.milliseconds, privacy: .public)ms")
+            }
             if selectedChatSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = response.session
@@ -6506,8 +6544,11 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             reloadPendingApprovals()
             if let chatSessionRepository {
-                chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-                allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+                let duration = try AppPerformanceLog.measure {
+                    self.chatSessions = try chatSessionRepository.loadSessions(filter: self.sessionListFilter)
+                    self.allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+                }
+                AppPerformanceLog.chatTurnLogger.info("sessionList.reloadAfterSubmit session=\(submittingSessionID, privacy: .public) visible=\(self.chatSessions.count, privacy: .public) all=\(self.allChatSessions.count, privacy: .public) duration=\(duration.milliseconds, privacy: .public)ms")
             }
             if shouldAutoGenerateInitialTitle {
                 regenerateChatSessionTitle(submittingSessionID)
@@ -6515,7 +6556,7 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
             let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
-                .last(where: { $0.role == .assistant })
+                .last(where: { $0.role == AgentRole.assistant })
             noteSessionUpdate(
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,
