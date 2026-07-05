@@ -38,6 +38,7 @@
 		9A17D0B10000000000000C /* Sources/ConnorGraphAgentMac/AppSidebarSharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000000C /* Sources/ConnorGraphAgentMac/AppSidebarSharedViews.swift */; };
 		9A17D0B10000000000000D /* Sources/ConnorGraphAgentMac/AppTopSearchTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000000D /* Sources/ConnorGraphAgentMac/AppTopSearchTextField.swift */; };
 		9A17D0B10000000000000E /* Sources/ConnorGraphAgentMac/AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000000E /* Sources/ConnorGraphAgentMac/AppViewModel.swift */; };
+		9A17D0B10000000000001B /* Sources/ConnorGraphAgentMac/AppMainActorStallMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000001B /* Sources/ConnorGraphAgentMac/AppMainActorStallMonitor.swift */; };
 		9A17D0B10000000000000F /* Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000000F /* Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift */; };
 		9A17D0B100000000000010 /* Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000010 /* Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift */; };
 		9A17D0B100000000000014 /* Sources/ConnorGraphAgentMac/SettingsAIViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000014 /* Sources/ConnorGraphAgentMac/SettingsAIViews.swift */; };
@@ -94,6 +95,13 @@
 		E00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000013 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift */; };
 		F00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentToolInvocationDetailOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentToolInvocationDetailOverlay.swift */; };
 		F00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentToolOutputRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentToolOutputRenderers.swift */; };
+		AA5A70000000000000000101 /* Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift */; };
+		AA5A70000000000000000102 /* Sources/ConnorGraphAgentMac/CalendarContactsBrowserViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000002 /* Sources/ConnorGraphAgentMac/CalendarContactsBrowserViews.swift */; };
+		AA5A70000000000000000103 /* Sources/ConnorGraphAgentMac/CalendarContactsSettingsSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000003 /* Sources/ConnorGraphAgentMac/CalendarContactsSettingsSections.swift */; };
+		AA5A70000000000000000104 /* Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000004 /* Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift */; };
+		AA5A70000000000000000105 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000005 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift */; };
+		AA5A70000000000000000106 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000006 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift */; };
+		AA5A70000000000000000107 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5A70000000000000000007 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -128,6 +136,7 @@
 		9A17D0B00000000000000C /* Sources/ConnorGraphAgentMac/AppSidebarSharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppSidebarSharedViews.swift; sourceTree = "<group>"; };
 		9A17D0B00000000000000D /* Sources/ConnorGraphAgentMac/AppTopSearchTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppTopSearchTextField.swift; sourceTree = "<group>"; };
 		9A17D0B00000000000000E /* Sources/ConnorGraphAgentMac/AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppViewModel.swift; sourceTree = "<group>"; };
+		9A17D0B00000000000001B /* Sources/ConnorGraphAgentMac/AppMainActorStallMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppMainActorStallMonitor.swift; sourceTree = "<group>"; };
 		9A17D0B00000000000000F /* Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000010 /* Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000014 /* Sources/ConnorGraphAgentMac/SettingsAIViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SettingsAIViews.swift; sourceTree = "<group>"; };
@@ -180,6 +189,13 @@
 		E00000000000000000000013 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift; sourceTree = "<group>"; };
 		F00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentToolInvocationDetailOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentToolInvocationDetailOverlay.swift; sourceTree = "<group>"; };
 		F00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentToolOutputRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentToolOutputRenderers.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000002 /* Sources/ConnorGraphAgentMac/CalendarContactsBrowserViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/CalendarContactsBrowserViews.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000003 /* Sources/ConnorGraphAgentMac/CalendarContactsSettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/CalendarContactsSettingsSections.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000004 /* Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000005 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailApprovalViews.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000006 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift; sourceTree = "<group>"; };
+		AA5A70000000000000000007 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailReadinessViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -279,6 +295,7 @@
 				9A17D0B00000000000000C /* Sources/ConnorGraphAgentMac/AppSidebarSharedViews.swift */,
 				9A17D0B00000000000000D /* Sources/ConnorGraphAgentMac/AppTopSearchTextField.swift */,
 				9A17D0B00000000000000E /* Sources/ConnorGraphAgentMac/AppViewModel.swift */,
+				9A17D0B00000000000001B /* Sources/ConnorGraphAgentMac/AppMainActorStallMonitor.swift */,
 				9A17D0B00000000000000F /* Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift */,
 				9A17D0B000000000000010 /* Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift */,
 				9A17D0B000000000000014 /* Sources/ConnorGraphAgentMac/SettingsAIViews.swift */,
@@ -290,6 +307,13 @@
 				6D47A40000000000000AAA1 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift */,
 				9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */,
 				A00000000000000000000014 /* Products */,
+				AA5A70000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift */,
+				AA5A70000000000000000002 /* Sources/ConnorGraphAgentMac/CalendarContactsBrowserViews.swift */,
+				AA5A70000000000000000003 /* Sources/ConnorGraphAgentMac/CalendarContactsSettingsSections.swift */,
+				AA5A70000000000000000004 /* Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift */,
+				AA5A70000000000000000005 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift */,
+				AA5A70000000000000000006 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift */,
+				AA5A70000000000000000007 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift */,
 				A0000000000000000000002D /* AgentChatView.swift */,
 			);
 			sourceTree = "<group>";
@@ -509,6 +533,7 @@
 				9A17D0B10000000000000C /* Sources/ConnorGraphAgentMac/AppSidebarSharedViews.swift in Sources */,
 				9A17D0B10000000000000D /* Sources/ConnorGraphAgentMac/AppTopSearchTextField.swift in Sources */,
 				9A17D0B10000000000000E /* Sources/ConnorGraphAgentMac/AppViewModel.swift in Sources */,
+				9A17D0B10000000000001B /* Sources/ConnorGraphAgentMac/AppMainActorStallMonitor.swift in Sources */,
 				9A17D0B10000000000000F /* Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift in Sources */,
 				9A17D0B100000000000010 /* Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift in Sources */,
 				9A17D0B100000000000014 /* Sources/ConnorGraphAgentMac/SettingsAIViews.swift in Sources */,
@@ -519,6 +544,13 @@
 				9A17D0B10000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift in Sources */,
 				6D47A40000000000000AAA2 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift in Sources */,
 				9A17D0B100000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift in Sources */,
+				AA5A70000000000000000101 /* Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift in Sources */,
+				AA5A70000000000000000102 /* Sources/ConnorGraphAgentMac/CalendarContactsBrowserViews.swift in Sources */,
+				AA5A70000000000000000103 /* Sources/ConnorGraphAgentMac/CalendarContactsSettingsSections.swift in Sources */,
+				AA5A70000000000000000104 /* Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift in Sources */,
+				AA5A70000000000000000105 /* Sources/ConnorGraphAgentMac/MailApprovalViews.swift in Sources */,
+				AA5A70000000000000000106 /* Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift in Sources */,
+				AA5A70000000000000000107 /* Sources/ConnorGraphAgentMac/MailReadinessViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
