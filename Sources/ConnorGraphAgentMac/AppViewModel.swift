@@ -286,6 +286,7 @@ final class AppViewModel: NSObject, ObservableObject {
 #if DEBUG
     private let mainActorStallMonitor = AppMainActorStallMonitor()
 #endif
+    private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -2269,12 +2270,16 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            let duration = try AppPerformanceLog.measure {
-                _ = try AppMemoryOSBackgroundJobRunner(
-                    aiExecutorProvider: backgroundAIExecutorProvider
-                ).runOnce(facade: memoryOSFacade)
-            }
-            AppPerformanceLog.chatTurnLogger.info("memoryOS.backgroundJobs.completed duration=\(duration.milliseconds, privacy: .public)ms")
+            let aiExecutorProvider = backgroundAIExecutorProvider
+            let startedAt = ContinuousClock.now
+            let summary = try await memoryOSMaintenanceWorker.runBackgroundJobs(
+                facade: memoryOSFacade,
+                aiExecutorProvider: aiExecutorProvider,
+                now: Date()
+            )
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("memoryOS.backgroundJobs.completed projectionRuns=\(summary.projectionRunCount, privacy: .public) aiRuns=\(summary.aiJobRunCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
@@ -2286,10 +2291,11 @@ final class AppViewModel: NSObject, ObservableObject {
         guard lastMemoryOSDailySweep.map({ now.timeIntervalSince($0) > 86400 }) ?? true else { return }
         lastMemoryOSDailySweep = now
         do {
-            let duration = try AppPerformanceLog.measure {
-                _ = try AppMemoryOSPipelineTriggerCoordinator(facade: memoryOSFacade).runDailySweep(now: now)
-            }
-            AppPerformanceLog.chatTurnLogger.info("memoryOS.dailySweep.completed duration=\(duration.milliseconds, privacy: .public)ms")
+            let startedAt = ContinuousClock.now
+            let items = try await memoryOSMaintenanceWorker.runDailySweep(facade: memoryOSFacade, now: now)
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("memoryOS.dailySweep.completed queued=\(items.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             AppPerformanceLog.chatTurnLogger.warning("memoryOS.dailySweep.failed error=\(String(describing: error), privacy: .public)")
             // silent failure — does not block main flow
