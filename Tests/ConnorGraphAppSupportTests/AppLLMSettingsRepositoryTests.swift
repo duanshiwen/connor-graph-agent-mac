@@ -63,7 +63,7 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 
     #expect(loaded.hasAPIKey == true)
     #expect(settingsStore.values.values.contains("secret-key") == false)
-    #expect(try credentialStore.readSecret(service: AppLLMSettingsRepository.keychainService, account: AppLLMSettingsRepository.apiKeyAccount) == "secret-key")
+    #expect(try credentialStore.readSecret(service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount) == "secret-key")
 }
 
 @Test func settingsRepositoryClearsAPIKey() throws {

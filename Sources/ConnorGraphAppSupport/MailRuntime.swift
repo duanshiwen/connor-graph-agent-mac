@@ -1,6 +1,18 @@
 import Foundation
 import ConnorGraphCore
 
+public struct MailRuntimeRecentMessagesRequest: Sendable, Equatable {
+    public var accountID: MailAccountID?
+    public var direction: MailMessageDirectionFilter
+    public var limit: Int
+
+    public init(accountID: MailAccountID? = nil, direction: MailMessageDirectionFilter = .all, limit: Int = NativeSearchLimitPolicy.defaultSearchLimit) {
+        self.accountID = accountID
+        self.direction = direction
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+    }
+}
+
 public struct MailRuntimeSearchRequest: Sendable, Equatable {
     public var query: String
     public var accountID: MailAccountID?
@@ -104,6 +116,33 @@ public struct MailRuntime: Sendable {
         return boxes
     }
 
+    public func listRecentMessages(_ request: MailRuntimeRecentMessagesRequest, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(request.limit)
+        let messages: [MailMessageSummary]
+        if let recentCache = cache as? any RecentMailSourceCache {
+            messages = try await recentCache.recentMessages(accountID: request.accountID, direction: request.direction, limit: limit)
+        } else {
+            let all = try await cache.searchMessages(query: "", accountID: request.accountID)
+            let mailboxes = try await mailboxesForRecentMessages(accountID: request.accountID, messages: all)
+            let byID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0) })
+            messages = all.filter { summary in
+                switch request.direction {
+                case .all:
+                    return true
+                case .received:
+                    return byID[summary.mailboxID]?.role != .sent
+                case .sent:
+                    return byID[summary.mailboxID]?.role == .sent
+                }
+            }.sorted { lhs, rhs in
+                if lhs.date != rhs.date { return lhs.date > rhs.date }
+                return lhs.id.rawValue < rhs.id.rawValue
+            }
+        }
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Listed recent mail messages; returned \(min(messages.count, limit)) summaries"))
+        return Array(messages.prefix(limit))
+    }
+
     public func searchMessages(_ request: MailRuntimeSearchRequest, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageSummary] {
         let messages: [MailMessageSummary]
         if let timeAwareCache = cache as? any TimeAwareMailSourceCache {
@@ -118,6 +157,74 @@ public struct MailRuntime: Sendable {
         let limit = NativeSearchLimitPolicy.clampSearchLimit(request.limit)
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Searched mail messages; returned \(min(messages.count, limit)) summaries"))
         return Array(messages.prefix(limit))
+    }
+
+    public func listRecentMessagesWithBodyPreview(_ request: MailRuntimeRecentMessagesRequest, bodyPreviewMaxChars: Int, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageBodyPreviewResult] {
+        let summaries = try await listRecentMessages(request, runID: runID, sessionID: sessionID)
+        let results = try await bodyPreviewResults(for: summaries, maxChars: bodyPreviewMaxChars)
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageBodyRead, riskClass: .bodyRead, redactedSummary: "Listed recent mail messages with cached body previews; returned \(results.count) previews without mutating read state"))
+        return results
+    }
+
+    public func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequest, bodyPreviewMaxChars: Int, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageBodyPreviewResult] {
+        let summaries = try await searchMessages(request, runID: runID, sessionID: sessionID)
+        let results = try await bodyPreviewResults(for: summaries, maxChars: bodyPreviewMaxChars)
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageBodyRead, riskClass: .bodyRead, redactedSummary: "Searched mail messages with cached body previews; returned \(results.count) previews without mutating read state"))
+        return results
+    }
+
+    private func bodyPreviewResults(for summaries: [MailMessageSummary], maxChars: Int) async throws -> [MailMessageBodyPreviewResult] {
+        let maxChars = min(max(bodyPreviewMaxCharsLowerBound, maxChars), bodyPreviewMaxCharsUpperBound)
+        var results: [MailMessageBodyPreviewResult] = []
+        results.reserveCapacity(summaries.count)
+        for summary in summaries {
+            let detail = try await cache.message(id: summary.id)
+            let preview = detail.flatMap { Self.bodyPreview(from: $0, maxChars: maxChars) }
+            results.append(MailMessageBodyPreviewResult(summary: summary, bodyPreview: preview?.text, bodyPreviewTruncated: preview?.truncated ?? false, bodySource: preview?.source))
+        }
+        return results
+    }
+
+    private var bodyPreviewMaxCharsLowerBound: Int { 200 }
+    private var bodyPreviewMaxCharsUpperBound: Int { 2_000 }
+
+    private static func bodyPreview(from detail: MailMessageDetail, maxChars: Int) -> (text: String, truncated: Bool, source: String)? {
+        let htmlPreview = (detail.body?.htmlText?.text).map { stripHTMLForPreview($0) }
+        let candidates: [(String, String?)] = [
+            ("plainText", detail.body?.plainText?.text),
+            ("htmlText", htmlPreview),
+            ("redactedPreview", detail.body?.redactedPreview)
+        ]
+        for (source, rawText) in candidates {
+            let normalized = normalizeBodyPreviewText(rawText ?? "")
+            guard !normalized.isEmpty else { continue }
+            let truncated = normalized.count > maxChars
+            return (String(normalized.prefix(maxChars)), truncated, source)
+        }
+        return nil
+    }
+
+    private static func normalizeBodyPreviewText(_ value: String) -> String {
+        value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func stripHTMLForPreview(_ value: String) -> String {
+        value.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+    }
+
+    private func mailboxesForRecentMessages(accountID: MailAccountID?, messages: [MailMessageSummary]) async throws -> [MailMailbox] {
+        if let accountID {
+            return try await cache.listMailboxes(accountID: accountID)
+        }
+        let accountIDs = Set(messages.map(\.accountID))
+        let knownAccounts = try await repository.listAccounts().map(\.id)
+        let allAccountIDs = Set(knownAccounts).union(accountIDs)
+        var result: [MailMailbox] = []
+        for id in allAccountIDs.sorted(by: { $0.rawValue < $1.rawValue }) {
+            result.append(contentsOf: try await cache.listMailboxes(accountID: id))
+        }
+        return result
     }
 
     public func getMessage(id: MailMessageID, includeBody: Bool = false, runID: String? = nil, sessionID: String? = nil) async throws -> MailMessageDetail {

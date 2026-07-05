@@ -20,7 +20,7 @@ struct MailRuntimeSMTPSendTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let credentialMemory = MailRuntimeSMTPMemoryCredentialStore()
-        try credentialMemory.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try credentialMemory.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let smtp = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "smtp-server-id"))
         let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(

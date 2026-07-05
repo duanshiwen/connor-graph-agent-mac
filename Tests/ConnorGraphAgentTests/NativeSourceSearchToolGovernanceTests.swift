@@ -36,6 +36,9 @@ struct NativeSourceSearchToolGovernanceTests {
         #expect(Set(names).count == names.count)
         #expect(registry.duplicateRegistrations.isEmpty)
         #expect(names.contains("mail_search_messages"))
+        #expect(names.contains("mail_search_messages_with_body_preview"))
+        #expect(names.contains("mail_list_recent_messages"))
+        #expect(names.contains("mail_list_recent_messages_with_body_preview"))
         #expect(names.contains("mail_get_message"))
         #expect(names.contains("rss_search_items"))
         #expect(names.contains("rss_get_item"))
@@ -57,6 +60,9 @@ struct NativeSourceSearchToolGovernanceTests {
     @Test func systemPromptExposesNativeSourceToolsButNotInternalIndexMethods() {
         let prompt = AgentInstructionSection.defaultConnorInstruction
         #expect(prompt.contains("mail_search_messages"))
+        #expect(prompt.contains("mail_search_messages_with_body_preview"))
+        #expect(prompt.contains("mail_list_recent_messages"))
+        #expect(prompt.contains("mail_list_recent_messages_with_body_preview"))
         #expect(prompt.contains("rss_search_items"))
         #expect(prompt.contains("calendar_search_events"))
         #expect(prompt.contains("browser_history_search"))

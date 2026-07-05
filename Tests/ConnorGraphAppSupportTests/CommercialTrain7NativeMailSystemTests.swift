@@ -40,6 +40,68 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(updated.summary.flags.isRead)
     }
 
+    @Test func runtimeListsRecentMessagesWithCachedBodyPreviewsWithoutMutatingReadState() async throws {
+        let accountID = MailAccountID(rawValue: "account-a")
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let longBody = String(repeating: "PreviewNeedle ", count: 40)
+        let detail = Self.makeMailDetail(id: "body-preview", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 100), subject: "Preview", bodyText: longBody)
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [Self.makeMailAccount(id: accountID, displayName: "Account A")]), cache: InMemoryMailSourceCache(mailboxes: [inbox], messages: [detail]))
+
+        let results = try await runtime.listRecentMessagesWithBodyPreview(MailRuntimeRecentMessagesRequest(accountID: accountID, limit: 10), bodyPreviewMaxChars: 220)
+
+        #expect(results.count == 1)
+        #expect(results.first?.summary.id.rawValue == "body-preview")
+        #expect(results.first?.bodyPreview?.contains("PreviewNeedle") == true)
+        #expect(results.first?.bodyPreview?.count == 220)
+        #expect(results.first?.bodyPreviewTruncated == true)
+        #expect(results.first?.bodySource == "plainText")
+        let reloaded = try await runtime.getMessage(id: detail.id, includeBody: false)
+        #expect(reloaded.summary.flags.isRead == false)
+    }
+
+    @Test func runtimeSearchesMessagesWithCachedBodyPreviews() async throws {
+        let accountID = MailAccountID(rawValue: "account-a")
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let detail = Self.makeMailDetail(id: "body-search-preview", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 100), subject: "No keyword", bodyText: "BodySearchNeedle appears only inside the cached body.")
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: [Self.makeMailAccount(id: accountID, displayName: "Account A")]), cache: InMemoryMailSourceCache(mailboxes: [inbox], messages: [detail]))
+
+        let results = try await runtime.searchMessagesWithBodyPreview(MailRuntimeSearchRequest(query: "BodySearchNeedle", accountID: accountID), bodyPreviewMaxChars: 500)
+
+        #expect(results.map { $0.summary.id.rawValue } == ["body-search-preview"])
+        #expect(results.first?.bodyPreview?.contains("BodySearchNeedle") == true)
+        #expect(results.first?.bodyPreviewTruncated == false)
+    }
+
+    @Test func runtimeListsRecentMessagesAcrossAccountsAndDirections() async throws {
+        let accountA = MailAccountID(rawValue: "account-a")
+        let accountB = MailAccountID(rawValue: "account-b")
+        let inboxA = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountA, name: "Inbox", path: "INBOX", role: .inbox)
+        let sentA = MailMailbox(id: MailMailboxID(rawValue: "account-a-sent"), accountID: accountA, name: "Sent", path: "Sent", role: .sent)
+        let inboxB = MailMailbox(id: MailMailboxID(rawValue: "account-b-inbox"), accountID: accountB, name: "Inbox", path: "INBOX", role: .inbox)
+        let messages = [
+            Self.makeMailDetail(id: "a-inbox-old", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 100), subject: "Old inbox"),
+            Self.makeMailDetail(id: "a-sent-newest", accountID: accountA, mailboxID: sentA.id, date: Date(timeIntervalSince1970: 300), subject: "Newest sent"),
+            Self.makeMailDetail(id: "b-inbox-middle", accountID: accountB, mailboxID: inboxB.id, date: Date(timeIntervalSince1970: 200), subject: "Middle inbox")
+        ]
+        let accounts = [
+            Self.makeMailAccount(id: accountA, displayName: "Account A"),
+            Self.makeMailAccount(id: accountB, displayName: "Account B")
+        ]
+        let runtime = MailRuntime(repository: InMemoryMailSourceRepository(accounts: accounts), cache: InMemoryMailSourceCache(mailboxes: [inboxA, sentA, inboxB], messages: messages))
+
+        let all = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(limit: 10))
+        #expect(all.map { $0.id.rawValue } == ["a-sent-newest", "b-inbox-middle", "a-inbox-old"])
+
+        let sent = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(direction: .sent, limit: 10))
+        #expect(sent.map { $0.id.rawValue } == ["a-sent-newest"])
+
+        let received = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(direction: .received, limit: 10))
+        #expect(received.map { $0.id.rawValue } == ["b-inbox-middle", "a-inbox-old"])
+
+        let accountAOnly = try await runtime.listRecentMessages(MailRuntimeRecentMessagesRequest(accountID: accountA, direction: .all, limit: 10))
+        #expect(accountAOnly.map { $0.id.rawValue } == ["a-sent-newest", "a-inbox-old"])
+    }
+
     @Test func fileBackedMailStorePersistsAccountsMailboxesMessagesAndReadState() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-store-\(UUID().uuidString)", isDirectory: true)
         let storeURL = directory.appendingPathComponent("mail-store.json")
@@ -70,6 +132,199 @@ struct CommercialTrain7NativeMailSystemTests {
         }
         let reloaded = FileBackedMailSourceStore(storeURL: storeURL)
         #expect(try await reloaded.message(id: messageID)?.summary.flags.isRead == true)
+    }
+
+    @Test func fileBackedMailStoreSearchesCachedBodyTextAndRespectsAccountFilter() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-body-search-store-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let accountA = MailAccountID(rawValue: "account-a")
+        let accountB = MailAccountID(rawValue: "account-b")
+        let inboxA = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountA, name: "Inbox", path: "INBOX", role: .inbox)
+        let inboxB = MailMailbox(id: MailMailboxID(rawValue: "account-b-inbox"), accountID: accountB, name: "Inbox", path: "INBOX", role: .inbox)
+        let store = FileBackedMailSourceStore(storeURL: storeURL)
+        try await store.saveAccount(Self.makeMailAccount(id: accountA, displayName: "Account A"))
+        try await store.saveAccount(Self.makeMailAccount(id: accountB, displayName: "Account B"))
+        try await store.saveMailbox(inboxA)
+        try await store.saveMailbox(inboxB)
+        try await store.saveMessage(Self.makeMailDetail(id: "body-a-old", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 100), subject: "No visible keyword", bodyText: "Quarterly body-only AlphaNeedle context"))
+        try await store.saveMessage(Self.makeMailDetail(id: "body-a-new", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 200), subject: "Still no subject keyword", bodyText: "A newer AlphaNeedle body match"))
+        try await store.saveMessage(Self.makeMailDetail(id: "body-b", accountID: accountB, mailboxID: inboxB.id, date: Date(timeIntervalSince1970: 300), subject: "Other account", bodyText: "AlphaNeedle appears in another account"))
+
+        let all = try await store.searchMessages(query: "AlphaNeedle", accountID: nil)
+        #expect(all.map { $0.id.rawValue } == ["body-b", "body-a-new", "body-a-old"])
+
+        let accountAOnly = try await store.searchMessages(query: "AlphaNeedle", accountID: accountA)
+        #expect(accountAOnly.map { $0.id.rawValue } == ["body-a-new", "body-a-old"])
+    }
+
+    @Test func inMemoryMailStoreSearchesCachedBodyText() async throws {
+        let accountID = MailAccountID(rawValue: "account-a")
+        let inbox = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let store = InMemoryMailSourceCache(mailboxes: [inbox], messages: [
+            Self.makeMailDetail(id: "body-old", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 100), subject: "No keyword", bodyText: "Body-only MemoryNeedle match"),
+            Self.makeMailDetail(id: "body-new", accountID: accountID, mailboxID: inbox.id, date: Date(timeIntervalSince1970: 200), subject: "No keyword either", bodyText: "Newer MemoryNeedle match")
+        ])
+
+        let results = try await store.searchMessages(query: "MemoryNeedle", accountID: accountID)
+        #expect(results.map { $0.id.rawValue } == ["body-new", "body-old"])
+    }
+
+    @Test func fileBackedMailStoreListsRecentMessagesWithDirectionAndAccountFilters() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-recent-store-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let accountA = MailAccountID(rawValue: "account-a")
+        let accountB = MailAccountID(rawValue: "account-b")
+        let inboxA = MailMailbox(id: MailMailboxID(rawValue: "account-a-inbox"), accountID: accountA, name: "Inbox", path: "INBOX", role: .inbox)
+        let sentA = MailMailbox(id: MailMailboxID(rawValue: "account-a-sent"), accountID: accountA, name: "Sent", path: "Sent", role: .sent)
+        let inboxB = MailMailbox(id: MailMailboxID(rawValue: "account-b-inbox"), accountID: accountB, name: "Inbox", path: "INBOX", role: .inbox)
+        let store = FileBackedMailSourceStore(storeURL: storeURL)
+        try await store.saveAccount(Self.makeMailAccount(id: accountA, displayName: "Account A"))
+        try await store.saveAccount(Self.makeMailAccount(id: accountB, displayName: "Account B"))
+        try await store.saveMailbox(inboxA)
+        try await store.saveMailbox(sentA)
+        try await store.saveMailbox(inboxB)
+        try await store.saveMessage(Self.makeMailDetail(id: "z-same-date", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 300), subject: "Tie Z"))
+        try await store.saveMessage(Self.makeMailDetail(id: "a-same-date", accountID: accountA, mailboxID: sentA.id, date: Date(timeIntervalSince1970: 300), subject: "Tie A"))
+        try await store.saveMessage(Self.makeMailDetail(id: "b-inbox-middle", accountID: accountB, mailboxID: inboxB.id, date: Date(timeIntervalSince1970: 200), subject: "Middle inbox"))
+        try await store.saveMessage(Self.makeMailDetail(id: "a-inbox-old", accountID: accountA, mailboxID: inboxA.id, date: Date(timeIntervalSince1970: 100), subject: "Old inbox"))
+
+        let all = try await store.recentMessages(accountID: nil, direction: .all, limit: 10)
+        #expect(all.map { $0.id.rawValue } == ["a-same-date", "z-same-date", "b-inbox-middle", "a-inbox-old"])
+
+        let sent = try await store.recentMessages(accountID: nil, direction: .sent, limit: 10)
+        #expect(sent.map { $0.id.rawValue } == ["a-same-date"])
+
+        let received = try await store.recentMessages(accountID: nil, direction: .received, limit: 10)
+        #expect(received.map { $0.id.rawValue } == ["z-same-date", "b-inbox-middle", "a-inbox-old"])
+
+        let accountAOnly = try await store.recentMessages(accountID: accountA, direction: .all, limit: 2)
+        #expect(accountAOnly.map { $0.id.rawValue } == ["a-same-date", "z-same-date"])
+    }
+
+    @Test func mailStoreCanClearCachedMailDataWithoutRemovingAccounts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-cache-rebuild-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        let accountID = MailAccountID(rawValue: "mail-test")
+        let mailboxID = MailMailboxID(rawValue: "mail-test-inbox")
+        let messageID = MailMessageID(rawValue: "mail-test-INBOX-42")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Test Mail", identities: [MailIdentity(id: MailIdentityID(rawValue: "identity"), displayName: "Test", address: MailAddress(email: "test@example.com"))], health: MailAccountHealth(status: .ready, summary: "ready"))
+        let mailbox = MailMailbox(id: mailboxID, accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 1, unreadCount: 1, syncCursor: MailSyncCursor(value: "42", uidValidity: "7"), lastSyncedAt: Date()))
+        let summary = MailMessageSummary(id: messageID, accountID: accountID, mailboxID: mailboxID, subject: "Cached", from: MailAddress(email: "sender@example.com"), to: [MailAddress(email: "test@example.com")], snippet: "hello", flags: MailMessageFlags(isRead: false))
+        let detail = MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<msg@example.com>"), body: MailMessageBody(redactedPreview: "hello"))
+        let store = FileBackedMailSourceStore(storeURL: storeURL)
+        try await store.saveAccount(account)
+        try await store.saveMailbox(mailbox)
+        try await store.saveMessage(detail)
+
+        try await store.clearCachedMailData()
+
+        #expect(try await store.account(id: accountID) != nil)
+        #expect(try await store.listMailboxes(accountID: accountID).isEmpty)
+        #expect(try await store.allMessageIDs().isEmpty)
+    }
+
+    @Test func mailBodyOnDemandPlannerDetectsEmptyCachedBodyAndExtractsUID() {
+        let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
+        let mailboxID = MailMailboxID(rawValue: "yakii_d@icloud.com-inbox")
+        let emptyDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-INBOX-1392"),
+                accountID: accountID,
+                mailboxID: mailboxID,
+                subject: "Empty body",
+                from: MailAddress(email: "sender@example.com"),
+                to: [MailAddress(email: "yakii_d@icloud.com")],
+                snippet: "（无正文摘要）"
+            ),
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: "", byteCount: 0),
+                htmlText: nil,
+                redactedPreview: ""
+            )
+        )
+        let fullDetail = MailMessageDetail(
+            summary: emptyDetail.summary,
+            body: MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: "Hello", byteCount: 5), redactedPreview: "Hello")
+        )
+
+        #expect(MailBodyOnDemandFetchPlanner.hasDisplayableBody(fullDetail))
+        #expect(!MailBodyOnDemandFetchPlanner.hasDisplayableBody(emptyDetail))
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: emptyDetail) == "1392")
+    }
+
+    @Test func mailBodyOnDemandPlannerRejectsEncodedGarbageCachedBodies() {
+        let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
+        let mailboxID = MailMailboxID(rawValue: "yakii_d@icloud.com-inbox")
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: "yakii_d@icloud.com-INBOX-1392"),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: "Encoded body",
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "yakii_d@icloud.com")],
+            snippet: "PCFET0NUWVBF"
+        )
+        let base64HTML = "PCFET0NUWVBFIEhUTUw+PGh0bWw+PGJvZHk+PHA+QXBwbGUgUmVjZWlwdDwvcD48L2JvZHk+PC9odG1sPg=="
+        let base64Detail = MailMessageDetail(
+            summary: summary,
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: base64HTML, byteCount: base64HTML.utf8.count),
+                redactedPreview: base64HTML
+            )
+        )
+        let quotedPrintableDetail = MailMessageDetail(
+            summary: summary,
+            body: MailMessageBody(
+                plainText: MailBodyPart(mimeType: "text/plain", text: "<td>=E6=AE=B5=E8=AF=97=E9=97=BB</td>", byteCount: 42),
+                redactedPreview: "=E6=AE=B5=E8=AF=97=E9=97=BB"
+            )
+        )
+
+        #expect(!MailBodyOnDemandFetchPlanner.hasDisplayableBody(base64Detail))
+        #expect(!MailBodyOnDemandFetchPlanner.hasDisplayableBody(quotedPrintableDetail))
+    }
+
+    @Test func mailBodyOnDemandPlannerSupportsInboxAndSentMessageIDs() {
+        let accountID = MailAccountID(rawValue: "yakii_d@icloud.com")
+        let inboxDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-INBOX-1392"),
+                accountID: accountID,
+                mailboxID: MailMailboxID(rawValue: "yakii_d@icloud.com-inbox"),
+                subject: "Inbox",
+                from: MailAddress(email: "sender@example.com"),
+                to: [MailAddress(email: "yakii_d@icloud.com")],
+                snippet: "摘要"
+            )
+        )
+        let sentDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-Sent-1393"),
+                accountID: accountID,
+                mailboxID: MailMailboxID(rawValue: "yakii_d@icloud.com-sent"),
+                subject: "Sent",
+                from: MailAddress(email: "yakii_d@icloud.com"),
+                to: [MailAddress(email: "sender@example.com")],
+                snippet: "摘要"
+            )
+        )
+        let archiveDetail = MailMessageDetail(
+            summary: MailMessageSummary(
+                id: MailMessageID(rawValue: "yakii_d@icloud.com-Archive-1394"),
+                accountID: accountID,
+                mailboxID: MailMailboxID(rawValue: "archive"),
+                subject: "Archive",
+                from: MailAddress(email: "sender@example.com"),
+                to: [MailAddress(email: "yakii_d@icloud.com")],
+                snippet: "摘要"
+            )
+        )
+
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: inboxDetail) == "1392")
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: sentDetail) == "1393")
+        #expect(MailBodyOnDemandFetchPlanner.imapUID(for: archiveDetail) == nil)
     }
 
     @Test func agentToolRegistryExposesNativeMailToolsAndBlocksSendWithoutApproval() async throws {
@@ -159,15 +414,15 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(imapHealth.status == .degraded)
         #expect(smtpHealth.status == .ready)
 
-        let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
+        let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(credentialNamespace: "svc", accountName: "a", authMode: .oauth2))
         let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)
         #expect(syncHealth.status == .ready)
     }
 
     @Test func googleAndMicrosoftMailProvidersAreTreatedAsUnsupportedLegacyAccounts() async throws {
         let credentialStore = CommercialTrain7MemoryCredentialStore()
-        let googleBinding = MailCredentialBinding(keychainService: "test.legacy", accountName: "gmail@example.com", authMode: .appPassword)
-        try credentialStore.saveSecret("app-password", service: googleBinding.keychainService, account: googleBinding.accountName)
+        let googleBinding = MailCredentialBinding(credentialNamespace: "test.legacy", accountName: "gmail@example.com", authMode: .appPassword)
+        try credentialStore.saveSecret("app-password", service: googleBinding.credentialNamespace, account: googleBinding.accountName)
         let account = MailAccount(
             id: MailAccountID(rawValue: "legacy-gmail"),
             provider: .gmail,
@@ -186,10 +441,83 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(result.messages.isEmpty)
     }
 
+    @Test func remoteIMAPMailboxDiscoveryRecognizesSpecialUseSentMailbox() {
+        let response = """
+        * LIST (\\HasNoChildren) "/" "INBOX"
+        * LIST (\\Sent \\HasNoChildren) "/" "Sent Messages"
+        A1 OK LIST completed
+        """
+
+        let mailboxes = RemoteIMAPMailbox.parseListResponse(response)
+
+        #expect(mailboxes.map(\.path) == ["INBOX", "Sent Messages"])
+        #expect(mailboxes.first { $0.path == "INBOX" }?.role == .inbox)
+        #expect(mailboxes.first { $0.path == "Sent Messages" }?.role == .sent)
+    }
+
+    @Test func remoteIMAPMailboxDiscoveryFallsBackToCommonSentNames() {
+        let response = """
+        * LIST (\\HasNoChildren) "/" "INBOX"
+        * LIST (\\HasNoChildren) "/" "已发送"
+        * LIST (\\HasNoChildren) "/" "Sent Mail"
+        A1 OK LIST completed
+        """
+
+        let mailboxes = RemoteIMAPMailbox.parseListResponse(response)
+
+        #expect(mailboxes.first { $0.path == "已发送" }?.role == .sent)
+        #expect(mailboxes.first { $0.path == "Sent Mail" }?.role == .sent)
+    }
+
+    @Test func remoteIMAPMailboxBuildsMailboxAwareMessageIDs() {
+        let accountID = MailAccountID(rawValue: "shiwen@example.com")
+        let inbox = RemoteIMAPMailbox(name: "INBOX", path: "INBOX", role: .inbox)
+        let sent = RemoteIMAPMailbox(name: "Sent", path: "Sent", role: .sent)
+
+        #expect(inbox.messageID(accountID: accountID, uid: "123").rawValue == "shiwen@example.com-INBOX-123")
+        #expect(sent.messageID(accountID: accountID, uid: "123").rawValue == "shiwen@example.com-Sent-123")
+        #expect(inbox.messageID(accountID: accountID, uid: "123") != sent.messageID(accountID: accountID, uid: "123"))
+        #expect(inbox.uid(fromMessageID: inbox.messageID(accountID: accountID, uid: "123"), accountID: accountID) == "123")
+        #expect(sent.uid(fromMessageID: sent.messageID(accountID: accountID, uid: "123"), accountID: accountID) == "123")
+        #expect(sent.uid(fromMessageID: inbox.messageID(accountID: accountID, uid: "123"), accountID: accountID) == nil)
+    }
+
+    @Test func remoteIMAPUIDChunkingDoesNotLimitWhenMessageLimitIsZero() {
+        let chunks = RemoteIMAPMailbox.chunkUIDs([1, 2, 3, 4, 5], messageLimit: 0, batchSize: 2)
+
+        #expect(chunks == [[1, 2], [3, 4], [5]])
+    }
+
+    @Test func remoteIMAPUIDChunkingStillSupportsExplicitLatestLimit() {
+        let chunks = RemoteIMAPMailbox.chunkUIDs([1, 2, 3, 4, 5], messageLimit: 3, batchSize: 2)
+
+        #expect(chunks == [[3, 4], [5]])
+    }
+
+    @Test func remoteIMAPSyncTargetsPreferInboxAndSentOnly() {
+        let remote = [
+            RemoteIMAPMailbox(name: "Archive", path: "Archive", role: .archive),
+            RemoteIMAPMailbox(name: "Sent", path: "Sent Messages", role: .sent),
+            RemoteIMAPMailbox(name: "Inbox", path: "INBOX", role: .inbox),
+            RemoteIMAPMailbox(name: "Custom", path: "Projects", role: .custom)
+        ]
+
+        let targets = RemoteIMAPMailbox.syncTargets(from: remote)
+
+        #expect(targets.map(\.role) == [.inbox, .sent])
+        #expect(targets.map(\.path) == ["INBOX", "Sent Messages"])
+    }
+
+    @Test func remoteIMAPSyncTargetsFallbackToInboxWhenSentMissing() {
+        let targets = RemoteIMAPMailbox.syncTargets(from: [RemoteIMAPMailbox(name: "Inbox", path: "INBOX", role: .inbox)])
+
+        #expect(targets.map(\.role) == [.inbox])
+    }
+
     @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
-        let binding = MailCredentialBinding(keychainService: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
+        let binding = MailCredentialBinding(credentialNamespace: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
         let credentialStore = CommercialTrain7MemoryCredentialStore()
-        try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.keychainService, account: binding.accountName)
+        try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.credentialNamespace, account: binding.accountName)
         let account = MailAccount(
             id: MailAccountID(rawValue: "legacy-oauth"),
             provider: .genericIMAPSMTP,
@@ -303,6 +631,32 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(other.outgoingHost.isEmpty)
     }
 
+    private static func makeMailAccount(id: MailAccountID, displayName: String) -> MailAccount {
+        MailAccount(
+            id: id,
+            provider: .genericIMAPSMTP,
+            displayName: displayName,
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "\(id.rawValue)-identity"), displayName: displayName, address: MailAddress(email: "\(id.rawValue)@example.com"))],
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+    }
+
+    private static func makeMailDetail(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String, bodyText: String? = nil) -> MailMessageDetail {
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: id),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: subject,
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "recipient@example.com")],
+            date: date,
+            snippet: subject
+        )
+        let body = bodyText.map { MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: $0, byteCount: $0.utf8.count), redactedPreview: $0) }
+            ?? MailMessageBody(redactedPreview: subject)
+        return MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<\(id)@example.com>"), body: body)
+    }
+
     private func makeMailBrowserFixture(now: Date = Date()) -> NativeMailBrowserPresentation {
         let accountID = MailAccountID(rawValue: "fixture-account")
         let otherAccountID = MailAccountID(rawValue: "fixture-qq")
@@ -319,7 +673,7 @@ struct CommercialTrain7NativeMailSystemTests {
                 identities: [MailIdentity(id: identityID, displayName: "Test User", address: MailAddress(name: "Test User", email: "test@example.com"))],
                 incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
                 outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
-                credentialBinding: MailCredentialBinding(keychainService: "test.mail", accountName: "test@example.com", authMode: .appPassword),
+                credentialBinding: MailCredentialBinding(credentialNamespace: "test.mail", accountName: "test@example.com", authMode: .appPassword),
                 health: MailAccountHealth(status: .ready, summary: "test-ready")
             ),
             MailAccount(
@@ -327,7 +681,7 @@ struct CommercialTrain7NativeMailSystemTests {
                 provider: .genericIMAPSMTP,
                 displayName: "Other Test Account",
                 identities: [MailIdentity(id: otherIdentityID, displayName: "Other", address: MailAddress(name: "Other", email: "other@example.com"))],
-                credentialBinding: MailCredentialBinding(keychainService: "test.mail.other", accountName: "other@example.com", authMode: .appPassword),
+                credentialBinding: MailCredentialBinding(credentialNamespace: "test.mail.other", accountName: "other@example.com", authMode: .appPassword),
                 health: MailAccountHealth(status: .unknown, summary: "test")
             )
         ]
@@ -360,7 +714,7 @@ struct CommercialTrain7NativeMailSystemTests {
                 from: MailAddress(name: "Security", email: "security@example.com"),
                 to: [MailAddress(email: "test@example.com")],
                 date: now.addingTimeInterval(-900),
-                snippet: "Provider auth policy, token refresh, keychain isolation, and audit readiness.",
+                snippet: "Provider auth policy, token refresh, encrypted credential vault isolation, and audit readiness.",
                 flags: MailMessageFlags(isRead: true),
                 hasAttachments: false
             )

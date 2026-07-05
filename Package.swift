@@ -17,7 +17,9 @@ let package = Package(
         .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"]),
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/vincedev/MailCoreSPM", branch: "master")
+    ],
     targets: [
         .target(name: "ConnorGraphCore"),
         .target(name: "ConnorGraphMemory", dependencies: ["ConnorGraphCore"]),
@@ -35,7 +37,8 @@ let package = Package(
                 "ConnorGraphMemory",
                 "ConnorGraphStore",
                 "ConnorGraphSearch",
-                "ConnorGraphAgent"
+                "ConnorGraphAgent",
+                .product(name: "MailCore", package: "MailCoreSPM")
             ],
             linkerSettings: [
                 .linkedFramework("Security"),

@@ -13,7 +13,7 @@ public final class CommercialFixtureMailCredentialStore: CredentialStore, @unche
     public func saveSecret(_ secret: String, service: String, account: String) throws {}
 
     public func readSecret(service: String, account: String) throws -> String? {
-        service == binding.keychainService && account == binding.accountName ? secret : nil
+        service == binding.credentialNamespace && account == binding.accountName ? secret : nil
     }
 
     public func deleteSecret(service: String, account: String) throws {}

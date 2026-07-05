@@ -26,7 +26,7 @@ struct MailRuntimeSendPipelineTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let rawCredentialStore = TestMailCredentialStore()
-        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-123"))
         let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(
@@ -67,7 +67,7 @@ struct MailRuntimeSendPipelineTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let rawCredentialStore = TestMailCredentialStore()
-        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let auditLog = InMemoryMailAuditLog()
         let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(
@@ -116,7 +116,7 @@ struct MailRuntimeSendPipelineTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let rawCredentialStore = TestMailCredentialStore()
-        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),
@@ -148,7 +148,7 @@ struct MailRuntimeSendPipelineTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let rawCredentialStore = TestMailCredentialStore()
-        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-missing-hash"))
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),
@@ -179,7 +179,7 @@ struct MailRuntimeSendPipelineTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let rawCredentialStore = TestMailCredentialStore()
-        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-hash-mismatch"))
         let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(
@@ -216,7 +216,7 @@ struct MailRuntimeSendPipelineTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let rawCredentialStore = TestMailCredentialStore()
-        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let draftRepository = InMemoryMailDraftRepository()
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),

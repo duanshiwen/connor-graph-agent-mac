@@ -10,6 +10,14 @@ public protocol MailSourceCache: Sendable {
     func updateFlags(messageIDs: [MailMessageID], transform: @Sendable (MailMessageFlags) -> MailMessageFlags) async throws
 }
 
+public protocol RecentMailSourceCache: MailSourceCache {
+    func recentMessages(
+        accountID: MailAccountID?,
+        direction: MailMessageDirectionFilter,
+        limit: Int
+    ) async throws -> [MailMessageSummary]
+}
+
 public protocol TimeAwareMailSourceCache: MailSourceCache {
     func searchMessages(
         query: String,

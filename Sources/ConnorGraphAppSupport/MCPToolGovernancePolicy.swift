@@ -72,7 +72,7 @@ public struct MCPToolGovernancePolicy: Codable, Sendable, Equatable, Hashable {
             .lowercased()
         let sourceAllowsExternalNetwork = source.allowedCapabilities.contains(.externalNetwork)
 
-        if containsAny(normalized, ["secret", "token", "credential", "password", "api_key", "apikey", "private_key", "ssh_key", "keychain"]) {
+        if containsAny(normalized, ["secret", "token", "credential", "password", "api_key", "apikey", "private_key", "ssh_key", "credential_store"]) {
             return MCPToolGovernancePolicy(
                 riskClass: .credentialAccess,
                 executionPolicy: .block,

@@ -44,7 +44,7 @@ struct MailOutboundMemoryOSEndToEndTests {
             health: MailAccountHealth(status: .ready, summary: "ready")
         )
         let credentialStore = MailOutboundMemoryOSCredentialStore()
-        try credentialStore.saveSecret("outbound-app-password", service: binding.keychainService, account: binding.accountName)
+        try credentialStore.saveSecret("outbound-app-password", service: binding.credentialNamespace, account: binding.accountName)
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),
             cache: InMemoryMailSourceCache(),

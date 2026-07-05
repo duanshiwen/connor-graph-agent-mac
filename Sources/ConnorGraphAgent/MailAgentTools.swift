@@ -4,6 +4,9 @@ import ConnorGraphCore
 public protocol AgentMailRuntime: Sendable {
     func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount]
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary]
+    func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult]
+    func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary]
+    func listRecentMessagesWithBodyPreview(_ request: MailRuntimeRecentMessagesRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult]
     func getMessage(id: MailMessageID, includeBody: Bool, runID: String?, sessionID: String?) async throws -> MailMessageDetail
     func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String?, sessionID: String?) async throws
     func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft
@@ -12,12 +15,46 @@ public protocol AgentMailRuntime: Sendable {
 }
 
 public extension AgentMailRuntime {
+    func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] {
+        try await searchMessages(
+            MailRuntimeSearchRequestBridge(query: "", accountID: request.accountID, limit: request.limit, timeSort: "timeDescThenRelevance"),
+            runID: runID,
+            sessionID: sessionID
+        )
+    }
+
+    func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
+        throw AgentToolError.invalidArguments("mail_search_messages_with_body_preview is not supported by this mail runtime")
+    }
+
+    func listRecentMessagesWithBodyPreview(_ request: MailRuntimeRecentMessagesRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
+        throw AgentToolError.invalidArguments("mail_list_recent_messages_with_body_preview is not supported by this mail runtime")
+    }
+
     func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft {
         MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary)
     }
 
     func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
         MailSendApprovalBridge(draftID: draftID, title: "Send email approval", from: "unknown", to: [], cc: [], bcc: [], subject: "", bodyPreview: "", attachmentCount: 0, riskSummary: "Email sending is always approval-gated.", envelopeHash: "")
+    }
+}
+
+public enum AgentMailMessageDirectionFilter: String, Sendable, Codable, Equatable, CaseIterable {
+    case all
+    case received
+    case sent
+}
+
+public struct MailRuntimeRecentMessagesRequestBridge: Sendable, Equatable {
+    public var accountID: MailAccountID?
+    public var direction: AgentMailMessageDirectionFilter
+    public var limit: Int
+
+    public init(accountID: MailAccountID? = nil, direction: AgentMailMessageDirectionFilter = .all, limit: Int = NativeSearchLimitPolicy.defaultSearchLimit) {
+        self.accountID = accountID
+        self.direction = direction
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
     }
 }
 
@@ -125,7 +162,136 @@ public struct MailSearchMessagesTool: AgentTool {
         )
         let messages = try await runtime.searchMessages(request, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(messages.map { NativeSourceReference.mailSummary($0, query: request.query, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; read state unchanged", contentJSON: try MailJSON.encode(messages))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; use the selected summary's id as messageID for mail_get_message; read state unchanged", contentJSON: try MailJSON.encode(messages))
+    }
+}
+
+public struct MailListRecentMessagesTool: AgentTool {
+    public let runtime: any AgentMailRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
+    public var name: String { "mail_list_recent_messages" }
+    public var description: String { "List recent Connor-owned mail summaries across all accounts by newest sent/received time, without reading bodies or mutating read state. Supports optional account and direction filters." }
+    public var permission: AgentPermissionCapability { .readMail }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts; omit to search all mail accounts"),
+            "direction": .string(description: "Optional direction filter: all, received, or sent. Defaults to all, mixing received and sent mail by newest time."),
+            "limit": .integer(description: "Maximum recent mail summaries to return")
+        ], required: [])
+    }
+    public init(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let direction: AgentMailMessageDirectionFilter
+        if let rawDirection = arguments.string("direction") {
+            guard let parsed = AgentMailMessageDirectionFilter(rawValue: rawDirection) else {
+                throw AgentToolError.invalidArguments("Invalid direction \"\(rawDirection)\". Expected one of: all, received, sent.")
+            }
+            direction = parsed
+        } else {
+            direction = .all
+        }
+        let request = MailRuntimeRecentMessagesRequestBridge(
+            accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
+            direction: direction,
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit)
+        )
+        let messages = try await runtime.listRecentMessages(request, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record(messages.map { NativeSourceReference.mailSummary($0, query: "recent", toolName: name, context: context) })
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) recent mail message summaries; use the selected summary's id as messageID for mail_get_message; read state unchanged", contentJSON: try MailJSON.encode(messages))
+    }
+}
+
+private enum MailBodyPreviewToolPolicy {
+    static let defaultMaxChars = 1200
+    static let minMaxChars = 200
+    static let maxMaxChars = 2_000
+
+    static func clampedMaxChars(from arguments: AgentToolArguments) -> Int {
+        let raw = arguments.int("bodyPreviewMaxChars") ?? defaultMaxChars
+        return min(max(raw, minMaxChars), maxMaxChars)
+    }
+}
+
+public struct MailSearchMessagesWithBodyPreviewTool: AgentTool {
+    public let runtime: any AgentMailRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
+    public var name: String { "mail_search_messages_with_body_preview" }
+    public var description: String { "Search Connor-owned mail and return bounded cached body previews for each result without mutating read state. Requires mail body read permission." }
+    public var permission: AgentPermissionCapability { .readMailBody }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "query": .string(description: "Search query; cached body text is included in search where available"),
+            "accountID": .string(description: "Optional account ID"),
+            "limit": .integer(description: "Maximum results"),
+            "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for sent/received time filtering"),
+            "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for sent/received time filtering"),
+            "timePreset": .string(description: "Optional time preset such as today, last7Days, last30Days, thisWeek, lastMonth"),
+            "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance"),
+            "bodyPreviewMaxChars": .integer(description: "Maximum cached body preview characters per message; clamped between 200 and 2000; defaults to 1200")
+        ], required: ["query"])
+    }
+    public init(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let formatter = ISO8601DateFormatter()
+        let request = MailRuntimeSearchRequestBridge(
+            query: arguments.string("query") ?? "",
+            accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
+            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
+            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            timePreset: arguments.string("timePreset"),
+            timeSort: arguments.string("timeSort")
+        )
+        let maxChars = MailBodyPreviewToolPolicy.clampedMaxChars(from: arguments)
+        let results = try await runtime.searchMessagesWithBodyPreview(request, bodyPreviewMaxChars: maxChars, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record(results.map { NativeSourceReference.mailSummary($0.summary, query: request.query, toolName: name, context: context) })
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(results.count) mail messages with cached body previews up to \(maxChars) characters each; use summary.id as messageID for mail_get_message for full bodies; read state unchanged; missing previews were not fetched remotely", contentJSON: try MailJSON.encode(results))
+    }
+}
+
+public struct MailListRecentMessagesWithBodyPreviewTool: AgentTool {
+    public let runtime: any AgentMailRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
+    public var name: String { "mail_list_recent_messages_with_body_preview" }
+    public var description: String { "List recent Connor-owned mail across accounts with bounded cached body previews, without mutating read state. Requires mail body read permission." }
+    public var permission: AgentPermissionCapability { .readMailBody }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts; omit to search all mail accounts"),
+            "direction": .string(description: "Optional direction filter: all, received, or sent. Defaults to all, mixing received and sent mail by newest time."),
+            "limit": .integer(description: "Maximum recent mail results to return"),
+            "bodyPreviewMaxChars": .integer(description: "Maximum cached body preview characters per message; clamped between 200 and 2000; defaults to 1200")
+        ], required: [])
+    }
+    public init(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let direction: AgentMailMessageDirectionFilter
+        if let rawDirection = arguments.string("direction") {
+            guard let parsed = AgentMailMessageDirectionFilter(rawValue: rawDirection) else {
+                throw AgentToolError.invalidArguments("Invalid direction \"\(rawDirection)\". Expected one of: all, received, sent.")
+            }
+            direction = parsed
+        } else {
+            direction = .all
+        }
+        let request = MailRuntimeRecentMessagesRequestBridge(
+            accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
+            direction: direction,
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit)
+        )
+        let maxChars = MailBodyPreviewToolPolicy.clampedMaxChars(from: arguments)
+        let results = try await runtime.listRecentMessagesWithBodyPreview(request, bodyPreviewMaxChars: maxChars, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record(results.map { NativeSourceReference.mailSummary($0.summary, query: "recent", toolName: name, context: context) })
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(results.count) recent mail messages with cached body previews up to \(maxChars) characters each; use summary.id as messageID for mail_get_message for full bodies; read state unchanged; missing previews were not fetched remotely", contentJSON: try MailJSON.encode(results))
     }
 }
 
@@ -137,7 +303,7 @@ public struct MailGetMessageTool: AgentTool {
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "messageID": .string(description: "Message ID"),
+            "messageID": .string(description: "Exact MailMessageSummary.id returned by mail_search_messages or mail_list_recent_messages. Do not pass result numbers, invented pseudo IDs such as 'message1' or 'msg1', or IMAP UIDs."),
             "includeBody": .boolean(description: "Whether to include body")
         ], required: ["messageID"])
     }
@@ -145,8 +311,30 @@ public struct MailGetMessageTool: AgentTool {
         self.runtime = runtime
         self.recorder = recorder
     }
+
+    private static func guidanceForOrdinalLikeMessageID(_ value: String) -> AgentToolError {
+        .invalidArguments("mail_get_message expects the exact messageID returned in a MailMessageSummary from mail_search_messages or mail_list_recent_messages. Received \"\(value)\", which looks like a result index or invented pseudo ID. Pass the selected summary's id field exactly; do not pass ordinals such as '1', pseudo IDs such as 'message1'/'msg1', or IMAP UIDs.")
+    }
+
+    private static func looksLikeOrdinalOrPseudoResultID(_ value: String) -> Bool {
+        if value.allSatisfy(\.isNumber) { return true }
+        let lowercased = value.lowercased()
+        let pattern = #"^(message|msg|mail|email|result) ?[0-9]+$"#
+        return lowercased.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private static func normalizedMessageID(from arguments: AgentToolArguments) throws -> String {
+        guard let rawMessageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
+        let messageID = rawMessageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !messageID.isEmpty else { throw AgentToolError.invalidArguments("messageID is required") }
+        if looksLikeOrdinalOrPseudoResultID(messageID) {
+            throw guidanceForOrdinalLikeMessageID(messageID)
+        }
+        return messageID
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let messageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
+        let messageID = try Self.normalizedMessageID(from: arguments)
         let includeBody = arguments.bool("includeBody") ?? false
         let detail = try await runtime.getMessage(id: MailMessageID(rawValue: messageID), includeBody: includeBody, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record([NativeSourceReference.mailDetail(detail, includeBody: includeBody, toolName: name, context: context)])
@@ -237,6 +425,9 @@ public extension AgentToolRegistry {
     mutating func registerNativeMailTools(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         register(MailListAccountsTool(runtime: runtime))
         register(MailSearchMessagesTool(runtime: runtime, recorder: recorder))
+        register(MailSearchMessagesWithBodyPreviewTool(runtime: runtime, recorder: recorder))
+        register(MailListRecentMessagesTool(runtime: runtime, recorder: recorder))
+        register(MailListRecentMessagesWithBodyPreviewTool(runtime: runtime, recorder: recorder))
         register(MailGetMessageTool(runtime: runtime, recorder: recorder))
         register(MailSetReadStateTool(runtime: runtime))
         register(MailCreateDraftTool(runtime: runtime))

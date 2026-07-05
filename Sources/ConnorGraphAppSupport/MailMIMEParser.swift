@@ -47,7 +47,7 @@ public struct MailMIMEParser: Sendable, Equatable {
         case "quoted-printable", "qp":
             return decodeQuotedPrintable(data)
         case "base64":
-            return Data(base64Encoded: data) ?? data
+            return decodeMIMEBase64(data) ?? data
         default:
             return data // 7bit, 8bit, binary - no decoding needed
         }
@@ -93,6 +93,31 @@ public struct MailMIMEParser: Sendable, Equatable {
         return String(data: data, encoding: String.Encoding(rawValue: nsEncoding))
     }
 
+    /// Parse a complete RFC 822 / MIME message by separating top-level headers from body,
+    /// then applying MIME Content-Type / Content-Transfer-Encoding metadata to the body.
+    public func parseFullMessageBody(rawData: Data?, fallbackString: String) -> MailMIMEBodyResult {
+        guard let rawData, !rawData.isEmpty else {
+            return MailMIMEBodyResult(plainText: fallbackString)
+        }
+        let split = splitFullMessage(rawData)
+        let headerString = String(data: split.headers, encoding: .ascii)
+            ?? String(data: split.headers, encoding: .utf8)
+            ?? ""
+        let unfoldedHeader = unfoldMIMEHeader(headerString)
+        let contentType = headerValue("Content-Type", in: unfoldedHeader)
+        let transferEncoding = headerValue("Content-Transfer-Encoding", in: unfoldedHeader)
+        let charset = contentType.flatMap { extractCharsetFromContentType("Content-Type: \($0)") }
+        let boundary = contentType.flatMap { extractBoundaryFromContentType("Content-Type: \($0)") }
+        return parseBodyWithHTML(
+            rawData: split.body,
+            fallbackString: fallbackString,
+            charset: charset,
+            transferEncoding: transferEncoding,
+            contentType: contentType,
+            boundary: boundary
+        )
+    }
+
     /// Parse raw email body and return plain text + HTML.
     /// Works entirely in Data domain — no String round-trip for multipart splitting.
     public func parseBodyWithHTML(rawData: Data?, fallbackString: String, charset: String?, transferEncoding: String?, contentType: String?, boundary: String?) -> MailMIMEBodyResult {
@@ -100,16 +125,20 @@ public struct MailMIMEParser: Sendable, Equatable {
             return MailMIMEBodyResult(plainText: fallbackString)
         }
 
-        // Step 1: Decode Content-Transfer-Encoding
-        let decodedData = decodeTransferEncoding(rawData, encoding: transferEncoding)
-
-        // Step 2: If multipart (has boundary), extract parts
+        // Multipart messages are decoded per part below; keep top-level data intact so
+        // boundary parsing cannot be affected by malformed body heuristics or by applying
+        // Content-Transfer-Encoding twice.
         if let boundary, !boundary.isEmpty {
-            return extractBodyComponents(data: decodedData, boundary: boundary, fallback: fallbackString)
+            let multipartData = decodeTransferEncoding(rawData, encoding: transferEncoding)
+            return extractBodyComponents(data: multipartData, boundary: boundary, fallback: fallbackString)
         }
 
-        // Step 3: Single part — charset convert
-        let decodedString = decodeCharset(decodedData, charset: charset) ?? fallbackString
+        // Single part — apply declared transfer encoding exactly once, then charset convert.
+        // Some real-world messages omit Content-Transfer-Encoding even though their text/html
+        // body is plainly quoted-printable; apply a conservative fallback only when no
+        // declared encoding is present.
+        let decodedSinglePartData = decodeTransferEncodingWithFallback(rawData, encoding: transferEncoding)
+        let decodedString = decodeCharset(decodedSinglePartData, charset: charset) ?? fallbackString
         let trimmed = decodedString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed.hasPrefix("<html") || trimmed.hasPrefix("<!doctype") {
             return MailMIMEBodyResult(plainText: stripHTML(decodedString), htmlText: decodedString)
@@ -140,11 +169,15 @@ public struct MailMIMEParser: Sendable, Equatable {
             let remaining = data[partStart...]
             if let nextBoundary = remaining.range(of: delimiter) {
                 let partData = data[partStart..<nextBoundary.lowerBound]
-                parts.append(partData)
+                // Data slices keep the base collection's indices. Normalize each MIME part
+                // before later using 0-based subdata(in:) ranges; otherwise a slice whose
+                // startIndex is not 0 can trap with EXC_BREAKPOINT during body parsing.
+                parts.append(Data(partData))
                 searchStart = nextBoundary.lowerBound
             } else {
                 // Last part (no trailing boundary)
-                parts.append(remaining)
+                // Normalize for the same reason as above.
+                parts.append(Data(remaining))
                 searchStart = data.endIndex
             }
         }
@@ -165,15 +198,16 @@ public struct MailMIMEParser: Sendable, Equatable {
             
             let headerBytes = headerEnd > 0 ? partData.subdata(in: 0..<headerEnd) : Data()
             guard let headerStr = String(data: headerBytes, encoding: .ascii) else { continue }
+            let unfoldedHeader = unfoldMIMEHeader(headerStr)
             let bodySlice = partData.subdata(in: headerEnd..<partData.count)
             
             // Extract Content-Type
-            let headerLower = headerStr.lowercased()
+            let headerLower = unfoldedHeader.lowercased()
             
             if headerLower.contains("text/plain") || headerLower.contains("text/html") {
-                let charset = extractCharsetFromContentType(headerStr)
-                let transferEncoding = extractTransferEncodingFromHeader(headerStr)
-                let decodedBody = decodeTransferEncoding(bodySlice, encoding: transferEncoding)
+                let charset = extractCharsetFromContentType(unfoldedHeader)
+                let transferEncoding = extractTransferEncodingFromHeader(unfoldedHeader)
+                let decodedBody = decodeTransferEncodingWithFallback(bodySlice, encoding: transferEncoding)
                 
                 if headerLower.contains("text/html") {
                     if let html = decodeCharset(decodedBody, charset: charset) {
@@ -187,7 +221,7 @@ public struct MailMIMEParser: Sendable, Equatable {
                 }
             } else if headerLower.contains("multipart/") {
                 // Nested multipart — recursive
-                let nestedBoundary = extractBoundaryFromContentType(headerStr)
+                let nestedBoundary = extractBoundaryFromContentType(unfoldedHeader)
                 if let nestedBoundary {
                     let nested = extractBodyComponents(data: bodySlice, boundary: nestedBoundary, fallback: fallback)
                     if bestPlain == nil, !nested.plainText.isEmpty { bestPlain = nested.plainText }
@@ -201,6 +235,69 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     // MARK: - Helpers
+
+    private func decodeTransferEncodingWithFallback(_ data: Data, encoding: String?) -> Data {
+        let enc = encoding?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if enc == "base64" || enc == "quoted-printable" || enc == "qp" {
+            return decodeTransferEncoding(data, encoding: encoding)
+        }
+        if looksLikeQuotedPrintable(data) {
+            return decodeQuotedPrintable(data)
+        }
+        return data
+    }
+
+    private func looksLikeQuotedPrintable(_ data: Data) -> Bool {
+        let bytes = [UInt8](data)
+        guard !bytes.isEmpty else { return false }
+        var encodedByteCount = 0
+        var hasSoftLineBreak = false
+
+        var i = 0
+        while i < bytes.count {
+            guard bytes[i] == 0x3D else { // '='
+                i += 1
+                continue
+            }
+            if i + 1 < bytes.count, bytes[i + 1] == 0x0A {
+                hasSoftLineBreak = true
+                i += 2
+                continue
+            }
+            if i + 2 < bytes.count, bytes[i + 1] == 0x0D, bytes[i + 2] == 0x0A {
+                hasSoftLineBreak = true
+                i += 3
+                continue
+            }
+            if i + 2 < bytes.count, Self.isHexDigit(bytes[i + 1]), Self.isHexDigit(bytes[i + 2]) {
+                encodedByteCount += 1
+                if encodedByteCount >= 2 { return true }
+                i += 3
+                continue
+            }
+            i += 1
+        }
+        return hasSoftLineBreak
+    }
+
+    private static func isHexDigit(_ byte: UInt8) -> Bool {
+        (byte >= 0x30 && byte <= 0x39) ||
+        (byte >= 0x41 && byte <= 0x46) ||
+        (byte >= 0x61 && byte <= 0x66)
+    }
+
+    /// Decode MIME base64 data. RFC 2045 allows encoded body lines to be wrapped, commonly
+    /// at 76 characters, so CRLF and other whitespace must be ignored before decoding.
+    private func decodeMIMEBase64(_ data: Data) -> Data? {
+        let base64Alphabet = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+        guard let text = String(data: data, encoding: .ascii) else { return nil }
+        var normalized = text.filter { base64Alphabet.contains($0) }
+        let remainder = normalized.count % 4
+        if remainder != 0 {
+            normalized.append(String(repeating: "=", count: 4 - remainder))
+        }
+        return Data(base64Encoded: normalized)
+    }
 
     /// Decode quoted-printable data. NOTE: _ → space is ONLY for RFC 2047 Q-encoding, NOT for QP transfer encoding.
     private func decodeQuotedPrintable(_ data: Data) -> Data {
@@ -234,6 +331,34 @@ public struct MailMIMEParser: Sendable, Equatable {
         return result
     }
 
+    private func unfoldMIMEHeader(_ header: String) -> String {
+        header.replacingOccurrences(
+            of: #"\r?\n[ \t]+"#,
+            with: " ",
+            options: .regularExpression
+        )
+    }
+
+    private func splitFullMessage(_ data: Data) -> (headers: Data, body: Data) {
+        if let range = data.range(of: Data("\r\n\r\n".utf8)) {
+            return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+        }
+        if let range = data.range(of: Data("\n\n".utf8)) {
+            return (data.subdata(in: 0..<range.lowerBound), data.subdata(in: range.upperBound..<data.endIndex))
+        }
+        return (Data(), data)
+    }
+
+    private func headerValue(_ name: String, in header: String) -> String? {
+        let prefix = name.lowercased() + ":"
+        for line in header.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix(prefix) else { continue }
+            return String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
     private func extractCharsetFromContentType(_ header: String) -> String? {
         guard let charsetRange = header.range(of: "charset=", options: .caseInsensitive) else { return nil }
         let after = header[charsetRange.upperBound...]
@@ -245,10 +370,13 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     private func extractTransferEncodingFromHeader(_ header: String) -> String? {
-        guard let range = header.range(of: "Content-Transfer-Encoding:", options: .caseInsensitive) else { return nil }
-        let after = header[range.upperBound...]
+        let unfolded = unfoldMIMEHeader(header)
+        guard let unfoldedRange = unfolded.range(of: "Content-Transfer-Encoding:", options: .caseInsensitive) else { return nil }
+        let after = unfolded[unfoldedRange.upperBound...]
         let endOfLine = after.firstIndex(of: "\n") ?? after.endIndex
-        return String(after[..<endOfLine]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(after[..<endOfLine])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
     }
 
     public func extractBoundaryFromContentType(_ header: String) -> String? {
@@ -262,8 +390,46 @@ public struct MailMIMEParser: Sendable, Equatable {
     }
 
     private func stripHTML(_ text: String) -> String {
-        text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        decodeHTMLEntities(
+            text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private func decodeHTMLEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        let namedEntities: [String: String] = [
+            "amp": "&",
+            "lt": "<",
+            "gt": ">",
+            "quot": "\"",
+            "apos": "'",
+            "nbsp": " "
+        ]
+        guard let regex = try? NSRegularExpression(pattern: #"&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z][A-Za-z0-9]+);"#) else {
+            return text
+        }
+        let nsText = text as NSString
+        var result = text
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        for match in matches.reversed() where match.numberOfRanges == 2 {
+            let token = nsText.substring(with: match.range(at: 1))
+            let decoded: String?
+            if token.hasPrefix("#x") || token.hasPrefix("#X") {
+                decoded = UInt32(token.dropFirst(2), radix: 16)
+                    .flatMap(UnicodeScalar.init)
+                    .map(String.init)
+            } else if token.hasPrefix("#") {
+                decoded = UInt32(token.dropFirst(), radix: 10)
+                    .flatMap(UnicodeScalar.init)
+                    .map(String.init)
+            } else {
+                decoded = namedEntities[token]
+            }
+            guard let decoded, let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: decoded)
+        }
+        return result
     }
 }
