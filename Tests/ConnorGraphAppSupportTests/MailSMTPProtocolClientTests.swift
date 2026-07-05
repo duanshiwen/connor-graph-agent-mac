@@ -151,6 +151,11 @@ struct MailSMTPProtocolClientTests {
         }
     }
 
+    @Test func smtpErrorsExposeActionableLocalizedDescriptions() {
+        #expect(MailSMTPClientError.startTLSUnavailable("smtp.example.com:587").localizedDescription.contains("port 587"))
+        #expect(MailSMTPClientError.authenticationFailed("535 auth failed").localizedDescription.contains("authorization code"))
+    }
+
     @Test func rejectedRecipientReportsSMTPRejection() async throws {
         let connection = ScriptedSMTPConnection(responses: [
             "220 smtp.example.com ESMTP ready",
