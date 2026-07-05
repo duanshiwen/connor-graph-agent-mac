@@ -49,6 +49,7 @@ public struct MailRuntime: Sendable {
     public var auditLog: any MailAuditLogProtocol
     public var draftStore: any MailDraftRepository
     public var credentialStore: AppMailCredentialStore
+    public var preferencesStore: (any MailPreferencesStore)?
     public var smtpClient: any MailSMTPClient
     public var messageComposer: MailMessageComposer
     public var memoryOSFacade: AppMemoryOSFacade?
@@ -59,6 +60,7 @@ public struct MailRuntime: Sendable {
         auditLog: any MailAuditLogProtocol = InMemoryMailAuditLog(),
         draftStore: any MailDraftRepository = MailDraftStore(),
         credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
+        preferencesStore: (any MailPreferencesStore)? = nil,
         smtpClient: any MailSMTPClient = NetworkMailSMTPClient(),
         messageComposer: MailMessageComposer = MailMessageComposer(),
         memoryOSFacade: AppMemoryOSFacade? = nil
@@ -68,6 +70,7 @@ public struct MailRuntime: Sendable {
         self.auditLog = auditLog
         self.draftStore = draftStore
         self.credentialStore = credentialStore
+        self.preferencesStore = preferencesStore
         self.smtpClient = smtpClient
         self.messageComposer = messageComposer
         self.memoryOSFacade = memoryOSFacade

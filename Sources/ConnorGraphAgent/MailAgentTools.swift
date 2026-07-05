@@ -1,8 +1,20 @@
 import Foundation
 import ConnorGraphCore
 
+public struct MailSendPreferencesBridge: Codable, Sendable, Equatable {
+    public var defaultSendAccountID: MailAccountID?
+    public var defaultSendIdentityID: MailIdentityID?
+
+    public init(defaultSendAccountID: MailAccountID? = nil, defaultSendIdentityID: MailIdentityID? = nil) {
+        self.defaultSendAccountID = defaultSendAccountID
+        self.defaultSendIdentityID = defaultSendIdentityID
+    }
+}
+
 public protocol AgentMailRuntime: Sendable {
     func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount]
+    func loadMailPreferences(runID: String?, sessionID: String?) async throws -> MailSendPreferencesBridge
+    func saveMailPreferences(_ preferences: MailSendPreferencesBridge, runID: String?, sessionID: String?) async throws
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary]
     func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult]
     func listRecentMessages(_ request: MailRuntimeRecentMessagesRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary]
@@ -22,6 +34,10 @@ public extension AgentMailRuntime {
             sessionID: sessionID
         )
     }
+
+    func loadMailPreferences(runID: String?, sessionID: String?) async throws -> MailSendPreferencesBridge { MailSendPreferencesBridge() }
+
+    func saveMailPreferences(_ preferences: MailSendPreferencesBridge, runID: String?, sessionID: String?) async throws {}
 
     func searchMessagesWithBodyPreview(_ request: MailRuntimeSearchRequestBridge, bodyPreviewMaxChars: Int, runID: String?, sessionID: String?) async throws -> [MailMessageBodyPreviewResult] {
         throw AgentToolError.invalidArguments("mail_search_messages_with_body_preview is not supported by this mail runtime")
@@ -369,8 +385,8 @@ public struct MailCreateDraftTool: AgentTool {
     public var permission: AgentPermissionCapability { .createMailDraft }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "accountID": .string(description: "Account ID"),
-            "identityID": .string(description: "Identity ID"),
+            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
+            "identityID": .string(description: "Optional exact MailIdentity.id from the selected account. Omit, empty, or pass default to use the Settings default send identity; never invent identity IDs."),
             "to": .array(items: .string(description: "Email address"), description: "Recipients"),
             "cc": .array(items: .string(description: "Email address"), description: "CC recipients"),
             "bcc": .array(items: .string(description: "Email address"), description: "BCC recipients"),
@@ -381,26 +397,94 @@ public struct MailCreateDraftTool: AgentTool {
             "inReplyToMessageID": .string(description: "Optional source message ID for replies"),
             "attachmentIDs": .array(items: .string(description: "Attachment ID"), description: "Attachment IDs"),
             "intentSummary": .string(description: "Short user intent summary for auditing")
-        ], required: ["accountID", "identityID", "to", "subject", "body"])
+        ], required: ["to", "subject", "body"])
     }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     private static func addresses(_ values: [SendableJSONValue]?) -> [MailAddress] {
         (values ?? []).compactMap(\.stringValue).map { MailAddress(email: $0) }
     }
+
+    private struct ResolvedSendIdentity: Sendable {
+        var account: MailAccount
+        var identity: MailIdentity
+    }
+
+    private static func normalizedOptionalID(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed.lowercased() == "default" ? nil : trimmed
+    }
+
+    private func resolveSendIdentity(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> ResolvedSendIdentity {
+        let accounts = try await runtime.listAccounts(runID: context.runID, sessionID: context.sessionID)
+        guard !accounts.isEmpty else {
+            throw AgentToolError.invalidArguments("No mail accounts configured. Add a mail account in Settings before sending mail.")
+        }
+        let explicitAccountID = Self.normalizedOptionalID(arguments.string("accountID")).map(MailAccountID.init(rawValue:))
+        let explicitIdentityID = Self.normalizedOptionalID(arguments.string("identityID")).map(MailIdentityID.init(rawValue:))
+
+        let account: MailAccount
+        if let explicitAccountID {
+            guard let found = accounts.first(where: { $0.id == explicitAccountID }) else {
+                let available = accounts.map(\.id.rawValue).joined(separator: ", ")
+                throw AgentToolError.invalidArguments("Unknown mail account \"\(explicitAccountID.rawValue)\". Available account IDs: \(available). Use exact IDs from mail_list_accounts or omit accountID to use the Settings default send account.")
+            }
+            account = found
+        } else {
+            let preferences = try await runtime.loadMailPreferences(runID: context.runID, sessionID: context.sessionID)
+            if let defaultAccountID = preferences.defaultSendAccountID,
+               let found = accounts.first(where: { $0.id == defaultAccountID }) {
+                account = found
+            } else {
+                let sendableAccounts = accounts.filter { $0.outgoing != nil && $0.identities.contains(where: \.canSend) }
+                guard sendableAccounts.count == 1, let only = sendableAccounts.first else {
+                    throw AgentToolError.invalidArguments("Multiple mail accounts are configured but no default send account is selected. Open Settings → Mail System → Send Settings and choose a default send account before creating a draft.")
+                }
+                let identity = only.identities.first(where: \.canSend)
+                try await runtime.saveMailPreferences(MailSendPreferencesBridge(defaultSendAccountID: only.id, defaultSendIdentityID: identity?.id), runID: context.runID, sessionID: context.sessionID)
+                account = only
+            }
+        }
+
+        guard account.outgoing != nil else {
+            throw AgentToolError.invalidArguments("Mail account \"\(account.id.rawValue)\" has no outgoing SMTP endpoint configured. Update the account in Settings before sending mail.")
+        }
+
+        let identity: MailIdentity
+        if let explicitIdentityID {
+            guard let found = account.identities.first(where: { $0.id == explicitIdentityID }) else {
+                let available = account.identities.map(\.id.rawValue).joined(separator: ", ")
+                throw AgentToolError.invalidArguments("Unknown mail identity \"\(explicitIdentityID.rawValue)\" for account \"\(account.id.rawValue)\". Available identity IDs: \(available).")
+            }
+            guard found.canSend else {
+                throw AgentToolError.invalidArguments("Mail identity \"\(found.id.rawValue)\" cannot send mail.")
+            }
+            identity = found
+        } else if let defaultIdentityID = try await runtime.loadMailPreferences(runID: context.runID, sessionID: context.sessionID).defaultSendIdentityID,
+                  let found = account.identities.first(where: { $0.id == defaultIdentityID && $0.canSend }) {
+            identity = found
+        } else if let found = account.identities.first(where: \.canSend) {
+            identity = found
+        } else {
+            throw AgentToolError.invalidArguments("Mail account \"\(account.id.rawValue)\" has no sendable identity. Update the account in Settings before sending mail.")
+        }
+
+        return ResolvedSendIdentity(account: account, identity: identity)
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let accountID = arguments.string("accountID"), let identityID = arguments.string("identityID") else { throw AgentToolError.invalidArguments("accountID and identityID are required") }
+        let resolved = try await resolveSendIdentity(arguments: arguments, context: context)
         let to = Self.addresses(arguments.array("to"))
         let cc = Self.addresses(arguments.array("cc"))
         let bcc = Self.addresses(arguments.array("bcc"))
         let replyTo = Self.addresses(arguments.array("replyTo"))
         let attachmentIDs = (arguments.array("attachmentIDs") ?? []).compactMap(\.stringValue).map(MailAttachmentID.init(rawValue:))
         let inReplyToMessageID = arguments.string("inReplyToMessageID").map(MailMessageID.init(rawValue:))
-        let draft = try await runtime.createDraft(accountID: MailAccountID(rawValue: accountID), identityID: MailIdentityID(rawValue: identityID), to: to, cc: cc, bcc: bcc, replyTo: replyTo, subject: arguments.string("subject") ?? "", body: arguments.string("body") ?? "", htmlBody: arguments.string("htmlBody"), inReplyToMessageID: inReplyToMessageID, attachmentIDs: attachmentIDs, intentSummary: arguments.string("intentSummary"), runID: context.runID, sessionID: context.sessionID)
+        let draft = try await runtime.createDraft(accountID: resolved.account.id, identityID: resolved.identity.id, to: to, cc: cc, bcc: bcc, replyTo: replyTo, subject: arguments.string("subject") ?? "", body: arguments.string("body") ?? "", htmlBody: arguments.string("htmlBody"), inReplyToMessageID: inReplyToMessageID, attachmentIDs: attachmentIDs, intentSummary: arguments.string("intentSummary"), runID: context.runID, sessionID: context.sessionID)
         let draftID = draft.id.rawValue
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Created draft \(draftID); not sent. To request the native Compose approval card for sending, call mail_send_draft with draftID=\"\(draftID)\". Do not ask the user to provide the draft ID.",
+            contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To request the native Compose approval card for sending, call mail_send_draft with draftID=\"\(draftID)\". Do not ask the user to provide the draft ID.",
             contentJSON: try MailJSON.encode(draft)
         )
     }
