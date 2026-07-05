@@ -44,7 +44,7 @@ public struct MailSMTPSendResponse: Sendable, Equatable, Codable {
     }
 }
 
-public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvertible {
+public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvertible, LocalizedError {
     case invalidEndpoint(String)
     case missingRecipients
     case unsupportedSecurity(String)
@@ -60,12 +60,14 @@ public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvert
         case .missingRecipients: "SMTP send requires at least one recipient"
         case .unsupportedSecurity(let value): "Unsupported SMTP security: \(value)"
         case .connectionFailed(let value): "SMTP connection failed: \(value)"
-        case .startTLSUnavailable(let value): "SMTP STARTTLS unavailable: \(value)"
-        case .authenticationFailed(let value): "SMTP authentication failed: \(value)"
+        case .startTLSUnavailable(let value): "SMTP STARTTLS unavailable for \(value). Use a provider endpoint that advertises STARTTLS, usually port 587."
+        case .authenticationFailed(let value): "SMTP authentication failed: \(value). Check the account username and provider app password/authorization code."
         case .networkSendNotAvailable(let value): "SMTP network send unavailable: \(value)"
         case .smtpRejected(let value): "SMTP rejected send: \(value)"
         }
     }
+
+    public var errorDescription: String? { description }
 }
 
 public protocol MailSMTPClient: Sendable {
