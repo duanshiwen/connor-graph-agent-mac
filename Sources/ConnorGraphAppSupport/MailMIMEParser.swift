@@ -184,6 +184,7 @@ public struct MailMIMEParser: Sendable, Equatable {
 
         var bestPlain: String?
         var bestHTML: String?
+        var inlineImageDataURLsByContentID: [String: String] = [:]
 
         for partData in parts {
             // Split headers from body at first \r\n\r\n or \n\n
@@ -219,6 +220,10 @@ public struct MailMIMEParser: Sendable, Equatable {
                         bestPlain = text
                     }
                 }
+            } else if headerLower.contains("content-type: image/"), let dataURL = inlineImageDataURL(from: bodySlice, header: unfoldedHeader) {
+                if let contentID = headerValue("Content-ID", in: unfoldedHeader).flatMap(normalizeContentID) {
+                    inlineImageDataURLsByContentID[contentID] = dataURL
+                }
             } else if headerLower.contains("multipart/") {
                 // Nested multipart — recursive
                 let nestedBoundary = extractBoundaryFromContentType(unfoldedHeader)
@@ -230,11 +235,55 @@ public struct MailMIMEParser: Sendable, Equatable {
             }
         }
 
+        if let html = bestHTML, !inlineImageDataURLsByContentID.isEmpty {
+            bestHTML = rewriteCIDImageSources(in: html, inlineImageDataURLsByContentID: inlineImageDataURLsByContentID)
+        }
+
         let plain = bestPlain ?? (bestHTML.map { stripHTML($0) }) ?? stripHTML(fallback)
         return MailMIMEBodyResult(plainText: plain, htmlText: bestHTML)
     }
 
     // MARK: - Helpers
+
+    private func inlineImageDataURL(from body: Data, header: String) -> String? {
+        guard let contentType = headerValue("Content-Type", in: header)?.split(separator: ";", maxSplits: 1).first else { return nil }
+        let mimeType = contentType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard mimeType.hasPrefix("image/") else { return nil }
+        let transferEncoding = extractTransferEncodingFromHeader(header)
+        let decoded = decodeTransferEncodingWithFallback(body, encoding: transferEncoding)
+        let maxInlineImageBytes = 5 * 1024 * 1024
+        guard !decoded.isEmpty, decoded.count <= maxInlineImageBytes else { return nil }
+        return "data:\(mimeType);base64,\(decoded.base64EncodedString())"
+    }
+
+    private func rewriteCIDImageSources(in html: String, inlineImageDataURLsByContentID: [String: String]) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\bsrc\s*=\s*([\"'])cid:([^\"']+)\1"#, options: [.caseInsensitive]) else {
+            return html
+        }
+        let source = html as NSString
+        var output = html
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: source.length))
+        for match in matches.reversed() where match.numberOfRanges >= 3 {
+            let quote = source.substring(with: match.range(at: 1))
+            let rawCID = source.substring(with: match.range(at: 2))
+            guard let normalizedCID = normalizeContentID(rawCID), let dataURL = inlineImageDataURLsByContentID[normalizedCID] else { continue }
+            let replacement = "src=\(quote)\(dataURL)\(quote)"
+            guard let range = Range(match.range(at: 0), in: output) else { continue }
+            output.replaceSubrange(range, with: replacement)
+        }
+        return output
+    }
+
+    private func normalizeContentID(_ value: String) -> String? {
+        var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("<"), normalized.hasSuffix(">"), normalized.count >= 2 {
+            normalized.removeFirst()
+            normalized.removeLast()
+        }
+        normalized = normalized.removingPercentEncoding ?? normalized
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized.lowercased()
+    }
 
     private func decodeTransferEncodingWithFallback(_ data: Data, encoding: String?) -> Data {
         let enc = encoding?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
