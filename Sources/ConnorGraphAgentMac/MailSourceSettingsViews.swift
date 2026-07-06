@@ -729,6 +729,7 @@ private struct MailMessageDetailPane: View {
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
     @State private var allowRemoteImagesForMessage = false
+    @State private var bodyLoadGate = MailBodyLoadRequestGate()
 
     var body: some View {
         ScrollView {
@@ -778,10 +779,14 @@ private struct MailMessageDetailPane: View {
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
         }
         .task(id: message.id) {
+            let token = bodyLoadGate.begin(messageID: message.id)
             allowRemoteImagesForMessage = false
             bodyWebLayout = .initial
             bodyDisplay = .loading
-            bodyDisplay = await viewModel.loadMailBodyDisplay(for: message.id)
+            let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
+            guard !Task.isCancelled else { return }
+            guard bodyLoadGate.shouldCommit(token) else { return }
+            bodyDisplay = display
         }
     }
 }
