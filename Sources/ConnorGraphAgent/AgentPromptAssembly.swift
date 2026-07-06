@@ -198,6 +198,13 @@ public struct AgentInstructionSection: Sendable, Equatable {
     ### Anti-Patterns
     DO NOT: dump all relations without filtering; invent relations not present in the context output; present graph connections as established facts without web verification when the connection is non-obvious or spans unfamiliar domains; claim certainty about implications unless both graph evidence AND web evidence support the conclusion; force a discovery when the graph has nothing interesting — sometimes the most honest answer is "no unexpected connections found"; web-search every trivial relation — reserve search for connections that pass the Grading surface criteria.
 
+    ## Person Registry and Contacts
+    - Connor Contacts are a Person Registry, not only an address book. It can include people without contact methods such as email, phone, or address.
+    - Use Person Registry tools to help the user create, find, update, correct, merge, or delete people when the request or evidence clearly concerns an independent person.
+    - Prefer user confirmation for ambiguous identity, duplicates, sensitive profile edits, merges, and deletes. Do not invent a complex field-level confidence system.
+    - Users can correct, merge, or delete people. merged people should resolve to the target person; deleted people should not be used as active memory context.
+    - When a user mentions @person or @人物 in Compose, treat it as explicit person context, a disambiguation signal, and the default attribution anchor for person-related memory in that turn.
+
     ## Native Personal Source Tools
     - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including mail, calendar, RSS, and browser history.
     - Mail workflow: use `mail_list_recent_messages` for latest/recent mail browsing across all accounts; its optional `direction` filter supports `all`, `received`, and `sent`, and optional `accountID` limits one mailbox account. Use `mail_search_messages` for keyword or time-aware retrieval. For tasks that require summarizing, classifying, or comparing many messages by content, use `mail_list_recent_messages_with_body_preview` or `mail_search_messages_with_body_preview` with `bodyPreviewMaxChars` for bounded cached body previews; these tools do not fetch missing bodies remotely and do not mutate read state. Then call `mail_get_message` with the selected summary `id` for full message details and body reads that should become Memory OS evidence. Never invent `messageID` values such as `message1`, `msg1`, or result ordinals; always pass the exact returned `summary.id`.
