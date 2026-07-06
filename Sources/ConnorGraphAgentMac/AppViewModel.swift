@@ -395,6 +395,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var calendarSyncMessage: String?
     @Published var contactsBrowserPresentation: NativeContactsBrowserPresentation = .empty
     @Published var contactRecords: [ContactRecord] = []
+    @Published var personProfiles: [PersonProfile] = []
     @Published var selectedContactID: ContactID?
     @Published var isSyncingSystemContacts: Bool = false
     @Published var contactsSyncMessage: String?
@@ -531,7 +532,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var globalSearchPreviewTask: Task<Void, Never>?
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
-    private var contactStore: FileBackedContactSourceStore?
+    private var personProfileStore: SQLitePersonProfileStore?
     private var mailStore: FileBackedMailSourceStore?
     private var mailPreferencesStore: (any MailPreferencesStore)?
     private var mailCacheChangeObserver: NSObjectProtocol?
@@ -2020,7 +2021,9 @@ final class AppViewModel: NSObject, ObservableObject {
             )
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
-            self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
+            self.personProfileStore = try? SQLitePersonProfileStore(databaseURL: storagePaths.applicationSupportDirectory
+                .appendingPathComponent("contacts", isDirectory: true)
+                .appendingPathComponent("person-profiles.sqlite"))
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
@@ -2642,9 +2645,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func reloadContactsBrowserPresentation() {
-        contactsBrowserPresentation = NativeContactsBrowserPresentation.build(records: contactRecords)
+        contactsBrowserPresentation = NativeContactsBrowserPresentation.build(profiles: personProfiles)
+        contactRecords = personProfiles.map(\.contactRecord)
         if let selectedContactID,
-           !contactRecords.contains(where: { $0.id == selectedContactID }) {
+           !personProfiles.contains(where: { $0.id == selectedContactID && $0.isActiveForDefaultContext }) {
             self.selectedContactID = nil
         }
         errorMessage = nil
@@ -2661,8 +2665,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 reloadCalendarBrowserPresentation()
                 scheduleCalendarSearchIndexRefresh()
             }
-            if let records = try await contactStore?.loadRecords() {
-                contactRecords = records
+            if let profiles = try await personProfileStore?.loadProfiles(includeInactive: false) {
+                personProfiles = profiles
                 reloadContactsBrowserPresentation()
             }
             await reloadMailBrowserPresentation()
@@ -2916,11 +2920,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func persistContactRecords() async {
+    private func persistPersonProfiles() async {
         do {
-            try await contactStore?.saveRecords(contactRecords)
+            for profile in personProfiles {
+                _ = try await personProfileStore?.upsert(profile)
+            }
         } catch {
-            errorMessage = "无法保存联系人缓存：\(error.localizedDescription)"
+            errorMessage = "无法保存人物档案：\(error.localizedDescription)"
         }
     }
 
@@ -2961,10 +2967,10 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { @MainActor in
             do {
                 let records = try await ContactsSystemAdapter.fetchSystemContacts()
-                contactRecords = records
+                personProfiles = records.map { PersonProfile(contactRecord: $0) }
                 reloadContactsBrowserPresentation()
-                await persistContactRecords()
-                contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
+                await persistPersonProfiles()
+                contactsSyncMessage = "已同步系统通讯录：\(records.count) 个人物档案"
                 setSettingsMessage(contactsSyncMessage, for: .preferences)
                 errorMessage = nil
             } catch {
