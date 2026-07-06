@@ -51,6 +51,7 @@ public struct MailRuntime: Sendable {
     public var credentialStore: AppMailCredentialStore
     public var preferencesStore: (any MailPreferencesStore)?
     public var smtpClient: any MailSMTPClient
+    public var sentMessageRemoteAppender: any MailSentMessageRemoteAppender
     public var messageComposer: MailMessageComposer
     public var memoryOSFacade: AppMemoryOSFacade?
 
@@ -62,6 +63,7 @@ public struct MailRuntime: Sendable {
         credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         preferencesStore: (any MailPreferencesStore)? = nil,
         smtpClient: any MailSMTPClient = NetworkMailSMTPClient(),
+        sentMessageRemoteAppender: any MailSentMessageRemoteAppender = NetworkMailSentMessageRemoteAppender(),
         messageComposer: MailMessageComposer = MailMessageComposer(),
         memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
@@ -72,6 +74,7 @@ public struct MailRuntime: Sendable {
         self.credentialStore = credentialStore
         self.preferencesStore = preferencesStore
         self.smtpClient = smtpClient
+        self.sentMessageRemoteAppender = sentMessageRemoteAppender
         self.messageComposer = messageComposer
         self.memoryOSFacade = memoryOSFacade
     }
@@ -328,7 +331,8 @@ public struct MailRuntime: Sendable {
             let receipt = MailSendReceipt(draftID: draftID, providerMessageID: response.providerMessageID, sentAt: response.sentAt, envelopeHash: composed.envelopeHash)
             try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: response.providerMessageID, envelopeHash: composed.envelopeHash))
             _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
-            try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
+            let sentMailbox = try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
+            await appendRemoteSentMessageIfPossible(account: account, password: password, draft: draft, receipt: receipt, rawMessage: composed.rawMessage, sentMailbox: sentMailbox, runID: runID, sessionID: sessionID)
             try captureOutboundMemoryEvidence(draft: draft, identity: identity, receipt: receipt, runID: runID, sessionID: sessionID)
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
             return receipt
@@ -356,24 +360,28 @@ public struct MailRuntime: Sendable {
         return MailSendHistory(draft: draft, attempts: attempts, auditRecords: auditRecords)
     }
 
-    private func saveSentMessage(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, messageIDHeader: String) async throws {
+    private func saveSentMessage(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, messageIDHeader: String) async throws -> MailMailbox {
         let mailboxID = MailMailboxID(rawValue: "\(draft.accountID.rawValue)-sent")
         let existingMailboxes = try await cache.listMailboxes(accountID: draft.accountID)
-        if !existingMailboxes.contains(where: { $0.id == mailboxID }) {
-            try await cache.saveMailbox(MailMailbox(
+        let sentMailbox: MailMailbox
+        if let existingSentMailbox = existingMailboxes.first(where: { $0.role == .sent }) {
+            sentMailbox = existingSentMailbox
+        } else {
+            sentMailbox = MailMailbox(
                 id: mailboxID,
                 accountID: draft.accountID,
                 name: "Sent",
                 path: "Sent",
                 role: .sent,
                 status: MailMailboxStatus(messageCount: 0, unreadCount: 0, lastSyncedAt: receipt.sentAt)
-            ))
+            )
+            try await cache.saveMailbox(sentMailbox)
         }
         let messageID = MailMessageID(rawValue: receipt.providerMessageID)
         let summary = MailMessageSummary(
             id: messageID,
             accountID: draft.accountID,
-            mailboxID: mailboxID,
+            mailboxID: sentMailbox.id,
             threadID: draft.inReplyToMessageID.map { MailThreadID(rawValue: $0.rawValue) },
             subject: draft.subject,
             from: identity.address,
@@ -415,6 +423,24 @@ public struct MailRuntime: Sendable {
                 MailCacheChangeNotificationUserInfoKey.reason: MailCacheChangeReason.sentMessageSaved.rawValue
             ]
         )
+        return sentMailbox
+    }
+
+    private func appendRemoteSentMessageIfPossible(account: MailAccount, password: String, draft: MailDraft, receipt: MailSendReceipt, rawMessage: String, sentMailbox: MailMailbox, runID: String?, sessionID: String?) async {
+        guard account.incoming?.protocolKind == .imap else { return }
+        do {
+            _ = try await sentMessageRemoteAppender.appendSentMessage(
+                account: account,
+                password: password,
+                rawMessage: rawMessage,
+                mailboxPath: sentMailbox.path,
+                sentAt: receipt.sentAt
+            )
+            try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: account.id, draftID: draft.id, kind: .stateMutated, riskClass: .mutation, redactedSummary: "Saved sent message to remote mailbox \(sentMailbox.path)", payloadHash: receipt.envelopeHash))
+        } catch {
+            try? await draftStore.recordSendAttempt(MailSendAttempt(draftID: draft.id, status: .failed, providerMessageID: receipt.providerMessageID, envelopeHash: receipt.envelopeHash, errorSummary: "Remote Sent APPEND failed: \(error)"))
+            try? await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: account.id, draftID: draft.id, kind: .stateMutated, riskClass: .mutation, redactedSummary: "Mail sent, but saving to remote Sent mailbox failed: \(error)", payloadHash: receipt.envelopeHash))
+        }
     }
 
     private func captureOutboundMemoryEvidence(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, runID: String?, sessionID: String?) throws {
