@@ -555,6 +555,20 @@ struct MailHTMLBodyLoadState: Equatable {
     }
 }
 
+struct MailHTMLBodyHeightStabilizer: Equatable {
+    var minimumHeight: CGFloat = 200
+    var maximumHeight: CGFloat = 8_000
+    var bottomPadding: CGFloat = 12
+    var significantDelta: CGFloat = 4
+
+    func stabilizedHeight(current: CGFloat, measuredDocumentHeight: CGFloat) -> CGFloat? {
+        let padded = measuredDocumentHeight + bottomPadding
+        let clamped = min(max(padded, minimumHeight), maximumHeight)
+        guard abs(clamped - current) >= significantDelta else { return nil }
+        return clamped
+    }
+}
+
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
