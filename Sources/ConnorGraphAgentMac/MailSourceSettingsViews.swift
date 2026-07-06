@@ -589,6 +589,16 @@ struct MailHTMLBodyLayout: Equatable {
     static let initial = MailHTMLBodyLayout(mode: .inline, height: 200, documentHeight: 200)
 }
 
+struct MailHTMLBodyScrollPolicy: Equatable {
+    var isInternalScrollingEnabled: Bool
+    var forwardsWheelEventsToParent: Bool
+
+    static let pageScrolling = MailHTMLBodyScrollPolicy(
+        isInternalScrollingEnabled: false,
+        forwardsWheelEventsToParent: true
+    )
+}
+
 struct MailHTMLBodyHeightStabilizer: Equatable {
     var minimumHeight: CGFloat = 200
     var inlineHeightLimit: CGFloat = 5_000
@@ -610,23 +620,35 @@ struct MailHTMLBodyHeightStabilizer: Equatable {
     }
 }
 
+private final class MailHTMLPassthroughScrollWebView: WKWebView {
+    var forwardsScrollWheelToParent = false
+
+    override func scrollWheel(with event: NSEvent) {
+        guard forwardsScrollWheelToParent else {
+            super.scrollWheel(with: event)
+            return
+        }
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
-    var isInternalScrollingEnabled: Bool
+    var scrollPolicy: MailHTMLBodyScrollPolicy
     @Binding var layout: MailHTMLBodyLayout
 
     func makeCoordinator() -> Coordinator {
         Coordinator(layout: $layout)
     }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> MailHTMLPassthroughScrollWebView {
         let config = WKWebViewConfiguration()
         // Disable JavaScript for security (email HTML should not execute scripts)
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = false
         config.defaultWebpagePreferences = preferences
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = MailHTMLPassthroughScrollWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
@@ -634,7 +656,7 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {
+    func updateNSView(_ nsView: MailHTMLPassthroughScrollWebView, context: Context) {
         context.coordinator.layout = $layout
         configureScrolling(for: nsView)
         guard context.coordinator.shouldReload(html: htmlContent) else { return }
@@ -642,9 +664,10 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         nsView.loadHTMLString(htmlContent, baseURL: nil)
     }
 
-    private func configureScrolling(for view: WKWebView) {
-        view.enclosingScrollView?.hasVerticalScroller = isInternalScrollingEnabled
-        view.enclosingScrollView?.verticalScrollElasticity = isInternalScrollingEnabled ? .automatic : .none
+    private func configureScrolling(for view: MailHTMLPassthroughScrollWebView) {
+        view.forwardsScrollWheelToParent = scrollPolicy.forwardsWheelEventsToParent
+        view.enclosingScrollView?.hasVerticalScroller = scrollPolicy.isInternalScrollingEnabled
+        view.enclosingScrollView?.verticalScrollElasticity = scrollPolicy.isInternalScrollingEnabled ? .automatic : .none
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
@@ -740,7 +763,7 @@ private struct MailMessageDetailPane: View {
                         }
                         MailHTMLBodyView(
                             htmlContent: sanitized.html,
-                            isInternalScrollingEnabled: false,
+                            scrollPolicy: .pageScrolling,
                             layout: $bodyWebLayout
                         )
                         .frame(height: bodyWebLayout.height)
