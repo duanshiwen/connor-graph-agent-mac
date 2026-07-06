@@ -44,10 +44,13 @@ public struct MailSMTPSendResponse: Sendable, Equatable, Codable {
     }
 }
 
-public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvertible {
+public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvertible, LocalizedError {
     case invalidEndpoint(String)
     case missingRecipients
     case unsupportedSecurity(String)
+    case connectionFailed(String)
+    case startTLSUnavailable(String)
+    case authenticationFailed(String)
     case networkSendNotAvailable(String)
     case smtpRejected(String)
 
@@ -56,10 +59,15 @@ public enum MailSMTPClientError: Error, Equatable, Sendable, CustomStringConvert
         case .invalidEndpoint(let value): "Invalid SMTP endpoint: \(value)"
         case .missingRecipients: "SMTP send requires at least one recipient"
         case .unsupportedSecurity(let value): "Unsupported SMTP security: \(value)"
+        case .connectionFailed(let value): "SMTP connection failed: \(value)"
+        case .startTLSUnavailable(let value): "SMTP STARTTLS unavailable for \(value). Use a provider endpoint that advertises STARTTLS, usually port 587."
+        case .authenticationFailed(let value): "SMTP authentication failed: \(value). Check the account username and provider app password/authorization code."
         case .networkSendNotAvailable(let value): "SMTP network send unavailable: \(value)"
         case .smtpRejected(let value): "SMTP rejected send: \(value)"
         }
     }
+
+    public var errorDescription: String? { description }
 }
 
 public protocol MailSMTPClient: Sendable {
@@ -88,11 +96,24 @@ public actor FakeMailSMTPClient: MailSMTPClient {
     }
 }
 
-/// Commercial SMTP client boundary. The full protocol exchange is intentionally isolated behind
-/// this type so MailRuntime never exposes credentials to LLM/tool JSON. Phase B establishes the
-/// network boundary and validation; Phase C wires it into the send lifecycle.
+/// Commercial SMTP client boundary. The protocol exchange is isolated behind this type so
+/// MailRuntime never exposes credentials to LLM/tool JSON and always sends the approval-checked
+/// raw RFC 5322 payload produced by MailMessageComposer.
 public struct NetworkMailSMTPClient: MailSMTPClient {
-    public init() {}
+    private let connectionFactory: @Sendable (MailServerEndpoint) async throws -> any MailSMTPConnection
+    private let protocolClient: MailSMTPProtocolClient
+
+    public init(
+        protocolClient: MailSMTPProtocolClient = MailSMTPProtocolClient(),
+        connectionFactory: @escaping @Sendable (MailServerEndpoint) async throws -> any MailSMTPConnection = { endpoint in
+            let connection = MailSMTPStreamConnection(host: endpoint.host, port: endpoint.port)
+            try await connection.connect(timeout: 30)
+            return connection
+        }
+    ) {
+        self.protocolClient = protocolClient
+        self.connectionFactory = connectionFactory
+    }
 
     public func send(_ request: MailSMTPSendRequest) async throws -> MailSMTPSendResponse {
         guard request.endpoint.protocolKind == .smtp else {
@@ -102,12 +123,11 @@ public struct NetworkMailSMTPClient: MailSMTPClient {
             throw MailSMTPClientError.invalidEndpoint("\(request.endpoint.host):\(request.endpoint.port)")
         }
         guard !request.recipients.isEmpty else { throw MailSMTPClientError.missingRecipients }
-        guard request.endpoint.security == .tls || request.endpoint.security == .startTLS else {
-            throw MailSMTPClientError.unsupportedSecurity(request.endpoint.security.rawValue)
+        guard request.endpoint.security == .startTLS else {
+            throw MailSMTPClientError.unsupportedSecurity("\(request.endpoint.security.rawValue); use SMTP STARTTLS on port 587")
         }
 
-        // Network.framework SMTP exchange will be completed in the runtime integration phase with
-        // fake-server protocol tests. Until then, this production client refuses to claim a send.
-        throw MailSMTPClientError.networkSendNotAvailable("SMTP protocol exchange is not enabled until MailRuntime wires the tested transport path")
+        let connection = try await connectionFactory(request.endpoint)
+        return try await protocolClient.send(request, over: connection)
     }
 }
