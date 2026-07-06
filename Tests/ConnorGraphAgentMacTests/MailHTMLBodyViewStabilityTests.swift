@@ -1,4 +1,5 @@
 import Testing
+import ConnorGraphCore
 @testable import ConnorGraphAgentMac
 
 @Suite("Mail HTML Body View Stability Tests")
@@ -58,5 +59,14 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(layout.mode == .inline)
         #expect(abs(layout.height - stabilizer.inlineHeightLimit) < 0.001)
         #expect(abs(layout.documentHeight - boundaryHeight) < 0.001)
+    }
+
+    @Test func mailBodyLoadGateRejectsStaleMessageResult() {
+        var gate = MailBodyLoadRequestGate()
+        let first = gate.begin(messageID: MailMessageID(rawValue: "message-a"))
+        let second = gate.begin(messageID: MailMessageID(rawValue: "message-b"))
+
+        #expect(!gate.shouldCommit(first))
+        #expect(gate.shouldCommit(second))
     }
 }
