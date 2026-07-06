@@ -1660,6 +1660,49 @@ private struct MailDirectionFilterChips: View {
     }
 }
 
+struct MailMessageDirectionPresentation: Equatable {
+    var label: String
+    var systemImage: String
+    var emphasizesOutbound: Bool
+
+    static func resolve(message: MailMessageSummary, mailbox: MailMailbox?) -> MailMessageDirectionPresentation {
+        if let role = mailbox?.role {
+            return presentation(for: role)
+        }
+        return fallback(forMessageID: message.id.rawValue)
+    }
+
+    private static func presentation(for role: MailMailboxRole) -> MailMessageDirectionPresentation {
+        switch role {
+        case .inbox:
+            return MailMessageDirectionPresentation(label: "收到", systemImage: "tray.fill", emphasizesOutbound: false)
+        case .sent:
+            return MailMessageDirectionPresentation(label: "已发送", systemImage: "paperplane.fill", emphasizesOutbound: true)
+        case .drafts:
+            return MailMessageDirectionPresentation(label: "草稿", systemImage: "doc.text", emphasizesOutbound: false)
+        case .archive:
+            return MailMessageDirectionPresentation(label: "归档", systemImage: "archivebox", emphasizesOutbound: false)
+        case .trash:
+            return MailMessageDirectionPresentation(label: "已删除", systemImage: "trash", emphasizesOutbound: false)
+        case .spam:
+            return MailMessageDirectionPresentation(label: "垃圾邮件", systemImage: "exclamationmark.triangle", emphasizesOutbound: false)
+        case .custom:
+            return MailMessageDirectionPresentation(label: "邮件", systemImage: "envelope", emphasizesOutbound: false)
+        }
+    }
+
+    private static func fallback(forMessageID rawValue: String) -> MailMessageDirectionPresentation {
+        let normalized = rawValue.lowercased()
+        if normalized.contains("sent") || normalized.contains("已发送") {
+            return presentation(for: .sent)
+        }
+        if normalized.contains("inbox") || normalized.contains("收件") {
+            return presentation(for: .inbox)
+        }
+        return MailMessageDirectionPresentation(label: "邮件", systemImage: "envelope", emphasizesOutbound: false)
+    }
+}
+
 struct MailMessageListRowPresentation: Equatable {
     var subjectText: String
     var senderText: String
@@ -1667,6 +1710,7 @@ struct MailMessageListRowPresentation: Equatable {
     var snippetText: String
     var directionLabelText: String?
     var directionLabelSystemImage: String?
+    var directionEmphasizesOutbound: Bool
 
     init(message: MailMessageSummary, account: MailAccount?, mailbox: MailMailbox?) {
         subjectText = message.subject.isEmpty ? "无主题" : message.subject
@@ -1678,17 +1722,10 @@ struct MailMessageListRowPresentation: Equatable {
             .compactMap { $0 }
             .joined(separator: " · ")
         snippetText = message.snippet
-        switch mailbox?.role {
-        case .sent:
-            directionLabelText = "已发送"
-            directionLabelSystemImage = "paperplane.fill"
-        case .some:
-            directionLabelText = "收件"
-            directionLabelSystemImage = "tray.fill"
-        case nil:
-            directionLabelText = nil
-            directionLabelSystemImage = nil
-        }
+        let direction = MailMessageDirectionPresentation.resolve(message: message, mailbox: mailbox)
+        directionLabelText = direction.label
+        directionLabelSystemImage = direction.systemImage
+        directionEmphasizesOutbound = direction.emphasizesOutbound
     }
 }
 
@@ -1704,11 +1741,11 @@ private struct MailMessageListRow: View {
     }
 
     private var mailDirectionBadgeForeground: Color {
-        mailbox?.role == .sent ? .accentColor : .secondary
+        presentation.directionEmphasizesOutbound ? .accentColor : .secondary
     }
 
     private var mailDirectionBadgeBackground: Color {
-        mailbox?.role == .sent ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.12)
+        presentation.directionEmphasizesOutbound ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.12)
     }
 
     var body: some View {
@@ -1720,6 +1757,16 @@ private struct MailMessageListRow: View {
                     .padding(.top, 7)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
+                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
+                            Label(label, systemImage: image)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(mailDirectionBadgeForeground)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
+                                .lineLimit(1)
+                        }
                         Text(presentation.subjectText)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
                             .lineLimit(1)
@@ -1732,17 +1779,6 @@ private struct MailMessageListRow: View {
                             Image(systemName: "flag.fill")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.orange)
-                        }
-                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
-                            Spacer(minLength: 4)
-                            Label(label, systemImage: image)
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .labelStyle(.titleAndIcon)
-                                .foregroundStyle(mailDirectionBadgeForeground)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
-                                .lineLimit(1)
                         }
                     }
                     Text(presentation.senderText)

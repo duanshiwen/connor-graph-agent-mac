@@ -23,6 +23,11 @@ struct MailRuntimeSMTPSendTests {
         try credentialMemory.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
         let smtp = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "smtp-server-id"))
         let draftRepository = InMemoryMailDraftRepository()
+        let notifications = MailCacheChangeNotificationRecorder()
+        let observer = NotificationCenter.default.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: nil) { notification in
+            notifications.record(notification)
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
         let runtime = MailRuntime(
             repository: InMemoryMailSourceRepository(accounts: [account]),
             cache: InMemoryMailSourceCache(),
@@ -46,6 +51,10 @@ struct MailRuntimeSMTPSendTests {
         #expect(try await draftRepository.draft(id: draft.id)?.status == .sent)
         let attempts = try await draftRepository.sendAttempts(draftID: draft.id)
         #expect(attempts.contains { $0.status == .sent && $0.providerMessageID == "smtp-server-id" })
+        let notification = try #require(notifications.notifications.first)
+        #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.accountID] as? String == accountID.rawValue)
+        #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.messageID] as? String == "smtp-server-id")
+        #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.reason] as? String == MailCacheChangeReason.sentMessageSaved.rawValue)
     }
 
     @Test func approvedSendFailsWhenCredentialMissingAndDoesNotCallSMTP() async throws {
@@ -78,6 +87,16 @@ struct MailRuntimeSMTPSendTests {
     }
 }
 
+
+private final class MailCacheChangeNotificationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var notifications: [Notification] = []
+
+    func record(_ notification: Notification) {
+        lock.lock(); defer { lock.unlock() }
+        notifications.append(notification)
+    }
+}
 
 private final class MailRuntimeSMTPMemoryCredentialStore: CredentialStore, @unchecked Sendable {
     private var secrets: [String: String] = [:]

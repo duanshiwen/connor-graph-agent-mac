@@ -1946,6 +1946,58 @@ struct BlockingIMAPClient {
         return uids
     }
 
+    func appendMessage(usernames: [String], password: String, mailboxPath: String, rawMessage: String, internalDate: Date) throws {
+        var readStream: Unmanaged<CFReadStream>?
+        var writeStream: Unmanaged<CFWriteStream>?
+        CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
+        guard let readStream, let writeStream else { throw IMAPError.connectionFailed("Cannot create socket streams for \(host):\(port)") }
+        let input = readStream.takeRetainedValue() as InputStream
+        let output = writeStream.takeRetainedValue() as OutputStream
+        input.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        output.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        let sslSettings: [String: Any] = [
+            kCFStreamSSLPeerName as String: host,
+            kCFStreamSSLValidatesCertificateChain as String: true
+        ]
+        let sslSettingsKey = Stream.PropertyKey(rawValue: kCFStreamPropertySSLSettings as String)
+        input.setProperty(sslSettings, forKey: sslSettingsKey)
+        output.setProperty(sslSettings, forKey: sslSettingsKey)
+        input.open()
+        output.open()
+        defer {
+            input.close()
+            output.close()
+        }
+
+        _ = try readUntilLine(input: input, timeout: 20)
+        try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+
+        let normalizedMessage = rawMessage.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
+        let messageData = Data(normalizedMessage.utf8)
+        let tag = nextTag()
+        let date = Self.imapAppendDateFormatter.string(from: internalDate)
+        try write("\(tag) APPEND \"\(escape(mailboxPath))\" (\\Seen) \"\(date)\" {\(messageData.count)}\r\n", output: output)
+        let continuation = try readUntilLine(input: input, timeout: 30)
+        guard continuation.contains("+") else {
+            throw IMAPError.protocolError(continuation.lastLine ?? "APPEND continuation not received")
+        }
+        try write(messageData, output: output)
+        try write("\r\n", output: output)
+        let response = try readUntilTagged(tag: tag, input: input, timeout: 60)
+        guard response.contains("\(tag) OK") else {
+            throw IMAPError.protocolError(response.lastLine ?? "APPEND \(mailboxPath) failed")
+        }
+        try logout(input: input, output: output)
+    }
+
+    private static let imapAppendDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "dd-MMM-yyyy HH:mm:ss Z"
+        return formatter
+    }()
+
     private func logout(input: InputStream, output: OutputStream) throws {
         let tag = nextTag()
         try write("\(tag) LOGOUT\r\n", output: output)
@@ -1959,7 +2011,11 @@ struct BlockingIMAPClient {
     }
 
     private func write(_ string: String, output: OutputStream) throws {
-        let bytes = Array(string.utf8)
+        try write(Data(string.utf8), output: output)
+    }
+
+    private func write(_ data: Data, output: OutputStream) throws {
+        let bytes = [UInt8](data)
         let written = bytes.withUnsafeBufferPointer { pointer in
             output.write(pointer.baseAddress!, maxLength: bytes.count)
         }
