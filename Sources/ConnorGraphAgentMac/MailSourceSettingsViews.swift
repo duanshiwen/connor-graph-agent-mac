@@ -357,12 +357,8 @@ struct MailSourceDetailView: View {
     var body: some View {
         Group {
             if let selectedMessage {
-                VStack(alignment: .leading, spacing: 0) {
-                    MailBrowserTopBar(onAdd: { viewModel.presentAddMailAccountSheet() })
-                    Divider().opacity(0.6)
-                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
+                MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 MailDetailEmptyState(onAdd: { viewModel.presentAddMailAccountSheet() })
             }
@@ -518,30 +514,6 @@ private struct MailDetailEmptyState: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(AppShellLayout.spaceXL)
-    }
-}
-
-private struct MailBrowserTopBar: View {
-    var onAdd: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text("邮件系统")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("账户、文件夹和邮件详情由 Connor 本地治理；读取不会自动改变已读状态。")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: AppShellLayout.spaceM)
-            Button(action: onAdd) {
-                Label("添加邮件帐户", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-        }
-        .padding(.horizontal, AppShellLayout.spaceXL)
-        .padding(.vertical, AppShellLayout.spaceL)
     }
 }
 
@@ -799,22 +771,6 @@ private struct MailMessageDetailPane: View {
             guard bodyLoadGate.shouldCommit(token) else { return }
             bodyDisplay = display
         }
-    }
-}
-
-private struct MailLongHTMLBodyBanner: View {
-    var body: some View {
-        HStack(spacing: AppShellLayout.spaceS) {
-            Image(systemName: "scroll")
-                .foregroundStyle(.secondary)
-            Text("这封邮件正文较长，可在正文区域内继续滚动。")
-                .font(AgentChatTypography.micro)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: AppShellLayout.spaceS)
-        }
-        .padding(AppShellLayout.spaceS)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityLabel("长邮件正文提示")
     }
 }
 
