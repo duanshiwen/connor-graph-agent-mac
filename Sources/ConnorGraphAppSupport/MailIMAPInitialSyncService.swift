@@ -689,6 +689,7 @@ struct BlockingIMAPClient {
         var rawHeaderData: Data?  // Raw RFC 822 headers from BODY.PEEK[HEADER.FIELDS]
         var snippet: String
         var rawBodyData: Data?
+        var serverReceivedDate: Date? = nil
         var fallbackSequenceDate: Date
 
         func detail(accountID: MailAccountID, mailboxID: MailMailboxID, fallbackRecipient: MailAddress, remoteMailbox: RemoteIMAPMailbox? = nil) -> MailMessageDetail {
@@ -717,9 +718,13 @@ struct BlockingIMAPClient {
             // Subject/From: prefer raw RFC 822 headers (proper RFC 2047 decoding)
             let subject = rawHeaders.subject?.nilIfEmpty ?? envHeaders.subject?.nilIfEmpty ?? "（无主题）"
             let from = MailAddress.parse(rawHeaders.from) ?? MailAddress.parse(envHeaders.from) ?? MailAddress(email: "unknown@example.com")
-            // To/Cc/Date: use ENVELOPE data (structured, already parsed)
+            // To/Cc: use ENVELOPE data (structured, already parsed).
+            // Date: prefer IMAP INTERNALDATE because it represents the server-side
+            // arrival/received timestamp used by mail clients for inbox ordering. Header
+            // Date may be absent, malformed, or authored by the sender; only use it as a
+            // fallback before the final sequence-time fallback.
             let to = MailAddress.parseList(envHeaders.to)
-            let date = envHeaders.date ?? fallbackSequenceDate
+            let date = serverReceivedDate ?? envHeaders.date ?? fallbackSequenceDate
             // Charset extraction: try rawHeaderData with the same multi-encoding fallback
             let charset: String? = {
                 guard let rawHeaderData else { return ParsedHeaders.extractCharset(from: header) }
@@ -1146,8 +1151,9 @@ struct BlockingIMAPClient {
             let batch = Array(newUIDs[batchStart..<batchEnd])
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
-            // Incremental sync: fetch only headers — no body text
-            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type)])\r\n", output: output)
+            // Incremental sync: fetch only headers — no body text. Include INTERNALDATE
+            // so local list ordering follows server received time, not cache sync time.
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS INTERNALDATE ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type)])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
             let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
             allMessages.append(contentsOf: batchMessages)
@@ -1204,8 +1210,9 @@ struct BlockingIMAPClient {
         for batch in uidChunks {
             let uidRange = "\(batch.first!):\(batch.last!)"
             let fetchTag = nextTag()
-            // Fetch only envelope and key headers — no body text
-            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type)])\r\n", output: output)
+            // Fetch only envelope and key headers — no body text. Include INTERNALDATE
+            // so local list ordering follows server received time, not cache sync time.
+            try write("\(fetchTag) UID FETCH \(uidRange) (UID FLAGS INTERNALDATE ENVELOPE BODY.PEEK[HEADER.FIELDS (Subject From Content-Type)])\r\n", output: output)
             let (fetchResponse, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 120)
             let batchMessages = parseFetchedMessages(fetchResponse, rawData: fetchRaw)
             allMessages.append(contentsOf: batchMessages)
@@ -1227,7 +1234,8 @@ struct BlockingIMAPClient {
             let flags = chunk.firstString(matching: #"FLAGS\s+\(([^)]*)\)"#) ?? ""
             let header = extractHeader(from: chunk)
             let body = extractBody(from: chunk, after: header)
-            return FetchedMessage(uid: uid, flags: flags, header: header, rawHeaderData: nil, snippet: body, rawBodyData: nil, fallbackSequenceDate: Date())
+            let serverReceivedDate = Self.parseIMAPInternalDate(in: chunk)
+            return FetchedMessage(uid: uid, flags: flags, header: header, rawHeaderData: nil, snippet: body, rawBodyData: nil, serverReceivedDate: serverReceivedDate, fallbackSequenceDate: serverReceivedDate ?? Date())
         }.sorted { (Int($0.uid) ?? 0) > (Int($1.uid) ?? 0) }
     }
 
@@ -1271,6 +1279,9 @@ struct BlockingIMAPClient {
                     }
                     flags = f
                 }
+
+                let fetchPrefix = String(decoding: bytes[i..<min(i + 500, bytes.count)], as: Unicode.UTF8.self)
+                let serverReceivedDate = Self.parseIMAPInternalDate(in: fetchPrefix)
 
                 // Find ENVELOPE and extract subject, from, to, cc, date
                 var subject = ""
@@ -1423,7 +1434,9 @@ struct BlockingIMAPClient {
                 results.append(FetchedMessage(
                     uid: uid, flags: flags, header: headerString, rawHeaderData: rawHeaderData,
                     snippet: snippet,
-                    rawBodyData: bodyData, fallbackSequenceDate: envelopeDate ?? Date()
+                    rawBodyData: bodyData,
+                    serverReceivedDate: serverReceivedDate,
+                    fallbackSequenceDate: serverReceivedDate ?? envelopeDate ?? Date()
                 ))
 
                 i = fetchEndPos
@@ -1589,7 +1602,16 @@ struct BlockingIMAPClient {
 
     /// Parse IMAP date string: "dd-Mon-yyyy HH:mm:ss +HHMM"
     private func parseIMAPDate(_ s: String) -> Date? {
-        let cleaned = unquoteIMAP(s)
+        Self.parseIMAPDateString(unquoteIMAP(s))
+    }
+
+    static func parseIMAPInternalDate(in fetchResponse: String) -> Date? {
+        guard let value = fetchResponse.firstString(matching: #"INTERNALDATE\s+\"([^\"]+)\""#) else { return nil }
+        return parseIMAPDateString(value)
+    }
+
+    private static func parseIMAPDateString(_ value: String) -> Date? {
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty && cleaned != "NIL" else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -1785,7 +1807,7 @@ struct BlockingIMAPClient {
 
         // Prefer full raw MIME so part-level headers and transfer encodings remain intact.
         var fetchTag = nextTag()
-        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[])\r\n", output: output)
+        try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS INTERNALDATE BODY.PEEK[])\r\n", output: output)
         var (_, fetchRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
         var fullMessageData = extractLiteral(after: "BODY[]", in: fetchRaw)
         var splitMessage = fullMessageData.flatMap(splitFullMessage)
@@ -1793,7 +1815,7 @@ struct BlockingIMAPClient {
         if splitMessage == nil {
             // Compatibility fallback: some servers/proxies may reject full-message literals.
             fetchTag = nextTag()
-            try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
+            try write("\(fetchTag) UID FETCH \(uid) (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])\r\n", output: output)
             let (_, fallbackRaw) = try readUntilTaggedRaw(tag: fetchTag, input: input, timeout: 60)
             fetchRaw = fallbackRaw
             let headerData = extractLiteral(after: "BODY[HEADER]", in: fetchRaw)
@@ -1817,7 +1839,8 @@ struct BlockingIMAPClient {
         let from = MailAddress.parse(unfolded.headerValue("From")?.decodeRFC2047()) ?? MailAddress(email: "unknown@example.com")
         let to = MailAddress.parseList(unfolded.headerValue("To")?.decodeRFC2047())
         let cc = MailAddress.parseList(unfolded.headerValue("Cc")?.decodeRFC2047())
-        let date = Self.parseDate(unfolded.headerValue("Date")) ?? Date()
+        let serverReceivedDate = Self.parseIMAPInternalDate(in: String(decoding: fetchRaw.prefix(500), as: Unicode.UTF8.self))
+        let date = serverReceivedDate ?? Self.parseDate(unfolded.headerValue("Date")) ?? Date()
         let msgID = unfolded.headerValue("Message-ID")
         let ctHeader = unfolded.headerValue("Content-Type") ?? ""
         let cteHeader = unfolded.headerValue("Content-Transfer-Encoding") ?? ""
