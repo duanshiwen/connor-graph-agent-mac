@@ -555,6 +555,27 @@ struct MailHTMLBodyLoadState: Equatable {
     }
 }
 
+struct MailBodyLoadToken: Equatable {
+    var messageID: MailMessageID
+    var generation: Int
+}
+
+struct MailBodyLoadRequestGate: Equatable {
+    private(set) var activeToken: MailBodyLoadToken?
+    private var nextGeneration = 0
+
+    mutating func begin(messageID: MailMessageID) -> MailBodyLoadToken {
+        nextGeneration += 1
+        let token = MailBodyLoadToken(messageID: messageID, generation: nextGeneration)
+        activeToken = token
+        return token
+    }
+
+    func shouldCommit(_ token: MailBodyLoadToken) -> Bool {
+        activeToken == token
+    }
+}
+
 struct MailHTMLBodyLayout: Equatable {
     enum Mode: Equatable {
         case inline
