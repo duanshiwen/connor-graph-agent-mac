@@ -214,10 +214,35 @@ struct MailSettingsSectionTests {
         let receivedRow = MailMessageListRowPresentation(message: receivedMessage, account: account, mailbox: inbox)
         let sentRow = MailMessageListRowPresentation(message: sentMessage, account: account, mailbox: sent)
 
-        #expect(receivedRow.directionLabelText == "收件")
+        #expect(receivedRow.directionLabelText == "收到")
         #expect(receivedRow.directionLabelSystemImage == "tray.fill")
         #expect(sentRow.directionLabelText == "已发送")
         #expect(sentRow.directionLabelSystemImage == "paperplane.fill")
+    }
+
+    @Test func mailMessageListPresentationFallsBackToMessageIDWhenMailboxIsMissing() {
+        let account = MailAccount(id: MailAccountID(rawValue: "shiwen@example.com"), provider: .genericIMAPSMTP, displayName: "诗闻邮箱", identities: [])
+        let receivedMessage = MailMessageSummary(id: MailMessageID(rawValue: "shiwen@example.com-INBOX-44"), accountID: account.id, mailboxID: MailMailboxID(rawValue: "missing-inbox"), subject: "收到", from: MailAddress(email: "sender@example.com"), to: [], snippet: "摘要")
+        let sentMessage = MailMessageSummary(id: MailMessageID(rawValue: "shiwen@example.com-Sent-44"), accountID: account.id, mailboxID: MailMailboxID(rawValue: "missing-sent"), subject: "发出", from: MailAddress(email: "shiwen@example.com"), to: [], snippet: "摘要")
+
+        let receivedRow = MailMessageListRowPresentation(message: receivedMessage, account: account, mailbox: nil)
+        let sentRow = MailMessageListRowPresentation(message: sentMessage, account: account, mailbox: nil)
+
+        #expect(receivedRow.directionLabelText == "收到")
+        #expect(receivedRow.directionLabelSystemImage == "tray.fill")
+        #expect(sentRow.directionLabelText == "已发送")
+        #expect(sentRow.directionLabelSystemImage == "paperplane.fill")
+    }
+
+    @Test func mailMessageListPresentationDoesNotMislabelCustomMailboxAsReceived() {
+        let account = MailAccount(id: MailAccountID(rawValue: "shiwen@example.com"), provider: .genericIMAPSMTP, displayName: "诗闻邮箱", identities: [])
+        let custom = MailMailbox(id: MailMailboxID(rawValue: "custom"), accountID: account.id, name: "旅行", path: "Travel", role: .custom)
+        let message = MailMessageSummary(id: MailMessageID(rawValue: "custom-message"), accountID: account.id, mailboxID: custom.id, subject: "旅行", from: MailAddress(email: "sender@example.com"), to: [], snippet: "摘要")
+
+        let row = MailMessageListRowPresentation(message: message, account: account, mailbox: custom)
+
+        #expect(row.directionLabelText == "邮件")
+        #expect(row.directionLabelSystemImage == "envelope")
     }
 
     @Test func mailBrowserPresentationReturnsMessagesNewestFirst() {
