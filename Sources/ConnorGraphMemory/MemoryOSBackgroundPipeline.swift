@@ -216,6 +216,17 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Other named or described people use memory_os_l2_update_entities, not the current_user tool.
         - If person identity is ambiguous, do not write it as a stable person entity. Report ambiguity as a warning instead.
 
+        Person Registry identity model:
+        - Connor Contacts are a Person Registry. A person does not need contact methods such as email, phone, address, or social account to be a useful person anchor.
+        - For other people, create or update a person L2 entity only when evidence names or describes a named or described independent person likely to be used again.
+        - Do not create a person entity for incidental noun phrases, vague roles, organizations, projects, assistant guesses, or one-off mentions without future retrieval value.
+        - @person and @人物 mentions are a strong identity anchor for the referenced person in that turn.
+
+        Person governance events:
+        - If evidence says person A was merged into person B, preserve the merged into identity/governance fact and route future active context to B.
+        - If evidence says there is a deleted person, preserve that the person should be not active retrieval context and should not be used as active LLM context.
+        - Merge/delete governance should not erase historical evidence; it changes active use and attribution.
+
         Person feature extraction policy:
         - Extract explicitly evidenced current-user and other-person features when they are useful future operational memory: preference, dislike, habit, goal, stable_trait, communication_preference, knowledge_background, interaction_guidance, personal_context, constraint.
         - Current-user profile_preference facts: use memory_os_update_current_user_profile with factType = profile_preference.
