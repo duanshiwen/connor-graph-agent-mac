@@ -358,7 +358,7 @@ struct MailSourceDetailView: View {
         Group {
             if let selectedMessage {
                 MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 MailDetailEmptyState(onAdd: { viewModel.presentAddMailAccountSheet() })
             }
@@ -759,8 +759,10 @@ private struct MailMessageDetailPane: View {
                 }
             }
             .padding(AppShellLayout.spaceXL)
-            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
             allowRemoteImagesForMessage = false
