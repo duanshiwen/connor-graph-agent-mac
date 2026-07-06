@@ -545,6 +545,16 @@ private struct MailBrowserTopBar: View {
     }
 }
 
+struct MailHTMLBodyLoadState: Equatable {
+    private(set) var lastLoadedHTML: String?
+
+    mutating func shouldReload(html: String) -> Bool {
+        guard lastLoadedHTML != html else { return false }
+        lastLoadedHTML = html
+        return true
+    }
+}
+
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
