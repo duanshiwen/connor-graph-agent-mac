@@ -598,20 +598,11 @@ struct MailHTMLBodyHeightStabilizer: Equatable {
 
     func stabilizedLayout(current: MailHTMLBodyLayout, measuredDocumentHeight: CGFloat) -> MailHTMLBodyLayout? {
         let padded = measuredDocumentHeight + bottomPadding
-        let next: MailHTMLBodyLayout
-        if padded > inlineHeightLimit {
-            next = MailHTMLBodyLayout(
-                mode: .scrollable,
-                height: scrollableViewportHeight,
-                documentHeight: measuredDocumentHeight
-            )
-        } else {
-            next = MailHTMLBodyLayout(
-                mode: .inline,
-                height: max(padded, minimumHeight),
-                documentHeight: measuredDocumentHeight
-            )
-        }
+        let next = MailHTMLBodyLayout(
+            mode: .inline,
+            height: max(padded, minimumHeight),
+            documentHeight: measuredDocumentHeight
+        )
         guard next.mode != current.mode
             || abs(next.height - current.height) >= significantDelta
             || abs(next.documentHeight - current.documentHeight) >= significantDelta else { return nil }
@@ -747,12 +738,9 @@ private struct MailMessageDetailPane: View {
                                 allowRemoteImagesForMessage = true
                             }
                         }
-                        if bodyWebLayout.mode == .scrollable {
-                            MailLongHTMLBodyBanner()
-                        }
                         MailHTMLBodyView(
                             htmlContent: sanitized.html,
-                            isInternalScrollingEnabled: bodyWebLayout.mode == .scrollable,
+                            isInternalScrollingEnabled: false,
                             layout: $bodyWebLayout
                         )
                         .frame(height: bodyWebLayout.height)
