@@ -41,7 +41,6 @@ let package = Package(
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
             linkerSettings: [
-                .linkedFramework("Security"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),
                 .linkedLibrary("sqlite3")

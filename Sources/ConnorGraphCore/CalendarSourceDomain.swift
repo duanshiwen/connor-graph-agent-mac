@@ -107,22 +107,15 @@ public struct CalendarCredentialBinding: Codable, Sendable, Equatable, Hashable 
         self.authMode = authMode
     }
 
-    @available(*, deprecated, renamed: "init(credentialNamespace:accountName:authMode:)")
-    public init(keychainService: String, accountName: String, authMode: CalendarSourceAuthMode) {
-        self.init(credentialNamespace: keychainService, accountName: accountName, authMode: authMode)
-    }
-
     private enum CodingKeys: String, CodingKey {
         case credentialNamespace
-        case keychainService
         case accountName
         case authMode
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        credentialNamespace = try container.decodeIfPresent(String.self, forKey: .credentialNamespace)
-            ?? container.decode(String.self, forKey: .keychainService)
+        credentialNamespace = try container.decode(String.self, forKey: .credentialNamespace)
         accountName = try container.decode(String.self, forKey: .accountName)
         authMode = try container.decode(CalendarSourceAuthMode.self, forKey: .authMode)
     }

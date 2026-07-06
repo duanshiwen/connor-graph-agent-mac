@@ -318,7 +318,7 @@ public struct MailRuntime: Sendable {
         do {
             let response = try await smtpClient.send(MailSMTPSendRequest(
                 endpoint: endpoint,
-                username: binding.accountName,
+                username: Self.smtpAuthenticationUsername(from: binding.accountName, fallback: identity.address.email),
                 password: password,
                 from: identity.address,
                 recipients: composed.envelopeRecipients,
@@ -337,6 +337,16 @@ public struct MailRuntime: Sendable {
             try? await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .failed, envelopeHash: composed.envelopeHash, errorSummary: String(describing: error)))
             throw error
         }
+    }
+
+    static func smtpAuthenticationUsername(from credentialAccountName: String, fallback: String) -> String {
+        let trimmed = credentialAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if candidate.contains("@") {
+            return candidate.lowercased()
+        }
+        let fallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? trimmed : fallback.lowercased()
     }
 
     public func sendHistory(draftID: MailDraftID) async throws -> MailSendHistory {

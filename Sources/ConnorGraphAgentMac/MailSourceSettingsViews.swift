@@ -257,7 +257,7 @@ struct SettingsMailSection: View {
         SettingsGroup(title: "协议与能力") {
             SettingsValueRow(title: "收件协议", value: "IMAP over TLS")
             Divider()
-            SettingsValueRow(title: "发件协议", value: "SMTP STARTTLS / TLS")
+            SettingsValueRow(title: "发件协议", value: "SMTP STARTTLS 587（真实发送）；隐式 TLS 465 暂未启用")
             Divider()
             SettingsValueRow(title: "支持账户", value: "iCloud、QQ、网易、自定义 IMAP/SMTP")
             Divider()
@@ -831,8 +831,14 @@ struct AddMailAccountSheet: View {
                 }
 
                 MailAccountSetupRow("授权凭据", labelWidth: Layout.labelColumnWidth) {
-                    SecureField("授权码 / App Password", text: $credential)
-                        .textFieldStyle(.roundedBorder)
+                    VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                        SecureField("授权码 / App Password", text: $credential)
+                            .textFieldStyle(.roundedBorder)
+                        Text("请使用服务商生成的授权码 / App Password；QQ、网易等通常不能使用网页登录密码。")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
             }
@@ -861,11 +867,17 @@ struct AddMailAccountSheet: View {
                 }
 
                 MailAccountSetupRow("发件端口", labelWidth: Layout.labelColumnWidth) {
-                    TextField("587", value: $outgoingPort, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: Layout.portFieldWidth, alignment: .leading)
-                        .disabled(!isManualPreset)
-                        .opacity(isManualPreset ? 1 : 0.68)
+                    VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                        TextField("587", value: $outgoingPort, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: Layout.portFieldWidth, alignment: .leading)
+                            .disabled(!isManualPreset)
+                            .opacity(isManualPreset ? 1 : 0.68)
+                        Text("发送通道目前使用 SMTP STARTTLS，推荐端口 587；465 隐式 TLS 会在发送时提示暂未支持。")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
