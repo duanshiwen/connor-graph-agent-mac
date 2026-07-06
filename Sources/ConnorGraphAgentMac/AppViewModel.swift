@@ -534,6 +534,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var contactStore: FileBackedContactSourceStore?
     private var mailStore: FileBackedMailSourceStore?
     private var mailPreferencesStore: (any MailPreferencesStore)?
+    private var mailCacheChangeObserver: NSObjectProtocol?
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -2060,6 +2061,11 @@ final class AppViewModel: NSObject, ObservableObject {
             guard let self else { return }
             self.recordBrowserWebViewEviction(key: key, webView: webView, metadata: metadata)
         }
+        mailCacheChangeObserver = NotificationCenter.default.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                await self?.reloadMailBrowserPresentation()
+            }
+        }
         if let repository {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
                 store: repository.store,
@@ -2128,6 +2134,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func shutdownRuntimeResources() {
+        if let mailCacheChangeObserver {
+            NotificationCenter.default.removeObserver(mailCacheChangeObserver)
+            self.mailCacheChangeObserver = nil
+        }
         stopTaskSchedulerTimer()
         globalSearchPreviewTask?.cancel()
         globalSearchPreviewTask = nil
