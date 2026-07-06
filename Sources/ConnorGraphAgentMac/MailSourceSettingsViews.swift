@@ -548,6 +548,11 @@ private struct MailBrowserTopBar: View {
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
+    @Binding var measuredHeight: CGFloat
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(measuredHeight: $measuredHeight)
+    }
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -556,14 +561,54 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         preferences.allowsContentJavaScript = false
         config.defaultWebpagePreferences = preferences
         let view = WKWebView(frame: .zero, configuration: config)
+        view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        context.coordinator.measuredHeight = $measuredHeight
+        context.coordinator.lastHTML = htmlContent
         nsView.loadHTMLString(htmlContent, baseURL: nil)
         nsView.isHidden = false
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var measuredHeight: Binding<CGFloat>
+        var lastHTML: String = ""
+
+        init(measuredHeight: Binding<CGFloat>) {
+            self.measuredHeight = measuredHeight
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            let script = """
+            Math.max(
+                document.body ? document.body.scrollHeight : 0,
+                document.documentElement ? document.documentElement.scrollHeight : 0,
+                200
+            )
+            """
+            webView.evaluateJavaScript(script) { [weak self] value, _ in
+                guard let self else { return }
+                let numericHeight: CGFloat?
+                if let doubleValue = value as? Double {
+                    numericHeight = CGFloat(doubleValue)
+                } else if let intValue = value as? Int {
+                    numericHeight = CGFloat(intValue)
+                } else if let number = value as? NSNumber {
+                    numericHeight = CGFloat(truncating: number)
+                } else {
+                    numericHeight = nil
+                }
+                guard let numericHeight else { return }
+                let clamped = min(max(numericHeight + 12, 200), 8_000)
+                Task { @MainActor in
+                    self.measuredHeight.wrappedValue = clamped
+                }
+            }
+        }
     }
 }
 
@@ -591,8 +636,8 @@ private struct MailMessageDetailPane: View {
                                 allowRemoteImagesForMessage = true
                             }
                         }
-                        MailHTMLBodyView(htmlContent: sanitized.html)
-                            .frame(minHeight: bodyWebViewHeight)
+                        MailHTMLBodyView(htmlContent: sanitized.html, measuredHeight: $bodyWebViewHeight)
+                            .frame(height: bodyWebViewHeight)
                             .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text(bodyDisplay.text)
