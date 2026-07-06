@@ -69,4 +69,11 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(!gate.shouldCommit(first))
         #expect(gate.shouldCommit(second))
     }
+
+    @Test func mailHTMLBodyUsesPageScrollingPolicy() {
+        let policy = MailHTMLBodyScrollPolicy.pageScrolling
+
+        #expect(!policy.isInternalScrollingEnabled)
+        #expect(policy.forwardsWheelEventsToParent)
+    }
 }
