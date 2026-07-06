@@ -812,26 +812,34 @@ private struct MailMessageHero: View {
             }
             .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
+                Text(message.subject)
+                    .font(AgentChatTypography.title)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
                 HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
-                    Text(message.subject)
-                        .font(AgentChatTypography.title)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
                     MailStatusPill(status: message.flags.isRead ? "已读" : "未读", color: message.flags.isRead ? .secondary : .blue)
                     if message.hasAttachments {
                         MailStatusPill(status: "附件", color: .teal, systemImage: "paperclip")
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
+
                 Text("From \(message.from.name ?? message.from.email) · \(message.from.email)")
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                     .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 HStack(spacing: AppShellLayout.spaceS) {
                     MailStatusPill(status: account?.displayName ?? "未选择账户", color: .secondary, systemImage: "person.crop.circle")
                     MailStatusPill(status: mailbox?.name ?? "未选择文件夹", color: .secondary, systemImage: "folder")
                     MailStatusPill(status: message.date.connorLocalFormatted(date: .medium, time: .short), color: .secondary, systemImage: "clock")
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
             Spacer(minLength: 0)
         }
