@@ -406,6 +406,15 @@ public struct MailRuntime: Sendable {
             body: body,
             attachments: attachments
         ))
+        NotificationCenter.default.post(
+            name: .connorMailCacheDidChange,
+            object: nil,
+            userInfo: [
+                MailCacheChangeNotificationUserInfoKey.accountID: draft.accountID.rawValue,
+                MailCacheChangeNotificationUserInfoKey.messageID: messageID.rawValue,
+                MailCacheChangeNotificationUserInfoKey.reason: MailCacheChangeReason.sentMessageSaved.rawValue
+            ]
+        )
     }
 
     private func captureOutboundMemoryEvidence(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, runID: String?, sessionID: String?) throws {
