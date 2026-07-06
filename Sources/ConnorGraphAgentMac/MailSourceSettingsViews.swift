@@ -29,11 +29,11 @@ struct MailBodyDisplayPresentation: Equatable {
         let redacted = detail.body?.redactedPreview.trimmingCharacters(in: .whitespacesAndNewlines)
         let snippet = detail.summary.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if let plain, !plain.isEmpty {
-            self.init(kind: .plainText, text: plain)
-        } else if let html, trimmedHTML?.isEmpty == false {
-            let recovered = Self.recoverCachedHTMLIfNeeded(html, fallback: redacted ?? snippet)
+        if let html, trimmedHTML?.isEmpty == false {
+            let recovered = Self.recoverCachedHTMLIfNeeded(html, fallback: plain ?? redacted ?? snippet)
             self.init(kind: .html, text: recovered.plainText, html: recovered.html)
+        } else if let plain, !plain.isEmpty {
+            self.init(kind: .plainText, text: plain)
         } else if let redacted, !redacted.isEmpty {
             self.init(kind: .fallback, text: redacted)
         } else if !snippet.isEmpty {
