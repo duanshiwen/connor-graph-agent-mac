@@ -555,7 +555,6 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = false
         config.defaultWebpagePreferences = preferences
-        // Prevent auto-loading remote content for privacy
         let view = WKWebView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
@@ -563,28 +562,7 @@ private struct MailHTMLBodyView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        // Wrap HTML in a basic document structure for consistent rendering
-        let wrapped: String
-        if htmlContent.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("<html") {
-            wrapped = htmlContent
-        } else {
-            wrapped = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body { font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.5; padding: 0; margin: 0; word-wrap: break-word; overflow-wrap: break-word; }
-                img { max-width: 100%; height: auto; }
-                a { color: -webkit-link; }
-                pre, code { white-space: pre-wrap; word-break: break-all; }
-            </style>
-            </head>
-            <body>\(htmlContent)</body>
-            </html>
-            """
-        }
-        nsView.loadHTMLString(wrapped, baseURL: nil)
+        nsView.loadHTMLString(htmlContent, baseURL: nil)
         nsView.isHidden = false
     }
 }
@@ -596,6 +574,7 @@ private struct MailMessageDetailPane: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var bodyWebViewHeight: CGFloat = 200
+    @State private var allowRemoteImagesForMessage = false
 
     var body: some View {
         ScrollView {
@@ -603,7 +582,16 @@ private struct MailMessageDetailPane: View {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
                 MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
                     if bodyDisplay.kind == .html, let bodyHTML = bodyDisplay.html {
-                        MailHTMLBodyView(htmlContent: bodyHTML)
+                        let sanitized = MailHTMLBodySanitizer().prepareHTML(
+                            bodyHTML,
+                            policy: MailHTMLDisplayPolicy(remoteContentMode: allowRemoteImagesForMessage ? .allowForMessage : .block)
+                        )
+                        if sanitized.blockedRemoteImageCount > 0 {
+                            MailRemoteImagesBlockedBanner(blockedCount: sanitized.blockedRemoteImageCount) {
+                                allowRemoteImagesForMessage = true
+                            }
+                        }
+                        MailHTMLBodyView(htmlContent: sanitized.html)
                             .frame(minHeight: bodyWebViewHeight)
                             .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
@@ -628,9 +616,31 @@ private struct MailMessageDetailPane: View {
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
         }
         .task(id: message.id) {
+            allowRemoteImagesForMessage = false
             bodyDisplay = .loading
             bodyDisplay = await viewModel.loadMailBodyDisplay(for: message.id)
         }
+    }
+}
+
+private struct MailRemoteImagesBlockedBanner: View {
+    var blockedCount: Int
+    var onLoadRemoteImages: () -> Void
+
+    var body: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            Image(systemName: "eye.slash")
+                .foregroundStyle(.secondary)
+            Text("已阻止 \(blockedCount) 张远程图片以保护隐私")
+                .font(AgentChatTypography.micro)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: AppShellLayout.spaceS)
+            Button("加载此邮件的远程图片", action: onLoadRemoteImages)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(AppShellLayout.spaceS)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
