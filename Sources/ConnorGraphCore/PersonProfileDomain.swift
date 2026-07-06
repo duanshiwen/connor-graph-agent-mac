@@ -149,7 +149,7 @@ public extension PersonProfile {
     }
 }
 
-public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable {
+public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var id: ContactID?
     public var displayName: String
     public var aliases: [String]
@@ -192,5 +192,55 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable {
         self.jobTitle = jobTitle
         self.notes = notes
         self.status = status
+    }
+
+    public init(profile: PersonProfile) {
+        self.init(
+            id: profile.id,
+            displayName: profile.displayName,
+            aliases: profile.aliases,
+            givenName: profile.givenName,
+            familyName: profile.familyName,
+            gender: profile.gender,
+            emails: profile.emails,
+            phones: profile.phones,
+            addresses: profile.addresses,
+            organizationName: profile.organizationName,
+            jobTitle: profile.jobTitle,
+            notes: profile.notes,
+            status: profile.status
+        )
+    }
+
+    public func makeProfile(existing: PersonProfile? = nil, now: Date = Date()) -> PersonProfile {
+        PersonProfile(
+            id: id ?? existing?.id ?? ContactID(rawValue: "person-\(UUID().uuidString)"),
+            displayName: displayName,
+            aliases: aliases,
+            givenName: givenName,
+            familyName: familyName,
+            gender: gender,
+            emails: emails,
+            phones: phones,
+            addresses: addresses,
+            organizationName: organizationName,
+            jobTitle: jobTitle,
+            notes: notes,
+            status: status,
+            mergedIntoID: existing?.mergedIntoID,
+            memoryEntityID: existing?.memoryEntityID,
+            memoryStableKey: existing?.memoryStableKey,
+            source: existing?.source ?? "person-registry",
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+        )
+    }
+}
+
+public extension Array where Element == PersonProfile {
+    func upserting(_ profile: PersonProfile) -> [PersonProfile] {
+        var copy = self.filter { $0.id != profile.id }
+        copy.append(profile)
+        return copy.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 }
