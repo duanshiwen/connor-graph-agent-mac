@@ -1,4 +1,5 @@
 import Testing
+import ConnorGraphCore
 @testable import ConnorGraphAgentMac
 
 @Suite("Mail HTML Body View Stability Tests")
@@ -19,23 +20,60 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(secondDecision)
     }
 
-    @Test func heightStabilizerIgnoresTinyDeltas() {
+    @Test func layoutStabilizerIgnoresTinyDeltas() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
-        #expect(stabilizer.stabilizedHeight(current: 300, measuredDocumentHeight: 286) == nil)
+        let current = MailHTMLBodyLayout(mode: .inline, height: 300, documentHeight: 286)
+        #expect(stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 286) == nil)
     }
 
-    @Test func heightStabilizerClampsMinimum() {
+    @Test func layoutStabilizerClampsMinimumForInlineContent() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
-        #expect(stabilizer.stabilizedHeight(current: 500, measuredDocumentHeight: 10) == 200)
+        let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 10)
+        let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 10)
+        #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 200, documentHeight: 10))
     }
 
-    @Test func heightStabilizerClampsMaximum() {
+    @Test func layoutStabilizerKeepsShortHTMLInline() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
-        #expect(stabilizer.stabilizedHeight(current: 500, measuredDocumentHeight: 20_000) == 8_000)
+        let current = MailHTMLBodyLayout(mode: .inline, height: 300, documentHeight: 500)
+        let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 500)
+        #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 512, documentHeight: 500))
     }
 
-    @Test func heightStabilizerAcceptsMeaningfulGrowth() {
+    @Test func layoutStabilizerKeepsLongHTMLInlineForPageScrolling() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
-        #expect(stabilizer.stabilizedHeight(current: 300, measuredDocumentHeight: 500) == 512)
+        let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 500)
+        let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 20_000)
+        #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 20_012, documentHeight: 20_000))
+    }
+
+    @Test func layoutStabilizerKeepsBoundaryHTMLInline() {
+        let stabilizer = MailHTMLBodyHeightStabilizer()
+        let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 500)
+        let boundaryHeight = stabilizer.inlineHeightLimit - stabilizer.bottomPadding
+        let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: boundaryHeight)
+        guard let layout else {
+            Issue.record("Expected boundary-height HTML to produce an inline layout update")
+            return
+        }
+        #expect(layout.mode == .inline)
+        #expect(abs(layout.height - stabilizer.inlineHeightLimit) < 0.001)
+        #expect(abs(layout.documentHeight - boundaryHeight) < 0.001)
+    }
+
+    @Test func mailBodyLoadGateRejectsStaleMessageResult() {
+        var gate = MailBodyLoadRequestGate()
+        let first = gate.begin(messageID: MailMessageID(rawValue: "message-a"))
+        let second = gate.begin(messageID: MailMessageID(rawValue: "message-b"))
+
+        #expect(!gate.shouldCommit(first))
+        #expect(gate.shouldCommit(second))
+    }
+
+    @Test func mailHTMLBodyUsesPageScrollingPolicy() {
+        let policy = MailHTMLBodyScrollPolicy.pageScrolling
+
+        #expect(!policy.isInternalScrollingEnabled)
+        #expect(policy.forwardsWheelEventsToParent)
     }
 }

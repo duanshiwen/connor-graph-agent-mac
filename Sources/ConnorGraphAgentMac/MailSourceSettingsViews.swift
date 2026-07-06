@@ -357,12 +357,8 @@ struct MailSourceDetailView: View {
     var body: some View {
         Group {
             if let selectedMessage {
-                VStack(alignment: .leading, spacing: 0) {
-                    MailBrowserTopBar(onAdd: { viewModel.presentAddMailAccountSheet() })
-                    Divider().opacity(0.6)
-                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
+                MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 MailDetailEmptyState(onAdd: { viewModel.presentAddMailAccountSheet() })
             }
@@ -521,30 +517,6 @@ private struct MailDetailEmptyState: View {
     }
 }
 
-private struct MailBrowserTopBar: View {
-    var onAdd: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text("邮件系统")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("账户、文件夹和邮件详情由 Connor 本地治理；读取不会自动改变已读状态。")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: AppShellLayout.spaceM)
-            Button(action: onAdd) {
-                Label("添加邮件帐户", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-        }
-        .padding(.horizontal, AppShellLayout.spaceXL)
-        .padding(.vertical, AppShellLayout.spaceL)
-    }
-}
-
 struct MailHTMLBodyLoadState: Equatable {
     private(set) var lastLoadedHTML: String?
 
@@ -555,57 +527,129 @@ struct MailHTMLBodyLoadState: Equatable {
     }
 }
 
+struct MailBodyLoadToken: Equatable {
+    var messageID: MailMessageID
+    var generation: Int
+}
+
+struct MailBodyLoadRequestGate: Equatable {
+    private(set) var activeToken: MailBodyLoadToken?
+    private var nextGeneration = 0
+
+    mutating func begin(messageID: MailMessageID) -> MailBodyLoadToken {
+        nextGeneration += 1
+        let token = MailBodyLoadToken(messageID: messageID, generation: nextGeneration)
+        activeToken = token
+        return token
+    }
+
+    func shouldCommit(_ token: MailBodyLoadToken) -> Bool {
+        activeToken == token
+    }
+}
+
+struct MailHTMLBodyLayout: Equatable {
+    enum Mode: Equatable {
+        case inline
+        case scrollable
+    }
+
+    var mode: Mode
+    var height: CGFloat
+    var documentHeight: CGFloat
+
+    static let initial = MailHTMLBodyLayout(mode: .inline, height: 200, documentHeight: 200)
+}
+
+struct MailHTMLBodyScrollPolicy: Equatable {
+    var isInternalScrollingEnabled: Bool
+    var forwardsWheelEventsToParent: Bool
+
+    static let pageScrolling = MailHTMLBodyScrollPolicy(
+        isInternalScrollingEnabled: false,
+        forwardsWheelEventsToParent: true
+    )
+}
+
 struct MailHTMLBodyHeightStabilizer: Equatable {
     var minimumHeight: CGFloat = 200
-    var maximumHeight: CGFloat = 8_000
+    var inlineHeightLimit: CGFloat = 5_000
+    var scrollableViewportHeight: CGFloat = 640
     var bottomPadding: CGFloat = 12
     var significantDelta: CGFloat = 4
 
-    func stabilizedHeight(current: CGFloat, measuredDocumentHeight: CGFloat) -> CGFloat? {
+    func stabilizedLayout(current: MailHTMLBodyLayout, measuredDocumentHeight: CGFloat) -> MailHTMLBodyLayout? {
         let padded = measuredDocumentHeight + bottomPadding
-        let clamped = min(max(padded, minimumHeight), maximumHeight)
-        guard abs(clamped - current) >= significantDelta else { return nil }
-        return clamped
+        let next = MailHTMLBodyLayout(
+            mode: .inline,
+            height: max(padded, minimumHeight),
+            documentHeight: measuredDocumentHeight
+        )
+        guard next.mode != current.mode
+            || abs(next.height - current.height) >= significantDelta
+            || abs(next.documentHeight - current.documentHeight) >= significantDelta else { return nil }
+        return next
+    }
+}
+
+private final class MailHTMLPassthroughScrollWebView: WKWebView {
+    var forwardsScrollWheelToParent = false
+
+    override func scrollWheel(with event: NSEvent) {
+        guard forwardsScrollWheelToParent else {
+            super.scrollWheel(with: event)
+            return
+        }
+        nextResponder?.scrollWheel(with: event)
     }
 }
 
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
-    @Binding var measuredHeight: CGFloat
+    var scrollPolicy: MailHTMLBodyScrollPolicy
+    @Binding var layout: MailHTMLBodyLayout
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(measuredHeight: $measuredHeight)
+        Coordinator(layout: $layout)
     }
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> MailHTMLPassthroughScrollWebView {
         let config = WKWebViewConfiguration()
         // Disable JavaScript for security (email HTML should not execute scripts)
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = false
         config.defaultWebpagePreferences = preferences
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = MailHTMLPassthroughScrollWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
+        configureScrolling(for: view)
         return view
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        context.coordinator.measuredHeight = $measuredHeight
+    func updateNSView(_ nsView: MailHTMLPassthroughScrollWebView, context: Context) {
+        context.coordinator.layout = $layout
+        configureScrolling(for: nsView)
         guard context.coordinator.shouldReload(html: htmlContent) else { return }
         nsView.isHidden = true
         nsView.loadHTMLString(htmlContent, baseURL: nil)
     }
 
+    private func configureScrolling(for view: MailHTMLPassthroughScrollWebView) {
+        view.forwardsScrollWheelToParent = scrollPolicy.forwardsWheelEventsToParent
+        view.enclosingScrollView?.hasVerticalScroller = scrollPolicy.isInternalScrollingEnabled
+        view.enclosingScrollView?.verticalScrollElasticity = scrollPolicy.isInternalScrollingEnabled ? .automatic : .none
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var measuredHeight: Binding<CGFloat>
+        var layout: Binding<MailHTMLBodyLayout>
         private var loadState = MailHTMLBodyLoadState()
         private let heightStabilizer = MailHTMLBodyHeightStabilizer()
         private var measurementGeneration = 0
 
-        init(measuredHeight: Binding<CGFloat>) {
-            self.measuredHeight = measuredHeight
+        init(layout: Binding<MailHTMLBodyLayout>) {
+            self.layout = layout
         }
 
         func shouldReload(html: String) -> Bool {
@@ -643,8 +687,8 @@ private struct MailHTMLBodyView: NSViewRepresentable {
                 Task { @MainActor in
                     guard generation == self.measurementGeneration else { return }
                     guard let numericHeight = Self.numericHeight(from: value) else { return }
-                    guard let stabilized = self.heightStabilizer.stabilizedHeight(current: self.measuredHeight.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
-                    self.measuredHeight.wrappedValue = stabilized
+                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: self.layout.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
+                    self.layout.wrappedValue = stabilized
                 }
             }
         }
@@ -669,8 +713,9 @@ private struct MailMessageDetailPane: View {
     var message: MailMessageSummary
     @ObservedObject var viewModel: AppViewModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
-    @State private var bodyWebViewHeight: CGFloat = 200
+    @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
     @State private var allowRemoteImagesForMessage = false
+    @State private var bodyLoadGate = MailBodyLoadRequestGate()
 
     var body: some View {
         ScrollView {
@@ -684,13 +729,17 @@ private struct MailMessageDetailPane: View {
                         )
                         if sanitized.blockedRemoteImageCount > 0 {
                             MailRemoteImagesBlockedBanner(blockedCount: sanitized.blockedRemoteImageCount) {
-                                bodyWebViewHeight = max(bodyWebViewHeight, 200)
+                                bodyWebLayout = .initial
                                 allowRemoteImagesForMessage = true
                             }
                         }
-                        MailHTMLBodyView(htmlContent: sanitized.html, measuredHeight: $bodyWebViewHeight)
-                            .frame(height: bodyWebViewHeight)
-                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        MailHTMLBodyView(
+                            htmlContent: sanitized.html,
+                            scrollPolicy: .pageScrolling,
+                            layout: $bodyWebLayout
+                        )
+                        .frame(height: bodyWebLayout.height)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text(bodyDisplay.text)
                             .font(AgentChatTypography.meta)
@@ -710,13 +759,19 @@ private struct MailMessageDetailPane: View {
                 }
             }
             .padding(AppShellLayout.spaceXL)
-            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: message.id) {
+            let token = bodyLoadGate.begin(messageID: message.id)
             allowRemoteImagesForMessage = false
-            bodyWebViewHeight = 200
+            bodyWebLayout = .initial
             bodyDisplay = .loading
-            bodyDisplay = await viewModel.loadMailBodyDisplay(for: message.id)
+            let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
+            guard !Task.isCancelled else { return }
+            guard bodyLoadGate.shouldCommit(token) else { return }
+            bodyDisplay = display
         }
     }
 }
@@ -759,26 +814,34 @@ private struct MailMessageHero: View {
             }
             .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
+                Text(message.subject)
+                    .font(AgentChatTypography.title)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
                 HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
-                    Text(message.subject)
-                        .font(AgentChatTypography.title)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
                     MailStatusPill(status: message.flags.isRead ? "已读" : "未读", color: message.flags.isRead ? .secondary : .blue)
                     if message.hasAttachments {
                         MailStatusPill(status: "附件", color: .teal, systemImage: "paperclip")
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
+
                 Text("From \(message.from.name ?? message.from.email) · \(message.from.email)")
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                     .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 HStack(spacing: AppShellLayout.spaceS) {
                     MailStatusPill(status: account?.displayName ?? "未选择账户", color: .secondary, systemImage: "person.crop.circle")
                     MailStatusPill(status: mailbox?.name ?? "未选择文件夹", color: .secondary, systemImage: "folder")
                     MailStatusPill(status: message.date.connorLocalFormatted(date: .medium, time: .short), color: .secondary, systemImage: "clock")
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
             Spacer(minLength: 0)
         }

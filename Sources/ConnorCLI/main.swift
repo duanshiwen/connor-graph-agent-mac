@@ -4,11 +4,11 @@ import ConnorGraphCore
 import ConnorGraphStore
 
 let args = Array(CommandLine.arguments.dropFirst())
-let output = try ConnorCLI.route(args: args)
+let output = try await ConnorCLI.route(args: args)
 print(output)
 
 struct ConnorCLI {
-    static func route(args: [String]) throws -> String {
+    static func route(args: [String]) async throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if args.isEmpty || args == ["commands"] || args == ["--help"] {
@@ -23,8 +23,23 @@ struct ConnorCLI {
         if args.first == "memory" {
             return try AppMemoryOSCLIRouter.route(args: Array(args.dropFirst()), inspector: AppMemoryOSCLIRouter.makeLiveInspector(), encoder: encoder)
         }
+        if args.first == "mail" {
+            return try await routeMail(args: Array(args.dropFirst()), encoder: encoder)
+        }
         let error: [String: String] = ["error": "unknown_command", "usage": "connor commands"]
         return try encode(error, encoder: encoder)
+    }
+
+    private static func routeMail(args: [String], encoder: JSONEncoder) async throws -> String {
+        let command = args.first ?? "diagnostics"
+        switch command {
+        case "diagnostics":
+            let paths = try AppStoragePaths.live()
+            let snapshot = try await MailStoreDiagnosticsService(storagePaths: paths).snapshot()
+            return try encode(snapshot, encoder: encoder)
+        default:
+            return try encode(["error": "unknown_mail_command", "usage": "connor mail diagnostics"], encoder: encoder)
+        }
     }
 
     private static func routeTasks(args: [String], encoder: JSONEncoder) throws -> String {
