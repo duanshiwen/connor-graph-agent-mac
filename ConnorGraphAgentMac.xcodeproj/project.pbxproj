@@ -24,6 +24,7 @@
 		7C0C0DE10000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift */; };
 		7C0C0DE1000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE0000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift */; };
 		7C0C0DE1000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE0000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift */; };
+		7C0C0DE1000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE0000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift */; };
 		9A17D0B100000000000001 /* Sources/ConnorGraphAgentMac/AgentActivityDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000001 /* Sources/ConnorGraphAgentMac/AgentActivityDetailViews.swift */; };
 		9A17D0B100000000000002 /* Sources/ConnorGraphAgentMac/AgentChatDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatDesignSystem.swift */; };
 		9A17D0B100000000000003 /* Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift */; };
@@ -122,6 +123,7 @@
 		7C0C0DE00000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift; sourceTree = "<group>"; };
+		7C0C0DE0000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000001 /* Sources/ConnorGraphAgentMac/AgentActivityDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentActivityDetailViews.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatDesignSystem.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift; sourceTree = "<group>"; };
@@ -283,6 +285,7 @@
 				9A17D0B000000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift */,
 				7C0C0DE0000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift */,
 				7C0C0DE0000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift */,
+				7C0C0DE0000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift */,
 				7C0C0DE00000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift */,
 				7C0C0DE00000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift */,
 				7C0C0DE00000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift */,
@@ -521,6 +524,7 @@
 				9A17D0B100000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift in Sources */,
 				7C0C0DE1000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift in Sources */,
 				7C0C0DE1000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift in Sources */,
+				7C0C0DE1000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift in Sources */,
 				7C0C0DE10000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift in Sources */,
 				7C0C0DE10000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift in Sources */,
 				7C0C0DE10000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift in Sources */,

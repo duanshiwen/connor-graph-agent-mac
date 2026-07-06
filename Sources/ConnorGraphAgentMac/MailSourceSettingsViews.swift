@@ -29,11 +29,11 @@ struct MailBodyDisplayPresentation: Equatable {
         let redacted = detail.body?.redactedPreview.trimmingCharacters(in: .whitespacesAndNewlines)
         let snippet = detail.summary.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if let plain, !plain.isEmpty {
-            self.init(kind: .plainText, text: plain)
-        } else if let html, trimmedHTML?.isEmpty == false {
-            let recovered = Self.recoverCachedHTMLIfNeeded(html, fallback: redacted ?? snippet)
+        if let html, trimmedHTML?.isEmpty == false {
+            let recovered = Self.recoverCachedHTMLIfNeeded(html, fallback: plain ?? redacted ?? snippet)
             self.init(kind: .html, text: recovered.plainText, html: recovered.html)
+        } else if let plain, !plain.isEmpty {
+            self.init(kind: .plainText, text: plain)
         } else if let redacted, !redacted.isEmpty {
             self.init(kind: .fallback, text: redacted)
         } else if !snippet.isEmpty {
@@ -545,9 +545,38 @@ private struct MailBrowserTopBar: View {
     }
 }
 
+struct MailHTMLBodyLoadState: Equatable {
+    private(set) var lastLoadedHTML: String?
+
+    mutating func shouldReload(html: String) -> Bool {
+        guard lastLoadedHTML != html else { return false }
+        lastLoadedHTML = html
+        return true
+    }
+}
+
+struct MailHTMLBodyHeightStabilizer: Equatable {
+    var minimumHeight: CGFloat = 200
+    var maximumHeight: CGFloat = 8_000
+    var bottomPadding: CGFloat = 12
+    var significantDelta: CGFloat = 4
+
+    func stabilizedHeight(current: CGFloat, measuredDocumentHeight: CGFloat) -> CGFloat? {
+        let padded = measuredDocumentHeight + bottomPadding
+        let clamped = min(max(padded, minimumHeight), maximumHeight)
+        guard abs(clamped - current) >= significantDelta else { return nil }
+        return clamped
+    }
+}
+
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
+    @Binding var measuredHeight: CGFloat
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(measuredHeight: $measuredHeight)
+    }
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -555,37 +584,82 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = false
         config.defaultWebpagePreferences = preferences
-        // Prevent auto-loading remote content for privacy
         let view = WKWebView(frame: .zero, configuration: config)
+        view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        // Wrap HTML in a basic document structure for consistent rendering
-        let wrapped: String
-        if htmlContent.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("<html") {
-            wrapped = htmlContent
-        } else {
-            wrapped = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body { font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.5; padding: 0; margin: 0; word-wrap: break-word; overflow-wrap: break-word; }
-                img { max-width: 100%; height: auto; }
-                a { color: -webkit-link; }
-                pre, code { white-space: pre-wrap; word-break: break-all; }
-            </style>
-            </head>
-            <body>\(htmlContent)</body>
-            </html>
-            """
+        context.coordinator.measuredHeight = $measuredHeight
+        guard context.coordinator.shouldReload(html: htmlContent) else { return }
+        nsView.isHidden = true
+        nsView.loadHTMLString(htmlContent, baseURL: nil)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var measuredHeight: Binding<CGFloat>
+        private var loadState = MailHTMLBodyLoadState()
+        private let heightStabilizer = MailHTMLBodyHeightStabilizer()
+        private var measurementGeneration = 0
+
+        init(measuredHeight: Binding<CGFloat>) {
+            self.measuredHeight = measuredHeight
         }
-        nsView.loadHTMLString(wrapped, baseURL: nil)
-        nsView.isHidden = false
+
+        func shouldReload(html: String) -> Bool {
+            guard loadState.shouldReload(html: html) else { return false }
+            measurementGeneration += 1
+            return true
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.isHidden = false
+            scheduleHeightMeasurements(for: webView, generation: measurementGeneration)
+        }
+
+        private func scheduleHeightMeasurements(for webView: WKWebView, generation: Int) {
+            measureHeight(of: webView, generation: generation)
+            for delayNanoseconds in [150_000_000, 400_000_000, 900_000_000] {
+                Task { @MainActor [weak self, weak webView] in
+                    try? await Task.sleep(nanoseconds: UInt64(delayNanoseconds))
+                    guard let self, let webView else { return }
+                    self.measureHeight(of: webView, generation: generation)
+                }
+            }
+        }
+
+        private func measureHeight(of webView: WKWebView, generation: Int) {
+            let script = """
+            Math.max(
+                document.body ? document.body.scrollHeight : 0,
+                document.documentElement ? document.documentElement.scrollHeight : 0,
+                200
+            )
+            """
+            webView.evaluateJavaScript(script) { [weak self] value, _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    guard generation == self.measurementGeneration else { return }
+                    guard let numericHeight = Self.numericHeight(from: value) else { return }
+                    guard let stabilized = self.heightStabilizer.stabilizedHeight(current: self.measuredHeight.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
+                    self.measuredHeight.wrappedValue = stabilized
+                }
+            }
+        }
+
+        private static func numericHeight(from value: Any?) -> CGFloat? {
+            if let doubleValue = value as? Double {
+                return CGFloat(doubleValue)
+            } else if let intValue = value as? Int {
+                return CGFloat(intValue)
+            } else if let number = value as? NSNumber {
+                return CGFloat(truncating: number)
+            } else {
+                return nil
+            }
+        }
     }
 }
 
@@ -596,6 +670,7 @@ private struct MailMessageDetailPane: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var bodyWebViewHeight: CGFloat = 200
+    @State private var allowRemoteImagesForMessage = false
 
     var body: some View {
         ScrollView {
@@ -603,8 +678,18 @@ private struct MailMessageDetailPane: View {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
                 MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
                     if bodyDisplay.kind == .html, let bodyHTML = bodyDisplay.html {
-                        MailHTMLBodyView(htmlContent: bodyHTML)
-                            .frame(minHeight: bodyWebViewHeight)
+                        let sanitized = MailHTMLBodySanitizer().prepareHTML(
+                            bodyHTML,
+                            policy: MailHTMLDisplayPolicy(remoteContentMode: allowRemoteImagesForMessage ? .allowForMessage : .block)
+                        )
+                        if sanitized.blockedRemoteImageCount > 0 {
+                            MailRemoteImagesBlockedBanner(blockedCount: sanitized.blockedRemoteImageCount) {
+                                bodyWebViewHeight = max(bodyWebViewHeight, 200)
+                                allowRemoteImagesForMessage = true
+                            }
+                        }
+                        MailHTMLBodyView(htmlContent: sanitized.html, measuredHeight: $bodyWebViewHeight)
+                            .frame(height: bodyWebViewHeight)
                             .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text(bodyDisplay.text)
@@ -628,9 +713,32 @@ private struct MailMessageDetailPane: View {
             .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
         }
         .task(id: message.id) {
+            allowRemoteImagesForMessage = false
+            bodyWebViewHeight = 200
             bodyDisplay = .loading
             bodyDisplay = await viewModel.loadMailBodyDisplay(for: message.id)
         }
+    }
+}
+
+private struct MailRemoteImagesBlockedBanner: View {
+    var blockedCount: Int
+    var onLoadRemoteImages: () -> Void
+
+    var body: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            Image(systemName: "eye.slash")
+                .foregroundStyle(.secondary)
+            Text("已阻止 \(blockedCount) 张远程图片以保护隐私")
+                .font(AgentChatTypography.micro)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: AppShellLayout.spaceS)
+            Button("加载此邮件的远程图片", action: onLoadRemoteImages)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(AppShellLayout.spaceS)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

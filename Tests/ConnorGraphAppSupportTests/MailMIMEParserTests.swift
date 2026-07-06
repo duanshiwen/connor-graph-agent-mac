@@ -210,6 +210,40 @@ struct MailMIMEParserTests {
         #expect(result.plainText.contains("段诗闻"))
     }
 
+    @Test func multipartRelatedRewritesCIDInlineImagesToDataURLs() {
+        let boundary = "connor-related"
+        let imageData = Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString()
+        let raw = """
+        --\(boundary)
+        Content-Type: text/html; charset=utf-8
+        Content-Transfer-Encoding: 8bit
+        
+        <html><body><p>Logo</p><img src="cid:logo@example.com" alt="Logo"></body></html>
+        --\(boundary)
+        Content-Type: image/png
+        Content-Transfer-Encoding: base64
+        Content-ID: <logo@example.com>
+        Content-Disposition: inline; filename="logo.png"
+        
+        \(imageData)
+        --\(boundary)--
+
+        """
+
+        let result = MailMIMEParser().parseBodyWithHTML(
+            rawData: Data(raw.utf8),
+            fallbackString: "fallback",
+            charset: nil,
+            transferEncoding: nil,
+            contentType: "multipart/related; boundary=\"\(boundary)\"",
+            boundary: boundary
+        )
+
+        #expect(result.htmlText?.contains("src=\"data:image/png;base64,\(imageData)\"") == true)
+        #expect(result.htmlText?.contains("cid:logo@example.com") == false)
+        #expect(result.plainText.contains("Logo"))
+    }
+
     @Test func htmlPlainTextDecodesEntitiesAfterStrippingTags() {
         let html = """
         <!DOCTYPE html><html><body><p>Open https://twitter.com/i/u?t=1&amp;cn=ZmxleGlibGVfcmVjcw%3D%3D</p><p>&#x4E2D;&#25991; / &#20013;&#25991;</p></body></html>
