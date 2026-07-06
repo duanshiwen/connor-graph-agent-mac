@@ -555,27 +555,57 @@ struct MailHTMLBodyLoadState: Equatable {
     }
 }
 
+struct MailHTMLBodyLayout: Equatable {
+    enum Mode: Equatable {
+        case inline
+        case scrollable
+    }
+
+    var mode: Mode
+    var height: CGFloat
+    var documentHeight: CGFloat
+
+    static let initial = MailHTMLBodyLayout(mode: .inline, height: 200, documentHeight: 200)
+}
+
 struct MailHTMLBodyHeightStabilizer: Equatable {
     var minimumHeight: CGFloat = 200
-    var maximumHeight: CGFloat = 8_000
+    var inlineHeightLimit: CGFloat = 5_000
+    var scrollableViewportHeight: CGFloat = 640
     var bottomPadding: CGFloat = 12
     var significantDelta: CGFloat = 4
 
-    func stabilizedHeight(current: CGFloat, measuredDocumentHeight: CGFloat) -> CGFloat? {
+    func stabilizedLayout(current: MailHTMLBodyLayout, measuredDocumentHeight: CGFloat) -> MailHTMLBodyLayout? {
         let padded = measuredDocumentHeight + bottomPadding
-        let clamped = min(max(padded, minimumHeight), maximumHeight)
-        guard abs(clamped - current) >= significantDelta else { return nil }
-        return clamped
+        let next: MailHTMLBodyLayout
+        if padded > inlineHeightLimit {
+            next = MailHTMLBodyLayout(
+                mode: .scrollable,
+                height: scrollableViewportHeight,
+                documentHeight: measuredDocumentHeight
+            )
+        } else {
+            next = MailHTMLBodyLayout(
+                mode: .inline,
+                height: max(padded, minimumHeight),
+                documentHeight: measuredDocumentHeight
+            )
+        }
+        guard next.mode != current.mode
+            || abs(next.height - current.height) >= significantDelta
+            || abs(next.documentHeight - current.documentHeight) >= significantDelta else { return nil }
+        return next
     }
 }
 
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
-    @Binding var measuredHeight: CGFloat
+    var isInternalScrollingEnabled: Bool
+    @Binding var layout: MailHTMLBodyLayout
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(measuredHeight: $measuredHeight)
+        Coordinator(layout: $layout)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -588,24 +618,31 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
+        configureScrolling(for: view)
         return view
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        context.coordinator.measuredHeight = $measuredHeight
+        context.coordinator.layout = $layout
+        configureScrolling(for: nsView)
         guard context.coordinator.shouldReload(html: htmlContent) else { return }
         nsView.isHidden = true
         nsView.loadHTMLString(htmlContent, baseURL: nil)
     }
 
+    private func configureScrolling(for view: WKWebView) {
+        view.enclosingScrollView?.hasVerticalScroller = isInternalScrollingEnabled
+        view.enclosingScrollView?.verticalScrollElasticity = isInternalScrollingEnabled ? .automatic : .none
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var measuredHeight: Binding<CGFloat>
+        var layout: Binding<MailHTMLBodyLayout>
         private var loadState = MailHTMLBodyLoadState()
         private let heightStabilizer = MailHTMLBodyHeightStabilizer()
         private var measurementGeneration = 0
 
-        init(measuredHeight: Binding<CGFloat>) {
-            self.measuredHeight = measuredHeight
+        init(layout: Binding<MailHTMLBodyLayout>) {
+            self.layout = layout
         }
 
         func shouldReload(html: String) -> Bool {
@@ -643,8 +680,8 @@ private struct MailHTMLBodyView: NSViewRepresentable {
                 Task { @MainActor in
                     guard generation == self.measurementGeneration else { return }
                     guard let numericHeight = Self.numericHeight(from: value) else { return }
-                    guard let stabilized = self.heightStabilizer.stabilizedHeight(current: self.measuredHeight.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
-                    self.measuredHeight.wrappedValue = stabilized
+                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: self.layout.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
+                    self.layout.wrappedValue = stabilized
                 }
             }
         }
@@ -669,7 +706,7 @@ private struct MailMessageDetailPane: View {
     var message: MailMessageSummary
     @ObservedObject var viewModel: AppViewModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
-    @State private var bodyWebViewHeight: CGFloat = 200
+    @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
     @State private var allowRemoteImagesForMessage = false
 
     var body: some View {
@@ -684,13 +721,20 @@ private struct MailMessageDetailPane: View {
                         )
                         if sanitized.blockedRemoteImageCount > 0 {
                             MailRemoteImagesBlockedBanner(blockedCount: sanitized.blockedRemoteImageCount) {
-                                bodyWebViewHeight = max(bodyWebViewHeight, 200)
+                                bodyWebLayout = .initial
                                 allowRemoteImagesForMessage = true
                             }
                         }
-                        MailHTMLBodyView(htmlContent: sanitized.html, measuredHeight: $bodyWebViewHeight)
-                            .frame(height: bodyWebViewHeight)
-                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        if bodyWebLayout.mode == .scrollable {
+                            MailLongHTMLBodyBanner()
+                        }
+                        MailHTMLBodyView(
+                            htmlContent: sanitized.html,
+                            isInternalScrollingEnabled: bodyWebLayout.mode == .scrollable,
+                            layout: $bodyWebLayout
+                        )
+                        .frame(height: bodyWebLayout.height)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text(bodyDisplay.text)
                             .font(AgentChatTypography.meta)
@@ -714,10 +758,26 @@ private struct MailMessageDetailPane: View {
         }
         .task(id: message.id) {
             allowRemoteImagesForMessage = false
-            bodyWebViewHeight = 200
+            bodyWebLayout = .initial
             bodyDisplay = .loading
             bodyDisplay = await viewModel.loadMailBodyDisplay(for: message.id)
         }
+    }
+}
+
+private struct MailLongHTMLBodyBanner: View {
+    var body: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            Image(systemName: "scroll")
+                .foregroundStyle(.secondary)
+            Text("这封邮件正文较长，可在正文区域内继续滚动。")
+                .font(AgentChatTypography.micro)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: AppShellLayout.spaceS)
+        }
+        .padding(AppShellLayout.spaceS)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityLabel("长邮件正文提示")
     }
 }
 
