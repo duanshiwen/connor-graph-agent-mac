@@ -397,6 +397,9 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var contactRecords: [ContactRecord] = []
     @Published var personProfiles: [PersonProfile] = []
     @Published var selectedContactID: ContactID?
+    @Published var isPresentingPersonProfileEditor: Bool = false
+    @Published var editingPersonProfileDraft: PersonProfileDraft?
+    @Published var pendingPersonProfileDeletionID: ContactID?
     @Published var isSyncingSystemContacts: Bool = false
     @Published var contactsSyncMessage: String?
     @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
@@ -2917,6 +2920,64 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         } catch {
             errorMessage = "无法保存日历缓存：\(error.localizedDescription)"
+        }
+    }
+
+    func presentNewPersonProfileEditor() {
+        editingPersonProfileDraft = PersonProfileDraft(displayName: "")
+        isPresentingPersonProfileEditor = true
+    }
+
+    func presentEditPersonProfile(_ id: ContactID) {
+        guard let profile = personProfiles.first(where: { $0.id == id }) else { return }
+        editingPersonProfileDraft = PersonProfileDraft(profile: profile)
+        isPresentingPersonProfileEditor = true
+    }
+
+    func savePersonProfileDraft(_ draft: PersonProfileDraft) async {
+        do {
+            let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !displayName.isEmpty else {
+                errorMessage = "人物名称不能为空"
+                return
+            }
+            let existing = draft.id.flatMap { id in personProfiles.first(where: { $0.id == id }) }
+            let now = Date()
+            let profile = draft.makeProfile(existing: existing, now: now)
+            _ = try await personProfileStore?.upsert(profile)
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.upserting(profile)
+            reloadContactsBrowserPresentation()
+            selectedContactID = profile.id
+            editingPersonProfileDraft = nil
+            isPresentingPersonProfileEditor = false
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法保存人物档案：\(error.localizedDescription)"
+        }
+    }
+
+    func deletePersonProfile(_ id: ContactID) async {
+        do {
+            try await personProfileStore?.markDeleted(id: id, now: Date())
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != id }
+            if selectedContactID == id { selectedContactID = personProfiles.first?.id }
+            reloadContactsBrowserPresentation()
+            pendingPersonProfileDeletionID = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法删除人物档案：\(error.localizedDescription)"
+        }
+    }
+
+    func mergePersonProfile(sourceID: ContactID, targetID: ContactID) async {
+        do {
+            _ = try await personProfileStore?.merge(sourceID: sourceID, targetID: targetID, now: Date())
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != sourceID }
+            selectedContactID = targetID
+            reloadContactsBrowserPresentation()
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法合并人物档案：\(error.localizedDescription)"
         }
     }
 
