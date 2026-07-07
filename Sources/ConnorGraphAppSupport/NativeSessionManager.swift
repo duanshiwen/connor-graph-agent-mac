@@ -576,7 +576,8 @@ public struct NativeSessionManager: Sendable {
             sessionID: session.id,
             role: "user",
             content: message.content,
-            occurredAt: message.createdAt
+            occurredAt: message.createdAt,
+            personReferences: message.personReferences
         )
     }
 
