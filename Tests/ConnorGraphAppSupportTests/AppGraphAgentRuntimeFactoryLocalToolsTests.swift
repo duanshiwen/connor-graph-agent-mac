@@ -397,6 +397,7 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(names.contains("mail_list_accounts"))
     #expect(names.contains("mail_search_messages"))
     #expect(names.contains("mail_create_draft"))
+    #expect(names.contains("mail_create_draft_to_people"))
     #expect(names.contains("mail_send_draft"))
     #expect(controller.toolRegistry.permission(named: "mail_send_draft") == .sendMail)
 
