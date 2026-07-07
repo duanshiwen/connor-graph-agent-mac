@@ -38,6 +38,9 @@ struct AgentChatComposerView: View {
     @State private var isSkillPickerPresented: Bool = false
     @State private var slashSkillPickerAnchorRect: CGRect?
     @State private var slashSkillPickerTriggerRange: NSRange?
+    @State private var personMentionTrigger: PersonMentionTrigger?
+    @State private var isPersonMentionPickerPresented: Bool = false
+    @State private var personMentionPickerSelectionIndex: Int = 0
     @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
@@ -132,8 +135,6 @@ struct AgentChatComposerView: View {
 
                     workingDirectoryMenu
 
-                    personMentionMenu
-
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
@@ -212,11 +213,13 @@ struct AgentChatComposerView: View {
         .onChange(of: viewModel.selectedChatSessionID) { _, _ in
             localChatInput = viewModel.chatInput
             composerPersonMentions = []
+            closePersonMentionPicker()
         }
         .onChange(of: viewModel.chatInput) { _, newValue in
             guard newValue != localChatInput else { return }
             localChatInput = newValue
             composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
+            updatePersonMentionTrigger(for: newValue)
         }
         .onChange(of: viewModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
             if isEnabled {
@@ -281,6 +284,7 @@ struct AgentChatComposerView: View {
             set: { newValue in
                 localChatInput = newValue
                 composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
+                updatePersonMentionTrigger(for: newValue)
                 sendComposerAction(.inputChanged(newValue))
             }
         )
@@ -295,10 +299,12 @@ struct AgentChatComposerView: View {
                 isSpellCheckEnabled: viewModel.spellCheckEnabled,
                 sendShortcut: viewModel.composerSendShortcut,
                 isSkillPickerPresented: isSkillPickerPresented,
+                isPersonMentionPickerPresented: isPersonMentionPickerPresented,
                 onSubmit: submitLocalChatInput,
                 onImportFiles: importComposerFiles,
                 onSlashCommand: handleSlashCommand,
                 onSkillPickerKeyCommand: handleSkillPickerKeyCommand,
+                onPersonMentionPickerKeyCommand: handlePersonMentionPickerKeyCommand,
                 onAttachmentImportError: handleAttachmentImportError,
                 onTextFileDropped: { droppedText in
                     if localChatInput.isEmpty {
@@ -312,6 +318,7 @@ struct AgentChatComposerView: View {
             )
 
             slashSkillPickerAnchor
+            personMentionPickerAnchor
         }
     }
 
@@ -319,7 +326,8 @@ struct AgentChatComposerView: View {
         if composerState.displayMode == .note {
             return "写下你的笔记..."
         }
-        return viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行"
+        let sendHint = viewModel.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
+        return "输入 / 选择技能，输入 @ 选择人名；\(sendHint)"
     }
 
     @ViewBuilder
@@ -395,6 +403,63 @@ struct AgentChatComposerView: View {
         slashSkillPickerTriggerRange = triggerRange
         skillPickerSelectionIndex = preferredSkillPickerSelectionIndex()
         isSkillPickerPresented = true
+        closePersonMentionPicker()
+    }
+
+    @ViewBuilder
+    private var personMentionPickerAnchor: some View {
+        if isPersonMentionPickerPresented, let trigger = personMentionTrigger {
+            VStack {
+                PersonMentionPickerView(
+                    query: trigger.query,
+                    profiles: viewModel.personProfiles,
+                    selectionIndex: personMentionPickerSelectionIndex,
+                    onSelect: selectPersonMention
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.top, AgentChatLayout.spaceL)
+            .padding(.leading, AgentChatLayout.spaceL)
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+        }
+    }
+
+    private var personMentionPickerResults: [PersonProfile] {
+        guard let trigger = personMentionTrigger else { return [] }
+        return PersonMentionSearch().search(query: trigger.query, profiles: viewModel.personProfiles, limit: 8)
+    }
+
+    private func updatePersonMentionTrigger(for text: String) {
+        let selectedRange = composerSelectionTracker.selectedRange ?? NSRange(location: (text as NSString).length, length: 0)
+        if let trigger = PersonMentionTriggerDetector().trigger(in: text, selectedRange: selectedRange) {
+            personMentionTrigger = trigger
+            personMentionPickerSelectionIndex = 0
+            isPersonMentionPickerPresented = true
+            closeSkillPicker()
+        } else {
+            closePersonMentionPicker()
+        }
+    }
+
+    private func selectPersonMention(_ profile: PersonProfile) {
+        guard let trigger = personMentionTrigger else { return }
+        do {
+            let replacement = try ComposerPersonMentionTextRewriter().replace(trigger: trigger, in: localChatInput, with: profile)
+            localChatInput = replacement.text
+            composerSelectionTracker.selectedRange = replacement.selectedRange
+            composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: replacement.text, mentions: composerPersonMentions + [replacement.mention])
+            viewModel.updateSelectedChatInputDraft(replacement.text)
+            sendComposerAction(.inputChanged(replacement.text))
+            closePersonMentionPicker()
+        } catch {
+            closePersonMentionPicker()
+        }
+    }
+
+    private func closePersonMentionPicker() {
+        isPersonMentionPickerPresented = false
+        personMentionTrigger = nil
+        personMentionPickerSelectionIndex = 0
     }
 
     private var canSubmitLocalChat: Bool {
@@ -449,6 +514,23 @@ struct AgentChatComposerView: View {
         slashSkillPickerTriggerRange = nil
     }
 
+    private func handlePersonMentionPickerKeyCommand(_ command: SkillPickerKeyCommand) {
+        let results = personMentionPickerResults
+        switch command {
+        case .moveUp:
+            guard !results.isEmpty else { return }
+            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex - 1 + results.count) % results.count
+        case .moveDown:
+            guard !results.isEmpty else { return }
+            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex + 1) % results.count
+        case .confirm:
+            guard results.indices.contains(personMentionPickerSelectionIndex) else { return }
+            selectPersonMention(results[personMentionPickerSelectionIndex])
+        case .cancel:
+            closePersonMentionPicker()
+        }
+    }
+
     private func submitLocalChatInput() {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
@@ -457,6 +539,7 @@ struct AgentChatComposerView: View {
         let personReferences = ComposerPersonMentionResolver().personReferences(in: submittedText, mentions: submittedMentions)
         localChatInput = ""
         composerPersonMentions = []
+        closePersonMentionPicker()
         viewModel.updateSelectedChatInputDraft("")
         Task {
             let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences)
@@ -466,56 +549,6 @@ struct AgentChatComposerView: View {
                 viewModel.updateSelectedChatInputDraft(submittedText)
             }
         }
-    }
-
-    private var personMentionMenu: some View {
-        Menu {
-            if activePersonMentionProfiles.isEmpty {
-                Text("暂无可提及人物")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(activePersonMentionProfiles, id: \.id) { profile in
-                    Button {
-                        insertPersonMention(profile)
-                    } label: {
-                        Text(personMentionMenuTitle(profile))
-                    }
-                }
-            }
-        } label: {
-            AgentComposerOptionBadge(
-                title: "@人物",
-                systemImage: "person.crop.circle.badge.plus",
-                tint: composerPersonMentions.isEmpty ? composerControlForeground : composerControlActiveForeground,
-                showsChevron: true,
-                isActive: !composerPersonMentions.isEmpty,
-                style: .compact,
-                showsBorder: false
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .help("插入结构化人物提及；发送给模型时会附带内部 person_id")
-        .accessibilityLabel("插入人物提及")
-    }
-
-    private var activePersonMentionProfiles: [PersonProfile] {
-        viewModel.personProfiles
-            .filter(\.isActiveForDefaultContext)
-            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-    }
-
-    private func personMentionMenuTitle(_ profile: PersonProfile) -> String {
-        let subtitle = profile.contactSubtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !subtitle.isEmpty, subtitle != "暂无联系方式" else { return profile.displayName }
-        return "\(profile.displayName)  ·  \(subtitle)"
-    }
-
-    private func insertPersonMention(_ profile: PersonProfile) {
-        let resolver = ComposerPersonMentionResolver()
-        let result = resolver.appendingMention(profile: profile, to: localChatInput)
-        localChatInput = result.text
-        composerPersonMentions = resolver.validatedMentions(in: result.text, mentions: composerPersonMentions + [result.mention])
-        viewModel.updateSelectedChatInputDraft(result.text)
     }
 
     private var workingDirectoryMenu: some View {
