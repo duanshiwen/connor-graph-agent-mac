@@ -27,6 +27,34 @@ import ConnorGraphAgent
     #expect(rendered.contains("Current user request:"))
 }
 
+@Test func agentChatPromptContextRendersActivePersonMemoryItemsForMentionedPeople() {
+    let profile = PersonProfile(
+        id: ContactID(rawValue: "person-chen"),
+        displayName: "小陈",
+        memoryEntityID: "person:person-profile:person-chen",
+        memoryStableKey: "person-profile:person-chen"
+    )
+    let context = AgentChatPromptContext(
+        userPrompt: "@小陈 最近在做什么？",
+        explicitPersonContexts: [
+            PersonContextSnapshot(
+                profile: profile,
+                activeMemoryItems: [
+                    "小陈负责产品策略。",
+                    "小陈喜欢冲浪。"
+                ]
+            )
+        ]
+    )
+
+    let rendered = context.renderedPrompt
+
+    #expect(rendered.contains("active person memory"))
+    #expect(rendered.contains("archived/deleted/moved person memories are not active default context"))
+    #expect(rendered.contains("- 小陈负责产品策略。"))
+    #expect(rendered.contains("- 小陈喜欢冲浪。"))
+}
+
 @Test func agentChatPromptContextReturnsRawPromptWithoutSummaryOrRecentMessages() {
     let context = AgentChatPromptContext(userPrompt: "What next?")
 

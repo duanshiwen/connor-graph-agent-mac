@@ -5,11 +5,13 @@ public struct PersonContextSnapshot: Sendable, Codable, Equatable, Hashable {
     public var profile: PersonProfile
     public var memorySummary: String?
     public var activeAliases: [String]
+    public var activeMemoryItems: [String]
 
-    public init(profile: PersonProfile, memorySummary: String? = nil, activeAliases: [String]? = nil) {
+    public init(profile: PersonProfile, memorySummary: String? = nil, activeAliases: [String]? = nil, activeMemoryItems: [String] = []) {
         self.profile = profile
         self.memorySummary = memorySummary
         self.activeAliases = activeAliases ?? profile.aliases
+        self.activeMemoryItems = activeMemoryItems
     }
 }
 
@@ -122,6 +124,13 @@ public struct AgentChatPromptContext: Sendable, Equatable {
             }
             if let memorySummary = context.memorySummary, !memorySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 parts.append("memory: \(memorySummary)")
+            }
+            let activeMemoryItems = context.activeMemoryItems
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !activeMemoryItems.isEmpty {
+                let bullets = activeMemoryItems.prefix(8).map { "- \($0)" }.joined(separator: "\n")
+                parts.append("active person memory (archived/deleted/moved person memories are not active default context): \n\(bullets)")
             }
             if let memoryStableKey = profile.memoryStableKey, !memoryStableKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 parts.append("memory_stable_key: \(memoryStableKey)")
