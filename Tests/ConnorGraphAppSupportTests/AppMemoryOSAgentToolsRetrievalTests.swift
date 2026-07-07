@@ -16,6 +16,7 @@ import ConnorGraphAppSupport
     try store.upsert(statement: MemoryOSStatement(id: "stmt-1", subjectID: node.id, predicate: "needs", text: "Connor Memory OS needs unified retrieval.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"]))
 
     let tool = MemoryOSSearchTool(facade: facade)
+    #expect(tool.description.contains("updated_at"))
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS retrieval","layers":["L1","L2"],"limit":5}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
