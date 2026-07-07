@@ -540,11 +540,20 @@ struct CraftContactsListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("联系人")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
+            HStack {
+                Text("联系人")
+                    .font(AppListTypography.header)
+                Spacer()
+                Button {
+                    viewModel.presentNewPersonProfileEditor()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.borderless)
+                .help("新建人物")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
 
             if viewModel.contactsBrowserPresentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的联系人", systemImage: "person.crop.circle.badge", description: Text("连接通讯录后，康纳同学会把可用联系人整理在这里，方便之后检索和关联会话。"))
@@ -587,7 +596,7 @@ private struct ContactRowButton: View {
                 Text(row.displayName)
                     .font(AppListTypography.rowTitle)
                     .foregroundStyle(.primary)
-                Text(row.primaryEmail ?? row.organizationName ?? "无联系方式")
+                Text(row.subtitle)
                     .font(AppListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
             }
@@ -2297,17 +2306,20 @@ struct ContactsSourceSettingsView: View {
         Group {
             if let selected = selectedContactRow {
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                    CalendarContactsDetailHeader(title: "联系人", subtitle: "轻量联系人数据源：列表和详情，不做 CRM。")
+                    CalendarContactsDetailHeader(title: "人物档案", subtitle: "联系人模块现在是人物列表：人可以先存在，联系方式后补充。")
                     Divider().opacity(0.6)
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
                         Label(selected.displayName, systemImage: "person.crop.circle")
                             .font(AgentChatTypography.title)
-                        if let email = selected.primaryEmail {
-                            Text(email).font(AgentChatTypography.meta).textSelection(.enabled)
-                        }
+                        Text(selected.subtitle).font(AgentChatTypography.meta).textSelection(.enabled)
                         if let organization = selected.organizationName {
                             Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
                         }
+                        HStack {
+                            Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
+                            Button("删除", role: .destructive) { viewModel.pendingPersonProfileDeletionID = selected.id }
+                        }
+                        .padding(.top, AppShellLayout.spaceM)
                     }
                     .padding(AppShellLayout.spaceXL)
                 }
@@ -2318,6 +2330,32 @@ struct ContactsSourceSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
+        .sheet(isPresented: $viewModel.isPresentingPersonProfileEditor) {
+            if let draft = Binding($viewModel.editingPersonProfileDraft) {
+                PersonProfileEditorView(
+                    draft: draft,
+                    onCancel: {
+                        viewModel.isPresentingPersonProfileEditor = false
+                        viewModel.editingPersonProfileDraft = nil
+                    },
+                    onSave: { draft in
+                        Task { @MainActor in await viewModel.savePersonProfileDraft(draft) }
+                    }
+                )
+            }
+        }
+        .confirmationDialog("删除人物档案？", isPresented: Binding(
+            get: { viewModel.pendingPersonProfileDeletionID != nil },
+            set: { if !$0 { viewModel.pendingPersonProfileDeletionID = nil } }
+        )) {
+            Button("删除", role: .destructive) {
+                guard let id = viewModel.pendingPersonProfileDeletionID else { return }
+                Task { @MainActor in await viewModel.deletePersonProfile(id) }
+            }
+            Button("取消", role: .cancel) { viewModel.pendingPersonProfileDeletionID = nil }
+        } message: {
+            Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
+        }
     }
 
     private var selectedContactRow: NativeContactRowPresentation? {
