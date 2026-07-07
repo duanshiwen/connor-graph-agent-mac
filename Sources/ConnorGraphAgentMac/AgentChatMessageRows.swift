@@ -120,6 +120,8 @@ struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
+    var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
+    var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
 
     @MainActor
     private final class BrowserPromptFoldingCache {
@@ -164,6 +166,10 @@ struct AgentChatMessageRow: View {
     }
 
     private var isUser: Bool { row.message.role == .user }
+    private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
+        AgentAssistantMessageActionsPresentation(message: row.message)
+    }
+
     private var activeSkillLabel: String? {
         guard let contextSnapshot = row.message.contextSnapshot else { return nil }
         let prefix = "Active skill:"
@@ -196,6 +202,13 @@ struct AgentChatMessageRow: View {
                         AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
                             onPreviewAttachment(attachment)
                         }
+                    }
+                    if assistantActionsPresentation.showsActions {
+                        AgentAssistantMessageActionsView(
+                            presentation: assistantActionsPresentation,
+                            onCopy: { onCopyAssistantMessage(row) },
+                            onExport: { onExportAssistantMessage(row) }
+                        )
                     }
                 }
                 .foregroundStyle(Color.primary)
@@ -261,6 +274,59 @@ struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct AgentAssistantMessageActionsView: View {
+    var presentation: AgentAssistantMessageActionsPresentation
+    var onCopy: () -> Void
+    var onExport: () -> Void
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            actionButton(
+                title: presentation.copyTitle,
+                accessibilityLabel: presentation.copyAccessibilityLabel,
+                help: presentation.copyHelp,
+                action: onCopy
+            )
+            actionButton(
+                title: presentation.exportTitle,
+                accessibilityLabel: presentation.exportAccessibilityLabel,
+                help: presentation.exportHelp,
+                action: onExport
+            )
+            Spacer(minLength: 0)
+        }
+        .padding(.top, AgentChatLayout.spaceXS)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func actionButton(
+        title: String,
+        accessibilityLabel: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(AgentChatTypography.microEmphasis)
+                .padding(.horizontal, AgentChatLayout.spaceS)
+                .padding(.vertical, 3)
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .background(
+            Capsule(style: .continuous)
+                .fill(ConnorCraftPalette.foreground.opacity(0.045))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(ConnorCraftPalette.foreground.opacity(0.08), lineWidth: 1)
+        )
+        .accessibilityLabel(accessibilityLabel)
+        .help(help)
     }
 }
 
