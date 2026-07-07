@@ -17,6 +17,9 @@ struct AgentChatComposerView: View {
     @State private var isSkillPickerPresented: Bool = false
     @State private var slashSkillPickerAnchorRect: CGRect?
     @State private var slashSkillPickerTriggerRange: NSRange?
+    @State private var personMentionTrigger: PersonMentionTrigger?
+    @State private var isPersonMentionPickerPresented: Bool = false
+    @State private var personMentionPickerSelectionIndex: Int = 0
     @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
@@ -253,6 +256,7 @@ struct AgentChatComposerView: View {
             set: { newValue in
                 localChatInput = newValue
                 sendComposerAction(.inputChanged(newValue))
+                updatePersonMentionTrigger(for: newValue)
             }
         )
     }
@@ -283,6 +287,7 @@ struct AgentChatComposerView: View {
             )
 
             slashSkillPickerAnchor
+            personMentionPickerAnchor
         }
     }
 
@@ -325,6 +330,54 @@ struct AgentChatComposerView: View {
 
     private func handleAttachmentImportError(_ message: String) {
         sendComposerAction(.showAttachmentImportError(message))
+    }
+
+    @ViewBuilder
+    private var personMentionPickerAnchor: some View {
+        if isPersonMentionPickerPresented, let trigger = personMentionTrigger {
+            VStack {
+                PersonMentionPickerView(
+                    query: trigger.query,
+                    profiles: viewModel.personProfiles,
+                    selectionIndex: personMentionPickerSelectionIndex,
+                    onSelect: selectPersonMention
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.top, AgentChatLayout.spaceL)
+            .padding(.leading, AgentChatLayout.spaceL)
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+        }
+    }
+
+    private func updatePersonMentionTrigger(for text: String) {
+        let selectedRange = composerSelectionTracker.selectedRange ?? NSRange(location: text.utf16.count, length: 0)
+        if let trigger = PersonMentionTriggerDetector().trigger(in: text, selectedRange: selectedRange) {
+            personMentionTrigger = trigger
+            personMentionPickerSelectionIndex = 0
+            isPersonMentionPickerPresented = true
+        } else {
+            closePersonMentionPicker()
+        }
+    }
+
+    private func selectPersonMention(_ profile: PersonProfile) {
+        guard let trigger = personMentionTrigger else { return }
+        do {
+            let replacement = try PersonMentionTextRewriter().replace(trigger: trigger, in: localChatInput, with: profile)
+            localChatInput = replacement.text
+            composerSelectionTracker.selectedRange = replacement.selectedRange
+            viewModel.updateSelectedChatInputDraft(localChatInput)
+            closePersonMentionPicker()
+        } catch {
+            closePersonMentionPicker()
+        }
+    }
+
+    private func closePersonMentionPicker() {
+        isPersonMentionPickerPresented = false
+        personMentionTrigger = nil
+        personMentionPickerSelectionIndex = 0
     }
 
     private var noteFormatBar: some View {
@@ -425,6 +478,7 @@ struct AgentChatComposerView: View {
         let displayPrompt = localChatInput
         let submittedText = localChatInput
         localChatInput = ""
+        closePersonMentionPicker()
         viewModel.updateSelectedChatInputDraft("")
         Task {
             let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
