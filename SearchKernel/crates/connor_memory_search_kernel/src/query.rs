@@ -19,6 +19,7 @@ pub struct MemorySearchHit {
     pub score: f32,
     pub matched_channel: String,
     pub rank_reason: String,
+    pub updated_at: Option<String>,
     pub metadata_json: String,
 }
 

@@ -37,6 +37,15 @@ private extension MemoryOSRetrievalHit {
             "matched_channel": hit.matchedChannel,
             "rank_reason": hit.rankReason
         ]
+        if let data = hit.metadataJSON.data(using: .utf8),
+           let kernelMetadata = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            for (key, value) in kernelMetadata {
+                metadata[key] = value
+            }
+        }
+        if metadata["updated_at"] == nil, let updatedAt = hit.updatedAt, !updatedAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            metadata["updated_at"] = updatedAt
+        }
         metadata["kernel_metadata_json"] = hit.metadataJSON
         self.init(
             layer: MemoryOSRetrievalLayer(searchKernelLayer: hit.layer),

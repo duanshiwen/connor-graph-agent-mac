@@ -100,6 +100,7 @@ impl ConnorMemorySearchKernel {
             let keywords = stored_text(&doc, fields.keywords).unwrap_or_default();
             let ids = stored_text(&doc, fields.ids).unwrap_or_default();
             let snippet = if !summary.is_empty() { summary.clone() } else { body.chars().take(240).collect() };
+            let updated_at = stored_text(&doc, fields.updated_at).filter(|value| !value.trim().is_empty());
             let metadata_json = stored_text(&doc, fields.metadata_json).unwrap_or_else(|| "{}".to_string());
             let layer_enum = serde_json::from_str(&format!("\"{}\"", layer)).unwrap_or(SearchLayer::L4);
             let boost_explanation = exact_match_boost(&request.query, &record_id, &record_kind, &title, &exact_terms);
@@ -125,6 +126,7 @@ impl ConnorMemorySearchKernel {
                 score: boosted_score,
                 matched_channel: matched_channel.to_string(),
                 rank_reason,
+                updated_at,
                 metadata_json,
             });
         }
