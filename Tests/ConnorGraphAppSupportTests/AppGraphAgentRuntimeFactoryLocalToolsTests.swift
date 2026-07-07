@@ -245,6 +245,96 @@ import ConnorGraphStore
     #expect(result.contentJSON?.contains("shared-docs") == true)
 }
 
+@Test func agentLoopRuntimeFactoryContactsReadListsPersistentPersonRegistryProfiles() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryPersistentContactsList-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let profileStore = try SQLitePersonProfileStore(databaseURL: storagePaths.applicationSupportDirectory
+        .appendingPathComponent("contacts", isDirectory: true)
+        .appendingPathComponent("person-profiles.sqlite"))
+    _ = try await profileStore.upsert(PersonProfile(
+        id: ContactID(rawValue: "person-zhang-xia"),
+        displayName: "张霞",
+        notes: "段诗闻和段福强的妈妈。"
+    ))
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "contacts_read", argumentsJSON: #"{"operation":"list_people"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-persistent-contacts-list",
+            sessionID: "session-persistent-contacts-list",
+            groupID: "default",
+            userPrompt: "list people",
+            toolCallID: "contacts-list-people",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(result.contentText.contains("Found 1 people"))
+    #expect(result.contentJSON?.contains("person-zhang-xia") == true)
+    #expect(result.contentJSON?.contains("张霞") == true)
+}
+
+@Test func agentLoopRuntimeFactoryContactsReadGetsPersistentPersonByID() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryPersistentContactsGet-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let profileStore = try SQLitePersonProfileStore(databaseURL: storagePaths.applicationSupportDirectory
+        .appendingPathComponent("contacts", isDirectory: true)
+        .appendingPathComponent("person-profiles.sqlite"))
+    _ = try await profileStore.upsert(PersonProfile(
+        id: ContactID(rawValue: "person-zhang-xia"),
+        displayName: "张霞",
+        notes: "段诗闻和段福强的妈妈。"
+    ))
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "contacts_read", argumentsJSON: #"{"operation":"get_person","id":"person-zhang-xia"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-persistent-contacts-get",
+            sessionID: "session-persistent-contacts-get",
+            groupID: "default",
+            userPrompt: "get person",
+            toolCallID: "contacts-get-person",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(result.contentText.contains("Loaded person"))
+    #expect(result.contentJSON?.contains("person-zhang-xia") == true)
+    #expect(result.contentJSON?.contains("张霞") == true)
+}
+
 @Test func agentLoopRuntimeFactoryAllowsHiddenConnorDataDirectoryWithoutShowingItAsWorkspaceRoot() async throws {
     let tempBase = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryHiddenDataWorkspace-", isDirectory: true)
