@@ -113,12 +113,15 @@ public struct MemoryOSContextDeliveryService: Sendable {
     private static func hitFromKernel(_ hit: MemoryOSSearchKernelHit) -> MemoryOSRetrievalHit {
         let layer = MemoryOSRetrievalLayer(rawValue: hit.layer.rawValue) ?? .l4
         let isEntity = hit.recordKind == "Entity"
-        let metadata: [String: String]
+        var metadata: [String: String]
         if let data = hit.metadataJSON.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
             metadata = obj
         } else {
             metadata = [:]
+        }
+        if metadata["updated_at"] == nil, let updatedAt = hit.updatedAt, !updatedAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            metadata["updated_at"] = updatedAt
         }
         return MemoryOSRetrievalHit(
             layer: layer,
