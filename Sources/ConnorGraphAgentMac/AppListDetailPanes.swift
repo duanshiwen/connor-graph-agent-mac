@@ -2345,6 +2345,21 @@ struct ContactsSourceSettingsView: View {
                                 PersonProfileMetadataLine(label: "状态", value: selected.status.displayTitle)
                             }
                         }
+
+                        let relationshipRows = PersonRelationshipPresentation.rows(
+                            for: selected.id,
+                            relationships: viewModel.personRelationships,
+                            displayTitle: { viewModel.displayTitle(for: $0) }
+                        )
+                        if !relationshipRows.isEmpty {
+                            PersonProfileInfoSection(title: "关系", systemImage: "person.2") {
+                                VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                                    ForEach(relationshipRows) { row in
+                                        PersonProfileMetadataLine(label: row.label, value: row.value)
+                                    }
+                                }
+                            }
+                        }
                     }
                     .padding(AppShellLayout.spaceXL)
                     .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
