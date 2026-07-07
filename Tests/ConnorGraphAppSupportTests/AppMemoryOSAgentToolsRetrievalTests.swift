@@ -16,6 +16,7 @@ import ConnorGraphAppSupport
     try store.upsert(statement: MemoryOSStatement(id: "stmt-1", subjectID: node.id, predicate: "needs", text: "Connor Memory OS needs unified retrieval.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"]))
 
     let tool = MemoryOSSearchTool(facade: facade)
+    #expect(tool.description.contains("updated_at"))
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS retrieval","layers":["L1","L2"],"limit":5}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
@@ -66,7 +67,9 @@ import ConnorGraphAppSupport
     #expect(result.toolName == "memory_os_get_current_user_profile")
     #expect(result.contentText.contains("current_user profile"))
     #expect(lines.contains { $0.contains("structured architectural explanations") })
+    #expect(lines.contains { $0.contains("structured architectural explanations") && $0.contains("(updated_at: \(iso8601(now)))") })
     #expect(lines.contains { $0.contains("phase-by-phase execution updates") })
+    #expect(lines.contains { $0.contains("phase-by-phase execution updates") && $0.contains("(updated_at: \(iso8601(now)))") })
     #expect(!json.contains("shiwen"))
 }
 
@@ -154,7 +157,7 @@ import ConnorGraphAppSupport
 
     let profile = try facade.currentUserProfileContext()
     #expect(!profile.isEmpty)
-    #expect(profile.contains { $0 == "Current user prefers mature systemic plans over minimal patches for architectural issues." })
+    #expect(profile.contains { $0.contains("Current user prefers mature systemic plans over minimal patches for architectural issues.") && $0.contains("(updated_at:") })
 }
 
 @Test func memoryOSUpdateCurrentUserProfileRejectsExtraFactFields() async throws {
@@ -242,6 +245,10 @@ private func memoryOSToolJSON(_ result: AgentToolResult) throws -> [String: Any]
 
 private func memoryOSToolContext() -> AgentToolExecutionContext {
     AgentToolExecutionContext(runID: "run-memory-os-retrieval", sessionID: "session", groupID: "group", userPrompt: "search memory", toolCallID: UUID().uuidString, policyEngine: AgentPolicyEngine(permissionMode: .allowAll))
+}
+
+private func iso8601(_ date: Date) -> String {
+    ISO8601DateFormatter().string(from: date)
 }
 
 private func temporaryAppMemoryOSRetrievalToolDatabaseURL() -> URL {

@@ -25,6 +25,7 @@ struct AppMemoryOSFacadeEmbeddedSearchTests {
         let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: "中国", layers: [.l4], limit: 5))
         #expect(hits.contains { $0.recordID == "wikidata:Q148" })
         #expect(hits.allSatisfy { $0.metadata["backend"] == "tantivy-embedded" })
+        #expect(hits.contains { $0.recordID == "wikidata:Q148" && $0.metadata["updated_at"] == "2026-06-24" })
     }
 }
 

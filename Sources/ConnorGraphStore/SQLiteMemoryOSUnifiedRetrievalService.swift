@@ -63,8 +63,9 @@ public struct MemoryOSL4ExpansionHit: Sendable, Codable, Equatable, Identifiable
     public var text: String
     public var depth: Int
     public var score: Double
+    public var updatedAt: String?
 
-    public init(recordID: String, sourceEntityID: String, relatedEntityID: String?, predicate: String, text: String, depth: Int, score: Double = 1.0) {
+    public init(recordID: String, sourceEntityID: String, relatedEntityID: String?, predicate: String, text: String, depth: Int, score: Double = 1.0, updatedAt: String? = nil) {
         self.recordID = recordID
         self.sourceEntityID = sourceEntityID
         self.relatedEntityID = relatedEntityID
@@ -72,6 +73,7 @@ public struct MemoryOSL4ExpansionHit: Sendable, Codable, Equatable, Identifiable
         self.text = text
         self.depth = depth
         self.score = score
+        self.updatedAt = updatedAt
     }
 }
 
@@ -145,7 +147,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             guard !frontier.isEmpty, results.count < limit else { break }
             let quoted = frontier.map { store.quote($0) }.joined(separator: ",")
             let rows = try store.query(sql: """
-            SELECT id, entity_id, predicate, object_entity_id, text
+            SELECT id, entity_id, predicate, object_entity_id, text, COALESCE(committed_at, ''), COALESCE(valid_at, '')
             FROM memory_l4_entity_statements
             WHERE entity_id IN (\(quoted)) OR (object_entity_id IS NOT NULL AND object_entity_id IN (\(quoted)))
             ORDER BY committed_at DESC
@@ -157,7 +159,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
                 let object = row[3].isEmpty ? nil : row[3]
                 let related = source == entityID || frontier.contains(source) ? object : source
                 let score = l4ExpansionScore(predicate: row[2], depth: currentDepth)
-                results.append(MemoryOSL4ExpansionHit(recordID: row[0], sourceEntityID: source, relatedEntityID: related, predicate: row[2], text: row[4], depth: currentDepth, score: score))
+                results.append(MemoryOSL4ExpansionHit(recordID: row[0], sourceEntityID: source, relatedEntityID: related, predicate: row[2], text: row[4], depth: currentDepth, score: score, updatedAt: firstNonEmpty(row[5], row[6])))
                 if let related, !visited.contains(related) {
                     visited.insert(related)
                     nextFrontier.insert(related)
@@ -184,34 +186,36 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
 
     private func searchL0(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
         try store.query(sql: """
-        SELECT object_id, title, content, bm25(memory_l0_provenance_fts) AS rank
-        FROM memory_l0_provenance_fts
+        SELECT f.object_id, f.title, f.content, bm25(memory_l0_provenance_fts) AS rank, COALESCE(o.ingested_at, ''), COALESCE(o.occurred_at, '')
+        FROM memory_l0_provenance_fts f
+        LEFT JOIN memory_l0_provenance_objects o ON o.id = f.object_id
         WHERE memory_l0_provenance_fts MATCH \(store.quote(ftsQuery(text)))
         ORDER BY rank
         LIMIT \(limit)
         """).map { row in
-            MemoryOSRetrievalHit(layer: .l0, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[3]), provenanceRefs: [row[0]], canReadRaw: true)
+            MemoryOSRetrievalHit(layer: .l0, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[3]), provenanceRefs: [row[0]], canReadRaw: true, metadata: ["updated_at": firstNonEmpty(row[4], row[5])])
         }
     }
 
     private func searchL1(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
         let like = "%\(text.replacingOccurrences(of: "'", with: "''"))%"
         return try store.query(sql: """
-        SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content
+        SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, '')
         FROM memory_l1_capture_events c
         JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
         WHERE o.title LIKE '\(like)' OR o.content LIKE '\(like)' OR c.event_type LIKE '\(like)'
         ORDER BY c.occurred_at DESC
         LIMIT \(limit)
         """).map { row in
-            let metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
+            var metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
+            metadata["updated_at"] = firstNonEmpty(metadata["updated_at"] ?? "", row[6])
             return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[4], matchedText: row[5], score: lexicalScore(text, haystack: row[4] + " " + row[5]), evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: true, metadata: metadata)
         }
     }
 
     private func searchL2(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
         try store.query(sql: """
-        SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.subject_id, bm25(memory_l2_statements_fts) AS rank, COALESCE(s.committed_at, '')
+        SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.subject_id, bm25(memory_l2_statements_fts) AS rank, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, '')
         FROM memory_l2_statements_fts f
         JOIN memory_l2_statements s ON s.id = f.statement_id
         WHERE memory_l2_statements_fts MATCH \(store.quote(ftsQuery(text)))
@@ -219,7 +223,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         LIMIT \(limit)
         """).map { row in
             let evidence = (try? store.decode([String].self, row[3])) ?? []
-            return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]], metadata: ["committed_at": row[6]])
+            return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]], metadata: ["committed_at": row[6], "valid_at": row[7], "updated_at": firstNonEmpty(row[6], row[7])])
         }
     }
 
@@ -243,7 +247,8 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
                 metadata: [
                     "domain": row[2],
                     "related_object_names": row[3],
-                    "updated_at": row[5]
+                    "created_at": row[4],
+                    "updated_at": firstNonEmpty(row[5], row[4])
                 ]
             )
         }
@@ -251,18 +256,18 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
 
     private func searchL4(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
         var hits = try store.query(sql: """
-        SELECT f.entity_id, f.entity_type, f.name, f.summary, bm25(memory_l4_entities_fts) AS rank, COALESCE(e.updated_at, '')
+        SELECT f.entity_id, f.entity_type, f.name, f.summary, bm25(memory_l4_entities_fts) AS rank, COALESCE(e.updated_at, ''), COALESCE(e.created_at, ''), COALESCE(e.valid_from, '')
         FROM memory_l4_entities_fts f
         LEFT JOIN memory_l4_entities e ON e.id = f.entity_id
         WHERE memory_l4_entities_fts MATCH \(store.quote(ftsQuery(text)))
         ORDER BY rank
         LIMIT \(limit)
         """).map { row in
-            MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[2], summary: row[3], matchedText: row[2] + " " + row[3], score: score(fromFTSRank: row[4]), entityRefs: [row[0]], canExpandDepth: true, metadata: ["entity_type": row[1], "updated_at": row[5]])
+            MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[2], summary: row[3], matchedText: row[2] + " " + row[3], score: score(fromFTSRank: row[4]), entityRefs: [row[0]], canExpandDepth: true, metadata: ["entity_type": row[1], "updated_at": firstNonEmpty(row[5], row[6], row[7]), "created_at": row[6], "valid_from": row[7]])
         }
         if hits.count < limit {
             hits += try store.query(sql: """
-            SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, bm25(memory_l4_statements_fts) AS rank, COALESCE(s.committed_at, '')
+            SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, bm25(memory_l4_statements_fts) AS rank, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, '')
             FROM memory_l4_statements_fts f
             JOIN memory_l4_entity_statements s ON s.id = f.statement_id
             WHERE memory_l4_statements_fts MATCH \(store.quote(ftsQuery(text)))
@@ -270,7 +275,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             LIMIT \(limit - hits.count)
             """).map { row in
                 let evidence = (try? store.decode([String].self, row[3])) ?? []
-                return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true, metadata: ["committed_at": row[7]])
+                return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true, metadata: ["committed_at": row[7], "valid_at": row[8], "updated_at": firstNonEmpty(row[7], row[8])])
             }
         }
         return hits
@@ -314,6 +319,10 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             terms.append(compact)
         }
         return Array(NSOrderedSet(array: terms).compactMap { $0 as? String })
+    }
+
+    private func firstNonEmpty(_ values: String...) -> String {
+        values.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
     }
 
     private func score(fromFTSRank rank: String) -> Double {

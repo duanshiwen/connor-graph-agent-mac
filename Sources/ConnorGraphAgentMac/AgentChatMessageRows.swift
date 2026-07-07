@@ -2,6 +2,55 @@ import SwiftUI
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
+struct AgentAssistantMessageActionsPresentation: Equatable {
+    var showsActions: Bool
+    var copyTitle: String
+    var exportTitle: String
+    var copyAccessibilityLabel: String
+    var exportAccessibilityLabel: String
+    var copyHelp: String
+    var exportHelp: String
+
+    init(message: AgentMessage) {
+        let hasContent = !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.showsActions = message.role == .assistant && hasContent
+        self.copyTitle = "复制"
+        self.exportTitle = "导出到文件"
+        self.copyAccessibilityLabel = "复制这条助理回复"
+        self.exportAccessibilityLabel = "导出这条助理回复为 Markdown 文件"
+        self.copyHelp = "复制原始 Markdown 文本"
+        self.exportHelp = "选择保存位置和文件名，导出为 Markdown 文件"
+    }
+}
+
+enum AssistantMessageExportFormatter {
+    private static let invalidFilenameCharacters = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+
+    static func filename(for message: AgentChatMessagePresentation, date: Date, calendar: Calendar = .current) -> String {
+        let turn = String(format: "%03d", max(message.turnNumber, 0))
+        let timestamp = timestampFormatter(calendar: calendar).string(from: date)
+        let prefix = sanitizedMessageIDPrefix(message.message.id)
+        return "assistant-reply-turn-\(turn)-\(timestamp)-\(prefix).md"
+    }
+
+    private static func sanitizedMessageIDPrefix(_ id: String) -> String {
+        let sanitized = id.unicodeScalars.map { scalar -> Character in
+            invalidFilenameCharacters.contains(scalar) || CharacterSet.whitespacesAndNewlines.contains(scalar) ? "-" : Character(scalar)
+        }
+        let prefix = String(sanitized).prefix(8)
+        return prefix.isEmpty ? "message" : String(prefix)
+    }
+
+    private static func timestampFormatter(calendar: Calendar) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }
+}
+
 struct AgentChatTurnTimestampRow: View {
     var timestamp: AgentChatTurnTimestampPresentation
 
@@ -71,6 +120,8 @@ struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
+    var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
+    var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
 
     @MainActor
     private final class BrowserPromptFoldingCache {
@@ -115,6 +166,10 @@ struct AgentChatMessageRow: View {
     }
 
     private var isUser: Bool { row.message.role == .user }
+    private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
+        AgentAssistantMessageActionsPresentation(message: row.message)
+    }
+
     private var activeSkillLabel: String? {
         guard let contextSnapshot = row.message.contextSnapshot else { return nil }
         let prefix = "Active skill:"
@@ -137,7 +192,7 @@ struct AgentChatMessageRow: View {
         HStack(alignment: .top) {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
@@ -158,6 +213,15 @@ struct AgentChatMessageRow: View {
                     RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
                         .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
                 )
+
+                if assistantActionsPresentation.showsActions {
+                    AgentAssistantMessageActionsView(
+                        presentation: assistantActionsPresentation,
+                        onCopy: { onCopyAssistantMessage(row) },
+                        onExport: { onExportAssistantMessage(row) }
+                    )
+                    .padding(.leading, AgentChatLayout.messageBubbleHorizontalPadding + 1)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
@@ -212,6 +276,59 @@ struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct AgentAssistantMessageActionsView: View {
+    var presentation: AgentAssistantMessageActionsPresentation
+    var onCopy: () -> Void
+    var onExport: () -> Void
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceM) {
+            actionButton(
+                title: presentation.copyTitle,
+                systemImage: "doc.on.doc",
+                accessibilityLabel: presentation.copyAccessibilityLabel,
+                help: presentation.copyHelp,
+                action: onCopy
+            )
+            actionButton(
+                title: presentation.exportTitle,
+                systemImage: "doc.text",
+                accessibilityLabel: presentation.exportAccessibilityLabel,
+                help: presentation.exportHelp,
+                action: onExport
+            )
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func actionButton(
+        title: String,
+        systemImage: String,
+        accessibilityLabel: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .medium))
+                    .imageScale(.small)
+                Text(title)
+                    .font(AgentChatTypography.microEmphasis)
+            }
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tertiary)
+        .accessibilityLabel(accessibilityLabel)
+        .help(help)
     }
 }
 

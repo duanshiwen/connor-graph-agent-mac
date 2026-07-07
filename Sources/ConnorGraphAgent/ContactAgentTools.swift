@@ -194,6 +194,55 @@ public struct ContactCommitDraftTool: AgentTool {
     }
 }
 
+private func summarizePeople(_ people: [PersonProfile], prefix: String) -> String {
+    let lines = people.prefix(20).map { person in
+        var parts = [
+            "person_id: \(person.id.rawValue)",
+            "display_name: \(person.displayName)",
+            "status: \(person.status.rawValue)"
+        ]
+        if let mergedIntoID = person.mergedIntoID {
+            parts.append("merged_into_person_id: \(mergedIntoID.rawValue)")
+        }
+        if let notes = person.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+            parts.append("notes: \(String(notes.prefix(160)))")
+        }
+        if !person.aliases.isEmpty {
+            parts.append("aliases: \(person.aliases.prefix(5).joined(separator: ", "))")
+        }
+        return "- " + parts.joined(separator: " | ")
+    }
+    guard !lines.isEmpty else { return prefix }
+    let suffix = people.count > lines.count ? ["... and \(people.count - lines.count) more people"] : []
+    return ([prefix] + lines + suffix).joined(separator: "\n")
+}
+
+private func summarizePerson(_ person: PersonProfile?) -> String {
+    guard let person else { return "Person not found" }
+    var lines = [
+        "Loaded person",
+        "person_id: \(person.id.rawValue)",
+        "display_name: \(person.displayName)",
+        "status: \(person.status.rawValue)"
+    ]
+    if let mergedIntoID = person.mergedIntoID {
+        lines.append("merged_into_person_id: \(mergedIntoID.rawValue)")
+    }
+    if !person.aliases.isEmpty {
+        lines.append("aliases: \(person.aliases.joined(separator: ", "))")
+    }
+    if let organizationName = person.organizationName?.trimmingCharacters(in: .whitespacesAndNewlines), !organizationName.isEmpty {
+        lines.append("organization: \(organizationName)")
+    }
+    if let jobTitle = person.jobTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !jobTitle.isEmpty {
+        lines.append("job_title: \(jobTitle)")
+    }
+    if let notes = person.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+        lines.append("notes: \(String(notes.prefix(500)))")
+    }
+    return lines.joined(separator: "\n")
+}
+
 public struct ContactsReadTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_read" }
@@ -212,14 +261,14 @@ public struct ContactsReadTool: AgentTool {
         switch operation {
         case "list_people":
             let people = try await runtime.listPeople()
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(people.count) people", contentJSON: try ContactJSON.encode(people))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encode(people))
         case "search_people", "resolve_person":
             let people = try await runtime.searchPeople(query: arguments.string("query") ?? "")
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(people.count) people", contentJSON: try ContactJSON.encode(people))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encode(people))
         case "get_person":
             guard let id = arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("id is required") }
             let person = try await runtime.getPerson(id: ContactID(rawValue: id))
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: person == nil ? "Person not found" : "Loaded person", contentJSON: try ContactJSON.encode(person))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePerson(person), contentJSON: try ContactJSON.encode(person))
         case "list_contacts", "search_contacts", "resolve_contact":
             let records = try await runtime.search(query: arguments.string("query") ?? "")
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: try ContactJSON.encode(records))

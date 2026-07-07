@@ -39,6 +39,8 @@ impl MemorySearchIndexer {
             document.add_text(fields.body, searchable_text(&item.body));
             document.add_text(fields.keywords, searchable_text(&item.keywords.join(" ")));
             document.add_text(fields.ids, item.ids.join(" "));
+            document.add_text(fields.created_at, item.created_at.clone().unwrap_or_default());
+            document.add_text(fields.updated_at, item.updated_at.clone().unwrap_or_default());
             document.add_text(fields.metadata_json, item.metadata_json.clone());
             document.add_text(fields.exact_terms, exact_terms(item).join("\n"));
             for term in exact_terms(item) {

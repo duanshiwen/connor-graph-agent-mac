@@ -22,6 +22,7 @@ struct MemoryOSSearchKernelFFITests {
         let response = try kernel.search(.init(query: "中国", layers: [.l4], limit: 5))
         #expect(response.backend == "tantivy-embedded")
         #expect(response.hits.contains { $0.recordID == "wikidata:Q148" })
+        #expect(response.hits.contains { $0.recordID == "wikidata:Q148" && $0.updatedAt == "2026-06-24" })
     }
 }
 

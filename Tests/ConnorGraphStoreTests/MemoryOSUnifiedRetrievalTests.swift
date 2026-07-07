@@ -7,7 +7,7 @@ import ConnorGraphStore
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 4_000)
-    let object = MemoryOSProvenanceObject(sourceType: .manual, sourceID: "source-1", title: "Elasticity note", content: "Supply demand elasticity changes with price sensitivity.", occurredAt: now)
+    let object = MemoryOSProvenanceObject(sourceType: .manual, sourceID: "source-1", title: "Elasticity note", content: "Supply demand elasticity changes with price sensitivity.", occurredAt: now, ingestedAt: now)
     try store.upsert(provenance: object)
     let span = MemoryOSProvenanceSpan(id: "span-1", provenanceObjectID: object.id, text: object.content)
     try store.upsert(span: span)
@@ -24,6 +24,11 @@ import ConnorGraphStore
     #expect(Set(hits.map(\.layer)).isSuperset(of: Set([.l0, .l1, .l2, .l3, .l4])))
     #expect(hits.first?.score ?? 0 >= hits.last?.score ?? 0)
     #expect(hits.contains { $0.recordID == "statement-1" && $0.evidenceRefs == ["span-1"] })
+    #expect(hits.contains { $0.layer == .l0 && $0.metadata["updated_at"] == iso8601(now) })
+    #expect(hits.contains { $0.layer == .l1 && $0.metadata["updated_at"] == iso8601(now) })
+    #expect(hits.contains { $0.recordID == "statement-1" && $0.metadata["updated_at"] == iso8601(now) })
+    #expect(hits.contains { $0.recordID == "knowledge-1" && $0.metadata["updated_at"] == iso8601(now) })
+    #expect(hits.contains { $0.recordID == "entity-1" && $0.metadata["updated_at"]?.isEmpty == false })
 }
 
 @Test func memoryOSUnifiedRetrievalExpandsL4ConceptDepth() throws {
@@ -44,6 +49,25 @@ import ConnorGraphStore
     #expect(expansion.first?.depth == 1)
     #expect(expansion.first?.recordID == "relation-2")
     #expect((expansion.first?.score ?? 0) > (expansion.first(where: { $0.recordID == "relation-1" })?.score ?? 0))
+    #expect(expansion.first(where: { $0.recordID == "relation-1" })?.updatedAt == iso8601(now))
+}
+
+@Test func memoryOSUnifiedRetrievalReturnsUpdatedAtForL4StatementHits() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 4_000)
+    try store.upsert(entity: MemoryOSEntity(id: "entity-elasticity", stableKey: "economics:concept:elasticity", entityType: "concept", name: "Elasticity", summary: "Elasticity concept", confidence: 0.9))
+    try store.upsert(entity: MemoryOSEntity(id: "entity-price", stableKey: "economics:parameter:price", entityType: "parameter", name: "Price", summary: "Price parameter", confidence: 0.9))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-1", entityID: "entity-elasticity", predicate: .influences, objectEntityID: "entity-price", text: "Elasticity updated-at relation varies with price.", assertionKind: .summarized, confidence: 0.88, validAt: now, committedAt: now))
+
+    let service = SQLiteMemoryOSUnifiedRetrievalService(store: store)
+    let hits = try service.search(MemoryOSRetrievalQuery(text: "updated-at", layers: [.l4], limit: 10))
+
+    #expect(hits.contains { $0.recordID == "relation-1" && $0.metadata["updated_at"] == iso8601(now) })
+}
+
+private func iso8601(_ date: Date) -> String {
+    ISO8601DateFormatter().string(from: date)
 }
 
 private func temporaryMemoryOSUnifiedRetrievalDatabaseURL() -> URL {

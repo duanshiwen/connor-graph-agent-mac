@@ -10,6 +10,8 @@ pub const FIELD_SUMMARY: &str = "summary";
 pub const FIELD_BODY: &str = "body";
 pub const FIELD_KEYWORDS: &str = "keywords";
 pub const FIELD_IDS: &str = "ids";
+pub const FIELD_CREATED_AT: &str = "created_at";
+pub const FIELD_UPDATED_AT: &str = "updated_at";
 pub const FIELD_METADATA_JSON: &str = "metadata_json";
 pub const FIELD_EXACT_TERMS: &str = "exact_terms";
 pub const FIELD_EXACT_RAW: &str = "exact_raw";
@@ -26,6 +28,8 @@ pub struct MemorySearchFields {
     pub body: Field,
     pub keywords: Field,
     pub ids: Field,
+    pub created_at: Field,
+    pub updated_at: Field,
     pub metadata_json: Field,
     pub exact_terms: Field,
     pub exact_raw: Field,
@@ -43,6 +47,8 @@ pub fn memory_search_schema() -> Schema {
     builder.add_text_field(FIELD_BODY, TEXT | STORED);
     builder.add_text_field(FIELD_KEYWORDS, TEXT | STORED);
     builder.add_text_field(FIELD_IDS, TEXT | STORED);
+    builder.add_text_field(FIELD_CREATED_AT, STRING | STORED);
+    builder.add_text_field(FIELD_UPDATED_AT, STRING | STORED);
     builder.add_text_field(FIELD_METADATA_JSON, STORED);
     builder.add_text_field(FIELD_EXACT_TERMS, TEXT | STORED);
     builder.add_text_field(FIELD_EXACT_RAW, STRING | STORED);
@@ -61,6 +67,8 @@ pub fn memory_search_fields(schema: &Schema) -> MemorySearchFields {
         body: schema.get_field(FIELD_BODY).expect("body field"),
         keywords: schema.get_field(FIELD_KEYWORDS).expect("keywords field"),
         ids: schema.get_field(FIELD_IDS).expect("ids field"),
+        created_at: schema.get_field(FIELD_CREATED_AT).expect("created_at field"),
+        updated_at: schema.get_field(FIELD_UPDATED_AT).expect("updated_at field"),
         metadata_json: schema.get_field(FIELD_METADATA_JSON).expect("metadata_json field"),
         exact_terms: schema.get_field(FIELD_EXACT_TERMS).expect("exact_terms field"),
         exact_raw: schema.get_field(FIELD_EXACT_RAW).expect("exact_raw field"),

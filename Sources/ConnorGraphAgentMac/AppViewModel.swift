@@ -4,6 +4,7 @@ import CoreLocation
 import IOKit.pwr_mgt
 import UserNotifications
 import WebKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -772,6 +773,52 @@ final class AppViewModel: NSObject, ObservableObject {
             sessionID: selectedChatSessionID,
             messageID: messageID
         )
+    }
+
+    func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation) {
+        let content = message.message.content
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(content, forType: .string)
+        showAttachmentToast(
+            title: "已复制回复",
+            message: "已复制原始 Markdown 文本。",
+            systemImage: "doc.on.doc"
+        )
+    }
+
+    func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date = Date()) {
+        let content = message.message.content
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let panel = NSSavePanel()
+        panel.title = "导出助理回复"
+        panel.message = "选择保存位置和文件名。"
+        panel.prompt = "导出"
+        panel.nameFieldLabel = "文件名："
+        panel.nameFieldStringValue = AssistantMessageExportFormatter.filename(for: message, date: now)
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.directoryURL = selectedSessionArtifactDirectories?.exports
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            showAttachmentToast(
+                title: "已导出回复",
+                message: url.path,
+                systemImage: "square.and.arrow.down"
+            )
+        } catch {
+            showAttachmentToast(
+                title: "导出回复失败",
+                message: String(describing: error),
+                systemImage: "xmark.circle"
+            )
+        }
     }
 
     @discardableResult
