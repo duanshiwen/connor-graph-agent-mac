@@ -2,6 +2,55 @@ import SwiftUI
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
+struct AgentAssistantMessageActionsPresentation: Equatable {
+    var showsActions: Bool
+    var copyTitle: String
+    var exportTitle: String
+    var copyAccessibilityLabel: String
+    var exportAccessibilityLabel: String
+    var copyHelp: String
+    var exportHelp: String
+
+    init(message: AgentMessage) {
+        let hasContent = !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.showsActions = message.role == .assistant && hasContent
+        self.copyTitle = "复制"
+        self.exportTitle = "导出到文件"
+        self.copyAccessibilityLabel = "复制这条助理回复"
+        self.exportAccessibilityLabel = "导出这条助理回复到文件"
+        self.copyHelp = "复制原始 Markdown 文本"
+        self.exportHelp = "保存为 Markdown 文件到当前会话 exports 目录"
+    }
+}
+
+enum AssistantMessageExportFormatter {
+    private static let invalidFilenameCharacters = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+
+    static func filename(for message: AgentChatMessagePresentation, date: Date, calendar: Calendar = .current) -> String {
+        let turn = String(format: "%03d", max(message.turnNumber, 0))
+        let timestamp = timestampFormatter(calendar: calendar).string(from: date)
+        let prefix = sanitizedMessageIDPrefix(message.message.id)
+        return "assistant-reply-turn-\(turn)-\(timestamp)-\(prefix).md"
+    }
+
+    private static func sanitizedMessageIDPrefix(_ id: String) -> String {
+        let sanitized = id.unicodeScalars.map { scalar -> Character in
+            invalidFilenameCharacters.contains(scalar) || CharacterSet.whitespacesAndNewlines.contains(scalar) ? "-" : Character(scalar)
+        }
+        let prefix = String(sanitized).prefix(8)
+        return prefix.isEmpty ? "message" : String(prefix)
+    }
+
+    private static func timestampFormatter(calendar: Calendar) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }
+}
+
 struct AgentChatTurnTimestampRow: View {
     var timestamp: AgentChatTurnTimestampPresentation
 
