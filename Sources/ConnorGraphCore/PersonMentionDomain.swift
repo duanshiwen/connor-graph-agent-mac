@@ -105,22 +105,35 @@ public struct PersonMentionSearch: Sendable {
     public func search(query: String, profiles: [PersonProfile], limit: Int = 8) -> [PersonProfile] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let active = profiles.filter(\.isActiveForDefaultContext)
+        let activeByID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
         let matches: [PersonProfile]
         if normalized.isEmpty {
             matches = active
         } else {
-            matches = active.filter { profile in
-                [
-                    profile.displayName,
-                    profile.givenName,
-                    profile.familyName,
-                    profile.organizationName ?? "",
-                    profile.jobTitle ?? "",
-                    profile.aliases.joined(separator: " "),
-                    profile.emails.map(\.email).joined(separator: " ")
-                ].contains { $0.lowercased().contains(normalized) }
+            var matchedByID: [ContactID: PersonProfile] = [:]
+            for profile in active where profileMatches(profile, normalizedQuery: normalized) {
+                matchedByID[profile.id] = profile
             }
+            for merged in profiles where merged.status == .merged {
+                guard let targetID = merged.mergedIntoID,
+                      let target = activeByID[targetID],
+                      profileMatches(merged, normalizedQuery: normalized) else { continue }
+                matchedByID[target.id] = target
+            }
+            matches = Array(matchedByID.values)
         }
         return Array(matches.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }.prefix(limit))
+    }
+
+    private func profileMatches(_ profile: PersonProfile, normalizedQuery: String) -> Bool {
+        [
+            profile.displayName,
+            profile.givenName,
+            profile.familyName,
+            profile.organizationName ?? "",
+            profile.jobTitle ?? "",
+            profile.aliases.joined(separator: " "),
+            profile.emails.map(\.email).joined(separator: " ")
+        ].contains { $0.lowercased().contains(normalizedQuery) }
     }
 }

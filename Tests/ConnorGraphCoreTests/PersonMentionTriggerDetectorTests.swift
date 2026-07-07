@@ -55,6 +55,16 @@ struct PersonMentionTriggerDetectorTests {
         #expect(result.mention.insertedText == "@小王")
     }
 
+    @Test func mentionSearchResolvesMergedSourceNameToTargetProfile() {
+        let targetID = ContactID(rawValue: "person-target")
+        let source = PersonProfile(id: ContactID(rawValue: "person-source"), displayName: "小王", status: .merged, mergedIntoID: targetID)
+        let target = PersonProfile(id: targetID, displayName: "王诗闻")
+
+        let results = PersonMentionSearch().search(query: "小王", profiles: [source, target])
+
+        #expect(results.map(\.id) == [targetID])
+    }
+
     @Test func mentionSearchExcludesDeletedAndMergedProfiles() {
         let active = PersonProfile(id: ContactID(rawValue: "person-active"), displayName: "小王")
         let deleted = PersonProfile(id: ContactID(rawValue: "person-deleted"), displayName: "小李", status: .deleted)
