@@ -127,6 +127,14 @@ import ConnorGraphAgent
     #expect(prompt.contains("default attribution anchor"))
 }
 
+@Test func defaultSystemPromptDocumentsUserGovernedPersonMemoryRules() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Person memory can be archived, deleted, or moved by the user"))
+    #expect(prompt.contains("Archived, deleted, and moved person memories are not active default retrieval context"))
+    #expect(prompt.contains("prefer move or merge governance instead of inventing conflicting duplicate facts"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

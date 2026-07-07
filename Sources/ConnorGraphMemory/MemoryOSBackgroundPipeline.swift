@@ -226,6 +226,8 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Person governance events:
         - If evidence says person A was merged into person B, preserve the merged into identity/governance fact and route future active context to B.
         - If evidence says there is a deleted person, preserve that the person should be not active retrieval context and should not be used as active LLM context.
+        - Person memory can be archived, deleted, or moved by the user; archived/deleted/moved person memory is not active default retrieval context.
+        - If a memory appears attached to the wrong person, prefer move or merge governance instead of inventing conflicting duplicate facts.
         - Merge/delete governance should not erase historical evidence; it changes active use and attribution.
 
         Person feature extraction policy:
