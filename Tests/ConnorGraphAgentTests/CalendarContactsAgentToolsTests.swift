@@ -121,6 +121,30 @@ struct CalendarContactsAgentToolsTests {
         #expect(created.contentText.contains("Created approved contact"))
     }
 
+    @Test func contactsToolsDocumentStructuredPersonReferenceIDs() {
+        let readTool = ContactsReadTool(runtime: InMemoryAgentContactRuntime())
+        let writeTool = ContactsWriteTool(runtime: InMemoryAgentContactRuntime())
+
+        #expect(readTool.description.contains("Referenced People"))
+        #expect(readTool.description.contains("person_id"))
+        #expect(readTool.description.contains("do not guess IDs from display names"))
+        #expect(writeTool.description.contains("Referenced People"))
+        #expect(writeTool.description.contains("never guess IDs from display names"))
+
+        guard case .object(let readProperties, _) = readTool.inputSchema,
+              case .string(let readIDDescription) = readProperties["id"],
+              case .object(let writeProperties, _) = writeTool.inputSchema,
+              case .string(let writeIDDescription) = writeProperties["id"] else {
+            Issue.record("Expected contacts tools to expose object schemas with id descriptions")
+            return
+        }
+
+        #expect(readIDDescription.contains("person_id from Referenced People"))
+        #expect(readIDDescription.contains("do not infer"))
+        #expect(writeIDDescription.contains("person_id from Referenced People"))
+        #expect(writeIDDescription.contains("never inferred"))
+    }
+
     @Test func registryRegistersCalendarContactsAndTimeTools() {
         var registry = AgentToolRegistry()
         registry.registerTimeAnalysisTool()

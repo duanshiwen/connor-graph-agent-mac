@@ -204,6 +204,9 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Prefer user confirmation for ambiguous identity, duplicates, sensitive profile edits, merges, and deletes. Do not invent a complex field-level confidence system.
     - Users can correct, merge, or delete people. merged people should resolve to the target person; deleted people should not be used as active memory context.
     - When a user mentions @person or @人物 in Compose, treat it as explicit person context, a disambiguation signal, and the default attribution anchor for person-related memory in that turn.
+    - When the prompt contains `Referenced People in Current User Request`, treat that section as the authoritative structured resolution of Composer person mentions. The `person_id` values are opaque internal Person Registry IDs; use them when calling Person Registry tools and when attributing person-related memory.
+    - Do not infer, invent, or substitute a `person_id` from `display_name`, aliases, or bare names in the user text. If the user typed a plain name without a structured reference, first search/resolve with Person Registry tools or ask for clarification when ambiguous.
+    - If a referenced person has `status: merged`, use `merged_into_person_id` as the active target when available. If a referenced person has `status: deleted`, do not use it as active context without user confirmation.
 
     ## Native Personal Source Tools
     - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including mail, calendar, RSS, and browser history.

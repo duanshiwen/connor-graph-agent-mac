@@ -197,13 +197,13 @@ public struct ContactCommitDraftTool: AgentTool {
 public struct ContactsReadTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_read" }
-    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts." }
+    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts. For get_person, prefer the exact person_id from the prompt's Referenced People section; do not guess IDs from display names." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
             "operation": .string(description: "list_people | search_people | get_person | resolve_person | list_contacts | search_contacts | get_contact | resolve_contact"),
-            "query": .string(description: "Person/contact query"),
-            "id": .string(description: "Person/contact ID")
+            "query": .string(description: "Person/contact query; use this for plain names that were not already resolved in Referenced People"),
+            "id": .string(description: "Exact Person/contact ID. For people mentioned through Composer, use person_id from Referenced People; do not infer this from display_name")
         ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -236,14 +236,14 @@ public struct ContactsReadTool: AgentTool {
 public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
-    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. Legacy create_contact remains supported." }
+    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. Legacy create_contact remains supported. For update/delete/merge, use exact person_id values from Referenced People or prior contacts_read results; never guess IDs from display names." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
             "operation": .string(description: "create_person | update_person | delete_person | merge_people | create_contact"),
-            "id": .string(description: "Person ID"),
-            "sourceID": .string(description: "Merge source person ID"),
-            "targetID": .string(description: "Merge target person ID"),
+            "id": .string(description: "Exact Person ID, preferably person_id from Referenced People or contacts_read; never inferred from display name"),
+            "sourceID": .string(description: "Exact merge source person ID from Referenced People or contacts_read"),
+            "targetID": .string(description: "Exact merge target person ID from Referenced People or contacts_read"),
             "email": .string(description: "Email"),
             "name": .string(description: "Display name"),
             "organization": .string(description: "Organization"),
