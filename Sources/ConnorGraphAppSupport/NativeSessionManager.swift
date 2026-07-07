@@ -152,6 +152,7 @@ public struct NativeSessionManager: Sendable {
         displayPrompt: String? = nil,
         attachments: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
+        personReferences: [PersonReference] = [],
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil,
@@ -165,7 +166,7 @@ public struct NativeSessionManager: Sendable {
             guard !displayName.isEmpty || !slug.isEmpty else { return nil }
             return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
         }()
-        let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, contextSnapshot: activeSkillContextSnapshot)
+        let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, personReferences: personReferences, contextSnapshot: activeSkillContextSnapshot)
         try persistSession()
         try await persistMemoryOSAfterUserMessage(userMessage)
 
@@ -181,7 +182,8 @@ public struct NativeSessionManager: Sendable {
             anchorState: anchorState,
             skillInstructions: skillInstructions,
             activeSkillSlug: activeSkillSlug,
-            activeSkillDisplayName: activeSkillDisplayName
+            activeSkillDisplayName: activeSkillDisplayName,
+            personReferences: personReferences
         )
         let now = Date()
         var runMetadata = ["user_message_id": userMessage.id, "queue": "single-session"]
