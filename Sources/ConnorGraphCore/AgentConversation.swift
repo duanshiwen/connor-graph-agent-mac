@@ -49,6 +49,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     public var contextSnapshot: String?
     public var promptInspection: AgentPromptInspectionSnapshot?
     public var attachments: [AgentMessageAttachmentRef]
+    public var personReferences: [PersonReference]
 
     public init(
         id: String = UUID().uuidString,
@@ -65,7 +66,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
             createdAt: createdAt,
             citations: citations,
             contextSnapshot: contextSnapshot,
-            attachments: []
+            attachments: [],
+            personReferences: []
         )
     }
 
@@ -76,7 +78,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date = Date(),
         citations: [String] = [],
         contextSnapshot: String? = nil,
-        attachments: [AgentMessageAttachmentRef]
+        attachments: [AgentMessageAttachmentRef],
+        personReferences: [PersonReference] = []
     ) {
         self.id = id
         self.role = role
@@ -86,6 +89,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         self.contextSnapshot = contextSnapshot
         self.promptInspection = nil
         self.attachments = attachments
+        self.personReferences = personReferences
     }
 
     public init(
@@ -96,6 +100,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         citations: [String] = [],
         contextSnapshot: String? = nil,
         attachments: [AgentMessageAttachmentRef] = [],
+        personReferences: [PersonReference] = [],
         promptInspection: AgentPromptInspectionSnapshot?
     ) {
         self.id = id
@@ -106,6 +111,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         self.contextSnapshot = contextSnapshot
         self.promptInspection = promptInspection
         self.attachments = attachments
+        self.personReferences = personReferences
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -117,6 +123,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         case contextSnapshot
         case promptInspection
         case attachments
+        case personReferences
     }
 
     public init(from decoder: Decoder) throws {
@@ -129,6 +136,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         contextSnapshot = try container.decodeIfPresent(String.self, forKey: .contextSnapshot)
         promptInspection = try container.decodeIfPresent(AgentPromptInspectionSnapshot.self, forKey: .promptInspection)
         attachments = try container.decodeIfPresent([AgentMessageAttachmentRef].self, forKey: .attachments) ?? []
+        personReferences = try container.decodeIfPresent([PersonReference].self, forKey: .personReferences) ?? []
     }
 }
 
@@ -285,9 +293,10 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     public mutating func appendUserMessage(
         _ content: String,
         attachments: [AgentMessageAttachmentRef] = [],
+        personReferences: [PersonReference] = [],
         contextSnapshot: String? = nil
     ) -> AgentMessage {
-        let message = AgentMessage(role: .user, content: content, contextSnapshot: contextSnapshot, attachments: attachments)
+        let message = AgentMessage(role: .user, content: content, contextSnapshot: contextSnapshot, attachments: attachments, personReferences: personReferences)
         messages.append(message)
         updatedAt = message.createdAt
         if title == "New Chat" {

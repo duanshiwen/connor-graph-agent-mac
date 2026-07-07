@@ -60,9 +60,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     }
 
     @discardableResult
-    public mutating func submit(_ prompt: String) async throws -> AgentLoopChatResponse {
+    public mutating func submit(_ prompt: String, personReferences: [PersonReference] = []) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
-        let userMessage = session.appendUserMessage(prompt)
+        let userMessage = session.appendUserMessage(prompt, personReferences: personReferences)
         transcript = session.messages
         try await persistMemoryOSAfterUserMessage(userMessage)
         let request = AgentChatRequest(
@@ -70,7 +70,8 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             groupID: groupID,
             userMessage: prompt,
             recentMessages: recentMessages,
-            permissionMode: loopController.configuration.permissionMode
+            permissionMode: loopController.configuration.permissionMode,
+            personReferences: personReferences
         )
 
         var collectedEvents: [AgentEvent] = []

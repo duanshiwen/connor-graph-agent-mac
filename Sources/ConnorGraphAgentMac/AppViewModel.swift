@@ -6481,7 +6481,8 @@ final class AppViewModel: NSObject, ObservableObject {
         prompt rawPrompt: String,
         clearComposer: Bool = false,
         displayPrompt rawDisplayPrompt: String? = nil,
-        attachments explicitAttachments: [AgentMessageAttachmentRef]? = nil
+        attachments explicitAttachments: [AgentMessageAttachmentRef]? = nil,
+        personReferences: [PersonReference] = []
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6524,7 +6525,8 @@ final class AppViewModel: NSObject, ObservableObject {
             role: .user,
             content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
             contextSnapshot: submittedActiveSkillContextSnapshot,
-            attachments: attachmentsForSubmission
+            attachments: attachmentsForSubmission,
+            personReferences: personReferences
         )
         if selectedChatSessionID == submittingSessionID {
             transcript = optimisticTranscript + [optimisticUserMessage]
@@ -6572,6 +6574,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
+                personReferences: personReferences,
                 skillInstructions: resolvedSkillInstructions,
                 activeSkillSlug: resolvedSkillInstructions == nil ? nil : submittedActiveSkillSlug,
                 activeSkillDisplayName: resolvedSkillInstructions == nil ? nil : submittedActiveSkillDisplayName,
