@@ -25,6 +25,36 @@ struct PersonContactAgentToolsTests {
         #expect(found.contentText.contains("Found 1 people"))
     }
 
+    @Test func contactsReadSummarizesPeopleWithIDsInContentText() async throws {
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(
+                id: ContactID(rawValue: "person-zhang-xia"),
+                displayName: "张霞",
+                aliases: ["妈妈"],
+                notes: "段诗闻和段福强的妈妈。"
+            )
+        ])
+        let readTool = ContactsReadTool(runtime: runtime)
+
+        let listed = try await readTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"list_people\"}"),
+            context: Self.context(toolCallID: "call-list-people-summary")
+        )
+        #expect(listed.contentText.contains("Found 1 people"))
+        #expect(listed.contentText.contains("person_id: person-zhang-xia"))
+        #expect(listed.contentText.contains("display_name: 张霞"))
+        #expect(listed.contentText.contains("status: active"))
+        #expect(listed.contentText.contains("段诗闻和段福强的妈妈"))
+
+        let loaded = try await readTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"id\":\"person-zhang-xia\"}"),
+            context: Self.context(toolCallID: "call-get-person-summary")
+        )
+        #expect(loaded.contentText.contains("Loaded person"))
+        #expect(loaded.contentText.contains("person_id: person-zhang-xia"))
+        #expect(loaded.contentText.contains("display_name: 张霞"))
+    }
+
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
         let runtime = InMemoryAgentContactRuntime(people: [
             PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "小王", aliases: ["王同学"]),

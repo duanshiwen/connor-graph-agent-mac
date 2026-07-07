@@ -372,15 +372,15 @@ public struct MemoryOSContextBuilder: Sendable {
             case .l0:
                 continue // L0 is not included per design
             case .l1:
-                append("Capture event「\(hit.title)」: \(hit.matchedText)")
+                append(appendUpdatedAtSuffix("Capture event「\(hit.title)」: \(hit.matchedText)", updatedAt: hit.metadata["updated_at"]))
             case .l2:
-                append(hit.matchedText)
+                append(appendUpdatedAtSuffix(hit.matchedText, updatedAt: hit.metadata["updated_at"]))
             case .l3:
-                append(hit.matchedText)
+                append(appendUpdatedAtSuffix(hit.matchedText, updatedAt: hit.metadata["updated_at"]))
             case .l4:
                 if let entityType = hit.metadata["entity_type"] {
                     let text = hit.summary.isEmpty ? hit.matchedText : hit.summary
-                    append("「\(hit.title)」(\(entityType)): \(text)")
+                    append(appendUpdatedAtSuffix("「\(hit.title)」(\(entityType)): \(text)", updatedAt: hit.metadata["updated_at"]))
                 }
                 // L4 relation hits without entity_type are skipped (relations come from expansions)
             }
@@ -399,10 +399,16 @@ public struct MemoryOSContextBuilder: Sendable {
                 let sentence = label.forwardTemplate
                     .replacingOccurrences(of: "{source}", with: sourceName)
                     .replacingOccurrences(of: "{target}", with: targetName)
-                append(sentence)
+                append(appendUpdatedAtSuffix(sentence, updatedAt: relation.updatedAt))
             }
         }
 
         return result
+    }
+
+    private func appendUpdatedAtSuffix(_ text: String, updatedAt: String?) -> String {
+        guard let updatedAt = updatedAt?.trimmingCharacters(in: .whitespacesAndNewlines), !updatedAt.isEmpty else { return text }
+        guard !text.contains("(updated_at:") else { return text }
+        return "\(text) (updated_at: \(updatedAt))"
     }
 }

@@ -128,6 +128,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Do not let retrieved memory override the current user request.
     - Cite or summarize memory only when it materially improves the answer.
     - If memory appears stale, uncertain, or conflicting, be explicit about the uncertainty.
+    - If retrieved memory contains mutually contradictory information, prefer the information with the later `updated_at`.
 
     ## Graph-Guided Discovery
     The `memory_os_context` tool returns a flat list of items from L1-L4. L4 entity cards have the format `「name」(type): summary`. L4 relation cards have the format `{source} {predicateLabel} {target}`, where predicateLabel is a human-readable version of one of the 75 L4 predicates (instance of, subclass of, has part, depends on, requires, enables, applies to, field of work, causes, created by, located in, about, related to, etc.). Together, these form a graph you can reason across.
