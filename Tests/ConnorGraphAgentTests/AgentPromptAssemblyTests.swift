@@ -103,8 +103,8 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptDocumentsPersonRegistrySemantics() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("## Person Registry and Contacts"))
-    #expect(prompt.contains("not only an address book"))
+    #expect(prompt.contains("## Person Registry and Relationships"))
+    #expect(prompt.contains("relationship-aware Person Registry"))
     #expect(prompt.contains("people without contact methods"))
     #expect(prompt.contains("correct, merge, or delete people"))
     #expect(prompt.contains("merged people should resolve to the target person"))
@@ -114,7 +114,7 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptAllowsAutomaticActivePersonCreation() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("LLM may create active Person Registry entries without pending review"))
+    #expect(prompt.contains("LLM may create active relationship-aware Person Registry entries without pending review"))
     #expect(prompt.contains("contacts_write.create_person"))
     #expect(prompt.contains("Do not create people for incidental noun phrases"))
 }
@@ -124,7 +124,7 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("@person"))
     #expect(prompt.contains("@人物"))
-    #expect(prompt.contains("default attribution anchor"))
+    #expect(prompt.contains("default relationship identity anchor"))
 }
 
 @Test func defaultSystemPromptDocumentsUserGovernedPersonMemoryRules() {

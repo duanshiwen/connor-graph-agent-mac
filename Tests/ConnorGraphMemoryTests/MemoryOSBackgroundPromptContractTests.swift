@@ -124,9 +124,9 @@ struct MemoryOSBackgroundPromptContractTests {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
         let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
-        #expect(prompt.contains("Person Registry"))
-        #expect(prompt.contains("A person does not need contact methods"))
-        #expect(prompt.contains("named or described independent person"))
+        #expect(prompt.contains("relationship-aware Person Registry"))
+        #expect(prompt.contains("A relationship person does not need contact methods"))
+        #expect(prompt.contains("named or described independent relationship person"))
         #expect(prompt.contains("Do not create a person entity for incidental noun phrases"))
     }
 
@@ -134,8 +134,8 @@ struct MemoryOSBackgroundPromptContractTests {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
         let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
-        #expect(prompt.contains("LLM-discovered people do not use pending review"))
-        #expect(prompt.contains("active Person Registry entries"))
+        #expect(prompt.contains("LLM-discovered relationship people do not use pending review"))
+        #expect(prompt.contains("active relationship-aware Person Registry entries"))
     }
 
     @Test func l1PromptDocumentsPersonMergeAndDeleteGovernance() {
@@ -153,7 +153,7 @@ struct MemoryOSBackgroundPromptContractTests {
 
         #expect(prompt.contains("@person"))
         #expect(prompt.contains("@人物"))
-        #expect(prompt.contains("identity anchor"))
+        #expect(prompt.contains("relationship identity anchor"))
     }
 
     @Test func l1PromptDocumentsUserGovernedPersonMemoryRules() {
