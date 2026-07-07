@@ -271,10 +271,12 @@ struct AgentChatComposerView: View {
                 isSpellCheckEnabled: viewModel.spellCheckEnabled,
                 sendShortcut: viewModel.composerSendShortcut,
                 isSkillPickerPresented: isSkillPickerPresented,
+                isPersonMentionPickerPresented: isPersonMentionPickerPresented,
                 onSubmit: submitLocalChatInput,
                 onImportFiles: importComposerFiles,
                 onSlashCommand: handleSlashCommand,
                 onSkillPickerKeyCommand: handleSkillPickerKeyCommand,
+                onPersonMentionPickerKeyCommand: handlePersonMentionPickerKeyCommand,
                 onAttachmentImportError: handleAttachmentImportError,
                 onTextFileDropped: { droppedText in
                     if localChatInput.isEmpty {
@@ -351,12 +353,18 @@ struct AgentChatComposerView: View {
         }
     }
 
+    private var personMentionPickerResults: [PersonProfile] {
+        guard let trigger = personMentionTrigger else { return [] }
+        return PersonMentionSearch().search(query: trigger.query, profiles: viewModel.personProfiles, limit: 8)
+    }
+
     private func updatePersonMentionTrigger(for text: String) {
         let selectedRange = composerSelectionTracker.selectedRange ?? NSRange(location: text.utf16.count, length: 0)
         if let trigger = PersonMentionTriggerDetector().trigger(in: text, selectedRange: selectedRange) {
             personMentionTrigger = trigger
             personMentionPickerSelectionIndex = 0
             isPersonMentionPickerPresented = true
+            closeSkillPicker()
         } else {
             closePersonMentionPicker()
         }
@@ -381,6 +389,23 @@ struct AgentChatComposerView: View {
         isPersonMentionPickerPresented = false
         personMentionTrigger = nil
         personMentionPickerSelectionIndex = 0
+    }
+
+    private func handlePersonMentionPickerKeyCommand(_ command: SkillPickerKeyCommand) {
+        let results = personMentionPickerResults
+        switch command {
+        case .moveUp:
+            guard !results.isEmpty else { return }
+            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex - 1 + results.count) % results.count
+        case .moveDown:
+            guard !results.isEmpty else { return }
+            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex + 1) % results.count
+        case .confirm:
+            guard results.indices.contains(personMentionPickerSelectionIndex) else { return }
+            selectPersonMention(results[personMentionPickerSelectionIndex])
+        case .cancel:
+            closePersonMentionPicker()
+        }
     }
 
     private var noteFormatBar: some View {
@@ -422,6 +447,7 @@ struct AgentChatComposerView: View {
         slashSkillPickerTriggerRange = triggerRange
         skillPickerSelectionIndex = preferredSkillPickerSelectionIndex()
         isSkillPickerPresented = true
+        closePersonMentionPicker()
     }
 
     private var canSubmitLocalChat: Bool {

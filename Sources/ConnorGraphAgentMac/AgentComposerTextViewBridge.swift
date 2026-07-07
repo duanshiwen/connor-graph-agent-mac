@@ -24,10 +24,12 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     var isSpellCheckEnabled: Bool
     var sendShortcut: String
     var isSkillPickerPresented: Bool = false
+    var isPersonMentionPickerPresented: Bool = false
     var onSubmit: () -> Void
     var onImportFiles: ([URL]) -> Void
     var onSlashCommand: ((CGRect, NSRange) -> Void)? = nil
     var onSkillPickerKeyCommand: ((SkillPickerKeyCommand) -> Void)? = nil
+    var onPersonMentionPickerKeyCommand: ((SkillPickerKeyCommand) -> Void)? = nil
     var onAttachmentImportError: ((String) -> Void)? = nil
     var onTextFileDropped: ((String) -> Void)? = nil
     var isNoteMode: Bool = false
@@ -71,10 +73,12 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         ComposerTextInputConfiguration(
             sendShortcut: sendShortcut,
             isSkillPickerPresented: isSkillPickerPresented,
+            isPersonMentionPickerPresented: isPersonMentionPickerPresented,
             onSubmit: onSubmit,
             onImportFiles: onImportFiles,
             onSlashCommand: onSlashCommand,
             onSkillPickerKeyCommand: onSkillPickerKeyCommand,
+            onPersonMentionPickerKeyCommand: onPersonMentionPickerKeyCommand,
             onAttachmentImportError: onAttachmentImportError,
             onTextFileDropped: onTextFileDropped,
             isNoteMode: isNoteMode
