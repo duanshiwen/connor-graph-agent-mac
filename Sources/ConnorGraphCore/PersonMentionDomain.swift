@@ -52,6 +52,135 @@ public struct PersonReference: Codable, Sendable, Equatable, Hashable, Identifia
     }
 }
 
+public struct PersonMentionTrigger: Sendable, Equatable, Hashable {
+    public var query: String
+    public var range: NSRange
+
+    public init(query: String, range: NSRange) {
+        self.query = query
+        self.range = range
+    }
+}
+
+public struct PersonMentionReplacement: Sendable, Equatable, Hashable {
+    public var text: String
+    public var mention: ComposerPersonMention
+    public var selectedRange: NSRange
+
+    public init(text: String, mention: ComposerPersonMention, selectedRange: NSRange) {
+        self.text = text
+        self.mention = mention
+        self.selectedRange = selectedRange
+    }
+}
+
+public enum PersonMentionTextRewriteError: Error, Sendable, Equatable {
+    case invalidRange
+}
+
+public struct PersonMentionTriggerDetector: Sendable {
+    public init() {}
+
+    public func trigger(in text: String, selectedRange: NSRange) -> PersonMentionTrigger? {
+        guard selectedRange.length == 0 else { return nil }
+        guard selectedRange.location >= 0, selectedRange.location <= (text as NSString).length else { return nil }
+        let cursor = String.Index(utf16Offset: selectedRange.location, in: text)
+
+        var index = cursor
+        while index > text.startIndex {
+            let previous = text.index(before: index)
+            let character = text[previous]
+            if character == "@" {
+                guard isValidMentionBoundary(before: previous, in: text) else { return nil }
+                let query = String(text[text.index(after: previous)..<cursor])
+                guard !query.contains(where: { $0.isWhitespace || $0.isNewline }) else { return nil }
+                let location = previous.utf16Offset(in: text)
+                return PersonMentionTrigger(
+                    query: query,
+                    range: NSRange(location: location, length: selectedRange.location - location)
+                )
+            }
+            if character.isWhitespace || character.isNewline || Self.terminatingCharacters.contains(character) {
+                return nil
+            }
+            index = previous
+        }
+        return nil
+    }
+
+    private static let terminatingCharacters: Set<Character> = ["，", "。", "、", ",", ".", "!", "?", "！", "？", ":", "：", ";", "；", "（", "(", ")", "）", "[", "]", "【", "】", "{", "}"]
+
+    private func isValidMentionBoundary(before atIndex: String.Index, in text: String) -> Bool {
+        guard atIndex > text.startIndex else { return true }
+        let previous = text[text.index(before: atIndex)]
+        return previous.isWhitespace || previous.isNewline
+    }
+}
+
+public struct PersonMentionSearch: Sendable {
+    public init() {}
+
+    public func search(query: String, profiles: [PersonProfile], limit: Int = 8) -> [PersonProfile] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        let activeProfiles = profiles.filter(\.isActiveForDefaultContext)
+        let filtered: [PersonProfile]
+        if normalizedQuery.isEmpty {
+            filtered = activeProfiles
+        } else {
+            filtered = activeProfiles.filter { profile in
+                searchableTokens(for: profile).contains { token in
+                    token.localizedLowercase.contains(normalizedQuery)
+                }
+            }
+        }
+        return Array(filtered.sorted(by: sortProfiles).prefix(max(0, limit)))
+    }
+
+    private func searchableTokens(for profile: PersonProfile) -> [String] {
+        var tokens = [
+            profile.displayName,
+            profile.givenName,
+            profile.familyName,
+            profile.organizationName ?? "",
+            profile.jobTitle ?? "",
+            profile.notes ?? ""
+        ]
+        tokens.append(contentsOf: profile.aliases)
+        tokens.append(contentsOf: profile.emails.map(\.email))
+        tokens.append(contentsOf: profile.phones.map(\.number))
+        return tokens.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    private func sortProfiles(_ lhs: PersonProfile, _ rhs: PersonProfile) -> Bool {
+        let nameComparison = lhs.displayName.localizedStandardCompare(rhs.displayName)
+        if nameComparison != .orderedSame { return nameComparison == .orderedAscending }
+        return lhs.id.rawValue.localizedStandardCompare(rhs.id.rawValue) == .orderedAscending
+    }
+}
+
+public struct ComposerPersonMentionTextRewriter: Sendable {
+    public init() {}
+
+    public func replace(trigger: PersonMentionTrigger, in text: String, with profile: PersonProfile) throws -> PersonMentionReplacement {
+        guard let range = Range(trigger.range, in: text) else { throw PersonMentionTextRewriteError.invalidRange }
+        let mentionText = "@\(profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines))"
+        let replacementText = mentionText + " "
+        var updatedText = text
+        updatedText.replaceSubrange(range, with: replacementText)
+        let selectedLocation = trigger.range.location + (replacementText as NSString).length
+        let mention = ComposerPersonMention(
+            profile: profile,
+            mentionText: mentionText,
+            range: TextRange(location: trigger.range.location, length: (mentionText as NSString).length)
+        )
+        return PersonMentionReplacement(
+            text: updatedText,
+            mention: mention,
+            selectedRange: NSRange(location: selectedLocation, length: 0)
+        )
+    }
+}
+
 public struct ComposerPersonMention: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var id: String
     public var personID: ContactID
