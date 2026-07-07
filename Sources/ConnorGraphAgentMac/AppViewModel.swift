@@ -3040,6 +3040,16 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func reloadPersonProfilesFromStorageAfterAgentWrite() async {
+        guard let personProfileStore else { return }
+        do {
+            personProfiles = try await personProfileStore.loadProfiles(includeInactive: false)
+            reloadContactsBrowserPresentation()
+        } catch {
+            errorMessage = "无法刷新人物档案：\(error.localizedDescription)"
+        }
+    }
+
     private func persistPersonProfiles() async {
         do {
             for profile in personProfiles {
@@ -6678,6 +6688,9 @@ final class AppViewModel: NSObject, ObservableObject {
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
             scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: manager.eventPresentations)
             await flushActivityTimelineCache(sessionID: submittingSessionID)
+            if Self.agentTurnMutatedPersonRegistry(manager.eventPresentations) {
+                await reloadPersonProfilesFromStorageAfterAgentWrite()
+            }
             if selectedChatSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = response.session
