@@ -1,6 +1,22 @@
 import SwiftUI
 import ConnorGraphCore
 
+public struct PersonProfileEditorPresentation: Equatable, Sendable {
+    public var title: String
+    public var subtitle: String
+    public var saveButtonTitle: String
+    public var displayNameHint: String
+    public var canSave: Bool
+
+    public init(draft: PersonProfileDraft) {
+        title = draft.id == nil ? "新建人物档案" : "编辑人物档案"
+        subtitle = "用于人际关系检索、@人物提及和人物相关记忆归因。人物可以先存在，联系方式后补充。"
+        saveButtonTitle = "保存人物档案"
+        displayNameHint = "显示名是必填项，用于列表和 @人物提及。"
+        canSave = !draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 struct PersonProfileEditorView: View {
     @Binding var draft: PersonProfileDraft
     var onCancel: () -> Void
