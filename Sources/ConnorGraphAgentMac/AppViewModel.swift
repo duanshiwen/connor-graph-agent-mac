@@ -6495,7 +6495,8 @@ final class AppViewModel: NSObject, ObservableObject {
         prompt rawPrompt: String,
         clearComposer: Bool = false,
         displayPrompt rawDisplayPrompt: String? = nil,
-        attachments explicitAttachments: [AgentMessageAttachmentRef]? = nil
+        attachments explicitAttachments: [AgentMessageAttachmentRef]? = nil,
+        personMentions: [PersonMention] = []
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6534,10 +6535,20 @@ final class AppViewModel: NSObject, ObservableObject {
             guard !displayName.isEmpty || !slug.isEmpty else { return nil }
             return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
         }()
+        let explicitPersonContexts = personContextSnapshots(for: personMentions)
+        let submittedPersonContextSnapshot: String? = {
+            guard !explicitPersonContexts.isEmpty else { return submittedActiveSkillContextSnapshot }
+            let names = explicitPersonContexts.map { $0.profile.displayName }.joined(separator: ", ")
+            let personSnapshot = "Mentioned people: \(names)"
+            if let submittedActiveSkillContextSnapshot {
+                return submittedActiveSkillContextSnapshot + "\n" + personSnapshot
+            }
+            return personSnapshot
+        }()
         let optimisticUserMessage = AgentMessage(
             role: .user,
             content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
-            contextSnapshot: submittedActiveSkillContextSnapshot,
+            contextSnapshot: submittedPersonContextSnapshot,
             attachments: attachmentsForSubmission
         )
         if selectedChatSessionID == submittingSessionID {
@@ -6580,8 +6591,12 @@ final class AppViewModel: NSObject, ObservableObject {
                 clearActiveSkill()
             }
             let submitStartedAt = ContinuousClock.now
+            let promptWithExplicitPeople = AgentChatPromptContext(
+                userPrompt: skillAugmentation.augmentedPrompt,
+                explicitPersonContexts: explicitPersonContexts
+            ).renderedPrompt
             let response = try await manager.submit(
-                skillAugmentation.augmentedPrompt,
+                promptWithExplicitPeople,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
@@ -6672,6 +6687,17 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             return nil
         }
+    }
+
+    private func personContextSnapshots(for mentions: [PersonMention]) -> [PersonContextSnapshot] {
+        guard !mentions.isEmpty else { return [] }
+        var snapshots: [PersonContextSnapshot] = []
+        var seen: Set<ContactID> = []
+        for mention in mentions where seen.insert(mention.personID).inserted {
+            guard let profile = personProfiles.first(where: { $0.id == mention.personID && $0.isActiveForDefaultContext }) else { continue }
+            snapshots.append(PersonContextSnapshot(profile: profile, memorySummary: profile.notes))
+        }
+        return snapshots
     }
 
     func summarizeSelectedChatSession() async {

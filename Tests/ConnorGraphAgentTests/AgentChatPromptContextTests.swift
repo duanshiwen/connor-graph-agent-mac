@@ -2,6 +2,31 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphAgent
 
+@Test func agentChatPromptContextIncludesExplicitPersonContextForMentionedPeople() {
+    let profile = PersonProfile(
+        id: ContactID(rawValue: "person-wang"),
+        displayName: "小王",
+        aliases: ["王同学"],
+        organizationName: "Connor Labs",
+        notes: "杭州朋友",
+        memoryEntityID: "person:person-profile:person-wang",
+        memoryStableKey: "person-profile:person-wang"
+    )
+    let context = AgentChatPromptContext(
+        userPrompt: "@小王 喜欢咖啡吗？",
+        explicitPersonContexts: [PersonContextSnapshot(profile: profile, memorySummary: "小王偏好手冲咖啡。")]
+    )
+
+    let rendered = context.renderedPrompt
+
+    #expect(rendered.contains("Explicit Person Context"))
+    #expect(rendered.contains("identity anchor"))
+    #expect(rendered.contains("person_id: person-wang"))
+    #expect(rendered.contains("aliases: 王同学"))
+    #expect(rendered.contains("memory: 小王偏好手冲咖啡。"))
+    #expect(rendered.contains("Current user request:"))
+}
+
 @Test func agentChatPromptContextReturnsRawPromptWithoutSummaryOrRecentMessages() {
     let context = AgentChatPromptContext(userPrompt: "What next?")
 

@@ -1,10 +1,23 @@
 import Foundation
 import ConnorGraphCore
 
+public struct PersonContextSnapshot: Sendable, Codable, Equatable, Hashable {
+    public var profile: PersonProfile
+    public var memorySummary: String?
+    public var activeAliases: [String]
+
+    public init(profile: PersonProfile, memorySummary: String? = nil, activeAliases: [String]? = nil) {
+        self.profile = profile
+        self.memorySummary = memorySummary
+        self.activeAliases = activeAliases ?? profile.aliases
+    }
+}
+
 public struct AgentChatPromptContext: Sendable, Equatable {
     public var userPrompt: String
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
+    public var explicitPersonContexts: [PersonContextSnapshot]
     /// Compression anchor state — takes priority over `sessionSummary`
     /// when both are present.
     public var anchorState: SessionAnchorState?
@@ -13,11 +26,13 @@ public struct AgentChatPromptContext: Sendable, Equatable {
         userPrompt: String,
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
+        explicitPersonContexts: [PersonContextSnapshot] = [],
         anchorState: SessionAnchorState? = nil
     ) {
         self.userPrompt = userPrompt
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
+        self.explicitPersonContexts = explicitPersonContexts
         self.anchorState = anchorState
     }
 
@@ -40,6 +55,10 @@ public struct AgentChatPromptContext: Sendable, Equatable {
             Recent conversation:
             \(renderedMessages)
             """)
+        }
+
+        if !explicitPersonContexts.isEmpty {
+            blocks.append(renderExplicitPersonContexts(explicitPersonContexts))
         }
 
         // Only add the "Current user request" prefix if there's context to prepend
@@ -78,6 +97,38 @@ public struct AgentChatPromptContext: Sendable, Equatable {
 
     private var trimmedSummaryContent: String {
         sessionSummary?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func renderExplicitPersonContexts(_ contexts: [PersonContextSnapshot]) -> String {
+        var lines: [String] = [
+            "Explicit Person Context:",
+            "The user explicitly mentioned these Person Registry entries in the current message. Treat each entry as an identity anchor for this turn and prefer it for person fact attribution."
+        ]
+        for context in contexts {
+            let profile = context.profile
+            let aliases = context.activeAliases.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ", ")
+            var parts: [String] = [
+                "- \(profile.displayName) (person_id: \(profile.id.rawValue))"
+            ]
+            if !aliases.isEmpty { parts.append("aliases: \(aliases)") }
+            if let organization = profile.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("organization: \(organization)")
+            }
+            if let jobTitle = profile.jobTitle, !jobTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("job_title: \(jobTitle)")
+            }
+            if let notes = profile.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("notes: \(notes)")
+            }
+            if let memorySummary = context.memorySummary, !memorySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("memory: \(memorySummary)")
+            }
+            if let memoryStableKey = profile.memoryStableKey, !memoryStableKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("memory_stable_key: \(memoryStableKey)")
+            }
+            lines.append(parts.joined(separator: "; "))
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func renderAnchorState(_ anchor: SessionAnchorState) -> String {

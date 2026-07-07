@@ -20,6 +20,7 @@ struct AgentChatComposerView: View {
     @State private var personMentionTrigger: PersonMentionTrigger?
     @State private var isPersonMentionPickerPresented: Bool = false
     @State private var personMentionPickerSelectionIndex: Int = 0
+    @State private var selectedPersonMentions: [PersonMention] = []
     @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
@@ -367,6 +368,8 @@ struct AgentChatComposerView: View {
             let replacement = try PersonMentionTextRewriter().replace(trigger: trigger, in: localChatInput, with: profile)
             localChatInput = replacement.text
             composerSelectionTracker.selectedRange = replacement.selectedRange
+            selectedPersonMentions.removeAll { $0.personID == replacement.mention.personID }
+            selectedPersonMentions.append(replacement.mention)
             viewModel.updateSelectedChatInputDraft(localChatInput)
             closePersonMentionPicker()
         } catch {
@@ -477,13 +480,16 @@ struct AgentChatComposerView: View {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
         let submittedText = localChatInput
+        let submittedMentions = selectedPersonMentions
         localChatInput = ""
+        selectedPersonMentions = []
         closePersonMentionPicker()
         viewModel.updateSelectedChatInputDraft("")
         Task {
-            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
+            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personMentions: submittedMentions)
             if runID == nil, localChatInput.isEmpty {
                 localChatInput = submittedText
+                selectedPersonMentions = submittedMentions
                 viewModel.updateSelectedChatInputDraft(submittedText)
             }
         }
