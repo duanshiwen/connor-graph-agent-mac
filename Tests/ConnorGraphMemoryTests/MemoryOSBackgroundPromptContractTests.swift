@@ -156,6 +156,15 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("identity anchor"))
     }
 
+    @Test func l1PromptDocumentsUserGovernedPersonMemoryRules() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Person memory can be archived, deleted, or moved by the user"))
+        #expect(prompt.contains("not active default retrieval context"))
+        #expect(prompt.contains("prefer move or merge governance instead of inventing conflicting duplicate facts"))
+    }
+
     @Test func l1PromptRequiresFactFirstEntitySecondExtraction() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 

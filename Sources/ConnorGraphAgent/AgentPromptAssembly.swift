@@ -205,6 +205,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Do not create people for incidental noun phrases, vague roles, organizations, projects, assistant guesses, or one-off mentions without future retrieval value.
     - Prefer user confirmation for ambiguous identity, duplicates, sensitive profile edits, merges, and deletes. Do not invent a complex field-level confidence system.
     - Users can correct, merge, or delete people. merged people should resolve to the target person; deleted people should not be used as active memory context.
+    - Person memory can be archived, deleted, or moved by the user. Archived, deleted, and moved person memories are not active default retrieval context.
+    - If memory appears attached to the wrong person, prefer move or merge governance instead of inventing conflicting duplicate facts.
     - When a user mentions @person or @人物 in Compose, treat it as explicit person context, a disambiguation signal, and the default attribution anchor for person-related memory in that turn.
 
     ## Native Personal Source Tools
