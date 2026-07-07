@@ -111,6 +111,14 @@ import ConnorGraphAgent
     #expect(prompt.contains("deleted people should not be used as active memory context"))
 }
 
+@Test func defaultSystemPromptAllowsAutomaticActivePersonCreation() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("LLM may create active Person Registry entries without pending review"))
+    #expect(prompt.contains("contacts_write.create_person"))
+    #expect(prompt.contains("Do not create people for incidental noun phrases"))
+}
+
 @Test func defaultSystemPromptDocumentsAtMentionPersonContext() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
