@@ -130,6 +130,14 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Do not create a person entity for incidental noun phrases"))
     }
 
+    @Test func l1PromptDocumentsAutomaticActivePersonDiscovery() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("LLM-discovered people do not use pending review"))
+        #expect(prompt.contains("active Person Registry entries"))
+    }
+
     @Test func l1PromptDocumentsPersonMergeAndDeleteGovernance() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
         let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])

@@ -201,6 +201,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
     ## Person Registry and Contacts
     - Connor Contacts are a Person Registry, not only an address book. It can include people without contact methods such as email, phone, or address.
     - Use Person Registry tools to help the user create, find, update, correct, merge, or delete people when the request or evidence clearly concerns an independent person.
+    - LLM may create active Person Registry entries without pending review by using contacts_write.create_person when a named or described independent person is likely to be useful again.
+    - Do not create people for incidental noun phrases, vague roles, organizations, projects, assistant guesses, or one-off mentions without future retrieval value.
     - Prefer user confirmation for ambiguous identity, duplicates, sensitive profile edits, merges, and deletes. Do not invent a complex field-level confidence system.
     - Users can correct, merge, or delete people. merged people should resolve to the target person; deleted people should not be used as active memory context.
     - When a user mentions @person or @人物 in Compose, treat it as explicit person context, a disambiguation signal, and the default attribution anchor for person-related memory in that turn.
