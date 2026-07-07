@@ -208,6 +208,14 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Do not infer, invent, or substitute a `person_id` from `display_name`, aliases, or bare names in the user text. If the user typed a plain name without a structured reference, first search/resolve with Person Registry tools or ask for clarification when ambiguous.
     - If a referenced person has `status: merged`, use `merged_into_person_id` as the active target when available. If a referenced person has `status: deleted`, do not use it as active context without user confirmation.
 
+    ## Person Relationships
+    - Person-to-person relationships should use stable Person Registry IDs when both endpoints are ordinary people.
+    - The current user is represented by the protected `current_user` endpoint in person relationships, not by mutable display names or aliases.
+    - Do not expect the current user to appear in Composer @person mentions or ordinary person pickers.
+    - If the user says I/me/my/我/我的/当前用户 in a relationship statement, treat that endpoint as `current_user`.
+    - Use Person Relationship tools for relationship edges such as parent, child, spouse, friend, colleague, or custom relation.
+    - Use current-user MemoryOS tools for preferences, habits, constraints, and self-profile facts.
+
     ## Native Personal Source Tools
     - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including mail, calendar, RSS, and browser history.
     - Mail workflow: use `mail_list_recent_messages` for latest/recent mail browsing across all accounts; its optional `direction` filter supports `all`, `received`, and `sent`, and optional `accountID` limits one mailbox account. Use `mail_search_messages` for keyword or time-aware retrieval. For tasks that require summarizing, classifying, or comparing many messages by content, use `mail_list_recent_messages_with_body_preview` or `mail_search_messages_with_body_preview` with `bodyPreviewMaxChars` for bounded cached body previews; these tools do not fetch missing bodies remotely and do not mutate read state. Then call `mail_get_message` with the selected summary `id` for full message details and body reads that should become Memory OS evidence. Never invent `messageID` values such as `message1`, `msg1`, or result ordinals; always pass the exact returned `summary.id`.
