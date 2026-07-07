@@ -24,6 +24,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("ISO-8601 timestamps"))
     #expect(assembly.instruction.text.contains("session_get_status"))
     #expect(assembly.instruction.text.contains("session_set_status"))
+    #expect(assembly.instruction.text.contains("prefer the information with the later `updated_at`"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
