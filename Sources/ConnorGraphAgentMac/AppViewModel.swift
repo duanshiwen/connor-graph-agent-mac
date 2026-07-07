@@ -397,6 +397,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var contactRecords: [ContactRecord] = []
     @Published var personProfiles: [PersonProfile] = []
     @Published var personRelationships: [PersonRelationship] = []
+    @Published var editingPersonRelationshipDraft: PersonRelationshipDraft?
+    @Published var isPresentingPersonRelationshipEditor: Bool = false
     @Published var selectedContactID: ContactID?
     @Published var isPresentingPersonProfileEditor: Bool = false
     @Published var editingPersonProfileDraft: PersonProfileDraft?
@@ -2965,6 +2967,26 @@ final class AppViewModel: NSObject, ObservableObject {
             _ = try await personRelationshipStore?.upsert(relationship)
             personRelationships = try await personRelationshipStore?.loadRelationships(includeInactive: false) ?? personRelationships.upserting(relationship)
             errorMessage = nil
+        } catch {
+            errorMessage = "无法保存人物关系：\(error.localizedDescription)"
+        }
+    }
+
+    func presentNewPersonRelationshipEditor(sourcePersonID: ContactID) {
+        editingPersonRelationshipDraft = PersonRelationshipDraft(sourcePersonID: sourcePersonID)
+        isPresentingPersonRelationshipEditor = true
+    }
+
+    func savePersonRelationshipDraft(_ draft: PersonRelationshipDraft) async {
+        do {
+            let relationship = try draft.makeRelationship(now: Date())
+            await savePersonRelationship(relationship)
+            editingPersonRelationshipDraft = nil
+            isPresentingPersonRelationshipEditor = false
+        } catch PersonRelationshipDraftError.missingTargetPerson {
+            errorMessage = "请选择关系目标人物"
+        } catch PersonRelationshipDraftError.selfRelationship {
+            errorMessage = "不能将人物关系指向自己"
         } catch {
             errorMessage = "无法保存人物关系：\(error.localizedDescription)"
         }
