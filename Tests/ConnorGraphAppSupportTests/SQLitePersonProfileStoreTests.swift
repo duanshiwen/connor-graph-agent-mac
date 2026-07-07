@@ -125,6 +125,31 @@ struct SQLitePersonProfileStoreTests {
         #expect(sourceAfterMerge?.mergedIntoID == targetID)
     }
 
+    @Test func mergeAddsSourceDisplayNameAndAliasesToTargetAliasesWithoutDuplicatingTargetName() async throws {
+        let store = try makeStore()
+        let sourceID = ContactID(rawValue: "person-zhang-xiaoming")
+        let targetID = ContactID(rawValue: "person-zhang-ming")
+        _ = try await store.upsert(PersonProfile(
+            id: sourceID,
+            displayName: "张小明",
+            aliases: ["Xiao Ming", "XM", "张明"]
+        ))
+        _ = try await store.upsert(PersonProfile(
+            id: targetID,
+            displayName: "张明",
+            aliases: ["Ming Zhang"]
+        ))
+
+        let merged = try await store.merge(sourceID: sourceID, targetID: targetID, now: Date(timeIntervalSince1970: 300))
+
+        #expect(merged.displayName == "张明")
+        #expect(merged.aliases.contains("张小明"))
+        #expect(merged.aliases.contains("Xiao Ming"))
+        #expect(merged.aliases.contains("XM"))
+        #expect(merged.aliases.contains("Ming Zhang"))
+        #expect(!merged.aliases.contains("张明"))
+    }
+
     @Test func profileByIDReturnsMergedAndDeletedWhenRequestedDirectly() async throws {
         let store = try makeStore()
         let id = ContactID(rawValue: "person-direct")

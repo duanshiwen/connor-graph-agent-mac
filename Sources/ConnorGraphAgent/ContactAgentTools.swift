@@ -87,7 +87,6 @@ public actor InMemoryAgentContactRuntime: AgentContactRuntime {
     }
 
     public func createPerson(_ profile: PersonProfile, approved: Bool) async throws -> PersonProfile {
-        guard approved else { throw AgentToolError.permissionDenied("Person profile write approval required") }
         people.removeAll { $0.id == profile.id }
         people.append(profile)
         contacts.removeAll { $0.id == profile.id }
@@ -246,11 +245,13 @@ public struct ContactsWriteTool: AgentTool {
             "targetID": .string(description: "Merge target person ID"),
             "email": .string(description: "Email"),
             "name": .string(description: "Display name"),
+            "aliases": .array(items: .string(description: "Person alias"), description: "Aliases for the person"),
+            "source": .string(description: "Creation source such as llm-discovery"),
             "organization": .string(description: "Organization"),
             "jobTitle": .string(description: "Job title"),
             "notes": .string(description: "Notes"),
-            "approved": .boolean(description: "Explicit approval")
-        ], required: ["operation", "approved"])
+            "approved": .boolean(description: "Explicit approval for destructive or legacy contact operations")
+        ], required: ["operation"]) 
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -261,15 +262,19 @@ public struct ContactsWriteTool: AgentTool {
             let name = arguments.string("name") ?? arguments.string("displayName")
             guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AgentToolError.invalidArguments("name is required") }
             let email = arguments.string("email")
+            let aliases = (arguments.array("aliases") ?? []).compactMap(\.stringValue)
+            let source = arguments.string("source")
             let profile = PersonProfile(
                 displayName: name,
+                aliases: aliases,
                 emails: email.map { [ContactEmailAddress(email: $0)] } ?? [],
                 organizationName: arguments.string("organization"),
                 jobTitle: arguments.string("jobTitle"),
-                notes: arguments.string("notes")
+                notes: arguments.string("notes"),
+                discoveredBy: source
             )
-            let created = try await runtime.createPerson(profile, approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created approved person \(created.id.rawValue)", contentJSON: try ContactJSON.encode(created))
+            let created = try await runtime.createPerson(profile, approved: true)
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created person \(created.id.rawValue)", contentJSON: try ContactJSON.encode(created))
         case "update_person":
             guard let id = arguments.string("id") else { throw AgentToolError.invalidArguments("id is required") }
             let existing = try await runtime.getPerson(id: ContactID(rawValue: id))

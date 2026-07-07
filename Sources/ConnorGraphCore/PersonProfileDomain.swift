@@ -49,6 +49,8 @@ public struct PersonProfile: Codable, Sendable, Equatable, Hashable, Identifiabl
     public var memoryEntityID: String?
     public var memoryStableKey: String?
     public var source: String
+    public var discoveredBy: String?
+    public var lastMentionedAt: Date?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -70,6 +72,8 @@ public struct PersonProfile: Codable, Sendable, Equatable, Hashable, Identifiabl
         memoryEntityID: String? = nil,
         memoryStableKey: String? = nil,
         source: String = "person-registry",
+        discoveredBy: String? = nil,
+        lastMentionedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -90,6 +94,8 @@ public struct PersonProfile: Codable, Sendable, Equatable, Hashable, Identifiabl
         self.memoryEntityID = memoryEntityID
         self.memoryStableKey = memoryStableKey
         self.source = source
+        self.discoveredBy = discoveredBy
+        self.lastMentionedAt = lastMentionedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -163,6 +169,8 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
     public var jobTitle: String?
     public var notes: String?
     public var status: PersonProfileStatus
+    public var discoveredBy: String?
+    public var lastMentionedAt: Date?
 
     public init(
         id: ContactID? = nil,
@@ -177,7 +185,9 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
         organizationName: String? = nil,
         jobTitle: String? = nil,
         notes: String? = nil,
-        status: PersonProfileStatus = .active
+        status: PersonProfileStatus = .active,
+        discoveredBy: String? = nil,
+        lastMentionedAt: Date? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -192,6 +202,8 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
         self.jobTitle = jobTitle
         self.notes = notes
         self.status = status
+        self.discoveredBy = discoveredBy
+        self.lastMentionedAt = lastMentionedAt
     }
 
     public init(profile: PersonProfile) {
@@ -208,7 +220,9 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
             organizationName: profile.organizationName,
             jobTitle: profile.jobTitle,
             notes: profile.notes,
-            status: profile.status
+            status: profile.status,
+            discoveredBy: profile.discoveredBy,
+            lastMentionedAt: profile.lastMentionedAt
         )
     }
 
@@ -231,6 +245,8 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
             memoryEntityID: existing?.memoryEntityID,
             memoryStableKey: existing?.memoryStableKey,
             source: existing?.source ?? "person-registry",
+            discoveredBy: discoveredBy ?? existing?.discoveredBy,
+            lastMentionedAt: lastMentionedAt ?? existing?.lastMentionedAt,
             createdAt: existing?.createdAt ?? now,
             updatedAt: now
         )
