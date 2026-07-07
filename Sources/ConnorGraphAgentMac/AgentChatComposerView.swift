@@ -760,30 +760,18 @@ struct AgentChatComposerView: View {
                 }
             }
         } label: {
-            HStack(spacing: AgentChatLayout.spaceXS) {
-                Label {
-                    Text(composerState.selectedModel.isEmpty ? "未选择模型" : composerState.selectedModel)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } icon: {
-                    Image(systemName: "cpu")
-                }
-                if composerState.sessionHasLLMOverride {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 6, height: 6)
-                        .help("此会话使用自定义模型，与全局设置不同")
-                }
-            }
-            .font(AgentChatTypography.micro.weight(.medium))
-            .foregroundStyle(composerControlForeground)
-            .padding(.horizontal, AgentChatLayout.spaceM)
-            .frame(height: AgentChatLayout.chipHeight)
-            .frame(maxWidth: AgentChatLayout.modelMenuMaxWidth)
+            ComposerModelSelectionLabel(
+                presentation: ComposerModelSelectionPresentation(
+                    selectedModel: composerState.selectedModel,
+                    sessionHasOverride: composerState.sessionHasLLMOverride
+                ),
+                foreground: composerControlForeground
+            )
         }
         .menuStyle(.borderlessButton)
         .controlSize(.regular)
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
+        .accessibilityHint("选择模型和思考强度")
     }
 
     private var activeSkillInlineChip: some View {
@@ -963,6 +951,54 @@ struct AgentChatComposerView: View {
         }
     }
 
+}
+
+private struct ComposerModelSelectionLabel: View {
+    let presentation: ComposerModelSelectionPresentation
+    var foreground: Color
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceXS) {
+            Image(systemName: "cpu")
+                .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .accessibilityHidden(true)
+
+            Text(presentation.title)
+                .font(AgentChatTypography.micro.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .minimumScaleFactor(0.85)
+                .layoutPriority(1)
+        }
+        .foregroundStyle(foreground)
+        .padding(.leading, AgentChatLayout.spaceM)
+        .padding(.trailing, presentation.showsSessionOverrideIndicator ? AgentChatLayout.spaceL : AgentChatLayout.spaceM)
+        .frame(minWidth: 96, idealWidth: 148, maxWidth: AgentChatLayout.modelMenuMaxWidth, minHeight: AgentChatLayout.chipHeight, maxHeight: AgentChatLayout.chipHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        }
+        .overlay(alignment: .topTrailing) {
+            if presentation.showsSessionOverrideIndicator {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 5)
+                    .padding(.trailing, 6)
+                    .help("此会话使用自定义模型，与全局设置不同")
+                    .accessibilityHidden(true)
+            }
+        }
+        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
 }
 
 // MARK: - Speech Input Keyboard Monitor
