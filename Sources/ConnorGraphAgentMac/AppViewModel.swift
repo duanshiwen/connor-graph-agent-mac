@@ -536,6 +536,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var personProfileStore: SQLitePersonProfileStore?
+    private var personMemoryBindingService: (any PersonMemoryBindingService)?
     private var mailStore: FileBackedMailSourceStore?
     private var mailPreferencesStore: (any MailPreferencesStore)?
     private var mailCacheChangeObserver: NSObjectProtocol?
@@ -2027,6 +2028,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.personProfileStore = try? SQLitePersonProfileStore(databaseURL: storagePaths.applicationSupportDirectory
                 .appendingPathComponent("contacts", isDirectory: true)
                 .appendingPathComponent("person-profiles.sqlite"))
+            self.personMemoryBindingService = AppPersonMemoryBindingService(governanceSink: InMemoryPersonMemoryGovernanceSink())
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
@@ -2944,10 +2946,11 @@ final class AppViewModel: NSObject, ObservableObject {
             let existing = draft.id.flatMap { id in personProfiles.first(where: { $0.id == id }) }
             let now = Date()
             let profile = draft.makeProfile(existing: existing, now: now)
-            _ = try await personProfileStore?.upsert(profile)
-            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.upserting(profile)
+            let boundProfile = try await personMemoryBindingService?.ensureBinding(for: profile, now: now) ?? profile
+            _ = try await personProfileStore?.upsert(boundProfile)
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.upserting(boundProfile)
             reloadContactsBrowserPresentation()
-            selectedContactID = profile.id
+            selectedContactID = boundProfile.id
             editingPersonProfileDraft = nil
             isPresentingPersonProfileEditor = false
             errorMessage = nil
@@ -2958,7 +2961,11 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func deletePersonProfile(_ id: ContactID) async {
         do {
-            try await personProfileStore?.markDeleted(id: id, now: Date())
+            let now = Date()
+            if let profile = try await personProfileStore?.profile(id: id) ?? personProfiles.first(where: { $0.id == id }) {
+                try await personMemoryBindingService?.markDeleted(profile: profile, now: now)
+            }
+            try await personProfileStore?.markDeleted(id: id, now: now)
             personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != id }
             if selectedContactID == id { selectedContactID = personProfiles.first?.id }
             reloadContactsBrowserPresentation()
@@ -2971,7 +2978,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func mergePersonProfile(sourceID: ContactID, targetID: ContactID) async {
         do {
-            _ = try await personProfileStore?.merge(sourceID: sourceID, targetID: targetID, now: Date())
+            let now = Date()
+            let source = try await personProfileStore?.profile(id: sourceID) ?? personProfiles.first(where: { $0.id == sourceID })
+            let target = try await personProfileStore?.profile(id: targetID) ?? personProfiles.first(where: { $0.id == targetID })
+            let merged = try await personProfileStore?.merge(sourceID: sourceID, targetID: targetID, now: now)
+            if let source, let target = merged ?? target {
+                let boundTarget = try await personMemoryBindingService?.mergeBinding(source: source, target: target, now: now) ?? target
+                _ = try await personProfileStore?.upsert(boundTarget)
+            }
             personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != sourceID }
             selectedContactID = targetID
             reloadContactsBrowserPresentation()
