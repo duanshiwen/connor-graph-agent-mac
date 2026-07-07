@@ -130,10 +130,14 @@ public struct PersonMentionSearch: Sendable {
             profile.displayName,
             profile.givenName,
             profile.familyName,
+            profile.gender ?? "",
             profile.organizationName ?? "",
             profile.jobTitle ?? "",
+            profile.notes ?? "",
             profile.aliases.joined(separator: " "),
-            profile.emails.map(\.email).joined(separator: " ")
+            profile.emails.map(\.email).joined(separator: " "),
+            profile.phones.map(\.number).joined(separator: " "),
+            profile.addresses.map(\.value).joined(separator: " ")
         ].contains { $0.lowercased().contains(normalizedQuery) }
     }
 }

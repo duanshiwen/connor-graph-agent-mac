@@ -74,4 +74,19 @@ struct PersonMentionTriggerDetectorTests {
 
         #expect(results.map(\.id) == [active.id])
     }
+
+    @Test func mentionSearchMatchesNotesPhonesAndAddresses() {
+        let profile = PersonProfile(
+            id: ContactID(rawValue: "person-duan"),
+            displayName: "段福强",
+            phones: [PersonPhoneNumber(number: "13800000000")],
+            addresses: [PersonPostalAddress(value: "杭州西湖区")],
+            notes: "饼叔团队相关联系人"
+        )
+        let search = PersonMentionSearch()
+
+        #expect(search.search(query: "饼叔团队", profiles: [profile]).map(\.id) == [profile.id])
+        #expect(search.search(query: "138", profiles: [profile]).map(\.id) == [profile.id])
+        #expect(search.search(query: "西湖", profiles: [profile]).map(\.id) == [profile.id])
+    }
 }
