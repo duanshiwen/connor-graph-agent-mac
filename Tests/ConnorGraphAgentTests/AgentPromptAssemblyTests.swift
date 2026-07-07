@@ -127,6 +127,22 @@ import ConnorGraphAgent
     #expect(prompt.contains("default relationship identity anchor"))
 }
 
+@Test func defaultSystemPromptPrioritizesPersonRegistryContactMethodsOverMemoryHistory() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Person Registry active profile contact methods are authoritative"))
+    #expect(prompt.contains("Historical Memory OS conversation events are background only"))
+    #expect(prompt.contains("must not override current Person Registry email, phone, or address fields"))
+}
+
+@Test func defaultSystemPromptPrefersPersonAwareMailDraftToolForMentionedPeople() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("mail_create_draft_to_people"))
+    #expect(prompt.contains("exact person IDs"))
+    #expect(prompt.contains("Prefer it over raw `mail_create_draft.to`"))
+}
+
 @Test func defaultSystemPromptDocumentsUserGovernedPersonMemoryRules() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
