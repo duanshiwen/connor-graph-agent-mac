@@ -19,7 +19,7 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
         self.copyAccessibilityLabel = "复制这条助理回复"
         self.exportAccessibilityLabel = "导出这条助理回复到文件"
         self.copyHelp = "复制原始 Markdown 文本"
-        self.exportHelp = "保存为 Markdown 文件到当前会话 exports 目录"
+        self.exportHelp = "选择保存位置和文件名，导出为 Markdown 文件"
     }
 }
 

@@ -68,7 +68,7 @@ struct AssistantMessageExportFormatterTests {
         #expect(presentation.copyAccessibilityLabel == "复制这条助理回复")
         #expect(presentation.exportAccessibilityLabel == "导出这条助理回复到文件")
         #expect(presentation.copyHelp == "复制原始 Markdown 文本")
-        #expect(presentation.exportHelp == "保存为 Markdown 文件到当前会话 exports 目录")
+        #expect(presentation.exportHelp == "选择保存位置和文件名，导出为 Markdown 文件")
     }
 
     private func presentation(
