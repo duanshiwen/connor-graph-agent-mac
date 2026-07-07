@@ -84,6 +84,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         MCPToolRegistryBridge().registerTools(catalog: catalog, into: &registry, router: pool)
     }
 
+    private func makePersonRegistryContactRuntime() -> (any AgentContactRuntime)? {
+        guard let storagePaths else { return nil }
+        let databaseURL = storagePaths.applicationSupportDirectory
+            .appendingPathComponent("contacts", isDirectory: true)
+            .appendingPathComponent("person-profiles.sqlite")
+        guard let profileStore = try? SQLitePersonProfileStore(databaseURL: databaseURL) else { return nil }
+        return PersonRegistryAgentContactRuntime(profileStore: profileStore)
+    }
+
 
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -152,7 +161,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }
-        registry.registerNativeContactsAggregateTools(runtime: InMemoryAgentContactRuntime())
+        registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime() ?? InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool())
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
