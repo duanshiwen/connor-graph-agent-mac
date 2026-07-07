@@ -590,21 +590,42 @@ private struct ContactRowButton: View {
     var isSelected: Bool
     var onSelect: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.displayName)
-                    .font(AppListTypography.rowTitle)
-                    .foregroundStyle(.primary)
-                Text(row.subtitle)
-                    .font(AppListTypography.rowSubtitle)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.displayName)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                    Text(row.subtitle)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(rowBackground, in: rowShape)
+            .contentShape(rowShape)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityHint("打开人物详情")
+    }
+
+    private var rowShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return Color.accentColor.opacity(0.12) }
+        if isHovering { return Color.secondary.opacity(0.08) }
+        return Color.clear
     }
 }
 
