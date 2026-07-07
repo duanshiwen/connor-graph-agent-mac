@@ -2,6 +2,12 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphStore
 
+public enum PersonMemoryConsoleServiceError: Error, Sendable, Equatable {
+    case missingMemoryBinding
+    case memoryItemNotFound(String)
+    case memoryItemDoesNotBelongToPerson(itemID: String, personID: ContactID)
+}
+
 public enum PersonMemoryItemStatus: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
     case active
     case archived
@@ -49,12 +55,15 @@ public struct PersonMemoryItem: Sendable, Equatable, Identifiable, Hashable {
 public protocol PersonMemoryConsoleService: Sendable {
     func loadMemoryItems(for profile: PersonProfile, includeInactive: Bool, limit: Int) async throws -> [PersonMemoryItem]
     func activeMemorySummary(for profile: PersonProfile, limit: Int) async throws -> String
+    func archiveMemoryItem(id: String, for profile: PersonProfile, now: Date) async throws
+    func deleteMemoryItem(id: String, for profile: PersonProfile, now: Date) async throws
 }
 
 public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @unchecked Sendable {
     public enum MetadataKey {
         public static let personProfileID = "person_profile_id"
         public static let status = "person_memory_status"
+        public static let governedAt = "person_memory_governed_at"
     }
 
     private let store: SQLiteMemoryOSStore
@@ -84,6 +93,33 @@ public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @u
         let items = try await loadMemoryItems(for: profile, includeInactive: false, limit: limit)
         guard !items.isEmpty else { return "" }
         return items.prefix(limit).map { "- \($0.text)" }.joined(separator: "\n")
+    }
+
+    public func archiveMemoryItem(id: String, for profile: PersonProfile, now: Date = Date()) async throws {
+        try governMemoryItem(id: id, for: profile, status: .archived, now: now)
+    }
+
+    public func deleteMemoryItem(id: String, for profile: PersonProfile, now: Date = Date()) async throws {
+        try governMemoryItem(id: id, for: profile, status: .deleted, now: now)
+    }
+
+    private func governMemoryItem(id: String, for profile: PersonProfile, status: PersonMemoryItemStatus, now: Date) throws {
+        guard let entityID = profile.memoryEntityID?.trimmingCharacters(in: .whitespacesAndNewlines), !entityID.isEmpty else {
+            throw PersonMemoryConsoleServiceError.missingMemoryBinding
+        }
+        guard var statement = try store.entityStatement(id: id) else {
+            throw PersonMemoryConsoleServiceError.memoryItemNotFound(id)
+        }
+        guard statement.entityID == entityID else {
+            throw PersonMemoryConsoleServiceError.memoryItemDoesNotBelongToPerson(itemID: id, personID: profile.id)
+        }
+        if let statementPersonID = statement.metadata[MetadataKey.personProfileID], statementPersonID != profile.id.rawValue {
+            throw PersonMemoryConsoleServiceError.memoryItemDoesNotBelongToPerson(itemID: id, personID: profile.id)
+        }
+        statement.metadata[MetadataKey.personProfileID] = profile.id.rawValue
+        statement.metadata[MetadataKey.status] = status.rawValue
+        statement.metadata[MetadataKey.governedAt] = ISO8601DateFormatter().string(from: now)
+        try store.upsert(entityStatement: statement)
     }
 
     private func makeItem(from statement: MemoryOSEntityStatement, profile: PersonProfile, entityID: String) -> PersonMemoryItem {

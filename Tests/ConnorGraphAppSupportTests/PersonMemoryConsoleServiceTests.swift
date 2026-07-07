@@ -100,6 +100,62 @@ struct PersonMemoryConsoleServiceTests {
         #expect(!summary.contains("profile notes"))
         #expect(!summary.contains("旧记忆"))
     }
+
+    @Test func archiveMemoryItemMarksStatementArchivedAndRemovesFromActiveList() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryPersonMemoryConsoleDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 10_300)
+        let profile = boundProfile(id: "person-dana", name: "Dana")
+        try seedEntity(for: profile, in: store, now: now)
+        try seedStatement(id: "memory-archive", text: "Dana 喜欢潜水。", profile: profile, store: store, now: now)
+        let service = AppPersonMemoryConsoleService(store: store)
+
+        try await service.archiveMemoryItem(id: "memory-archive", for: profile, now: now.addingTimeInterval(10))
+
+        #expect(try await service.loadMemoryItems(for: profile).isEmpty)
+        let allItems = try await service.loadMemoryItems(for: profile, includeInactive: true)
+        #expect(allItems.first?.status == .archived)
+        let statement = try #require(try store.entityStatement(id: "memory-archive"))
+        #expect(statement.metadata["person_memory_status"] == "archived")
+        #expect(statement.metadata["person_memory_governed_at"] != nil)
+    }
+
+    @Test func deleteMemoryItemMarksStatementDeletedAndRemovesFromActiveList() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryPersonMemoryConsoleDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 10_400)
+        let profile = boundProfile(id: "person-erin", name: "Erin")
+        try seedEntity(for: profile, in: store, now: now)
+        try seedStatement(id: "memory-delete", text: "Erin 的错误记忆。", profile: profile, store: store, now: now)
+        let service = AppPersonMemoryConsoleService(store: store)
+
+        try await service.deleteMemoryItem(id: "memory-delete", for: profile, now: now.addingTimeInterval(10))
+
+        #expect(try await service.loadMemoryItems(for: profile).isEmpty)
+        let allItems = try await service.loadMemoryItems(for: profile, includeInactive: true)
+        #expect(allItems.first?.status == .deleted)
+        let statement = try #require(try store.entityStatement(id: "memory-delete"))
+        #expect(statement.metadata["person_memory_status"] == "deleted")
+    }
+
+    @Test func archiveAndDeleteRequireStatementBelongsToPerson() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryPersonMemoryConsoleDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 10_500)
+        let owner = boundProfile(id: "person-owner", name: "Owner")
+        let other = boundProfile(id: "person-other", name: "Other")
+        try seedEntity(for: owner, in: store, now: now)
+        try seedEntity(for: other, in: store, now: now)
+        try seedStatement(id: "memory-owner", text: "Owner memory", profile: owner, store: store, now: now)
+        let service = AppPersonMemoryConsoleService(store: store)
+
+        await #expect(throws: PersonMemoryConsoleServiceError.self) {
+            try await service.archiveMemoryItem(id: "memory-owner", for: other, now: now)
+        }
+        await #expect(throws: PersonMemoryConsoleServiceError.self) {
+            try await service.deleteMemoryItem(id: "memory-owner", for: other, now: now)
+        }
+    }
 }
 
 private func boundProfile(id: String, name: String) -> PersonProfile {
@@ -122,6 +178,18 @@ private func seedEntity(for profile: PersonProfile, in store: SQLiteMemoryOSStor
         confidence: 1.0,
         createdAt: now,
         updatedAt: now,
+        metadata: ["person_profile_id": profile.id.rawValue]
+    ))
+}
+
+private func seedStatement(id: String, text: String, profile: PersonProfile, store: SQLiteMemoryOSStore, now: Date) throws {
+    try store.upsert(entityStatement: MemoryOSEntityStatement(
+        id: id,
+        entityID: try #require(profile.memoryEntityID),
+        predicate: .relatedTo,
+        text: text,
+        validAt: now,
+        committedAt: now,
         metadata: ["person_profile_id": profile.id.rawValue]
     ))
 }
