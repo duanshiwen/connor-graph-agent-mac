@@ -2306,7 +2306,8 @@ struct ContactsSourceSettingsView: View {
         Group {
             if let selected = selectedContactRow {
                 let profile = selectedPersonProfile
-                let detail = profile.map(PersonProfileDetailPresentation.init(profile:))
+                let memoryItems = profile.map { viewModel.personMemoryItemsByPersonID[$0.id] ?? [] } ?? []
+                let detail = profile.map { PersonProfileDetailPresentation(profile: $0, memoryItems: memoryItems) }
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                     CalendarContactsDetailHeader(title: "人物档案", subtitle: "联系人模块现在是人物列表：人可以先存在，联系方式后补充。")
                     Divider().opacity(0.6)
@@ -2321,6 +2322,12 @@ struct ContactsSourceSettingsView: View {
                             PersonDetailInfoRow(title: "别名", value: detail.aliasesText, systemImage: "tag")
                             PersonDetailInfoRow(title: detail.memoryBindingTitle, value: detail.memoryBindingDetail, systemImage: "brain.head.profile")
                             PersonDetailInfoRow(title: "人物记忆摘要", value: detail.memorySummary, systemImage: "text.alignleft")
+                            PersonDetailInfoRow(title: "人物记忆", value: detail.activeMemoryCountText, systemImage: "list.bullet.rectangle")
+                            PersonMemoryItemsList(
+                                items: detail.memoryItems,
+                                onArchive: { item in Task { @MainActor in await viewModel.archivePersonMemoryItem(item.id, for: item.personID) } },
+                                onDelete: { item in Task { @MainActor in await viewModel.deletePersonMemoryItem(item.id, for: item.personID) } }
+                            )
                         }
                         HStack {
                             Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
@@ -2331,6 +2338,9 @@ struct ContactsSourceSettingsView: View {
                     .padding(AppShellLayout.spaceXL)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .task(id: selected.id) {
+                    await viewModel.reloadPersonMemoryItems(for: selected.id)
+                }
             } else {
                 Color.clear
             }
@@ -2373,6 +2383,46 @@ struct ContactsSourceSettingsView: View {
     private var selectedPersonProfile: PersonProfile? {
         guard let id = viewModel.selectedContactID else { return nil }
         return viewModel.personProfiles.first { $0.id == id }
+    }
+}
+
+private struct PersonMemoryItemsList: View {
+    var items: [PersonMemoryItem]
+    var onArchive: (PersonMemoryItem) -> Void
+    var onDelete: (PersonMemoryItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if items.isEmpty {
+                Text("暂无 active 人物记忆")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.predicate)
+                                .font(AgentChatTypography.metaEmphasis)
+                                .foregroundStyle(.secondary)
+                            Text(item.text)
+                                .font(AgentChatTypography.meta)
+                                .textSelection(.enabled)
+                        }
+                        Spacer(minLength: 12)
+                        Menu {
+                            Button("归档，不再主动使用") { onArchive(item) }
+                            Button("删除", role: .destructive) { onDelete(item) }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
+        }
     }
 }
 

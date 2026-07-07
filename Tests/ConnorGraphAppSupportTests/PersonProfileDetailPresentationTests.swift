@@ -33,4 +33,36 @@ struct PersonProfileDetailPresentationTests {
         #expect(presentation.memoryBindingTitle == "尚未连接 Memory OS")
         #expect(presentation.memorySummary == "暂无人物记忆摘要")
     }
+
+    @Test func detailPresentationIncludesPersonMemoryItemsAndCounts() {
+        let profile = PersonProfile(id: ContactID(rawValue: "person-memory"), displayName: "小陈")
+        let items = [
+            PersonMemoryItem(
+                id: "memory-1",
+                personID: profile.id,
+                memoryEntityID: "person:person-profile:person-memory",
+                predicate: "RELATED_TO",
+                text: "小陈喜欢冲浪。",
+                status: .active,
+                validAt: Date(timeIntervalSince1970: 1),
+                committedAt: Date(timeIntervalSince1970: 2)
+            ),
+            PersonMemoryItem(
+                id: "memory-2",
+                personID: profile.id,
+                memoryEntityID: "person:person-profile:person-memory",
+                predicate: "RELATED_TO",
+                text: "小陈在杭州工作。",
+                status: .active,
+                validAt: Date(timeIntervalSince1970: 3),
+                committedAt: Date(timeIntervalSince1970: 4)
+            )
+        ]
+
+        let presentation = PersonProfileDetailPresentation(profile: profile, memoryItems: items)
+
+        #expect(presentation.activeMemoryCountText == "2 条 active 记忆")
+        #expect(presentation.memoryItems.map(\.text) == ["小陈喜欢冲浪。", "小陈在杭州工作。"])
+        #expect(presentation.memorySummary.contains("小陈喜欢冲浪。"))
+    }
 }
