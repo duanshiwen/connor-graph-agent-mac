@@ -603,6 +603,12 @@ private struct AgentChatConversationView: View {
                 persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
                 onPreviewAttachment: { attachment in
                     viewModel.previewAttachment(attachment)
+                },
+                onCopyAssistantMessage: { message in
+                    viewModel.copyAssistantMessageToPasteboard(message)
+                },
+                onExportAssistantMessage: { message in
+                    viewModel.exportAssistantMessageToFile(message)
                 }
             )
         } else if let process = item.process {

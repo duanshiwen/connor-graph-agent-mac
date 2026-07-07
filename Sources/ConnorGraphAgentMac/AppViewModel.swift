@@ -774,6 +774,56 @@ final class AppViewModel: NSObject, ObservableObject {
         )
     }
 
+    func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation) {
+        let content = message.message.content
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(content, forType: .string)
+        showAttachmentToast(
+            title: "已复制回复",
+            message: "已复制原始 Markdown 文本。",
+            systemImage: "doc.on.doc"
+        )
+    }
+
+    func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date = Date()) {
+        let content = message.message.content
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let selectedChatSessionID, let storagePaths else {
+            showAttachmentToast(
+                title: "导出回复失败",
+                message: "当前会话文件目录不可用。",
+                systemImage: "xmark.circle"
+            )
+            return
+        }
+
+        do {
+            let filename = AssistantMessageExportFormatter.filename(for: message, date: now)
+            let result = try AppSessionArtifactManager(storagePaths: storagePaths).writeTextArtifact(
+                sessionID: selectedChatSessionID,
+                kind: "export",
+                filename: filename,
+                contents: content,
+                runID: nil,
+                message: "Exported assistant message \(message.message.id)"
+            )
+            selectedSessionArtifactDirectories = result.directories
+            showAttachmentToast(
+                title: "已导出回复",
+                message: result.url.path,
+                systemImage: "square.and.arrow.down"
+            )
+        } catch {
+            showAttachmentToast(
+                title: "导出回复失败",
+                message: String(describing: error),
+                systemImage: "xmark.circle"
+            )
+        }
+    }
+
     @discardableResult
     func importAttachments(urls: [URL]) async -> AttachmentImportBatchResult {
         guard let selectedChatSessionID, let storagePaths else { return AttachmentImportBatchResult() }
