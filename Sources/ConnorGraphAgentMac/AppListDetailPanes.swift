@@ -551,8 +551,8 @@ struct CraftContactsListPane: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
-                .help("新建人物")
-                .accessibilityLabel("新建人物")
+                .help("新建人物档案")
+                .accessibilityLabel("新建人物档案")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)

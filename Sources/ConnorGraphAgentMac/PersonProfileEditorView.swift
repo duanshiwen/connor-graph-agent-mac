@@ -152,6 +152,8 @@ struct PersonProfileEditorView: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!presentation.canSave)
+                .accessibilityLabel(presentation.saveButtonTitle)
+                .help(presentation.canSave ? presentation.saveButtonTitle : presentation.displayNameHint)
         }
         .padding(.top, SettingsListLayout.spaceXS)
     }
@@ -283,9 +285,15 @@ private struct PersonProfileEditorField: View {
             TextField(placeholder, text: $text, axis: axis)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(verticalLineLimit)
+                .accessibilityLabel(accessibilityTitle)
         } else {
             TextField(placeholder, text: $text, axis: axis)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel(accessibilityTitle)
         }
+    }
+
+    private var accessibilityTitle: String {
+        isRequired ? "\(title)，必填" : title
     }
 }
