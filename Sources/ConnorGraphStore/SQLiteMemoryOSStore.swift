@@ -455,6 +455,25 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         MemoryOSQueryCache.shared.invalidateL4()
     }
 
+    public func entityStatements(entityID: String, limit: Int = 100) throws -> [MemoryOSEntityStatement] {
+        try query(sql: """
+        SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+        FROM memory_l4_entity_statements
+        WHERE entity_id = \(quote(entityID))
+        ORDER BY committed_at DESC, id ASC
+        LIMIT \(limit)
+        """).map(decodeEntityStatement)
+    }
+
+    public func entityStatement(id: String) throws -> MemoryOSEntityStatement? {
+        try query(sql: """
+        SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+        FROM memory_l4_entity_statements
+        WHERE id = \(quote(id))
+        LIMIT 1
+        """).map(decodeEntityStatement).first
+    }
+
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
         // Check cache first
         let cache = MemoryOSQueryCache.shared
@@ -626,6 +645,23 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     private func decodeEntity(_ row: [String]) throws -> MemoryOSEntity {
         MemoryOSEntity(id: row[0], stableKey: row[1], entityType: row[2], name: row[3], aliases: try decode([String].self, row[4]), summary: row[5], confidence: Double(row[6]) ?? 0, createdAt: try date(row[7]), updatedAt: try date(row[8]), validFrom: try optionalDate(row[9]), metadata: try decode([String: String].self, row[10]))
+    }
+
+    private func decodeEntityStatement(_ row: [String]) throws -> MemoryOSEntityStatement {
+        MemoryOSEntityStatement(
+            id: row[0],
+            entityID: row[1],
+            predicate: MemoryOSL4RelationPredicate(rawValue: row[2]) ?? .relatedTo,
+            objectEntityID: nilIfEmpty(row[3]),
+            text: row[4],
+            assertionKind: MemoryOSAssertionKind(rawValue: row[5]) ?? .observed,
+            confidence: Double(row[6]) ?? 0,
+            validAt: try date(row[7]),
+            committedAt: try date(row[8]),
+            evidenceSpanIDs: try decode([String].self, row[9]),
+            sourceArtifactID: nilIfEmpty(row[10]),
+            metadata: try decode([String: String].self, row[11])
+        )
     }
 
     private func decodeBackgroundRun(_ row: [String]) throws -> MemoryOSBackgroundRunRecord {
