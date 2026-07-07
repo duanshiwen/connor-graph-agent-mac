@@ -76,6 +76,8 @@
 		C7A710000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift */; };
 		D00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */; };
 		D00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift */; };
+		D00000000000000000000014 /* Sources/ConnorGraphAgentMac/PersonMentionPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000013 /* Sources/ConnorGraphAgentMac/PersonMentionPickerView.swift */; };
+		D00000000000000000000015 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000014 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */; };
 		D00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift */; };
 		D00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift */; };
 		D00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift */; };
@@ -163,6 +165,8 @@
 		B00000000000000000000003 /* ConnorGraphAgentMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConnorGraphAgentMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift; sourceTree = "<group>"; };
 		C00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatComposerView.swift; sourceTree = "<group>"; };
+		C00000000000000000000013 /* Sources/ConnorGraphAgentMac/PersonMentionPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonMentionPickerView.swift; sourceTree = "<group>"; };
+		C00000000000000000000014 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift; sourceTree = "<group>"; };
 		C00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift; sourceTree = "<group>"; };
 		C00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift; sourceTree = "<group>"; };
 		C00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift; sourceTree = "<group>"; };
@@ -244,6 +248,8 @@
 				F00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentToolInvocationDetailOverlay.swift */,
 				F00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentToolOutputRenderers.swift */,
 				C00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift */,
+				C00000000000000000000013 /* Sources/ConnorGraphAgentMac/PersonMentionPickerView.swift */,
+				C00000000000000000000014 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */,
 				C00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift */,
 				C00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift */,
 				C00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift */,
@@ -483,6 +489,8 @@
 				F00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentToolInvocationDetailOverlay.swift in Sources */,
 				F00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentToolOutputRenderers.swift in Sources */,
 				D00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift in Sources */,
+				D00000000000000000000014 /* Sources/ConnorGraphAgentMac/PersonMentionPickerView.swift in Sources */,
+				D00000000000000000000015 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift in Sources */,
 				D00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift in Sources */,
 				D00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift in Sources */,
 				D00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift in Sources */,
