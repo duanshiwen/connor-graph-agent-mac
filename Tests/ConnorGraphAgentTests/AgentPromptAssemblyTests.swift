@@ -135,6 +135,43 @@ import ConnorGraphAgent
     #expect(prompt.contains("prefer move or merge governance instead of inventing conflicting duplicate facts"))
 }
 
+@Test func defaultSystemPromptRequiresPerTurnRelationshipMaintenance() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("In every conversation turn"))
+    #expect(prompt.contains("create an active Person Registry entry"))
+    #expect(prompt.contains("contacts_write.create_person"))
+    #expect(prompt.contains("Do not wait for background L1 processing"))
+}
+
+@Test func defaultSystemPromptDocumentsImmediateFactualPersonProfileUpdates() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Immediate factual profile updates"))
+    #expect(prompt.contains("contacts_read"))
+    #expect(prompt.contains("contacts_write.update_person"))
+    #expect(prompt.contains("name, aliases, email, organization, jobTitle, and notes"))
+}
+
+@Test func defaultSystemPromptDocumentsUnsupportedPersonFieldsFallback() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("does not expose structured phone/address/gender arguments"))
+    #expect(prompt.contains("preserve it in notes with clear labels"))
+    #expect(prompt.contains("phone numbers"))
+    #expect(prompt.contains("home/family addresses"))
+    #expect(prompt.contains("gender/pronoun/title"))
+}
+
+@Test func defaultSystemPromptSeparatesConversationProfileFactsFromL1PersonalitySynthesis() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("concrete, explicitly evidenced profile facts"))
+    #expect(prompt.contains("Do not use contacts_write to store personality analysis"))
+    #expect(prompt.contains("Multi-turn synthesis of personality traits"))
+    #expect(prompt.contains("belongs to L1/background Memory OS projection"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
