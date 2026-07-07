@@ -215,7 +215,13 @@ struct AppGlobalSearchTests {
         fixture.viewModel.isGlobalSearchOverlayPresented = true
 
         fixture.viewModel.openGlobalSearchResult(mail.searchResult)
-        try await Task.sleep(nanoseconds: 150_000_000)
+        for _ in 0..<20 {
+            if fixture.viewModel.selectedMailAccountID == mail.summary.accountID,
+               fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID {
+                break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
