@@ -140,6 +140,8 @@ public struct MemoryOSContextTool: AgentTool {
 
         Keep each term focused — short keyword phrases work better than long sentences.
         2-5 terms per call is the sweet spot.
+
+        Returned memory items may include `(updated_at: ...)`; use it to resolve conflicts between contradictory memory records.
         """
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
@@ -191,7 +193,7 @@ public struct MemoryOSContextTool: AgentTool {
 
 public struct MemoryOSSearchTool: AgentTool {
     public let name = "memory_os_search"
-    public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4 using the local embedded search path. Returns ranked candidate records and entry points only; retrieval hits are context, not graph-complete memory truth. For list/all/which/有哪些/所有/列出 class membership questions, resolve the class first and use memory_os_l4_instances. Use graph tools for relationships, evidence chains, timelines, and cross-layer context."
+    public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4 using the local embedded search path. Returns ranked candidate records and entry points only; retrieval hits are context, not graph-complete memory truth. Each hit metadata includes `updated_at` when available. For list/all/which/有哪些/所有/列出 class membership questions, resolve the class first and use memory_os_l4_instances. Use graph tools for relationships, evidence chains, timelines, and cross-layer context."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Search query text."),
@@ -261,7 +263,7 @@ public struct MemoryOSSearchTool: AgentTool {
 
 public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
     public let name = "memory_os_get_current_user_profile"
-    public let description = "Retrieve all current-user personalization context from Connor Memory OS. Returns a flat list of natural-language facts about preferences, habits, traits, projects, constraints, and interaction guidance."
+    public let description = "Retrieve all current-user personalization context from Connor Memory OS. Returns a flat list of natural-language facts about preferences, habits, traits, projects, constraints, and interaction guidance. Returned facts may include `(updated_at: ...)`; use it to resolve conflicts between contradictory profile records."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
 
