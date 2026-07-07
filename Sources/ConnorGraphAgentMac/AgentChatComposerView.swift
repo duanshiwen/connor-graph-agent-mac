@@ -6,6 +6,27 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+struct ComposerModelSelectionPresentation: Equatable, Sendable {
+    var selectedModel: String
+    var sessionHasOverride: Bool
+
+    var title: String {
+        selectedModel.isEmpty ? "未选择模型" : selectedModel
+    }
+
+    var showsSessionOverrideIndicator: Bool {
+        sessionHasOverride
+    }
+
+    var accessibilityLabel: String {
+        var label = "模型：\(title)"
+        if sessionHasOverride {
+            label += "，此会话使用自定义模型"
+        }
+        return label
+    }
+}
+
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
