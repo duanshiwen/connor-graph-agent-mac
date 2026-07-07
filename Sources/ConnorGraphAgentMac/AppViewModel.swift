@@ -6570,7 +6570,7 @@ final class AppViewModel: NSObject, ObservableObject {
             guard !displayName.isEmpty || !slug.isEmpty else { return nil }
             return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
         }()
-        let explicitPersonContexts = personContextSnapshots(for: personMentions)
+        let explicitPersonContexts = await personContextSnapshots(for: personMentions)
         let submittedPersonContextSnapshot: String? = {
             guard !explicitPersonContexts.isEmpty else { return submittedActiveSkillContextSnapshot }
             let names = explicitPersonContexts.map { $0.profile.displayName }.joined(separator: ", ")
@@ -6724,13 +6724,15 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func personContextSnapshots(for mentions: [PersonMention]) -> [PersonContextSnapshot] {
+    private func personContextSnapshots(for mentions: [PersonMention]) async -> [PersonContextSnapshot] {
         guard !mentions.isEmpty else { return [] }
         var snapshots: [PersonContextSnapshot] = []
         var seen: Set<ContactID> = []
         for mention in mentions where seen.insert(mention.personID).inserted {
             guard let profile = personProfiles.first(where: { $0.id == mention.personID && $0.isActiveForDefaultContext }) else { continue }
-            snapshots.append(PersonContextSnapshot(profile: profile, memorySummary: profile.notes))
+            let memoryItems = (try? await personMemoryConsoleService?.loadMemoryItems(for: profile, includeInactive: false, limit: 8)) ?? []
+            let memoryTexts = memoryItems.map(\.text)
+            snapshots.append(PersonContextSnapshot(profile: profile, memorySummary: nil, activeMemoryItems: memoryTexts))
         }
         return snapshots
     }
