@@ -283,6 +283,16 @@ struct MCPSourceDraft: Equatable {
 
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
+    static func agentTurnMutatedPersonRegistry(_ events: [AgentEventPresentation]) -> Bool {
+        AgentToolInvocationAssembler()
+            .invocations(from: events)
+            .contains { invocation in
+                invocation.toolName == "contacts_write" &&
+                    invocation.phase == .finished &&
+                    invocation.severity == .success
+            }
+    }
+
 #if DEBUG
     private let mainActorStallMonitor = AppMainActorStallMonitor()
 #endif
