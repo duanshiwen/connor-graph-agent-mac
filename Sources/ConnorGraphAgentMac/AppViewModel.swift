@@ -396,6 +396,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var contactsBrowserPresentation: NativeContactsBrowserPresentation = .empty
     @Published var contactRecords: [ContactRecord] = []
     @Published var personProfiles: [PersonProfile] = []
+    @Published var personMemoryItemsByPersonID: [ContactID: [PersonMemoryItem]] = [:]
     @Published var selectedContactID: ContactID?
     @Published var isPresentingPersonProfileEditor: Bool = false
     @Published var editingPersonProfileDraft: PersonProfileDraft?
@@ -537,6 +538,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var personProfileStore: SQLitePersonProfileStore?
     private var personMemoryBindingService: (any PersonMemoryBindingService)?
+    private var personMemoryConsoleService: AppPersonMemoryConsoleService?
     private var mailStore: FileBackedMailSourceStore?
     private var mailPreferencesStore: (any MailPreferencesStore)?
     private var mailCacheChangeObserver: NSObjectProtocol?
@@ -2048,6 +2050,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
                 try store.migrate()
                 self.memoryOSStore = store
+                self.personMemoryConsoleService = AppPersonMemoryConsoleService(store: store)
                 let initialSearchHealth = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
                 let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
                 self.memoryOSSearchHealthSummary = initialSearchHealth.status == .healthy
@@ -2973,6 +2976,36 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "无法删除人物档案：\(error.localizedDescription)"
+        }
+    }
+
+    func reloadPersonMemoryItems(for id: ContactID) async {
+        guard let profile = personProfiles.first(where: { $0.id == id }) else { return }
+        do {
+            let items = try await personMemoryConsoleService?.loadMemoryItems(for: profile) ?? []
+            personMemoryItemsByPersonID[id] = items
+        } catch {
+            errorMessage = "加载人物记忆失败：\(error.localizedDescription)"
+        }
+    }
+
+    func archivePersonMemoryItem(_ itemID: String, for personID: ContactID) async {
+        guard let profile = personProfiles.first(where: { $0.id == personID }) else { return }
+        do {
+            try await personMemoryConsoleService?.archiveMemoryItem(id: itemID, for: profile, now: Date())
+            await reloadPersonMemoryItems(for: personID)
+        } catch {
+            errorMessage = "归档人物记忆失败：\(error.localizedDescription)"
+        }
+    }
+
+    func deletePersonMemoryItem(_ itemID: String, for personID: ContactID) async {
+        guard let profile = personProfiles.first(where: { $0.id == personID }) else { return }
+        do {
+            try await personMemoryConsoleService?.deleteMemoryItem(id: itemID, for: profile, now: Date())
+            await reloadPersonMemoryItems(for: personID)
+        } catch {
+            errorMessage = "删除人物记忆失败：\(error.localizedDescription)"
         }
     }
 

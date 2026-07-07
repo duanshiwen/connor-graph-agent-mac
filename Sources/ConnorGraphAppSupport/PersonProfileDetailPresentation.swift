@@ -7,9 +7,12 @@ public struct PersonProfileDetailPresentation: Sendable, Equatable {
     public var memoryBindingTitle: String
     public var memoryBindingDetail: String
     public var memorySummary: String
+    public var activeMemoryCountText: String
+    public var memoryItems: [PersonMemoryItem]
 
-    public init(profile: PersonProfile) {
+    public init(profile: PersonProfile, memoryItems: [PersonMemoryItem] = []) {
         self.profile = profile
+        self.memoryItems = memoryItems
         let aliases = profile.aliases
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -29,7 +32,14 @@ public struct PersonProfileDetailPresentation: Sendable, Equatable {
             self.memoryBindingDetail = "保存或同步后会自动建立人物记忆锚点。"
         }
 
-        let notes = profile.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.memorySummary = notes.isEmpty ? "暂无人物记忆摘要" : notes
+        let activeItems = memoryItems.filter { $0.status == .active }
+        self.activeMemoryCountText = "\(activeItems.count) 条 active 记忆"
+        let memoryText = activeItems.map(\.text).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if memoryText.isEmpty {
+            let notes = profile.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            self.memorySummary = notes.isEmpty ? "暂无人物记忆摘要" : notes
+        } else {
+            self.memorySummary = memoryText.prefix(5).map { "- \($0)" }.joined(separator: "\n")
+        }
     }
 }
