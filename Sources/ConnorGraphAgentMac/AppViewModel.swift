@@ -4,6 +4,7 @@ import CoreLocation
 import IOKit.pwr_mgt
 import UserNotifications
 import WebKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -790,29 +791,25 @@ final class AppViewModel: NSObject, ObservableObject {
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date = Date()) {
         let content = message.message.content
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard let selectedChatSessionID, let storagePaths else {
-            showAttachmentToast(
-                title: "导出回复失败",
-                message: "当前会话文件目录不可用。",
-                systemImage: "xmark.circle"
-            )
-            return
-        }
+
+        let panel = NSSavePanel()
+        panel.title = "导出助理回复"
+        panel.message = "选择保存位置和文件名。"
+        panel.prompt = "导出"
+        panel.nameFieldLabel = "文件名："
+        panel.nameFieldStringValue = AssistantMessageExportFormatter.filename(for: message, date: now)
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.directoryURL = selectedSessionArtifactDirectories?.exports
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
 
         do {
-            let filename = AssistantMessageExportFormatter.filename(for: message, date: now)
-            let result = try AppSessionArtifactManager(storagePaths: storagePaths).writeTextArtifact(
-                sessionID: selectedChatSessionID,
-                kind: "export",
-                filename: filename,
-                contents: content,
-                runID: nil,
-                message: "Exported assistant message \(message.message.id)"
-            )
-            selectedSessionArtifactDirectories = result.directories
+            try content.write(to: url, atomically: true, encoding: .utf8)
             showAttachmentToast(
                 title: "已导出回复",
-                message: result.url.path,
+                message: url.path,
                 systemImage: "square.and.arrow.down"
             )
         } catch {
