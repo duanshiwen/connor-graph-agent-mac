@@ -58,6 +58,28 @@ import ConnorGraphStore
     #expect(package.budgetReport.truncatedBlockCount > 0)
 }
 
+@Test func buildFlatStringsRendersUpdatedAtSuffixes() throws {
+    let hits: [MemoryOSRetrievalHit] = [
+        MemoryOSRetrievalHit(layer: .l1, recordID: "capture-1", title: "manual", summary: "", matchedText: "User considered option A.", score: 4.0, metadata: ["updated_at": "2026-05-01T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "statement-1", title: "prefers", summary: "", matchedText: "User moved to option B.", score: 3.0, metadata: ["updated_at": "2026-07-01T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l3, recordID: "belief-1", title: "option-b", summary: "", matchedText: "Option B is current direction.", score: 2.0, metadata: ["updated_at": "2026-07-02T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l4, recordID: "entity-a", title: "Option B", summary: "Current strategy", matchedText: "", score: 1.0, entityRefs: ["entity-a"], metadata: ["entity_type": "project", "updated_at": "2026-07-03T10:00:00Z"])
+    ]
+    let expansions: [String: [MemoryOSL4ExpansionHit]] = [
+        "entity-a": [
+            MemoryOSL4ExpansionHit(recordID: "relation-1", sourceEntityID: "entity-a", relatedEntityID: "entity-b", predicate: MemoryOSL4RelationPredicate.dependsOn.rawValue, text: "", depth: 1, score: 1.0, updatedAt: "2026-07-04T10:00:00Z")
+        ]
+    ]
+
+    let result = MemoryOSContextBuilder().buildFlatStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-b": "Dependency"])
+
+    #expect(result.contains { $0.contains("User considered option A.") && $0.contains("(updated_at: 2026-05-01T10:00:00Z)") })
+    #expect(result.contains { $0.contains("User moved to option B.") && $0.contains("(updated_at: 2026-07-01T10:00:00Z)") })
+    #expect(result.contains { $0.contains("Option B is current direction.") && $0.contains("(updated_at: 2026-07-02T10:00:00Z)") })
+    #expect(result.contains { $0.contains("Option B") && $0.contains("(updated_at: 2026-07-03T10:00:00Z)") })
+    #expect(result.contains { $0.contains("Option B") && $0.contains("Dependency") && $0.contains("(updated_at: 2026-07-04T10:00:00Z)") })
+}
+
 @Test func buildFlatStringsFiltersSelfReferencingRelations() throws {
     let hits: [MemoryOSRetrievalHit] = [
         MemoryOSRetrievalHit(layer: .l4, recordID: "entity-a", title: "社会技术系统", summary: "A sociotechnical system.", matchedText: "", score: 1.0, entityRefs: ["entity-a"], metadata: ["entity_type": "concept"])
