@@ -15,9 +15,9 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
         let hasContent = !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.showsActions = message.role == .assistant && hasContent
         self.copyTitle = "复制"
-        self.exportTitle = "导出到文件"
+        self.exportTitle = "Markdown"
         self.copyAccessibilityLabel = "复制这条助理回复"
-        self.exportAccessibilityLabel = "导出这条助理回复到文件"
+        self.exportAccessibilityLabel = "导出这条助理回复为 Markdown 文件"
         self.copyHelp = "复制原始 Markdown 文本"
         self.exportHelp = "选择保存位置和文件名，导出为 Markdown 文件"
     }
@@ -285,48 +285,48 @@ private struct AgentAssistantMessageActionsView: View {
     var onExport: () -> Void
 
     var body: some View {
-        HStack(spacing: AgentChatLayout.spaceXS) {
+        HStack(spacing: AgentChatLayout.spaceM) {
             actionButton(
                 title: presentation.copyTitle,
+                systemImage: "doc.on.doc",
                 accessibilityLabel: presentation.copyAccessibilityLabel,
                 help: presentation.copyHelp,
                 action: onCopy
             )
             actionButton(
                 title: presentation.exportTitle,
+                systemImage: "doc.text",
                 accessibilityLabel: presentation.exportAccessibilityLabel,
                 help: presentation.exportHelp,
                 action: onExport
             )
             Spacer(minLength: 0)
         }
-        .padding(.top, 1)
+        .padding(.top, 2)
         .accessibilityElement(children: .contain)
     }
 
     private func actionButton(
         title: String,
+        systemImage: String,
         accessibilityLabel: String,
         help: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(AgentChatTypography.microEmphasis)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .contentShape(Capsule(style: .continuous))
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .medium))
+                    .imageScale(.small)
+                Text(title)
+                    .font(AgentChatTypography.microEmphasis)
+            }
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .background(
-            Capsule(style: .continuous)
-                .fill(ConnorCraftPalette.foreground.opacity(0.035))
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .stroke(ConnorCraftPalette.foreground.opacity(0.07), lineWidth: 1)
-        )
+        .foregroundStyle(.tertiary)
         .accessibilityLabel(accessibilityLabel)
         .help(help)
     }
