@@ -1,14 +1,47 @@
 import SwiftUI
 import ConnorGraphCore
 
+struct PersonProfileEditorPresentation: Equatable {
+    var isEditing: Bool
+    var title: String
+    var subtitle: String
+    var canSave: Bool
+    var footerHint: String
+
+    init(draft: PersonProfileDraft) {
+        isEditing = draft.id != nil
+        title = isEditing ? "编辑人物" : "新建人物"
+        subtitle = "人物可以没有邮箱或电话；这里记录的是 Person Registry 中的稳定人物档案。"
+        canSave = !draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        footerHint = canSave ? "按 ⏎ 保存，按 Esc 取消。" : "请输入显示名后保存。"
+    }
+}
+
+enum PersonProfileEditorDraftFormatting {
+    static func parseAliases(_ value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func aliasesText(_ aliases: [String]) -> String {
+        aliases.joined(separator: ", ")
+    }
+}
+
 struct PersonProfileEditorView: View {
     @Binding var draft: PersonProfileDraft
     var onCancel: () -> Void
     var onSave: (PersonProfileDraft) -> Void
 
+    private var presentation: PersonProfileEditorPresentation {
+        PersonProfileEditorPresentation(draft: draft)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(draft.id == nil ? "新建人物" : "编辑人物")
+            Text(presentation.title)
                 .font(.title2.weight(.semibold))
 
             Form {
@@ -49,12 +82,9 @@ struct PersonProfileEditorView: View {
 
     private var aliasesBinding: Binding<String> {
         Binding(
-            get: { draft.aliases.joined(separator: ", ") },
+            get: { PersonProfileEditorDraftFormatting.aliasesText(draft.aliases) },
             set: { value in
-                draft.aliases = value
-                    .split(separator: ",")
-                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
+                draft.aliases = PersonProfileEditorDraftFormatting.parseAliases(value)
             }
         )
     }
