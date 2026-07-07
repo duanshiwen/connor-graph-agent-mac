@@ -156,6 +156,58 @@ struct PersonMemoryConsoleServiceTests {
             try await service.deleteMemoryItem(id: "memory-owner", for: other, now: now)
         }
     }
+
+    @Test func moveMemoryItemCopiesStatementToTargetAndMarksSourceMoved() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryPersonMemoryConsoleDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 10_600)
+        let source = boundProfile(id: "person-source", name: "Source")
+        let target = boundProfile(id: "person-target", name: "Target")
+        try seedEntity(for: source, in: store, now: now)
+        try seedEntity(for: target, in: store, now: now)
+        try store.upsert(entityStatement: MemoryOSEntityStatement(
+            id: "memory-move",
+            entityID: try #require(source.memoryEntityID),
+            predicate: .relatedTo,
+            text: "这条记忆应该属于 Target。",
+            validAt: now,
+            committedAt: now,
+            evidenceSpanIDs: ["span-1"],
+            sourceArtifactID: "artifact-1",
+            metadata: ["person_profile_id": source.id.rawValue]
+        ))
+        let service = AppPersonMemoryConsoleService(store: store)
+
+        let moved = try await service.moveMemoryItem(id: "memory-move", from: source, to: target, now: now.addingTimeInterval(10))
+
+        #expect(moved.personID == target.id)
+        #expect(moved.text == "这条记忆应该属于 Target。")
+        #expect(moved.evidenceSpanIDs == ["span-1"])
+        #expect(moved.sourceArtifactID == "artifact-1")
+        #expect(try await service.loadMemoryItems(for: source).isEmpty)
+        let sourceAll = try await service.loadMemoryItems(for: source, includeInactive: true)
+        #expect(sourceAll.first?.status == .moved)
+        let targetItems = try await service.loadMemoryItems(for: target)
+        #expect(targetItems.map(\.text) == ["这条记忆应该属于 Target。"])
+        #expect(targetItems.first?.id != "memory-move")
+    }
+
+    @Test func moveMemoryItemRejectsDeletedTargetPerson() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryPersonMemoryConsoleDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 10_700)
+        let source = boundProfile(id: "person-source", name: "Source")
+        var target = boundProfile(id: "person-deleted", name: "Deleted")
+        target.status = .deleted
+        try seedEntity(for: source, in: store, now: now)
+        try seedEntity(for: target, in: store, now: now)
+        try seedStatement(id: "memory-move", text: "Cannot move", profile: source, store: store, now: now)
+        let service = AppPersonMemoryConsoleService(store: store)
+
+        await #expect(throws: PersonMemoryConsoleServiceError.self) {
+            try await service.moveMemoryItem(id: "memory-move", from: source, to: target, now: now)
+        }
+    }
 }
 
 private func boundProfile(id: String, name: String) -> PersonProfile {

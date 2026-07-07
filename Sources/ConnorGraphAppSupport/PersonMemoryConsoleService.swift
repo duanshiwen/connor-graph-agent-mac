@@ -4,6 +4,7 @@ import ConnorGraphStore
 
 public enum PersonMemoryConsoleServiceError: Error, Sendable, Equatable {
     case missingMemoryBinding
+    case targetPersonIsNotActive(ContactID)
     case memoryItemNotFound(String)
     case memoryItemDoesNotBelongToPerson(itemID: String, personID: ContactID)
 }
@@ -57,6 +58,7 @@ public protocol PersonMemoryConsoleService: Sendable {
     func activeMemorySummary(for profile: PersonProfile, limit: Int) async throws -> String
     func archiveMemoryItem(id: String, for profile: PersonProfile, now: Date) async throws
     func deleteMemoryItem(id: String, for profile: PersonProfile, now: Date) async throws
+    func moveMemoryItem(id: String, from source: PersonProfile, to target: PersonProfile, now: Date) async throws -> PersonMemoryItem
 }
 
 public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @unchecked Sendable {
@@ -64,6 +66,9 @@ public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @u
         public static let personProfileID = "person_profile_id"
         public static let status = "person_memory_status"
         public static let governedAt = "person_memory_governed_at"
+        public static let movedToProfileID = "person_memory_moved_to_profile_id"
+        public static let movedFromProfileID = "person_memory_moved_from_profile_id"
+        public static let movedFromStatementID = "person_memory_moved_from_statement_id"
     }
 
     private let store: SQLiteMemoryOSStore
@@ -103,6 +108,48 @@ public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @u
         try governMemoryItem(id: id, for: profile, status: .deleted, now: now)
     }
 
+    public func moveMemoryItem(id: String, from source: PersonProfile, to target: PersonProfile, now: Date = Date()) async throws -> PersonMemoryItem {
+        guard target.isActiveForDefaultContext else {
+            throw PersonMemoryConsoleServiceError.targetPersonIsNotActive(target.id)
+        }
+        guard let targetEntityID = target.memoryEntityID?.trimmingCharacters(in: .whitespacesAndNewlines), !targetEntityID.isEmpty else {
+            throw PersonMemoryConsoleServiceError.missingMemoryBinding
+        }
+        guard var sourceStatement = try store.entityStatement(id: id) else {
+            throw PersonMemoryConsoleServiceError.memoryItemNotFound(id)
+        }
+        try validate(statement: sourceStatement, belongsTo: source, id: id)
+
+        sourceStatement.metadata[MetadataKey.personProfileID] = source.id.rawValue
+        sourceStatement.metadata[MetadataKey.status] = PersonMemoryItemStatus.moved.rawValue
+        sourceStatement.metadata[MetadataKey.movedToProfileID] = target.id.rawValue
+        sourceStatement.metadata[MetadataKey.governedAt] = ISO8601DateFormatter().string(from: now)
+        try store.upsert(entityStatement: sourceStatement)
+
+        var targetMetadata = sourceStatement.metadata
+        targetMetadata[MetadataKey.personProfileID] = target.id.rawValue
+        targetMetadata[MetadataKey.status] = PersonMemoryItemStatus.active.rawValue
+        targetMetadata[MetadataKey.movedFromProfileID] = source.id.rawValue
+        targetMetadata[MetadataKey.movedFromStatementID] = sourceStatement.id
+        targetMetadata[MetadataKey.governedAt] = ISO8601DateFormatter().string(from: now)
+        let targetStatement = MemoryOSEntityStatement(
+            id: "person-memory-move:\(sourceStatement.id):\(UUID().uuidString)",
+            entityID: targetEntityID,
+            predicate: sourceStatement.predicate,
+            objectEntityID: sourceStatement.objectEntityID,
+            text: sourceStatement.text,
+            assertionKind: sourceStatement.assertionKind,
+            confidence: sourceStatement.confidence,
+            validAt: sourceStatement.validAt,
+            committedAt: now,
+            evidenceSpanIDs: sourceStatement.evidenceSpanIDs,
+            sourceArtifactID: sourceStatement.sourceArtifactID,
+            metadata: targetMetadata
+        )
+        try store.upsert(entityStatement: targetStatement)
+        return makeItem(from: targetStatement, profile: target, entityID: targetEntityID)
+    }
+
     private func governMemoryItem(id: String, for profile: PersonProfile, status: PersonMemoryItemStatus, now: Date) throws {
         guard let entityID = profile.memoryEntityID?.trimmingCharacters(in: .whitespacesAndNewlines), !entityID.isEmpty else {
             throw PersonMemoryConsoleServiceError.missingMemoryBinding
@@ -110,16 +157,21 @@ public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @u
         guard var statement = try store.entityStatement(id: id) else {
             throw PersonMemoryConsoleServiceError.memoryItemNotFound(id)
         }
-        guard statement.entityID == entityID else {
+        try validate(statement: statement, belongsTo: profile, id: id, expectedEntityID: entityID)
+        statement.metadata[MetadataKey.personProfileID] = profile.id.rawValue
+        statement.metadata[MetadataKey.status] = status.rawValue
+        statement.metadata[MetadataKey.governedAt] = ISO8601DateFormatter().string(from: now)
+        try store.upsert(entityStatement: statement)
+    }
+
+    private func validate(statement: MemoryOSEntityStatement, belongsTo profile: PersonProfile, id: String, expectedEntityID: String? = nil) throws {
+        let entityID = expectedEntityID ?? profile.memoryEntityID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !entityID.isEmpty, statement.entityID == entityID else {
             throw PersonMemoryConsoleServiceError.memoryItemDoesNotBelongToPerson(itemID: id, personID: profile.id)
         }
         if let statementPersonID = statement.metadata[MetadataKey.personProfileID], statementPersonID != profile.id.rawValue {
             throw PersonMemoryConsoleServiceError.memoryItemDoesNotBelongToPerson(itemID: id, personID: profile.id)
         }
-        statement.metadata[MetadataKey.personProfileID] = profile.id.rawValue
-        statement.metadata[MetadataKey.status] = status.rawValue
-        statement.metadata[MetadataKey.governedAt] = ISO8601DateFormatter().string(from: now)
-        try store.upsert(entityStatement: statement)
     }
 
     private func makeItem(from statement: MemoryOSEntityStatement, profile: PersonProfile, entityID: String) -> PersonMemoryItem {
