@@ -490,6 +490,122 @@ public struct MailCreateDraftTool: AgentTool {
     }
 }
 
+public struct MailCreateDraftToPeopleTool: AgentTool {
+    public let mailRuntime: any AgentMailRuntime
+    public let contactRuntime: any AgentContactRuntime
+    public var name: String { "mail_create_draft_to_people" }
+    public var description: String { "Create a governed mail draft to explicit Person Registry people by exact person IDs. Prefer this over raw mail_create_draft.to when the user explicitly mentions relationship-aware people; recipient emails are resolved from the current active Person Registry profile, not historical conversation memory." }
+    public var permission: AgentPermissionCapability { .createMailDraft }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
+            "identityID": .string(description: "Optional exact MailIdentity.id from the selected account. Omit, empty, or pass default to use the Settings default send identity; never invent identity IDs."),
+            "toPersonIDs": .array(items: .string(description: "Exact Person Registry person_id from explicit relationship context or contacts_read, e.g. person-..."), description: "Primary recipients as exact Person Registry IDs"),
+            "ccPersonIDs": .array(items: .string(description: "Exact Person Registry person_id"), description: "CC recipients as exact Person Registry IDs"),
+            "bccPersonIDs": .array(items: .string(description: "Exact Person Registry person_id"), description: "BCC recipients as exact Person Registry IDs"),
+            "to": .array(items: .string(description: "Additional explicit email address"), description: "Additional explicit email recipients only when user supplied literal addresses"),
+            "cc": .array(items: .string(description: "Additional explicit email address"), description: "Additional explicit CC addresses only when user supplied literal addresses"),
+            "bcc": .array(items: .string(description: "Additional explicit email address"), description: "Additional explicit BCC addresses only when user supplied literal addresses"),
+            "replyTo": .array(items: .string(description: "Reply-To address"), description: "Reply-To addresses"),
+            "subject": .string(description: "Subject"),
+            "body": .string(description: "Plain-text body"),
+            "htmlBody": .string(description: "Optional HTML body"),
+            "inReplyToMessageID": .string(description: "Optional source message ID for replies"),
+            "attachmentIDs": .array(items: .string(description: "Attachment ID"), description: "Attachment IDs"),
+            "intentSummary": .string(description: "Short user intent summary for auditing")
+        ], required: ["toPersonIDs", "subject", "body"])
+    }
+
+    public init(mailRuntime: any AgentMailRuntime, contactRuntime: any AgentContactRuntime) {
+        self.mailRuntime = mailRuntime
+        self.contactRuntime = contactRuntime
+    }
+
+    private struct DelegatedDraftArguments: Encodable {
+        var accountID: String?
+        var identityID: String?
+        var to: [String]
+        var cc: [String]
+        var bcc: [String]
+        var replyTo: [String]
+        var subject: String
+        var body: String
+        var htmlBody: String?
+        var inReplyToMessageID: String?
+        var attachmentIDs: [String]
+        var intentSummary: String?
+    }
+
+    private struct ResolvedPersonRecipient: Sendable {
+        var id: String
+        var displayName: String
+        var email: String
+    }
+
+    private static func strings(_ values: [SendableJSONValue]?) -> [String] {
+        (values ?? []).compactMap(\.stringValue).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    private func resolvePeople(ids: [String], role: String) async throws -> [ResolvedPersonRecipient] {
+        var resolved: [ResolvedPersonRecipient] = []
+        for id in ids {
+            guard let person = try await contactRuntime.getPerson(id: ContactID(rawValue: id)) else {
+                throw AgentToolError.invalidArguments("Unknown Person Registry \(role) recipient \"\(id)\". Use exact person IDs from explicit relationship context or contacts_read.")
+            }
+            guard person.isActiveForDefaultContext else {
+                throw AgentToolError.invalidArguments("Person Registry \(role) recipient \"\(id)\" is not active; ask the user before using it as an email recipient.")
+            }
+            let email = person.emails
+                .map { $0.email.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty }
+            guard let email else {
+                throw AgentToolError.invalidArguments("Person Registry \(role) recipient \"\(person.displayName)\" (\(id)) has no email address; ask the user for an email address or update the profile first.")
+            }
+            resolved.append(ResolvedPersonRecipient(id: id, displayName: person.displayName, email: email))
+        }
+        return resolved
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let toPersonIDs = Self.strings(arguments.array("toPersonIDs"))
+        guard !toPersonIDs.isEmpty else { throw AgentToolError.invalidArguments("toPersonIDs is required") }
+        let toPeople = try await resolvePeople(ids: toPersonIDs, role: "to")
+        let ccPeople = try await resolvePeople(ids: Self.strings(arguments.array("ccPersonIDs")), role: "cc")
+        let bccPeople = try await resolvePeople(ids: Self.strings(arguments.array("bccPersonIDs")), role: "bcc")
+
+        let delegated = DelegatedDraftArguments(
+            accountID: arguments.string("accountID"),
+            identityID: arguments.string("identityID"),
+            to: toPeople.map(\.email) + Self.strings(arguments.array("to")),
+            cc: ccPeople.map(\.email) + Self.strings(arguments.array("cc")),
+            bcc: bccPeople.map(\.email) + Self.strings(arguments.array("bcc")),
+            replyTo: Self.strings(arguments.array("replyTo")),
+            subject: arguments.string("subject") ?? "",
+            body: arguments.string("body") ?? "",
+            htmlBody: arguments.string("htmlBody"),
+            inReplyToMessageID: arguments.string("inReplyToMessageID"),
+            attachmentIDs: Self.strings(arguments.array("attachmentIDs")),
+            intentSummary: arguments.string("intentSummary")
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let json = String(data: try encoder.encode(delegated), encoding: .utf8) ?? "{}"
+        let result = try await MailCreateDraftTool(runtime: mailRuntime).execute(
+            arguments: try AgentToolArguments(json: json),
+            context: context
+        )
+        let peopleSummary = (toPeople + ccPeople + bccPeople)
+            .map { "\($0.displayName) (person_id: \($0.id), email: \($0.email))" }
+            .joined(separator: "; ")
+        return AgentToolResult(
+            toolCallID: result.toolCallID,
+            toolName: name,
+            contentText: "Created person-aware draft using current Person Registry recipients: \(peopleSummary). \(result.contentText)",
+            contentJSON: result.contentJSON
+        )
+    }
+}
+
 public struct MailSendDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_send_draft" }
@@ -513,6 +629,10 @@ public struct MailSendDraftTool: AgentTool {
 
 public extension AgentToolRegistry {
     mutating func registerNativeMailTools(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        registerNativeMailTools(runtime: runtime, contactRuntime: nil, recorder: recorder)
+    }
+
+    mutating func registerNativeMailTools(runtime: any AgentMailRuntime, contactRuntime: (any AgentContactRuntime)? = nil, recorder: (any NativeSourceReferenceRecording)? = nil) {
         register(MailListAccountsTool(runtime: runtime))
         register(MailSearchMessagesTool(runtime: runtime, recorder: recorder))
         register(MailSearchMessagesWithBodyPreviewTool(runtime: runtime, recorder: recorder))
@@ -521,6 +641,9 @@ public extension AgentToolRegistry {
         register(MailGetMessageTool(runtime: runtime, recorder: recorder))
         register(MailSetReadStateTool(runtime: runtime))
         register(MailCreateDraftTool(runtime: runtime))
+        if let contactRuntime {
+            register(MailCreateDraftToPeopleTool(mailRuntime: runtime, contactRuntime: contactRuntime))
+        }
         register(MailSendDraftTool(runtime: runtime))
     }
 }

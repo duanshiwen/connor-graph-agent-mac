@@ -17,6 +17,67 @@ struct MailAgentToolsTests {
         #expect(names.contains("mail_send_draft"))
     }
 
+    @Test func registryRegistersPersonAwareMailDraftToolWhenContactRuntimeProvided() {
+        var registry = AgentToolRegistry()
+        registry.registerNativeMailTools(
+            runtime: RecordingMailRuntime(),
+            contactRuntime: InMemoryAgentContactRuntime()
+        )
+        let names = registry.definitions.map(\.name)
+
+        #expect(names.contains("mail_create_draft_to_people"))
+    }
+
+    @Test func createDraftToPeopleResolvesRecipientsFromPersonRegistry() async throws {
+        let account = RecordingMailRuntime.sendableAccount("shiwen@example.com")
+        let mailRuntime = RecordingMailRuntime(accounts: [account], mailPreferences: MailSendPreferencesBridge(defaultSendAccountID: account.id, defaultSendIdentityID: account.identities.first?.id))
+        let contactRuntime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(
+                id: ContactID(rawValue: "person-duan-fuqiang"),
+                displayName: "段福强",
+                emails: [ContactEmailAddress(label: "primary", email: "oisin.duan@apecho.com")]
+            )
+        ])
+        let tool = MailCreateDraftToPeopleTool(mailRuntime: mailRuntime, contactRuntime: contactRuntime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
+
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: """
+            {"toPersonIDs":["person-duan-fuqiang"],"subject":"Hello","body":"Plain"}
+            """),
+            context: context
+        )
+        let request = try #require(await mailRuntime.lastCreateDraft)
+
+        #expect(request.to.map(\.email) == ["oisin.duan@apecho.com"])
+        #expect(result.contentText.contains("段福强"))
+        #expect(result.contentText.contains("person-duan-fuqiang"))
+        #expect(result.contentJSON?.contains("oisin.duan@apecho.com") == true)
+    }
+
+    @Test func createDraftToPeopleRejectsPersonWithoutEmail() async throws {
+        let mailRuntime = RecordingMailRuntime()
+        let contactRuntime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(id: ContactID(rawValue: "person-no-email"), displayName: "无邮箱")
+        ])
+        let tool = MailCreateDraftToPeopleTool(mailRuntime: mailRuntime, contactRuntime: contactRuntime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "draft", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.createMailDraft])
+
+        do {
+            _ = try await tool.execute(
+                arguments: try AgentToolArguments(json: "{\"toPersonIDs\":[\"person-no-email\"],\"subject\":\"Hello\",\"body\":\"Plain\"}"),
+                context: context
+            )
+            Issue.record("Expected missing person email to fail")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains("has no email address"))
+            #expect(message.contains("person-no-email"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+        #expect(await mailRuntime.lastCreateDraft == nil)
+    }
+
     @Test func bodyPreviewToolsRequireBodyReadPermissionAndDocumentPreviewLimits() {
         let recentTool = MailListRecentMessagesWithBodyPreviewTool(runtime: RecordingMailRuntime())
         let searchTool = MailSearchMessagesWithBodyPreviewTool(runtime: RecordingMailRuntime())

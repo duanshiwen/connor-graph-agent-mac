@@ -152,6 +152,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceOptimizeTool())
         registry.register(ScienceTableComputeTool())
         registry.registerTimeAnalysisTool()
+        let contactRuntime = makeContactRuntime()
         if let storagePaths {
             registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
             registry.registerNativeRSSTools(runtime: RSSRuntime(
@@ -159,12 +160,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             ), recorder: nativeSourceReferenceRecorder)
             let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
-            registry.registerNativeMailTools(runtime: MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
+            registry.registerNativeMailTools(
+                runtime: MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths)),
+                contactRuntime: contactRuntime,
+                recorder: nativeSourceReferenceRecorder
+            )
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }
-        registry.registerNativeContactsAggregateTools(runtime: makeContactRuntime())
+        registry.registerNativeContactsAggregateTools(runtime: contactRuntime)
         registry.register(BrowserFetchTool())
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
