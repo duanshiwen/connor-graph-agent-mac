@@ -204,6 +204,17 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Prefer user confirmation for ambiguous identity, duplicates, sensitive profile edits, merges, and deletes. Do not invent a complex field-level confidence system.
     - Users can correct, merge, or delete people. merged people should resolve to the target person; deleted people should not be used as active memory context.
     - When a user mentions @person or @人物 in Compose, treat it as explicit person context, a disambiguation signal, and the default attribution anchor for person-related memory in that turn.
+    - When the prompt contains `Referenced People in Current User Request`, treat that section as the authoritative structured resolution of Composer person mentions. The `person_id` values are opaque internal Person Registry IDs; use them when calling Person Registry tools and when attributing person-related memory.
+    - Do not infer, invent, or substitute a `person_id` from `display_name`, aliases, or bare names in the user text. If the user typed a plain name without a structured reference, first search/resolve with Person Registry tools or ask for clarification when ambiguous.
+    - If a referenced person has `status: merged`, use `merged_into_person_id` as the active target when available. If a referenced person has `status: deleted`, do not use it as active context without user confirmation.
+
+    ## Person Relationships
+    - Person-to-person relationships should use stable Person Registry IDs when both endpoints are ordinary people.
+    - The current user is represented by the protected `current_user` endpoint in person relationships, not by mutable display names or aliases.
+    - Do not expect the current user to appear in Composer @person mentions or ordinary person pickers.
+    - If the user says I/me/my/我/我的/当前用户 in a relationship statement, treat that endpoint as `current_user`.
+    - Use Person Relationship tools for relationship edges such as parent, child, spouse, friend, colleague, or custom relation.
+    - Use current-user MemoryOS tools for preferences, habits, constraints, and self-profile facts.
 
     ## Native Personal Source Tools
     - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including mail, calendar, RSS, and browser history.
@@ -305,11 +316,60 @@ public struct AgentUserRequestSection: Sendable, Equatable {
     }
 }
 
+public struct AgentPersonContextSection: Sendable, Equatable {
+    public var references: [PersonReference]
+
+    public init?(references: [PersonReference]) {
+        let uniqueReferences = Self.uniqueReferences(references)
+        guard !uniqueReferences.isEmpty else { return nil }
+        self.references = uniqueReferences
+    }
+
+    public var renderedText: String {
+        var lines: [String] = [
+            "Referenced People in Current User Request:",
+            "These are explicit people selected by the user in Composer. Treat them as typed Person references, not plain names.",
+            "Use person_id when calling Person Registry tools or attributing person-related memory. Do not infer a different person from display_name unless this reference is invalid."
+        ]
+        for reference in references {
+            lines.append("- mention: \(reference.mentionText)")
+            lines.append("  type: person")
+            lines.append("  person_id: \(reference.personID.rawValue)")
+            lines.append("  display_name: \(reference.displayName)")
+            if let status = reference.status {
+                lines.append("  status: \(status.rawValue)")
+            }
+            if let mergedIntoID = reference.mergedIntoID {
+                lines.append("  merged_into_person_id: \(mergedIntoID.rawValue)")
+            }
+            if let memoryEntityID = reference.memoryEntityID {
+                lines.append("  memory_entity_id: \(memoryEntityID)")
+            }
+            if let memoryStableKey = reference.memoryStableKey {
+                lines.append("  memory_stable_key: \(memoryStableKey)")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func uniqueReferences(_ references: [PersonReference]) -> [PersonReference] {
+        var seen = Set<ContactID>()
+        var result: [PersonReference] = []
+        for reference in references {
+            guard !seen.contains(reference.personID) else { continue }
+            seen.insert(reference.personID)
+            result.append(reference)
+        }
+        return result
+    }
+}
+
 public struct AgentPromptAssembly: Sendable, Equatable {
     public var instruction: AgentInstructionSection
     public var memory: AgentMemorySection?
     public var conversation: AgentConversationSection
     public var userRequest: AgentUserRequestSection
+    public var personContext: AgentPersonContextSection?
     public var attachmentContext: AgentAttachmentContextSection?
     public var diagnostics: AgentPromptDiagnostics
 
@@ -318,6 +378,7 @@ public struct AgentPromptAssembly: Sendable, Equatable {
         memory: AgentMemorySection? = nil,
         conversation: AgentConversationSection,
         userRequest: AgentUserRequestSection,
+        personContext: AgentPersonContextSection? = nil,
         attachmentContext: AgentAttachmentContextSection? = nil,
         diagnostics: AgentPromptDiagnostics = AgentPromptDiagnostics(projectionMode: .legacySingleUserMessage)
     ) {
@@ -325,6 +386,7 @@ public struct AgentPromptAssembly: Sendable, Equatable {
         self.memory = memory
         self.conversation = conversation
         self.userRequest = userRequest
+        self.personContext = personContext
         self.attachmentContext = attachmentContext
         self.diagnostics = diagnostics
     }
@@ -342,6 +404,7 @@ public struct AgentPromptAssembler: Sendable {
                 anchorState: request.anchorState
             ),
             userRequest: AgentUserRequestSection(text: request.userMessage),
+            personContext: AgentPersonContextSection(references: request.personReferences),
             attachmentContext: request.attachmentContextPlan.isEmpty ? nil : AgentAttachmentContextSection(plan: request.attachmentContextPlan)
         )
     }
@@ -402,6 +465,15 @@ public struct AgentPromptDiagnosticsTransformer: AgentContextTransformer, Sendab
                 ]
             )
         }
+        if let personContext = assembly.personContext {
+            append(
+                id: "person_context",
+                title: "Referenced people",
+                role: "user",
+                text: personContext.renderedText,
+                notes: ["explicit composer person references", "count=\(personContext.references.count)", "not trimmed"]
+            )
+        }
         append(id: "current_request", title: "Current user request", role: "user", text: assembly.userRequest.text, notes: ["latest user request", "not trimmed"])
 
         return AgentPromptDiagnostics(
@@ -440,6 +512,7 @@ public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
         let fixedTokenEstimate = estimator.estimate(transformed.instruction.text).estimatedTokenCount
             + (transformed.memory.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
             + (transformed.attachmentContext.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
+            + (transformed.personContext.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
             + estimator.estimate(transformed.userRequest.text).estimatedTokenCount
         let conversationBudget = max(256, maxEstimatedTokens - fixedTokenEstimate)
         let originalRecentMessages = transformed.conversation.recentMessages
@@ -494,6 +567,10 @@ public struct AgentPromptDedupeTransformer: AgentContextTransformer, Sendable {
         }
         if let attachmentContext = transformed.attachmentContext {
             let result = deduplicateText(attachmentContext.renderedText, seenFingerprints: &seenFingerprints)
+            removedParagraphCount += result.removedParagraphCount
+        }
+        if let personContext = transformed.personContext {
+            let result = deduplicateText(personContext.renderedText, seenFingerprints: &seenFingerprints)
             removedParagraphCount += result.removedParagraphCount
         }
 
@@ -568,7 +645,7 @@ public struct AgentTranscriptProjector: Sendable {
 
         switch projectionMode {
         case .legacySingleUserMessage:
-            let userPrompt = [assembly.attachmentContext?.renderedText, assembly.userRequest.text]
+            let userPrompt = [assembly.attachmentContext?.renderedText, assembly.personContext?.renderedText, assembly.userRequest.text]
                 .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
@@ -589,6 +666,12 @@ public struct AgentTranscriptProjector: Sendable {
                 let attachmentText = attachmentContext.renderedText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !attachmentText.isEmpty {
                     messages.append(AgentModelMessage(role: .user, content: attachmentText))
+                }
+            }
+            if let personContext = assembly.personContext {
+                let personText = personContext.renderedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !personText.isEmpty {
+                    messages.append(AgentModelMessage(role: .user, content: personText))
                 }
             }
             messages.append(AgentModelMessage(

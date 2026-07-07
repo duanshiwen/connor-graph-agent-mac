@@ -6,6 +6,27 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+struct ComposerModelSelectionPresentation: Equatable, Sendable {
+    var selectedModel: String
+    var sessionHasOverride: Bool
+
+    var title: String {
+        selectedModel.isEmpty ? "未选择模型" : selectedModel
+    }
+
+    var showsSessionOverrideIndicator: Bool {
+        sessionHasOverride
+    }
+
+    var accessibilityLabel: String {
+        var label = "模型：\(title)"
+        if sessionHasOverride {
+            label += "，此会话使用自定义模型"
+        }
+        return label
+    }
+}
+
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
@@ -17,9 +38,13 @@ struct AgentChatComposerView: View {
     @State private var isSkillPickerPresented: Bool = false
     @State private var slashSkillPickerAnchorRect: CGRect?
     @State private var slashSkillPickerTriggerRange: NSRange?
+    @State private var personMentionTrigger: PersonMentionTrigger?
+    @State private var isPersonMentionPickerPresented: Bool = false
+    @State private var personMentionPickerSelectionIndex: Int = 0
     @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
+    @State private var composerPersonMentions: [ComposerPersonMention] = []
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -125,14 +150,14 @@ struct AgentChatComposerView: View {
                     .accessibilityLabel(viewModel.isBrowserVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
                     if let inspection = viewModel.lastPromptInspection {
-                        Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
-                            .font(AgentChatTypography.micro)
-                            .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
+                        promptBudgetLabel(inspection)
+                            .layoutPriority(-1)
                     }
 
-                    Spacer(minLength: AgentChatLayout.spaceS)
+                    Spacer(minLength: AgentChatLayout.spaceXS)
 
                     modelSelectionMenu
+                        .layoutPriority(2)
 
                     AgentSendControlButton(
                         isSubmitting: composerState.isSubmitting,
@@ -145,6 +170,8 @@ struct AgentChatComposerView: View {
                             }
                         }
                     )
+                    .fixedSize()
+                    .layoutPriority(3)
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
@@ -185,10 +212,14 @@ struct AgentChatComposerView: View {
         }
         .onChange(of: viewModel.selectedChatSessionID) { _, _ in
             localChatInput = viewModel.chatInput
+            composerPersonMentions = []
+            closePersonMentionPicker()
         }
         .onChange(of: viewModel.chatInput) { _, newValue in
             guard newValue != localChatInput else { return }
             localChatInput = newValue
+            composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
+            updatePersonMentionTrigger(for: newValue)
         }
         .onChange(of: viewModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
             if isEnabled {
@@ -252,6 +283,8 @@ struct AgentChatComposerView: View {
             get: { localChatInput },
             set: { newValue in
                 localChatInput = newValue
+                composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
+                updatePersonMentionTrigger(for: newValue)
                 sendComposerAction(.inputChanged(newValue))
             }
         )
@@ -266,10 +299,12 @@ struct AgentChatComposerView: View {
                 isSpellCheckEnabled: viewModel.spellCheckEnabled,
                 sendShortcut: viewModel.composerSendShortcut,
                 isSkillPickerPresented: isSkillPickerPresented,
+                isPersonMentionPickerPresented: isPersonMentionPickerPresented,
                 onSubmit: submitLocalChatInput,
                 onImportFiles: importComposerFiles,
                 onSlashCommand: handleSlashCommand,
                 onSkillPickerKeyCommand: handleSkillPickerKeyCommand,
+                onPersonMentionPickerKeyCommand: handlePersonMentionPickerKeyCommand,
                 onAttachmentImportError: handleAttachmentImportError,
                 onTextFileDropped: { droppedText in
                     if localChatInput.isEmpty {
@@ -283,6 +318,7 @@ struct AgentChatComposerView: View {
             )
 
             slashSkillPickerAnchor
+            personMentionPickerAnchor
         }
     }
 
@@ -290,7 +326,8 @@ struct AgentChatComposerView: View {
         if composerState.displayMode == .note {
             return "写下你的笔记..."
         }
-        return viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行"
+        let sendHint = viewModel.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
+        return "输入 / 选择技能，输入 @ 选择人名；\(sendHint)"
     }
 
     @ViewBuilder
@@ -366,6 +403,63 @@ struct AgentChatComposerView: View {
         slashSkillPickerTriggerRange = triggerRange
         skillPickerSelectionIndex = preferredSkillPickerSelectionIndex()
         isSkillPickerPresented = true
+        closePersonMentionPicker()
+    }
+
+    @ViewBuilder
+    private var personMentionPickerAnchor: some View {
+        if isPersonMentionPickerPresented, let trigger = personMentionTrigger {
+            VStack {
+                PersonMentionPickerView(
+                    query: trigger.query,
+                    profiles: viewModel.personProfiles,
+                    selectionIndex: personMentionPickerSelectionIndex,
+                    onSelect: selectPersonMention
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.top, AgentChatLayout.spaceL)
+            .padding(.leading, AgentChatLayout.spaceL)
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+        }
+    }
+
+    private var personMentionPickerResults: [PersonProfile] {
+        guard let trigger = personMentionTrigger else { return [] }
+        return PersonMentionSearch().search(query: trigger.query, profiles: viewModel.personProfiles, limit: 8)
+    }
+
+    private func updatePersonMentionTrigger(for text: String) {
+        let selectedRange = composerSelectionTracker.selectedRange ?? NSRange(location: (text as NSString).length, length: 0)
+        if let trigger = PersonMentionTriggerDetector().trigger(in: text, selectedRange: selectedRange) {
+            personMentionTrigger = trigger
+            personMentionPickerSelectionIndex = 0
+            isPersonMentionPickerPresented = true
+            closeSkillPicker()
+        } else {
+            closePersonMentionPicker()
+        }
+    }
+
+    private func selectPersonMention(_ profile: PersonProfile) {
+        guard let trigger = personMentionTrigger else { return }
+        do {
+            let replacement = try ComposerPersonMentionTextRewriter().replace(trigger: trigger, in: localChatInput, with: profile)
+            localChatInput = replacement.text
+            composerSelectionTracker.selectedRange = replacement.selectedRange
+            composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: replacement.text, mentions: composerPersonMentions + [replacement.mention])
+            viewModel.updateSelectedChatInputDraft(replacement.text)
+            sendComposerAction(.inputChanged(replacement.text))
+            closePersonMentionPicker()
+        } catch {
+            closePersonMentionPicker()
+        }
+    }
+
+    private func closePersonMentionPicker() {
+        isPersonMentionPickerPresented = false
+        personMentionTrigger = nil
+        personMentionPickerSelectionIndex = 0
     }
 
     private var canSubmitLocalChat: Bool {
@@ -420,16 +514,38 @@ struct AgentChatComposerView: View {
         slashSkillPickerTriggerRange = nil
     }
 
+    private func handlePersonMentionPickerKeyCommand(_ command: SkillPickerKeyCommand) {
+        let results = personMentionPickerResults
+        switch command {
+        case .moveUp:
+            guard !results.isEmpty else { return }
+            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex - 1 + results.count) % results.count
+        case .moveDown:
+            guard !results.isEmpty else { return }
+            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex + 1) % results.count
+        case .confirm:
+            guard results.indices.contains(personMentionPickerSelectionIndex) else { return }
+            selectPersonMention(results[personMentionPickerSelectionIndex])
+        case .cancel:
+            closePersonMentionPicker()
+        }
+    }
+
     private func submitLocalChatInput() {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
         let submittedText = localChatInput
+        let submittedMentions = composerPersonMentions
+        let personReferences = ComposerPersonMentionResolver().personReferences(in: submittedText, mentions: submittedMentions)
         localChatInput = ""
+        composerPersonMentions = []
+        closePersonMentionPicker()
         viewModel.updateSelectedChatInputDraft("")
         Task {
-            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
+            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences)
             if runID == nil, localChatInput.isEmpty {
                 localChatInput = submittedText
+                composerPersonMentions = submittedMentions
                 viewModel.updateSelectedChatInputDraft(submittedText)
             }
         }
@@ -739,30 +855,18 @@ struct AgentChatComposerView: View {
                 }
             }
         } label: {
-            HStack(spacing: AgentChatLayout.spaceXS) {
-                Label {
-                    Text(composerState.selectedModel.isEmpty ? "未选择模型" : composerState.selectedModel)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } icon: {
-                    Image(systemName: "cpu")
-                }
-                if composerState.sessionHasLLMOverride {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 6, height: 6)
-                        .help("此会话使用自定义模型，与全局设置不同")
-                }
-            }
-            .font(AgentChatTypography.micro.weight(.medium))
-            .foregroundStyle(composerControlForeground)
-            .padding(.horizontal, AgentChatLayout.spaceM)
-            .frame(height: AgentChatLayout.chipHeight)
-            .frame(maxWidth: AgentChatLayout.modelMenuMaxWidth)
+            ComposerModelSelectionLabel(
+                presentation: ComposerModelSelectionPresentation(
+                    selectedModel: composerState.selectedModel,
+                    sessionHasOverride: composerState.sessionHasLLMOverride
+                ),
+                foreground: composerControlForeground
+            )
         }
         .menuStyle(.borderlessButton)
         .controlSize(.regular)
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
+        .accessibilityHint("选择模型和思考强度")
     }
 
     private var activeSkillInlineChip: some View {
@@ -934,6 +1038,17 @@ struct AgentChatComposerView: View {
 
     private var composerControlActiveForeground: Color { .accentColor }
 
+    @ViewBuilder
+    private func promptBudgetLabel(_ inspection: AgentChatPromptInspection) -> some View {
+        Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
+            .font(AgentChatTypography.micro)
+            .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: 128, alignment: .leading)
+            .accessibilityLabel("预计提示词约 \(inspection.estimatedPromptTokenCount) tokens")
+    }
+
     private func promptBudgetStatusColor(_ status: AgentPromptBudgetStatus) -> Color {
         switch status {
         case .safe: return .secondary
@@ -942,6 +1057,54 @@ struct AgentChatComposerView: View {
         }
     }
 
+}
+
+private struct ComposerModelSelectionLabel: View {
+    let presentation: ComposerModelSelectionPresentation
+    var foreground: Color
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceXS) {
+            Image(systemName: "cpu")
+                .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .accessibilityHidden(true)
+
+            Text(presentation.title)
+                .font(AgentChatTypography.micro.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .minimumScaleFactor(0.85)
+                .layoutPriority(1)
+        }
+        .foregroundStyle(foreground)
+        .padding(.leading, AgentChatLayout.spaceM)
+        .padding(.trailing, presentation.showsSessionOverrideIndicator ? AgentChatLayout.spaceL : AgentChatLayout.spaceM)
+        .frame(minWidth: 96, idealWidth: 148, maxWidth: AgentChatLayout.modelMenuMaxWidth, minHeight: AgentChatLayout.chipHeight, maxHeight: AgentChatLayout.chipHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        }
+        .overlay(alignment: .topTrailing) {
+            if presentation.showsSessionOverrideIndicator {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 5)
+                    .padding(.trailing, 6)
+                    .help("此会话使用自定义模型，与全局设置不同")
+                    .accessibilityHidden(true)
+            }
+        }
+        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
 }
 
 // MARK: - Speech Input Keyboard Monitor
@@ -1231,5 +1394,69 @@ private struct ComposerFormatBar: View {
         case "photo": return "插入图片"
         default: return ""
         }
+    }
+}
+
+private struct PersonMentionPickerView: View {
+    var query: String
+    var profiles: [PersonProfile]
+    var selectionIndex: Int
+    var onSelect: (PersonProfile) -> Void
+
+    private var results: [PersonProfile] {
+        PersonMentionSearch().search(query: query, profiles: profiles, limit: 8)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if results.isEmpty {
+                Text(query.isEmpty ? "选择人物" : "没有匹配的人物")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, AgentChatLayout.spaceM)
+                    .padding(.vertical, AgentChatLayout.spaceS)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(Array(results.enumerated()), id: \.element.id) { index, profile in
+                    Button {
+                        onSelect(profile)
+                    } label: {
+                        HStack(spacing: AgentChatLayout.spaceS) {
+                            Image(systemName: "person.crop.circle")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(profile.displayName)
+                                    .font(AgentChatTypography.metaEmphasis)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+
+                                Text(profile.contactSubtitle)
+                                    .font(AgentChatTypography.micro)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: AgentChatLayout.spaceS)
+                        }
+                        .padding(.horizontal, AgentChatLayout.spaceM)
+                        .padding(.vertical, AgentChatLayout.spaceS)
+                        .background(index == selectionIndex ? Color.accentColor.opacity(0.12) : Color.clear)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("选择人物：\(profile.displayName)")
+                }
+            }
+        }
+        .frame(width: 280, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(query.isEmpty ? "人物选择列表" : "人物选择列表，搜索：\(query)")
     }
 }

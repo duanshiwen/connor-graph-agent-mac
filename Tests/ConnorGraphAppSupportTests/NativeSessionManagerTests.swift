@@ -24,6 +24,28 @@ private actor NativeSessionFinalAnswerProvider: AgentModelProvider {
     }
 }
 
+private actor NativeSessionPromptRecordingProvider: AgentModelProvider {
+    let modelID = "native-session-prompt-recording"
+    let capabilities = AgentModelCapabilities(
+        supportsStreaming: false,
+        supportsToolCalling: true,
+        supportsParallelToolCalls: false,
+        supportsStructuredOutput: false,
+        supportsVision: false
+    )
+    private var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        return AgentModelResponse(
+            text: "Recorded response",
+            usage: AgentModelUsage(promptTokens: 8, completionTokens: 4)
+        )
+    }
+
+    func lastRequest() -> AgentModelRequest? { requests.last }
+}
+
 private enum NativeSessionFailingProviderError: Error, Sendable, Equatable {
     case backendUnavailable
 }
@@ -186,6 +208,39 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(manager.session.messages.map(\.id) == loaded.messages.map(\.id))
     #expect(manager.session.messages.map(\.role) == loaded.messages.map(\.role))
     #expect(manager.session.messages.map(\.content) == loaded.messages.map(\.content))
+}
+
+@Test func nativeSessionManagerPersistsAndPromptsStructuredPersonReferences() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "native-session-person-ref", title: "Person Ref", createdAt: Date(timeIntervalSince1970: 1_000))
+    try repository.saveSession(session)
+    let provider = NativeSessionPromptRecordingProvider()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+    let reference = PersonReference(
+        personID: ContactID(rawValue: "person-duan-leiqiang"),
+        displayName: "段磊强",
+        mentionText: "@段磊强",
+        status: .active,
+        memoryEntityID: "memory-person-duan"
+    )
+
+    let response = try await manager.submit(
+        "请整理和 @段磊强 相关的事项",
+        sessionSummary: nil,
+        displayPrompt: "请整理和 @段磊强 相关的事项",
+        personReferences: [reference]
+    )
+    let loaded = try #require(try repository.loadSession(id: session.id))
+    let request = try #require(await provider.lastRequest())
+    let renderedMessages = request.messages.map(\.content).joined(separator: "\n\n")
+
+    #expect(response.session.messages.first?.personReferences == [reference])
+    #expect(loaded.messages.first?.personReferences == [reference])
+    #expect(renderedMessages.contains("Referenced People in Current User Request"))
+    #expect(renderedMessages.contains("person_id: person-duan-leiqiang"))
+    #expect(renderedMessages.contains("memory_entity_id: memory-person-duan"))
 }
 
 @Test func nativeSessionManagerPersistsAskToWritePendingApprovalAndContinuesAfterApproval() async throws {
