@@ -443,6 +443,25 @@ struct AppGlobalSearchTests {
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
+    @Test func globalSearchIncludesMailResultsInFallbackPreview() async throws {
+        let viewModel = AppViewModel(entities: [], statements: [], observeLogEntries: [])
+        let mails = (0..<5).map { index in
+            makeMailFixture(messageID: "fallback-mail-\(index)", subject: "Phoenix mail \(index)")
+        }
+        viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mails[0].account],
+            mailboxes: [mails[0].mailbox],
+            messages: mails.map(\.summary)
+        )
+        viewModel.updateGlobalSearchQuery("Phoenix")
+
+        await viewModel.refreshGlobalSearchPreview(for: "Phoenix")
+
+        #expect(viewModel.globalSearchPreviewState.mailResults.count == 3)
+        #expect(viewModel.globalSearchPreviewState.mailResults.allSatisfy { $0.sourceKind == .mail })
+        #expect(viewModel.globalSearchPreviewState.mailResults.allSatisfy { $0.title.contains("Phoenix mail") })
+    }
+
     @Test func globalSearchIncludesBrowserHistoryResults() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
