@@ -2966,6 +2966,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             let now = Date()
             if let profile = try await personProfileStore?.profile(id: id) ?? personProfiles.first(where: { $0.id == id }) {
+                try await personMemoryConsoleService?.deletePersonMemory(for: profile, now: now)
                 try await personMemoryBindingService?.markDeleted(profile: profile, now: now)
             }
             try await personProfileStore?.markDeleted(id: id, now: now)
@@ -3017,6 +3018,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let merged = try await personProfileStore?.merge(sourceID: sourceID, targetID: targetID, now: now)
             if let source, let target = merged ?? target {
                 let boundTarget = try await personMemoryBindingService?.mergeBinding(source: source, target: target, now: now) ?? target
+                _ = try await personMemoryConsoleService?.mergePersonMemory(source: source, target: boundTarget, now: now)
                 _ = try await personProfileStore?.upsert(boundTarget)
             }
             personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != sourceID }

@@ -59,6 +59,8 @@ public protocol PersonMemoryConsoleService: Sendable {
     func archiveMemoryItem(id: String, for profile: PersonProfile, now: Date) async throws
     func deleteMemoryItem(id: String, for profile: PersonProfile, now: Date) async throws
     func moveMemoryItem(id: String, from source: PersonProfile, to target: PersonProfile, now: Date) async throws -> PersonMemoryItem
+    func mergePersonMemory(source: PersonProfile, target: PersonProfile, now: Date) async throws -> [PersonMemoryItem]
+    func deletePersonMemory(for profile: PersonProfile, now: Date) async throws
 }
 
 public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @unchecked Sendable {
@@ -109,16 +111,37 @@ public final class AppPersonMemoryConsoleService: PersonMemoryConsoleService, @u
     }
 
     public func moveMemoryItem(id: String, from source: PersonProfile, to target: PersonProfile, now: Date = Date()) async throws -> PersonMemoryItem {
+        guard let sourceStatement = try store.entityStatement(id: id) else {
+            throw PersonMemoryConsoleServiceError.memoryItemNotFound(id)
+        }
+        return try move(statement: sourceStatement, from: source, to: target, now: now)
+    }
+
+    public func mergePersonMemory(source: PersonProfile, target: PersonProfile, now: Date = Date()) async throws -> [PersonMemoryItem] {
+        let activeItems = try await loadMemoryItems(for: source, includeInactive: false)
+        var moved: [PersonMemoryItem] = []
+        for item in activeItems {
+            moved.append(try await moveMemoryItem(id: item.id, from: source, to: target, now: now))
+        }
+        return moved
+    }
+
+    public func deletePersonMemory(for profile: PersonProfile, now: Date = Date()) async throws {
+        let activeItems = try await loadMemoryItems(for: profile, includeInactive: false)
+        for item in activeItems {
+            try await deleteMemoryItem(id: item.id, for: profile, now: now)
+        }
+    }
+
+    private func move(statement sourceStatement: MemoryOSEntityStatement, from source: PersonProfile, to target: PersonProfile, now: Date) throws -> PersonMemoryItem {
         guard target.isActiveForDefaultContext else {
             throw PersonMemoryConsoleServiceError.targetPersonIsNotActive(target.id)
         }
         guard let targetEntityID = target.memoryEntityID?.trimmingCharacters(in: .whitespacesAndNewlines), !targetEntityID.isEmpty else {
             throw PersonMemoryConsoleServiceError.missingMemoryBinding
         }
-        guard var sourceStatement = try store.entityStatement(id: id) else {
-            throw PersonMemoryConsoleServiceError.memoryItemNotFound(id)
-        }
-        try validate(statement: sourceStatement, belongsTo: source, id: id)
+        var sourceStatement = sourceStatement
+        try validate(statement: sourceStatement, belongsTo: source, id: sourceStatement.id)
 
         sourceStatement.metadata[MetadataKey.personProfileID] = source.id.rawValue
         sourceStatement.metadata[MetadataKey.status] = PersonMemoryItemStatus.moved.rawValue
