@@ -80,6 +80,26 @@ import ConnorGraphAgent
     #expect(rendered.contains("- 小陈喜欢冲浪。"))
 }
 
+@Test func agentChatRequestNormalizedPromptIncludesExplicitPersonContexts() {
+    let profile = PersonProfile(
+        id: ContactID(rawValue: "person-duan-fuqiang"),
+        displayName: "段福强",
+        emails: [ContactEmailAddress(email: "oisin.duan@apecho.com")]
+    )
+    let request = AgentChatRequest(
+        sessionID: "session-person-context",
+        userMessage: "@段福强 帮我给他发封邮件",
+        explicitPersonContexts: [PersonContextSnapshot(profile: profile)]
+    )
+
+    let normalizedPrompt = request.normalizedPrompt
+
+    #expect(normalizedPrompt.contains("Explicit Relationship Context"))
+    #expect(normalizedPrompt.contains("person_id: person-duan-fuqiang"))
+    #expect(normalizedPrompt.contains("emails: oisin.duan@apecho.com"))
+    #expect(normalizedPrompt.contains("Current user request:"))
+}
+
 @Test func agentChatPromptContextReturnsRawPromptWithoutSummaryOrRecentMessages() {
     let context = AgentChatPromptContext(userPrompt: "What next?")
 

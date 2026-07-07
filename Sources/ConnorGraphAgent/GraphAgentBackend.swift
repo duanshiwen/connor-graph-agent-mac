@@ -13,6 +13,8 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var attachmentContextPlan: AttachmentContextPlan
     /// Compression anchor state from prior rounds.
     public var anchorState: SessionAnchorState?
+    /// Relationship-aware Person Registry entries explicitly mentioned in the current user turn.
+    public var explicitPersonContexts: [PersonContextSnapshot]
     /// Skill instructions to inject into the system prompt for this turn.
     public var skillInstructions: String?
     /// Active skill metadata for auditing/presentation. The actual instructions remain in `skillInstructions`.
@@ -30,6 +32,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
         anchorState: SessionAnchorState? = nil,
+        explicitPersonContexts: [PersonContextSnapshot] = [],
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil
@@ -44,6 +47,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.attachmentRefs = attachmentRefs
         self.attachmentContextPlan = attachmentContextPlan
         self.anchorState = anchorState
+        self.explicitPersonContexts = explicitPersonContexts
         self.skillInstructions = skillInstructions
         self.activeSkillSlug = activeSkillSlug
         self.activeSkillDisplayName = activeSkillDisplayName
@@ -54,6 +58,7 @@ public struct AgentChatRequest: Sendable, Equatable {
             userPrompt: userMessage,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
+            explicitPersonContexts: explicitPersonContexts,
             anchorState: anchorState
         ).renderedPrompt
         guard let skillInstructions = skillInstructions?.trimmingCharacters(in: .whitespacesAndNewlines), !skillInstructions.isEmpty else {

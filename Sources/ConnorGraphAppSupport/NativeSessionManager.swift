@@ -152,6 +152,7 @@ public struct NativeSessionManager: Sendable {
         displayPrompt: String? = nil,
         attachments: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
+        explicitPersonContexts: [PersonContextSnapshot] = [],
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil,
@@ -179,6 +180,7 @@ public struct NativeSessionManager: Sendable {
             attachmentRefs: attachments,
             attachmentContextPlan: attachmentContextPlan,
             anchorState: anchorState,
+            explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
             activeSkillSlug: activeSkillSlug,
             activeSkillDisplayName: activeSkillDisplayName

@@ -6626,16 +6626,13 @@ final class AppViewModel: NSObject, ObservableObject {
                 clearActiveSkill()
             }
             let submitStartedAt = ContinuousClock.now
-            let promptWithExplicitPeople = AgentChatPromptContext(
-                userPrompt: skillAugmentation.augmentedPrompt,
-                explicitPersonContexts: explicitPersonContexts
-            ).renderedPrompt
             let response = try await manager.submit(
-                promptWithExplicitPeople,
+                skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
+                explicitPersonContexts: explicitPersonContexts,
                 skillInstructions: resolvedSkillInstructions,
                 activeSkillSlug: resolvedSkillInstructions == nil ? nil : submittedActiveSkillSlug,
                 activeSkillDisplayName: resolvedSkillInstructions == nil ? nil : submittedActiveSkillDisplayName,
