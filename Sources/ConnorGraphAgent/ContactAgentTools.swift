@@ -206,6 +206,11 @@ public struct ContactsReadTool: AgentTool {
         ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
+
+    private static func looksLikePersonID(_ value: String) -> Bool {
+        value.lowercased().hasPrefix("person-")
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let operation = arguments.string("operation") ?? "search_people"
         switch operation {
@@ -216,9 +221,23 @@ public struct ContactsReadTool: AgentTool {
             let people = try await runtime.searchPeople(query: arguments.string("query") ?? "")
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(people.count) people", contentJSON: try ContactJSON.encode(people))
         case "get_person":
-            guard let id = arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("id is required") }
+            guard let rawID = arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("id is required") }
+            let id = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
             let person = try await runtime.getPerson(id: ContactID(rawValue: id))
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: person == nil ? "Person not found" : "Loaded person", contentJSON: try ContactJSON.encode(person))
+            if let person {
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Loaded person", contentJSON: try ContactJSON.encode(person))
+            }
+            guard !Self.looksLikePersonID(id) else {
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Person not found", contentJSON: try ContactJSON.encode(Optional<PersonProfile>.none))
+            }
+            let matches = try await runtime.searchPeople(query: id)
+            if matches.count == 1, let resolved = matches.first {
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Resolved person by query \"\(id)\"", contentJSON: try ContactJSON.encode(resolved))
+            }
+            if matches.count > 1 {
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Ambiguous person query \"\(id)\"; use an exact person ID", contentJSON: try ContactJSON.encode(matches))
+            }
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Person not found", contentJSON: try ContactJSON.encode(Optional<PersonProfile>.none))
         case "list_contacts", "search_contacts", "resolve_contact":
             let records = try await runtime.search(query: arguments.string("query") ?? "")
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: try ContactJSON.encode(records))

@@ -41,6 +41,43 @@ struct PersonContactAgentToolsTests {
         #expect(created.contentJSON?.contains("active") == true)
     }
 
+    @Test func contactsReadGetPersonFallsBackToUniqueDisplayNameMatch() async throws {
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(
+                id: ContactID(rawValue: "person-duan-fuqiang"),
+                displayName: "段福强",
+                emails: [ContactEmailAddress(email: "oisin.duan@apecho.com")]
+            )
+        ])
+        let readTool = ContactsReadTool(runtime: runtime)
+
+        let result = try await readTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"id\":\"段福强\"}"),
+            context: Self.context(toolCallID: "call-get-person-by-name")
+        )
+
+        #expect(result.contentText.contains("Resolved person by query"))
+        #expect(result.contentJSON?.contains("person-duan-fuqiang") == true)
+        #expect(result.contentJSON?.contains("oisin.duan@apecho.com") == true)
+    }
+
+    @Test func contactsReadGetPersonReportsAmbiguousDisplayNameMatches() async throws {
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "小王"),
+            PersonProfile(id: ContactID(rawValue: "person-b"), displayName: "王小明", aliases: ["小王"])
+        ])
+        let readTool = ContactsReadTool(runtime: runtime)
+
+        let result = try await readTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"id\":\"小王\"}"),
+            context: Self.context(toolCallID: "call-get-person-ambiguous")
+        )
+
+        #expect(result.contentText.contains("Ambiguous person query"))
+        #expect(result.contentJSON?.contains("person-a") == true)
+        #expect(result.contentJSON?.contains("person-b") == true)
+    }
+
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
         let runtime = InMemoryAgentContactRuntime(people: [
             PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "小王", aliases: ["王同学"]),
