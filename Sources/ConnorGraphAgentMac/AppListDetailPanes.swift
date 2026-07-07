@@ -2305,6 +2305,8 @@ struct ContactsSourceSettingsView: View {
     var body: some View {
         Group {
             if let selected = selectedContactRow {
+                let profile = selectedPersonProfile
+                let detail = profile.map(PersonProfileDetailPresentation.init(profile:))
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                     CalendarContactsDetailHeader(title: "人物档案", subtitle: "联系人模块现在是人物列表：人可以先存在，联系方式后补充。")
                     Divider().opacity(0.6)
@@ -2314,6 +2316,11 @@ struct ContactsSourceSettingsView: View {
                         Text(selected.subtitle).font(AgentChatTypography.meta).textSelection(.enabled)
                         if let organization = selected.organizationName {
                             Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+                        }
+                        if let detail {
+                            PersonDetailInfoRow(title: "别名", value: detail.aliasesText, systemImage: "tag")
+                            PersonDetailInfoRow(title: detail.memoryBindingTitle, value: detail.memoryBindingDetail, systemImage: "brain.head.profile")
+                            PersonDetailInfoRow(title: "人物记忆摘要", value: detail.memorySummary, systemImage: "text.alignleft")
                         }
                         HStack {
                             Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
@@ -2361,6 +2368,33 @@ struct ContactsSourceSettingsView: View {
     private var selectedContactRow: NativeContactRowPresentation? {
         guard let id = viewModel.selectedContactID else { return nil }
         return viewModel.contactsBrowserPresentation.rows.first { $0.id == id }
+    }
+
+    private var selectedPersonProfile: PersonProfile? {
+        guard let id = viewModel.selectedContactID else { return nil }
+        return viewModel.personProfiles.first { $0.id == id }
+    }
+}
+
+private struct PersonDetailInfoRow: View {
+    var title: String
+    var value: String
+    var systemImage: String
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(AgentChatTypography.metaEmphasis)
+                Text(value)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
