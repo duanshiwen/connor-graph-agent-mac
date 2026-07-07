@@ -2305,24 +2305,20 @@ struct ContactsSourceSettingsView: View {
     var body: some View {
         Group {
             if let selected = selectedContactRow {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                    CalendarContactsDetailHeader(title: "人物档案", subtitle: "联系人模块现在是人物列表：人可以先存在，联系方式后补充。")
-                    Divider().opacity(0.6)
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                        Label(selected.displayName, systemImage: "person.crop.circle")
-                            .font(AgentChatTypography.title)
-                        Text(selected.subtitle).font(AgentChatTypography.meta).textSelection(.enabled)
-                        if let organization = selected.organizationName {
-                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
-                            Button("删除", role: .destructive) { viewModel.pendingPersonProfileDeletionID = selected.id }
-                        }
-                        .padding(.top, AppShellLayout.spaceM)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                        PersonProfileDetailHero(
+                            row: selected,
+                            onEdit: { viewModel.presentEditPersonProfile(selected.id) },
+                            onDelete: { viewModel.pendingPersonProfileDeletionID = selected.id }
+                        )
                     }
-                    .padding(AppShellLayout.spaceXL)
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.vertical, AgentChatLayout.spaceL)
+                    .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
+                .scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 Color.clear
@@ -2364,20 +2360,58 @@ struct ContactsSourceSettingsView: View {
     }
 }
 
-private struct CalendarContactsDetailHeader: View {
-    var title: String
-    var subtitle: String
+private struct PersonProfileDetailHero: View {
+    var row: NativeContactRowPresentation
+    var onEdit: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text(title).font(.system(size: 24, weight: .semibold))
-                Text(subtitle).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 25, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
             }
-            Spacer()
+            .frame(width: 58, height: 58)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text(row.displayName)
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+
+                Text(row.subtitle)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                if let organization = row.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, organization != row.subtitle {
+                    Text(organization)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            Spacer(minLength: AgentChatLayout.spaceM)
+
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Button("编辑", action: onEdit)
+                    .buttonStyle(.bordered)
+                Button("删除", role: .destructive, action: onDelete)
+                    .buttonStyle(.bordered)
+            }
         }
-        .padding(.horizontal, AppShellLayout.spaceXL)
-        .padding(.vertical, AppShellLayout.spaceL)
+        .padding(AgentChatLayout.spaceL)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 
