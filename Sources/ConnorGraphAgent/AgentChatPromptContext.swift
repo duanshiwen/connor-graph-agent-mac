@@ -103,8 +103,8 @@ public struct AgentChatPromptContext: Sendable, Equatable {
 
     private func renderExplicitPersonContexts(_ contexts: [PersonContextSnapshot]) -> String {
         var lines: [String] = [
-            "Explicit Person Context:",
-            "The user explicitly mentioned these Person Registry entries in the current message. Treat each entry as an identity anchor for this turn and prefer it for person fact attribution."
+            "Explicit Relationship Context:",
+            "The user explicitly mentioned these relationship-aware Person Registry entries in the current message. Treat each entry as a relationship identity anchor for this turn and prefer it for person fact attribution."
         ]
         for context in contexts {
             let profile = context.profile

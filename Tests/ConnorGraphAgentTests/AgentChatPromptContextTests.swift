@@ -19,8 +19,8 @@ import ConnorGraphAgent
 
     let rendered = context.renderedPrompt
 
-    #expect(rendered.contains("Explicit Person Context"))
-    #expect(rendered.contains("identity anchor"))
+    #expect(rendered.contains("Explicit Relationship Context"))
+    #expect(rendered.contains("relationship identity anchor"))
     #expect(rendered.contains("person_id: person-wang"))
     #expect(rendered.contains("aliases: 王同学"))
     #expect(rendered.contains("memory: 小王偏好手冲咖啡。"))

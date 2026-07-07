@@ -153,9 +153,9 @@ public actor InMemoryAgentContactRuntime: AgentContactRuntime {
 public struct ContactSearchTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contact_search" }
-    public var description: String { "Search governed contact records." }
+    public var description: String { "Search legacy governed contact records." }
     public var permission: AgentPermissionCapability { .readContacts }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Contact query")], required: ["query"]) }
+    public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Legacy contact query")], required: ["query"]) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let records = try await runtime.search(query: arguments.string("query") ?? "")
@@ -167,7 +167,7 @@ public struct ContactSearchTool: AgentTool {
 public struct ContactCreateDraftTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contact_create_draft" }
-    public var description: String { "Create a contact mutation draft; does not write system Contacts." }
+    public var description: String { "Create a legacy contact mutation draft; does not write system Contacts." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["email": .string(description: "Email"), "name": .string(description: "Display name")], required: ["email"] ) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -182,7 +182,7 @@ public struct ContactCreateDraftTool: AgentTool {
 public struct ContactCommitDraftTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contact_commit_draft" }
-    public var description: String { "Commit a contact mutation draft after approval." }
+    public var description: String { "Commit a legacy contact mutation draft after approval." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Draft ID"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -196,13 +196,13 @@ public struct ContactCommitDraftTool: AgentTool {
 public struct ContactsReadTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_read" }
-    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts." }
+    public var description: String { "Read governed relationship-aware Person Registry profiles, with legacy contact records available through list_contacts/search_contacts operations." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
             "operation": .string(description: "list_people | search_people | get_person | resolve_person | list_contacts | search_contacts | get_contact | resolve_contact"),
-            "query": .string(description: "Person/contact query"),
-            "id": .string(description: "Person/contact ID")
+            "query": .string(description: "Relationship person or legacy contact query"),
+            "id": .string(description: "Relationship person or legacy contact ID")
         ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -235,7 +235,7 @@ public struct ContactsReadTool: AgentTool {
 public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
-    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. Legacy create_contact remains supported." }
+    public var description: String { "Write governed relationship-aware Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. Legacy create_contact remains supported." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
@@ -250,7 +250,7 @@ public struct ContactsWriteTool: AgentTool {
             "organization": .string(description: "Organization"),
             "jobTitle": .string(description: "Job title"),
             "notes": .string(description: "Notes"),
-            "approved": .boolean(description: "Explicit approval for destructive or legacy contact operations")
+            "approved": .boolean(description: "Explicit approval for destructive relationship-person changes or legacy contact operations")
         ], required: ["operation"]) 
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
