@@ -7,6 +7,10 @@ struct PersonProfileEditorPresentation: Equatable {
     var subtitle: String
     var canSave: Bool
     var footerHint: String
+    var closeAccessibilityLabel: String
+    var cancelAccessibilityLabel: String
+    var saveAccessibilityLabel: String
+    var saveHelp: String
 
     init(draft: PersonProfileDraft) {
         isEditing = draft.id != nil
@@ -14,6 +18,10 @@ struct PersonProfileEditorPresentation: Equatable {
         subtitle = "人物可以没有邮箱或电话；这里记录的是 Person Registry 中的稳定人物档案。"
         canSave = !draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         footerHint = canSave ? "按 ⏎ 保存，按 Esc 取消。" : "请输入显示名后保存。"
+        closeAccessibilityLabel = isEditing ? "关闭编辑人物表单" : "关闭新建人物表单"
+        cancelAccessibilityLabel = isEditing ? "取消编辑人物" : "取消新建人物"
+        saveAccessibilityLabel = isEditing ? "保存人物修改" : "保存新建人物"
+        saveHelp = canSave ? "保存人物档案" : "请输入显示名后才能保存"
     }
 }
 
@@ -34,6 +42,12 @@ struct PersonProfileEditorView: View {
     @Binding var draft: PersonProfileDraft
     var onCancel: () -> Void
     var onSave: (PersonProfileDraft) -> Void
+
+    @FocusState private var focusedField: FocusedField?
+
+    private enum FocusedField: Hashable {
+        case displayName
+    }
 
     private var presentation: PersonProfileEditorPresentation {
         PersonProfileEditorPresentation(draft: draft)
@@ -62,6 +76,11 @@ struct PersonProfileEditorView: View {
         }
         .padding(AppShellLayout.spaceXL)
         .frame(width: 640, height: 680)
+        .onAppear {
+            if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                focusedField = .displayName
+            }
+        }
     }
 
     private var dialogHeader: some View {
@@ -98,6 +117,7 @@ struct PersonProfileEditorView: View {
             .buttonStyle(.plain)
             .keyboardShortcut(.cancelAction)
             .help("关闭")
+            .accessibilityLabel(presentation.closeAccessibilityLabel)
         }
     }
 
@@ -106,6 +126,9 @@ struct PersonProfileEditorView: View {
             PersonProfileDialogRow("显示名", required: true) {
                 TextField("例如：张霞", text: $draft.displayName)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .displayName)
+                    .accessibilityLabel("显示名，必填")
+                    .help("输入人物在 Person Registry 中显示的主要名称")
             }
             PersonProfileDialogRow("名") {
                 TextField("例如：霞", text: $draft.givenName)
@@ -174,10 +197,15 @@ struct PersonProfileEditorView: View {
             Spacer(minLength: AppShellLayout.spaceL)
 
             Button("取消", action: onCancel)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel(presentation.cancelAccessibilityLabel)
+                .help("放弃更改并关闭")
             Button("保存") { onSave(draft) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!presentation.canSave)
+                .accessibilityLabel(presentation.saveAccessibilityLabel)
+                .help(presentation.saveHelp)
         }
         .padding(.top, AppShellLayout.spaceM)
     }
@@ -280,6 +308,7 @@ private struct PersonProfileDialogRow<Content: View>: View {
             .font(.callout)
             .foregroundStyle(.secondary)
             .frame(width: 116, alignment: .trailing)
+            .accessibilityElement(children: .combine)
 
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
