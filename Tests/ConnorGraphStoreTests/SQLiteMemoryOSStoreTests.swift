@@ -121,6 +121,75 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     #expect(try store.pendingSearchIndexQueueItems(limit: 20).allSatisfy { $0["id"] != firstQueueID })
 }
 
+@Test func sqliteMemoryOSStoreQueriesEntityStatementsByEntity() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
+    try store.migrate()
+    let base = Date(timeIntervalSince1970: 3_000)
+    let entity = MemoryOSEntity(id: "person-1", stableKey: "person-profile:person-1", entityType: "person", name: "张三", createdAt: base, updatedAt: base)
+    let otherEntity = MemoryOSEntity(id: "person-2", stableKey: "person-profile:person-2", entityType: "person", name: "李四", createdAt: base, updatedAt: base)
+    try store.upsert(entity: entity)
+    try store.upsert(entity: otherEntity)
+
+    let older = MemoryOSEntityStatement(
+        id: "statement-older",
+        entityID: entity.id,
+        predicate: .relatedTo,
+        text: "张三喜欢摄影。",
+        committedAt: base
+    )
+    let newer = MemoryOSEntityStatement(
+        id: "statement-newer",
+        entityID: entity.id,
+        predicate: .relatedTo,
+        text: "张三在杭州。",
+        committedAt: base.addingTimeInterval(60)
+    )
+    let other = MemoryOSEntityStatement(
+        id: "statement-other",
+        entityID: otherEntity.id,
+        predicate: .relatedTo,
+        text: "李四在上海。",
+        committedAt: base.addingTimeInterval(120)
+    )
+    try store.upsert(entityStatement: older)
+    try store.upsert(entityStatement: newer)
+    try store.upsert(entityStatement: other)
+
+    let statements = try store.entityStatements(entityID: entity.id, limit: 10)
+
+    #expect(statements.map(\.id) == ["statement-newer", "statement-older"])
+    #expect(statements.allSatisfy { $0.entityID == entity.id })
+}
+
+@Test func sqliteMemoryOSStoreQueriesSingleEntityStatementByID() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 4_000)
+    let entity = MemoryOSEntity(id: "person-1", stableKey: "person-profile:person-1", entityType: "person", name: "张三", createdAt: now, updatedAt: now)
+    try store.upsert(entity: entity)
+    let statement = MemoryOSEntityStatement(
+        id: "statement-1",
+        entityID: entity.id,
+        predicate: .relatedTo,
+        text: "张三是独立人物。",
+        assertionKind: .summarized,
+        confidence: 0.8,
+        validAt: now,
+        committedAt: now,
+        evidenceSpanIDs: [],
+        sourceArtifactID: "artifact-1",
+        metadata: ["person_profile_id": "person-1"]
+    )
+    try store.upsert(entityStatement: statement)
+
+    let loaded = try #require(try store.entityStatement(id: statement.id))
+
+    #expect(loaded.id == statement.id)
+    #expect(loaded.text == statement.text)
+    #expect(loaded.metadata["person_profile_id"] == "person-1")
+    #expect(try store.entityStatement(id: "missing") == nil)
+}
+
 @Test func sqliteMemoryOSStoreMigrationIsIdempotent() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
 
