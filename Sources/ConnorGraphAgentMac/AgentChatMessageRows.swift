@@ -192,7 +192,7 @@ struct AgentChatMessageRow: View {
         HStack(alignment: .top) {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
@@ -202,13 +202,6 @@ struct AgentChatMessageRow: View {
                         AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
                             onPreviewAttachment(attachment)
                         }
-                    }
-                    if assistantActionsPresentation.showsActions {
-                        AgentAssistantMessageActionsView(
-                            presentation: assistantActionsPresentation,
-                            onCopy: { onCopyAssistantMessage(row) },
-                            onExport: { onExportAssistantMessage(row) }
-                        )
                     }
                 }
                 .foregroundStyle(Color.primary)
@@ -220,6 +213,15 @@ struct AgentChatMessageRow: View {
                     RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
                         .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
                 )
+
+                if assistantActionsPresentation.showsActions {
+                    AgentAssistantMessageActionsView(
+                        presentation: assistantActionsPresentation,
+                        onCopy: { onCopyAssistantMessage(row) },
+                        onExport: { onExportAssistantMessage(row) }
+                    )
+                    .padding(.leading, AgentChatLayout.messageBubbleHorizontalPadding + 1)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
@@ -283,7 +285,7 @@ private struct AgentAssistantMessageActionsView: View {
     var onExport: () -> Void
 
     var body: some View {
-        HStack(spacing: AgentChatLayout.spaceS) {
+        HStack(spacing: AgentChatLayout.spaceXS) {
             actionButton(
                 title: presentation.copyTitle,
                 accessibilityLabel: presentation.copyAccessibilityLabel,
@@ -298,7 +300,7 @@ private struct AgentAssistantMessageActionsView: View {
             )
             Spacer(minLength: 0)
         }
-        .padding(.top, AgentChatLayout.spaceXS)
+        .padding(.top, 1)
         .accessibilityElement(children: .contain)
     }
 
@@ -311,7 +313,7 @@ private struct AgentAssistantMessageActionsView: View {
         Button(action: action) {
             Text(title)
                 .font(AgentChatTypography.microEmphasis)
-                .padding(.horizontal, AgentChatLayout.spaceS)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .contentShape(Capsule(style: .continuous))
         }
@@ -319,11 +321,11 @@ private struct AgentAssistantMessageActionsView: View {
         .foregroundStyle(.secondary)
         .background(
             Capsule(style: .continuous)
-                .fill(ConnorCraftPalette.foreground.opacity(0.045))
+                .fill(ConnorCraftPalette.foreground.opacity(0.035))
         )
         .overlay(
             Capsule(style: .continuous)
-                .stroke(ConnorCraftPalette.foreground.opacity(0.08), lineWidth: 1)
+                .stroke(ConnorCraftPalette.foreground.opacity(0.07), lineWidth: 1)
         )
         .accessibilityLabel(accessibilityLabel)
         .help(help)
