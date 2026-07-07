@@ -2327,15 +2327,25 @@ struct ContactsSourceSettingsView: View {
         Group {
             if let selected = selectedContactRow {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                         PersonProfileDetailHero(
                             row: selected,
                             onEdit: { viewModel.presentEditPersonProfile(selected.id) },
                             onDelete: { viewModel.pendingPersonProfileDeletionID = selected.id }
                         )
+
+                        PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
+                            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                                PersonProfileMetadataLine(label: "姓名", value: selected.displayName)
+                                PersonProfileMetadataLine(label: "联系", value: selected.primaryEmail ?? selected.subtitle)
+                                if let organization = selected.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    PersonProfileMetadataLine(label: "组织", value: organization)
+                                }
+                                PersonProfileMetadataLine(label: "状态", value: selected.status.displayTitle)
+                            }
+                        }
                     }
-                    .padding(.horizontal, AgentChatLayout.spaceXL)
-                    .padding(.vertical, AgentChatLayout.spaceL)
+                    .padding(AppShellLayout.spaceXL)
                     .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
@@ -2387,52 +2397,162 @@ private struct PersonProfileDetailHero: View {
     var onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
             ZStack {
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.12))
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.14))
                 Image(systemName: "person.crop.circle")
-                    .font(.system(size: 25, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Color.accentColor)
             }
-            .frame(width: 58, height: 58)
+            .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
                 Text(row.displayName)
-                    .font(.system(size: 24, weight: .semibold))
-                    .lineLimit(2)
+                    .font(AgentChatTypography.title)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .textSelection(.enabled)
+
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+                    PersonProfileStatusPill(status: statusTitle, color: statusColor, systemImage: "person.crop.circle.badge.checkmark")
+                    if row.primaryEmail != nil {
+                        PersonProfileStatusPill(status: "邮箱", color: .teal, systemImage: "envelope")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 Text(row.subtitle)
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                     .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 if let organization = row.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, organization != row.subtitle {
-                    Text(organization)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    PersonProfileStatusPill(status: organization, color: .secondary, systemImage: "building.2")
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
+
+                HStack(spacing: AppShellLayout.spaceS) {
+                    Button("编辑", action: onEdit)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("删除", role: .destructive, action: onDelete)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
 
-            Spacer(minLength: AgentChatLayout.spaceM)
-
-            HStack(spacing: AgentChatLayout.spaceS) {
-                Button("编辑", action: onEdit)
-                    .buttonStyle(.bordered)
-                Button("删除", role: .destructive, action: onDelete)
-                    .buttonStyle(.bordered)
-            }
+            Spacer(minLength: 0)
         }
-        .padding(AgentChatLayout.spaceL)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .padding(AppShellLayout.spaceL)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
+    }
+
+    private var statusTitle: String {
+        row.status.displayTitle
+    }
+
+    private var statusColor: Color {
+        switch row.status {
+        case .active, .none:
+            return .green
+        case .pending:
+            return .orange
+        case .merged:
+            return .blue
+        case .deleted:
+            return .red
+        }
+    }
+}
+
+private extension Optional where Wrapped == PersonProfileStatus {
+    var displayTitle: String {
+        switch self {
+        case .active, .none:
+            return "活跃"
+        case .pending:
+            return "待确认"
+        case .merged:
+            return "已合并"
+        case .deleted:
+            return "已删除"
+        }
+    }
+}
+
+private struct PersonProfileInfoSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AppListTypography.header)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AppShellLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+    }
+}
+
+private struct PersonProfileMetadataLine: View {
+    var label: String
+    var value: String
+
+    var body: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: AppShellLayout.spaceL, verticalSpacing: AppShellLayout.spaceS) {
+            GridRow {
+                Text(label)
+                    .font(AgentChatTypography.microEmphasis)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 72, alignment: .leading)
+                Text(value)
+                    .font(AgentChatTypography.meta)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+}
+
+private struct PersonProfileStatusPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String? = nil
+
+    var body: some View {
+        Label {
+            Text(status)
+                .lineLimit(1)
+        } icon: {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+        }
+        .font(AppListTypography.rowCaptionEmphasized)
+        .foregroundStyle(color)
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .frame(height: 23)
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 
