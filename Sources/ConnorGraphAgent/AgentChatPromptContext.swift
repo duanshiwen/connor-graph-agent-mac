@@ -104,7 +104,8 @@ public struct AgentChatPromptContext: Sendable, Equatable {
     private func renderExplicitPersonContexts(_ contexts: [PersonContextSnapshot]) -> String {
         var lines: [String] = [
             "Explicit Relationship Context:",
-            "The user explicitly mentioned these relationship-aware Person Registry entries in the current message. Treat each entry as a relationship identity anchor for this turn and prefer it for person fact attribution."
+            "The user explicitly mentioned these relationship-aware Person Registry entries in the current message. Treat each entry as a relationship identity anchor for this turn and prefer it for person fact attribution.",
+            "Person Registry active profile contact methods are authoritative for email/phone/address decisions in this turn; historical Memory OS conversation events are background only and must not override these contact methods."
         ]
         for context in contexts {
             let profile = context.profile
@@ -113,6 +114,21 @@ public struct AgentChatPromptContext: Sendable, Equatable {
                 "- \(profile.displayName) (person_id: \(profile.id.rawValue))"
             ]
             if !aliases.isEmpty { parts.append("aliases: \(aliases)") }
+            let emails = profile.emails
+                .map { $0.email.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+            if !emails.isEmpty { parts.append("emails: \(emails)") }
+            let phones = profile.phones
+                .map { $0.number.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+            if !phones.isEmpty { parts.append("phones: \(phones)") }
+            let addresses = profile.addresses
+                .map { $0.value.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+            if !addresses.isEmpty { parts.append("addresses: \(addresses)") }
             if let organization = profile.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 parts.append("organization: \(organization)")
             }

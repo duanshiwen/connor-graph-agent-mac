@@ -27,6 +27,31 @@ import ConnorGraphAgent
     #expect(rendered.contains("Current user request:"))
 }
 
+@Test func agentChatPromptContextRendersContactMethodsForMentionedPeople() {
+    let profile = PersonProfile(
+        id: ContactID(rawValue: "person-duan-fuqiang"),
+        displayName: "段福强",
+        emails: [ContactEmailAddress(label: "primary", email: "oisin.duan@apecho.com")],
+        phones: [PersonPhoneNumber(label: "mobile", number: "13800000000")],
+        addresses: [PersonPostalAddress(label: "office", value: "杭州西湖区")],
+        organizationName: "杭州康纳快跑科技有限公司",
+        jobTitle: "CEO",
+        memoryStableKey: "person-profile:person-duan-fuqiang"
+    )
+    let context = AgentChatPromptContext(
+        userPrompt: "@段福强 帮我给他发封邮件",
+        explicitPersonContexts: [PersonContextSnapshot(profile: profile)]
+    )
+
+    let rendered = context.renderedPrompt
+
+    #expect(rendered.contains("Person Registry active profile contact methods are authoritative"))
+    #expect(rendered.contains("emails: oisin.duan@apecho.com"))
+    #expect(rendered.contains("phones: 13800000000"))
+    #expect(rendered.contains("addresses: 杭州西湖区"))
+    #expect(rendered.contains("person_id: person-duan-fuqiang"))
+}
+
 @Test func agentChatPromptContextRendersActivePersonMemoryItemsForMentionedPeople() {
     let profile = PersonProfile(
         id: ContactID(rawValue: "person-chen"),
