@@ -1191,14 +1191,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
         globalSearchPreviewState = GlobalSearchPreviewState(
             query: trimmed,
-            loadingSections: [.calendar, .rss, .browserHistory],
+            loadingSections: [.calendar, .rss, .mail, .browserHistory],
             chatSessionResults: chatSessionResults,
             searchTokens: tokens,
             errorMessage: nil
         )
         normalizeGlobalSearchSelection()
 
-        let limits: [NativeSearchSourceKind: Int] = [.calendar: 3, .rss: 3, .browserHistory: 3]
+        let limits: [NativeSearchSourceKind: Int] = [.calendar: 3, .rss: 3, .mail: 3, .browserHistory: 3]
         await refreshGlobalSearchNativePreviewSections(query: trimmed, tokens: tokens, limitsBySource: limits)
     }
 
