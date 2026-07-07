@@ -109,6 +109,12 @@ import ConnorGraphAgent
     #expect(prompt.contains("correct, merge, or delete people"))
     #expect(prompt.contains("merged people should resolve to the target person"))
     #expect(prompt.contains("deleted people should not be used as active memory context"))
+    #expect(prompt.contains("Referenced People in Current User Request"))
+    #expect(prompt.contains("authoritative structured resolution"))
+    #expect(prompt.contains("person_id"))
+    #expect(prompt.contains("Do not infer, invent, or substitute a `person_id` from `display_name`"))
+    #expect(prompt.contains("status: merged"))
+    #expect(prompt.contains("status: deleted"))
 }
 
 @Test func defaultSystemPromptDocumentsAtMentionPersonContext() {
