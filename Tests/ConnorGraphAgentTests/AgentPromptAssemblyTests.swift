@@ -125,6 +125,17 @@ import ConnorGraphAgent
     #expect(prompt.contains("default attribution anchor"))
 }
 
+@Test func defaultSystemPromptDocumentsCurrentUserRelationshipEndpointRules() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Person Relationships"))
+    #expect(prompt.contains("protected `current_user` endpoint"))
+    #expect(prompt.contains("Do not expect the current user to appear in Composer @person mentions"))
+    #expect(prompt.contains("I/me/my/我/我的/当前用户"))
+    #expect(prompt.contains("Use Person Relationship tools for relationship edges"))
+    #expect(prompt.contains("Use current-user MemoryOS tools for preferences, habits, constraints, and self-profile facts"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
