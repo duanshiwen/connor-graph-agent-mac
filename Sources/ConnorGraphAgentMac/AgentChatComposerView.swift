@@ -41,6 +41,7 @@ struct AgentChatComposerView: View {
     @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
+    @State private var composerPersonMentions: [ComposerPersonMention] = []
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -131,6 +132,8 @@ struct AgentChatComposerView: View {
 
                     workingDirectoryMenu
 
+                    personMentionMenu
+
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
@@ -208,10 +211,12 @@ struct AgentChatComposerView: View {
         }
         .onChange(of: viewModel.selectedChatSessionID) { _, _ in
             localChatInput = viewModel.chatInput
+            composerPersonMentions = []
         }
         .onChange(of: viewModel.chatInput) { _, newValue in
             guard newValue != localChatInput else { return }
             localChatInput = newValue
+            composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
         }
         .onChange(of: viewModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
             if isEnabled {
@@ -275,6 +280,7 @@ struct AgentChatComposerView: View {
             get: { localChatInput },
             set: { newValue in
                 localChatInput = newValue
+                composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
                 sendComposerAction(.inputChanged(newValue))
             }
         )
@@ -447,15 +453,69 @@ struct AgentChatComposerView: View {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
         let submittedText = localChatInput
+        let submittedMentions = composerPersonMentions
+        let personReferences = ComposerPersonMentionResolver().personReferences(in: submittedText, mentions: submittedMentions)
         localChatInput = ""
+        composerPersonMentions = []
         viewModel.updateSelectedChatInputDraft("")
         Task {
-            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
+            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences)
             if runID == nil, localChatInput.isEmpty {
                 localChatInput = submittedText
+                composerPersonMentions = submittedMentions
                 viewModel.updateSelectedChatInputDraft(submittedText)
             }
         }
+    }
+
+    private var personMentionMenu: some View {
+        Menu {
+            if activePersonMentionProfiles.isEmpty {
+                Text("暂无可提及人物")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(activePersonMentionProfiles, id: \.id) { profile in
+                    Button {
+                        insertPersonMention(profile)
+                    } label: {
+                        Text(personMentionMenuTitle(profile))
+                    }
+                }
+            }
+        } label: {
+            AgentComposerOptionBadge(
+                title: "@人物",
+                systemImage: "person.crop.circle.badge.plus",
+                tint: composerPersonMentions.isEmpty ? composerControlForeground : composerControlActiveForeground,
+                showsChevron: true,
+                isActive: !composerPersonMentions.isEmpty,
+                style: .compact,
+                showsBorder: false
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help("插入结构化人物提及；发送给模型时会附带内部 person_id")
+        .accessibilityLabel("插入人物提及")
+    }
+
+    private var activePersonMentionProfiles: [PersonProfile] {
+        viewModel.personProfiles
+            .filter(\.isActiveForDefaultContext)
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    private func personMentionMenuTitle(_ profile: PersonProfile) -> String {
+        let subtitle = profile.contactSubtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subtitle.isEmpty, subtitle != "暂无联系方式" else { return profile.displayName }
+        return "\(profile.displayName)  ·  \(subtitle)"
+    }
+
+    private func insertPersonMention(_ profile: PersonProfile) {
+        let resolver = ComposerPersonMentionResolver()
+        let result = resolver.appendingMention(profile: profile, to: localChatInput)
+        localChatInput = result.text
+        composerPersonMentions = resolver.validatedMentions(in: result.text, mentions: composerPersonMentions + [result.mention])
+        viewModel.updateSelectedChatInputDraft(result.text)
     }
 
     private var workingDirectoryMenu: some View {
