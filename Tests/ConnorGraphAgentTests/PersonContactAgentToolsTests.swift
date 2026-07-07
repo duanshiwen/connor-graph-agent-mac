@@ -14,7 +14,7 @@ struct PersonContactAgentToolsTests {
             context: Self.context(toolCallID: "call-create-person")
         )
 
-        #expect(created.contentText.contains("Created approved person"))
+        #expect(created.contentText.contains("Created person"))
         #expect(created.contentJSON?.contains("小王") == true)
 
         let readTool = ContactsReadTool(runtime: runtime)
@@ -23,6 +23,22 @@ struct PersonContactAgentToolsTests {
             context: Self.context(toolCallID: "call-search-person")
         )
         #expect(found.contentText.contains("Found 1 people"))
+    }
+
+    @Test func contactsWriteCreatePersonAcceptsLLMDiscoveryWithoutApprovedFlagAndParsesAliases() async throws {
+        let runtime = InMemoryAgentContactRuntime()
+        let writeTool = ContactsWriteTool(runtime: runtime)
+
+        let created = try await writeTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"name\":\"张三\",\"aliases\":[\"小张\",\"Zhang San\"],\"source\":\"llm-discovery\"}"),
+            context: Self.context(toolCallID: "call-create-auto-person")
+        )
+
+        #expect(created.contentText.contains("Created person"))
+        #expect(created.contentJSON?.contains("张三") == true)
+        #expect(created.contentJSON?.contains("小张") == true)
+        #expect(created.contentJSON?.contains("Zhang San") == true)
+        #expect(created.contentJSON?.contains("active") == true)
     }
 
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
