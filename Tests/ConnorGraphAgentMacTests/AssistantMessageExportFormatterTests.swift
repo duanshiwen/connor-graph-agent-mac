@@ -64,7 +64,7 @@ struct AssistantMessageExportFormatterTests {
         )
 
         #expect(presentation.copyTitle == "复制")
-        #expect(presentation.exportTitle == "Markdown")
+        #expect(presentation.exportTitle == "导出到文件")
         #expect(presentation.copyAccessibilityLabel == "复制这条助理回复")
         #expect(presentation.exportAccessibilityLabel == "导出这条助理回复为 Markdown 文件")
         #expect(presentation.copyHelp == "复制原始 Markdown 文本")

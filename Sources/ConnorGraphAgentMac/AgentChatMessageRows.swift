@@ -15,7 +15,7 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
         let hasContent = !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.showsActions = message.role == .assistant && hasContent
         self.copyTitle = "复制"
-        self.exportTitle = "Markdown"
+        self.exportTitle = "导出到文件"
         self.copyAccessibilityLabel = "复制这条助理回复"
         self.exportAccessibilityLabel = "导出这条助理回复为 Markdown 文件"
         self.copyHelp = "复制原始 Markdown 文本"
