@@ -69,6 +69,7 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
     public var organizationName: String?
     public var subtitle: String
     public var status: PersonProfileStatus?
+    public var accessibilityLabel: String
 
     public init(id: ContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil, subtitle: String? = nil, status: PersonProfileStatus? = nil) {
         self.id = id
@@ -77,6 +78,7 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
         self.organizationName = organizationName
         self.subtitle = subtitle ?? primaryEmail ?? organizationName ?? "暂无联系方式"
         self.status = status
+        self.accessibilityLabel = "查看人物档案，\(displayName)，\(self.subtitle)"
     }
 
     public init(record: ContactRecord) {
