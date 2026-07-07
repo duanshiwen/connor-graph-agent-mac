@@ -151,3 +151,14 @@ public struct PersonRelationship: Codable, Sendable, Equatable, Hashable, Identi
         return trimmedCustomLabel.isEmpty ? kind.displayTitle : trimmedCustomLabel
     }
 }
+
+public extension Array where Element == PersonRelationship {
+    func upserting(_ relationship: PersonRelationship) -> [PersonRelationship] {
+        var copy = filter { $0.id != relationship.id }
+        copy.append(relationship)
+        return copy.sorted { first, second in
+            if first.updatedAt != second.updatedAt { return first.updatedAt > second.updatedAt }
+            return first.id.localizedStandardCompare(second.id) == .orderedAscending
+        }
+    }
+}
