@@ -146,14 +146,14 @@ struct AgentChatComposerView: View {
                     .accessibilityLabel(viewModel.isBrowserVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
                     if let inspection = viewModel.lastPromptInspection {
-                        Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
-                            .font(AgentChatTypography.micro)
-                            .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
+                        promptBudgetLabel(inspection)
+                            .layoutPriority(-1)
                     }
 
-                    Spacer(minLength: AgentChatLayout.spaceS)
+                    Spacer(minLength: AgentChatLayout.spaceXS)
 
                     modelSelectionMenu
+                        .layoutPriority(2)
 
                     AgentSendControlButton(
                         isSubmitting: composerState.isSubmitting,
@@ -166,6 +166,8 @@ struct AgentChatComposerView: View {
                             }
                         }
                     )
+                    .fixedSize()
+                    .layoutPriority(3)
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
@@ -942,6 +944,17 @@ struct AgentChatComposerView: View {
     private var composerControlForeground: Color { .secondary }
 
     private var composerControlActiveForeground: Color { .accentColor }
+
+    @ViewBuilder
+    private func promptBudgetLabel(_ inspection: AgentChatPromptInspection) -> some View {
+        Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
+            .font(AgentChatTypography.micro)
+            .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: 128, alignment: .leading)
+            .accessibilityLabel("预计提示词约 \(inspection.estimatedPromptTokenCount) tokens")
+    }
 
     private func promptBudgetStatusColor(_ status: AgentPromptBudgetStatus) -> Color {
         switch status {
