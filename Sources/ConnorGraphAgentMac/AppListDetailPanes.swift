@@ -2332,6 +2332,7 @@ struct ContactsSourceSettingsView: View {
                         PersonProfileDetailHero(
                             row: selected,
                             onEdit: { viewModel.presentEditPersonProfile(selected.id) },
+                            onAddRelationship: { viewModel.presentNewPersonRelationshipEditor(sourcePersonID: selected.id) },
                             onDelete: { viewModel.pendingPersonProfileDeletionID = selected.id }
                         )
 
@@ -2387,6 +2388,22 @@ struct ContactsSourceSettingsView: View {
                 )
             }
         }
+        .sheet(isPresented: $viewModel.isPresentingPersonRelationshipEditor) {
+            if let draft = Binding($viewModel.editingPersonRelationshipDraft) {
+                PersonRelationshipEditorView(
+                    draft: draft,
+                    sourceDisplayName: selectedContactRow?.displayName ?? "此人物",
+                    candidateProfiles: viewModel.personProfiles,
+                    onCancel: {
+                        viewModel.isPresentingPersonRelationshipEditor = false
+                        viewModel.editingPersonRelationshipDraft = nil
+                    },
+                    onSave: { draft in
+                        Task { @MainActor in await viewModel.savePersonRelationshipDraft(draft) }
+                    }
+                )
+            }
+        }
         .confirmationDialog("删除人物档案？", isPresented: Binding(
             get: { viewModel.pendingPersonProfileDeletionID != nil },
             set: { if !$0 { viewModel.pendingPersonProfileDeletionID = nil } }
@@ -2410,6 +2427,7 @@ struct ContactsSourceSettingsView: View {
 private struct PersonProfileDetailHero: View {
     var row: NativeContactRowPresentation
     var onEdit: () -> Void
+    var onAddRelationship: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
@@ -2455,6 +2473,9 @@ private struct PersonProfileDetailHero: View {
 
                 HStack(spacing: AppShellLayout.spaceS) {
                     Button("编辑", action: onEdit)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("添加关系", action: onAddRelationship)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     Button("删除", role: .destructive, action: onDelete)
