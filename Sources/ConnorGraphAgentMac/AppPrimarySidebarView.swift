@@ -104,7 +104,7 @@ struct CraftPrimarySidebarView: View {
                         }
                     }
 
-                    SidebarRow(title: "联系人", systemImage: "person.crop.circle.badge", count: viewModel.contactsBrowserPresentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
+                    SidebarRow(title: "人际关系", systemImage: "person.2", count: viewModel.contactsBrowserPresentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "日历", systemImage: "calendar", count: viewModel.calendarBrowserPresentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
