@@ -36,30 +36,4 @@ struct CalendarContactsPersistenceTests {
         #expect(restored.events.first?.title == "Persistent Event")
     }
 
-    @Test func fileBackedContactStorageSurvivesRuntimeRestart() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorContactsStorageTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let paths = AppStoragePaths(applicationSupportDirectory: root)
-        try paths.ensureDirectoryHierarchy()
-
-        let contactID = MailContactID(rawValue: "alice@example.com")
-        let record = ContactRecord(
-            id: contactID,
-            givenName: "Alice",
-            familyName: "Chen",
-            organizationName: "Connor",
-            emails: [ContactEmailAddress(label: "work", email: "alice@example.com")],
-            source: "system-contacts"
-        )
-
-        let store = FileBackedContactSourceStore(storagePaths: paths)
-        try await store.saveRecords([record])
-
-        let restartedStore = FileBackedContactSourceStore(storagePaths: paths)
-        let restored = try await restartedStore.loadRecords()
-
-        #expect(restored.map(\.id).contains(contactID))
-        #expect(restored.first?.givenName == "Alice")
-        #expect(restored.first?.emails.first?.email == "alice@example.com")
-    }
 }

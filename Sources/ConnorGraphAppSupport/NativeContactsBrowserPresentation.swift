@@ -40,6 +40,26 @@ public struct NativeContactsBrowserPresentation: Sendable, Equatable {
             .map(NativeContactRowPresentation.init(contact:))
         return NativeContactsBrowserPresentation(query: query, rows: rows, emptyMessage: rows.isEmpty ? "没有匹配的联系人" : nil)
     }
+
+    public static func build(profiles: [PersonProfile], query: String = "") -> NativeContactsBrowserPresentation {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let activeProfiles = profiles.filter(\.isActiveForDefaultContext)
+        let filtered = normalized.isEmpty ? activeProfiles : activeProfiles.filter { profile in
+            profile.matchesContactQuery(normalized)
+        }
+        let rows = filtered
+            .sorted { left, right in
+                left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
+            }
+            .map(NativeContactRowPresentation.init(profile:))
+        let emptyMessage: String?
+        if rows.isEmpty {
+            emptyMessage = normalized.isEmpty ? "暂无联系人" : "没有匹配的联系人"
+        } else {
+            emptyMessage = nil
+        }
+        return NativeContactsBrowserPresentation(query: query, rows: rows, emptyMessage: emptyMessage)
+    }
 }
 
 public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
@@ -47,12 +67,16 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
     public var displayName: String
     public var primaryEmail: String?
     public var organizationName: String?
+    public var subtitle: String
+    public var status: PersonProfileStatus?
 
-    public init(id: ContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil) {
+    public init(id: ContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil, subtitle: String? = nil, status: PersonProfileStatus? = nil) {
         self.id = id
         self.displayName = displayName
         self.primaryEmail = primaryEmail
         self.organizationName = organizationName
+        self.subtitle = subtitle ?? primaryEmail ?? organizationName ?? "暂无联系方式"
+        self.status = status
     }
 
     public init(record: ContactRecord) {
@@ -71,6 +95,37 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
             primaryEmail: contact.email,
             organizationName: nil
         )
+    }
+
+    public init(profile: PersonProfile) {
+        self.init(
+            id: profile.id,
+            displayName: profile.displayName,
+            primaryEmail: profile.emails.first?.email,
+            organizationName: profile.organizationName,
+            subtitle: profile.contactSubtitle,
+            status: profile.status
+        )
+    }
+}
+
+private extension PersonProfile {
+    func matchesContactQuery(_ normalized: String) -> Bool {
+        guard !normalized.isEmpty else { return true }
+        let values = [
+            displayName,
+            givenName,
+            familyName,
+            gender ?? "",
+            organizationName ?? "",
+            jobTitle ?? "",
+            notes ?? "",
+            aliases.joined(separator: " "),
+            emails.map(\.email).joined(separator: " "),
+            phones.map(\.number).joined(separator: " "),
+            addresses.map(\.value).joined(separator: " ")
+        ]
+        return values.contains { $0.lowercased().contains(normalized) }
     }
 }
 

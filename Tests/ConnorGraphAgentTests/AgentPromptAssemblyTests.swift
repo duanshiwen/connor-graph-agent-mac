@@ -100,6 +100,25 @@ import ConnorGraphAgent
     #expect(prompt.contains("mail_list_accounts"))
 }
 
+@Test func defaultSystemPromptDocumentsPersonRegistrySemantics() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Person Registry and Contacts"))
+    #expect(prompt.contains("not only an address book"))
+    #expect(prompt.contains("people without contact methods"))
+    #expect(prompt.contains("correct, merge, or delete people"))
+    #expect(prompt.contains("merged people should resolve to the target person"))
+    #expect(prompt.contains("deleted people should not be used as active memory context"))
+}
+
+@Test func defaultSystemPromptDocumentsAtMentionPersonContext() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("@person"))
+    #expect(prompt.contains("@人物"))
+    #expect(prompt.contains("default attribution anchor"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

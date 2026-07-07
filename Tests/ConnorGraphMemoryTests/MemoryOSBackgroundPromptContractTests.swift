@@ -120,6 +120,34 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Do not create an entity merely because a noun phrase appears"))
     }
 
+    @Test func l1PromptDocumentsPersonRegistryIdentityModel() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Person Registry"))
+        #expect(prompt.contains("A person does not need contact methods"))
+        #expect(prompt.contains("named or described independent person"))
+        #expect(prompt.contains("Do not create a person entity for incidental noun phrases"))
+    }
+
+    @Test func l1PromptDocumentsPersonMergeAndDeleteGovernance() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("merged into"))
+        #expect(prompt.contains("deleted person"))
+        #expect(prompt.contains("not active retrieval context"))
+    }
+
+    @Test func l1PromptDocumentsAtMentionAsPersonAnchor() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("@person"))
+        #expect(prompt.contains("@人物"))
+        #expect(prompt.contains("identity anchor"))
+    }
+
     @Test func l1PromptRequiresFactFirstEntitySecondExtraction() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 

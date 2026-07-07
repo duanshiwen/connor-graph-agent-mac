@@ -395,7 +395,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var calendarSyncMessage: String?
     @Published var contactsBrowserPresentation: NativeContactsBrowserPresentation = .empty
     @Published var contactRecords: [ContactRecord] = []
+    @Published var personProfiles: [PersonProfile] = []
     @Published var selectedContactID: ContactID?
+    @Published var isPresentingPersonProfileEditor: Bool = false
+    @Published var editingPersonProfileDraft: PersonProfileDraft?
+    @Published var pendingPersonProfileDeletionID: ContactID?
     @Published var isSyncingSystemContacts: Bool = false
     @Published var contactsSyncMessage: String?
     @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
@@ -531,7 +535,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var globalSearchPreviewTask: Task<Void, Never>?
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
-    private var contactStore: FileBackedContactSourceStore?
+    private var personProfileStore: SQLitePersonProfileStore?
     private var mailStore: FileBackedMailSourceStore?
     private var mailPreferencesStore: (any MailPreferencesStore)?
     private var mailCacheChangeObserver: NSObjectProtocol?
@@ -2020,7 +2024,9 @@ final class AppViewModel: NSObject, ObservableObject {
             )
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
-            self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
+            self.personProfileStore = try? SQLitePersonProfileStore(databaseURL: storagePaths.applicationSupportDirectory
+                .appendingPathComponent("contacts", isDirectory: true)
+                .appendingPathComponent("person-profiles.sqlite"))
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
@@ -2642,9 +2648,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func reloadContactsBrowserPresentation() {
-        contactsBrowserPresentation = NativeContactsBrowserPresentation.build(records: contactRecords)
+        contactsBrowserPresentation = NativeContactsBrowserPresentation.build(profiles: personProfiles)
+        contactRecords = personProfiles.map(\.contactRecord)
         if let selectedContactID,
-           !contactRecords.contains(where: { $0.id == selectedContactID }) {
+           !personProfiles.contains(where: { $0.id == selectedContactID && $0.isActiveForDefaultContext }) {
             self.selectedContactID = nil
         }
         errorMessage = nil
@@ -2661,8 +2668,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 reloadCalendarBrowserPresentation()
                 scheduleCalendarSearchIndexRefresh()
             }
-            if let records = try await contactStore?.loadRecords() {
-                contactRecords = records
+            if let profiles = try await personProfileStore?.loadProfiles(includeInactive: false) {
+                personProfiles = profiles
                 reloadContactsBrowserPresentation()
             }
             await reloadMailBrowserPresentation()
@@ -2916,11 +2923,71 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func persistContactRecords() async {
+    func presentNewPersonProfileEditor() {
+        editingPersonProfileDraft = PersonProfileDraft(displayName: "")
+        isPresentingPersonProfileEditor = true
+    }
+
+    func presentEditPersonProfile(_ id: ContactID) {
+        guard let profile = personProfiles.first(where: { $0.id == id }) else { return }
+        editingPersonProfileDraft = PersonProfileDraft(profile: profile)
+        isPresentingPersonProfileEditor = true
+    }
+
+    func savePersonProfileDraft(_ draft: PersonProfileDraft) async {
         do {
-            try await contactStore?.saveRecords(contactRecords)
+            let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !displayName.isEmpty else {
+                errorMessage = "人物名称不能为空"
+                return
+            }
+            let existing = draft.id.flatMap { id in personProfiles.first(where: { $0.id == id }) }
+            let now = Date()
+            let profile = draft.makeProfile(existing: existing, now: now)
+            _ = try await personProfileStore?.upsert(profile)
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.upserting(profile)
+            reloadContactsBrowserPresentation()
+            selectedContactID = profile.id
+            editingPersonProfileDraft = nil
+            isPresentingPersonProfileEditor = false
+            errorMessage = nil
         } catch {
-            errorMessage = "无法保存联系人缓存：\(error.localizedDescription)"
+            errorMessage = "无法保存人物档案：\(error.localizedDescription)"
+        }
+    }
+
+    func deletePersonProfile(_ id: ContactID) async {
+        do {
+            try await personProfileStore?.markDeleted(id: id, now: Date())
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != id }
+            if selectedContactID == id { selectedContactID = personProfiles.first?.id }
+            reloadContactsBrowserPresentation()
+            pendingPersonProfileDeletionID = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法删除人物档案：\(error.localizedDescription)"
+        }
+    }
+
+    func mergePersonProfile(sourceID: ContactID, targetID: ContactID) async {
+        do {
+            _ = try await personProfileStore?.merge(sourceID: sourceID, targetID: targetID, now: Date())
+            personProfiles = try await personProfileStore?.loadProfiles(includeInactive: false) ?? personProfiles.filter { $0.id != sourceID }
+            selectedContactID = targetID
+            reloadContactsBrowserPresentation()
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法合并人物档案：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistPersonProfiles() async {
+        do {
+            for profile in personProfiles {
+                _ = try await personProfileStore?.upsert(profile)
+            }
+        } catch {
+            errorMessage = "无法保存人物档案：\(error.localizedDescription)"
         }
     }
 
@@ -2961,10 +3028,10 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { @MainActor in
             do {
                 let records = try await ContactsSystemAdapter.fetchSystemContacts()
-                contactRecords = records
+                personProfiles = records.map { PersonProfile(contactRecord: $0) }
                 reloadContactsBrowserPresentation()
-                await persistContactRecords()
-                contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
+                await persistPersonProfiles()
+                contactsSyncMessage = "已同步系统通讯录：\(records.count) 个人物档案"
                 setSettingsMessage(contactsSyncMessage, for: .preferences)
                 errorMessage = nil
             } catch {
