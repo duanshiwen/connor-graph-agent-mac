@@ -447,3 +447,47 @@ private func collectSchemaKeys(_ object: [String: Any]) -> [String] {
     }
     return keys
 }
+
+
+@Test func contactsReadUsesPersistedPersonRegistryWhenStoragePathsAreAvailable() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryPersistedPersonRegistry-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let personStoreDirectory = storagePaths.applicationSupportDirectory.appendingPathComponent("contacts", isDirectory: true)
+    try FileManager.default.createDirectory(at: personStoreDirectory, withIntermediateDirectories: true)
+    let personStore = try SQLitePersonProfileStore(databaseURL: personStoreDirectory.appendingPathComponent("person-profiles.sqlite"))
+    let profile = PersonProfile(id: ContactID(rawValue: "person-duan-fuqiang"), displayName: "段福强")
+    _ = try await personStore.upsert(profile)
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "contacts_read", argumentsJSON: #"{"operation":"search_people","query":"段福强"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-persisted-person-registry",
+            sessionID: "session-persisted-person-registry",
+            groupID: "default",
+            userPrompt: "search person",
+            toolCallID: "contacts-read-persisted-person",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(result.contentText.contains("Found 1 people"))
+    #expect(result.contentJSON?.contains("段福强") == true)
+    #expect(result.contentJSON?.contains("person-duan-fuqiang") == true)
+}
+
