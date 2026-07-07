@@ -540,23 +540,24 @@ struct CraftContactsListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("联系人")
+            HStack(spacing: 8) {
+                Text("人际关系")
                     .font(AppListTypography.header)
-                Spacer()
-                Button {
-                    viewModel.presentNewPersonProfileEditor()
-                } label: {
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.presentNewPersonProfileEditor() }) {
                     Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("新建人物")
+                .accessibilityLabel("新建人物")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
             if viewModel.contactsBrowserPresentation.rows.isEmpty {
-                ContentUnavailableView("还没有可显示的联系人", systemImage: "person.crop.circle.badge", description: Text("连接通讯录后，康纳同学会把可用联系人整理在这里，方便之后检索和关联会话。"))
+                ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
                 ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
@@ -590,21 +591,42 @@ private struct ContactRowButton: View {
     var isSelected: Bool
     var onSelect: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.displayName)
-                    .font(AppListTypography.rowTitle)
-                    .foregroundStyle(.primary)
-                Text(row.subtitle)
-                    .font(AppListTypography.rowSubtitle)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.displayName)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                    Text(row.subtitle)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(rowBackground, in: rowShape)
+            .contentShape(rowShape)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityHint("打开人物详情")
+    }
+
+    private var rowShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return Color.accentColor.opacity(0.12) }
+        if isHovering { return Color.secondary.opacity(0.08) }
+        return Color.clear
     }
 }
 
@@ -2305,24 +2327,46 @@ struct ContactsSourceSettingsView: View {
     var body: some View {
         Group {
             if let selected = selectedContactRow {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                    CalendarContactsDetailHeader(title: "人物档案", subtitle: "联系人模块现在是人物列表：人可以先存在，联系方式后补充。")
-                    Divider().opacity(0.6)
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                        Label(selected.displayName, systemImage: "person.crop.circle")
-                            .font(AgentChatTypography.title)
-                        Text(selected.subtitle).font(AgentChatTypography.meta).textSelection(.enabled)
-                        if let organization = selected.organizationName {
-                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                        PersonProfileDetailHero(
+                            row: selected,
+                            onEdit: { viewModel.presentEditPersonProfile(selected.id) },
+                            onAddRelationship: { viewModel.presentNewPersonRelationshipEditor(sourcePersonID: selected.id) },
+                            onDelete: { viewModel.pendingPersonProfileDeletionID = selected.id }
+                        )
+
+                        PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
+                            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                                PersonProfileMetadataLine(label: "姓名", value: selected.displayName)
+                                PersonProfileMetadataLine(label: "联系", value: selected.primaryEmail ?? selected.subtitle)
+                                if let organization = selected.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    PersonProfileMetadataLine(label: "组织", value: organization)
+                                }
+                                PersonProfileMetadataLine(label: "状态", value: selected.status.displayTitle)
+                            }
                         }
-                        HStack {
-                            Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
-                            Button("删除", role: .destructive) { viewModel.pendingPersonProfileDeletionID = selected.id }
+
+                        let relationshipRows = PersonRelationshipPresentation.rows(
+                            for: selected.id,
+                            relationships: viewModel.personRelationships,
+                            displayTitle: { viewModel.displayTitle(for: $0) }
+                        )
+                        if !relationshipRows.isEmpty {
+                            PersonProfileInfoSection(title: "关系", systemImage: "person.2") {
+                                VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                                    ForEach(relationshipRows) { row in
+                                        PersonProfileMetadataLine(label: row.label, value: row.value)
+                                    }
+                                }
+                            }
                         }
-                        .padding(.top, AppShellLayout.spaceM)
                     }
                     .padding(AppShellLayout.spaceXL)
+                    .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
+                .scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 Color.clear
@@ -2340,6 +2384,22 @@ struct ContactsSourceSettingsView: View {
                     },
                     onSave: { draft in
                         Task { @MainActor in await viewModel.savePersonProfileDraft(draft) }
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $viewModel.isPresentingPersonRelationshipEditor) {
+            if let draft = Binding($viewModel.editingPersonRelationshipDraft) {
+                PersonRelationshipEditorView(
+                    draft: draft,
+                    sourceDisplayName: selectedContactRow?.displayName ?? "此人物",
+                    candidateProfiles: viewModel.personProfiles,
+                    onCancel: {
+                        viewModel.isPresentingPersonRelationshipEditor = false
+                        viewModel.editingPersonRelationshipDraft = nil
+                    },
+                    onSave: { draft in
+                        Task { @MainActor in await viewModel.savePersonRelationshipDraft(draft) }
                     }
                 )
             }
@@ -2364,20 +2424,172 @@ struct ContactsSourceSettingsView: View {
     }
 }
 
-private struct CalendarContactsDetailHeader: View {
-    var title: String
-    var subtitle: String
+private struct PersonProfileDetailHero: View {
+    var row: NativeContactRowPresentation
+    var onEdit: () -> Void
+    var onAddRelationship: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text(title).font(.system(size: 24, weight: .semibold))
-                Text(subtitle).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.14))
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 24, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.accentColor)
             }
-            Spacer()
+            .frame(width: 56, height: 56)
+
+            VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
+                Text(row.displayName)
+                    .font(AgentChatTypography.title)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .textSelection(.enabled)
+
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+                    PersonProfileStatusPill(status: statusTitle, color: statusColor, systemImage: "person.crop.circle.badge.checkmark")
+                    if row.primaryEmail != nil {
+                        PersonProfileStatusPill(status: "邮箱", color: .teal, systemImage: "envelope")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                Text(row.subtitle)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                if let organization = row.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, organization != row.subtitle {
+                    PersonProfileStatusPill(status: organization, color: .secondary, systemImage: "building.2")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                HStack(spacing: AppShellLayout.spaceS) {
+                    Button("编辑", action: onEdit)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("添加关系", action: onAddRelationship)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("删除", role: .destructive, action: onDelete)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, AppShellLayout.spaceXL)
-        .padding(.vertical, AppShellLayout.spaceL)
+        .padding(AppShellLayout.spaceL)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private var statusTitle: String {
+        row.status.displayTitle
+    }
+
+    private var statusColor: Color {
+        switch row.status {
+        case .active, .none:
+            return .green
+        case .pending:
+            return .orange
+        case .merged:
+            return .blue
+        case .deleted:
+            return .red
+        }
+    }
+}
+
+private extension Optional where Wrapped == PersonProfileStatus {
+    var displayTitle: String {
+        switch self {
+        case .active, .none:
+            return "活跃"
+        case .pending:
+            return "待确认"
+        case .merged:
+            return "已合并"
+        case .deleted:
+            return "已删除"
+        }
+    }
+}
+
+private struct PersonProfileInfoSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AppListTypography.header)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AppShellLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+    }
+}
+
+private struct PersonProfileMetadataLine: View {
+    var label: String
+    var value: String
+
+    var body: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: AppShellLayout.spaceL, verticalSpacing: AppShellLayout.spaceS) {
+            GridRow {
+                Text(label)
+                    .font(AgentChatTypography.microEmphasis)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 72, alignment: .leading)
+                Text(value)
+                    .font(AgentChatTypography.meta)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+}
+
+private struct PersonProfileStatusPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String? = nil
+
+    var body: some View {
+        Label {
+            Text(status)
+                .lineLimit(1)
+        } icon: {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+        }
+        .font(AppListTypography.rowCaptionEmphasized)
+        .foregroundStyle(color)
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .frame(height: 23)
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 

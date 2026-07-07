@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public actor MemoryOSIngestionWriter {
     private struct QueuedChatMessage: Sendable {
@@ -7,6 +8,7 @@ public actor MemoryOSIngestionWriter {
         var role: String
         var content: String
         var occurredAt: Date
+        var personReferences: [PersonReference]
     }
 
     private let facade: AppMemoryOSFacade
@@ -22,14 +24,16 @@ public actor MemoryOSIngestionWriter {
         sessionID: String,
         role: String,
         content: String,
-        occurredAt: Date
+        occurredAt: Date,
+        personReferences: [PersonReference] = []
     ) {
         queuedMessages.append(QueuedChatMessage(
             messageID: messageID,
             sessionID: sessionID,
             role: role,
             content: content,
-            occurredAt: occurredAt
+            occurredAt: occurredAt,
+            personReferences: personReferences
         ))
         Task { try? flush() }
     }
@@ -41,12 +45,14 @@ public actor MemoryOSIngestionWriter {
 
         while !queuedMessages.isEmpty {
             let message = queuedMessages.removeFirst()
+            let formatter = MemoryOSPersonReferenceContextFormatter()
             _ = try facade.ingestChatMessage(
                 messageID: message.messageID,
                 sessionID: message.sessionID,
                 role: message.role,
-                content: message.content,
-                occurredAt: message.occurredAt
+                content: formatter.content(message.content, personReferences: message.personReferences),
+                occurredAt: message.occurredAt,
+                metadata: formatter.metadata(personReferences: message.personReferences)
             )
         }
     }

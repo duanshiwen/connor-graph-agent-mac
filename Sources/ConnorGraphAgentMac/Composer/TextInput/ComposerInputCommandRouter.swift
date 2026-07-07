@@ -17,33 +17,27 @@ final class ComposerInputCommandRouter {
     }
 
     func handleKeyDown(_ event: NSEvent) -> Bool {
-        guard configuration.isSkillPickerPresented else { return false }
-        switch event.keyCode {
-        case 126:
-            configuration.onSkillPickerKeyCommand?(.moveUp)
+        if routePickerKeyCommand(for: event.keyCode, using: configuration.onSkillPickerKeyCommand, when: configuration.isSkillPickerPresented) {
             return true
-        case 125:
-            configuration.onSkillPickerKeyCommand?(.moveDown)
-            return true
-        case 36, 76:
-            configuration.onSkillPickerKeyCommand?(.confirm)
-            return true
-        case 53:
-            configuration.onSkillPickerKeyCommand?(.cancel)
-            return true
-        default:
-            return false
         }
+        if routePickerKeyCommand(for: event.keyCode, using: configuration.onPersonMentionPickerKeyCommand, when: configuration.isPersonMentionPickerPresented) {
+            return true
+        }
+        return false
     }
 
     func handleInsertNewline(currentEvent: NSEvent?) -> Bool {
+        let flags = currentEvent?.modifierFlags ?? []
+        if flags.contains(.shift) || flags.contains(.option) {
+            return false
+        }
         if configuration.isSkillPickerPresented {
             configuration.onSkillPickerKeyCommand?(.confirm)
             return true
         }
-        let flags = currentEvent?.modifierFlags ?? []
-        if flags.contains(.shift) || flags.contains(.option) {
-            return false
+        if configuration.isPersonMentionPickerPresented {
+            configuration.onPersonMentionPickerKeyCommand?(.confirm)
+            return true
         }
         switch configuration.sendShortcut {
         case "cmd-return":
@@ -53,6 +47,30 @@ final class ComposerInputCommandRouter {
         default:
             configuration.onSubmit()
             return true
+        }
+    }
+
+    private func routePickerKeyCommand(
+        for keyCode: UInt16,
+        using handler: ((SkillPickerKeyCommand) -> Void)?,
+        when isPresented: Bool
+    ) -> Bool {
+        guard isPresented else { return false }
+        switch keyCode {
+        case 126:
+            handler?(.moveUp)
+            return true
+        case 125:
+            handler?(.moveDown)
+            return true
+        case 36, 76:
+            handler?(.confirm)
+            return true
+        case 53:
+            handler?(.cancel)
+            return true
+        default:
+            return false
         }
     }
 

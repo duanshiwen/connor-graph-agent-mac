@@ -18,6 +18,8 @@ public struct AgentChatRequest: Sendable, Equatable {
     /// Active skill metadata for auditing/presentation. The actual instructions remain in `skillInstructions`.
     public var activeSkillSlug: String?
     public var activeSkillDisplayName: String?
+    /// Structured people explicitly selected in Composer for this turn.
+    public var personReferences: [PersonReference]
 
     public init(
         runID: String = UUID().uuidString,
@@ -34,6 +36,40 @@ public struct AgentChatRequest: Sendable, Equatable {
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil
     ) {
+        self.init(
+            runID: runID,
+            sessionID: sessionID,
+            groupID: groupID,
+            userMessage: userMessage,
+            sessionSummary: sessionSummary,
+            recentMessages: recentMessages,
+            permissionMode: permissionMode,
+            attachmentRefs: attachmentRefs,
+            attachmentContextPlan: attachmentContextPlan,
+            anchorState: anchorState,
+            skillInstructions: skillInstructions,
+            activeSkillSlug: activeSkillSlug,
+            activeSkillDisplayName: activeSkillDisplayName,
+            personReferences: []
+        )
+    }
+
+    public init(
+        runID: String = UUID().uuidString,
+        sessionID: String,
+        groupID: String = "default",
+        userMessage: String,
+        sessionSummary: AgentSessionSummary? = nil,
+        recentMessages: [AgentMessage] = [],
+        permissionMode: AgentPermissionMode = .askToWrite,
+        attachmentRefs: [AgentMessageAttachmentRef] = [],
+        attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
+        anchorState: SessionAnchorState? = nil,
+        skillInstructions: String? = nil,
+        activeSkillSlug: String? = nil,
+        activeSkillDisplayName: String? = nil,
+        personReferences: [PersonReference]
+    ) {
         self.runID = runID
         self.sessionID = sessionID
         self.groupID = groupID
@@ -47,11 +83,17 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.skillInstructions = skillInstructions
         self.activeSkillSlug = activeSkillSlug
         self.activeSkillDisplayName = activeSkillDisplayName
+        self.personReferences = personReferences
     }
 
     public var normalizedPrompt: String {
+        let personContext = AgentPersonContextSection(references: personReferences)?.renderedText
+        let currentUserMessage = [personContext, userMessage]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
         let basePrompt = AgentChatPromptContext(
-            userPrompt: userMessage,
+            userPrompt: currentUserMessage,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
             anchorState: anchorState

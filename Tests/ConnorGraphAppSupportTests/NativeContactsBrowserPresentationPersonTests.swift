@@ -32,6 +32,19 @@ struct NativeContactsBrowserPresentationPersonTests {
         #expect(byID["empty"] == "暂无联系方式")
     }
 
+    @Test func rowAccessibilityLabelDescribesOpeningTheWholePersonCard() throws {
+        let profile = PersonProfile(
+            id: ContactID(rawValue: "person-accessibility"),
+            displayName: "段磊强",
+            emails: [ContactEmailAddress(email: "oisin@example.com")],
+            organizationName: "杭州康纳快跑科技有限公司"
+        )
+
+        let row = try #require(NativeContactsBrowserPresentation.build(profiles: [profile]).rows.first)
+
+        #expect(row.accessibilityLabel == "查看人物档案，段磊强，oisin@example.com")
+    }
+
     @Test func profileSearchMatchesAliasesContactMethodsAndNotes() {
         let profile = PersonProfile(
             id: ContactID(rawValue: "person-search"),

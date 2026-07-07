@@ -60,9 +60,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     }
 
     @discardableResult
-    public mutating func submit(_ prompt: String) async throws -> AgentLoopChatResponse {
+    public mutating func submit(_ prompt: String, personReferences: [PersonReference] = []) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
-        let userMessage = session.appendUserMessage(prompt)
+        let userMessage = session.appendUserMessage(prompt, personReferences: personReferences)
         transcript = session.messages
         try await persistMemoryOSAfterUserMessage(userMessage)
         let request = AgentChatRequest(
@@ -70,7 +70,8 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             groupID: groupID,
             userMessage: prompt,
             recentMessages: recentMessages,
-            permissionMode: loopController.configuration.permissionMode
+            permissionMode: loopController.configuration.permissionMode,
+            personReferences: personReferences
         )
 
         var collectedEvents: [AgentEvent] = []
@@ -118,18 +119,21 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 sessionID: session.id,
                 role: "user",
                 content: message.content,
-                occurredAt: message.createdAt
+                occurredAt: message.createdAt,
+                personReferences: message.personReferences
             )
             return
         }
         guard let memoryOSRepository else { return }
+        let formatter = MemoryOSPersonReferenceContextFormatter()
         let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
             sourceType: .chatMessage,
             sourceID: message.id,
             title: "User message",
-            content: message.content,
+            content: formatter.content(message.content, personReferences: message.personReferences),
             occurredAt: message.createdAt,
-            sessionID: session.id
+            sessionID: session.id,
+            metadata: formatter.metadata(personReferences: message.personReferences)
         ))
         try memoryOSRepository.save(result)
     }

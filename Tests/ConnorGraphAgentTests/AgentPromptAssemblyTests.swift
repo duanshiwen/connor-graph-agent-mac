@@ -109,6 +109,12 @@ import ConnorGraphAgent
     #expect(prompt.contains("correct, merge, or delete people"))
     #expect(prompt.contains("merged people should resolve to the target person"))
     #expect(prompt.contains("deleted people should not be used as active memory context"))
+    #expect(prompt.contains("Referenced People in Current User Request"))
+    #expect(prompt.contains("authoritative structured resolution"))
+    #expect(prompt.contains("person_id"))
+    #expect(prompt.contains("Do not infer, invent, or substitute a `person_id` from `display_name`"))
+    #expect(prompt.contains("status: merged"))
+    #expect(prompt.contains("status: deleted"))
 }
 
 @Test func defaultSystemPromptDocumentsAtMentionPersonContext() {
@@ -117,6 +123,17 @@ import ConnorGraphAgent
     #expect(prompt.contains("@person"))
     #expect(prompt.contains("@人物"))
     #expect(prompt.contains("default attribution anchor"))
+}
+
+@Test func defaultSystemPromptDocumentsCurrentUserRelationshipEndpointRules() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Person Relationships"))
+    #expect(prompt.contains("protected `current_user` endpoint"))
+    #expect(prompt.contains("Do not expect the current user to appear in Composer @person mentions"))
+    #expect(prompt.contains("I/me/my/我/我的/当前用户"))
+    #expect(prompt.contains("Use Person Relationship tools for relationship edges"))
+    #expect(prompt.contains("Use current-user MemoryOS tools for preferences, habits, constraints, and self-profile facts"))
 }
 
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
@@ -217,6 +234,87 @@ import ConnorGraphAgent
     #expect(modelRequest.messages[1].content.contains("Old task"))
     #expect(modelRequest.messages.last?.role == .user)
     #expect(modelRequest.messages.last?.content == "Current task")
+}
+
+@Test func agentPromptAssemblerRendersStructuredPersonReferences() async throws {
+    let reference = PersonReference(
+        personID: ContactID(rawValue: "person-duan-leiqiang"),
+        displayName: "段磊强",
+        mentionText: "@段磊强",
+        status: .active,
+        memoryEntityID: "memory-person-duan",
+        memoryStableKey: "person:duan-leiqiang"
+    )
+    var assembly = AgentPromptAssembler().assemble(
+        request: AgentChatRequest(
+            sessionID: "session-person-ref",
+            userMessage: "@段磊强 明天提醒我问他项目进展",
+            personReferences: [reference]
+        ),
+        memoryContract: nil
+    )
+    assembly = try await AgentPromptDiagnosticsTransformer().transform(assembly, projectionMode: .legacySingleUserMessage)
+
+    let rendered = try #require(assembly.personContext?.renderedText)
+    #expect(rendered.contains("Referenced People in Current User Request"))
+    #expect(rendered.contains("type: person"))
+    #expect(rendered.contains("person_id: person-duan-leiqiang"))
+    #expect(rendered.contains("display_name: 段磊强"))
+    #expect(rendered.contains("memory_entity_id: memory-person-duan"))
+    #expect(assembly.diagnostics.sections.contains { $0.id == "person_context" })
+}
+
+@Test func agentPromptProjectorLegacyModeIncludesPersonContextBeforeCurrentRequest() async throws {
+    let request = AgentChatRequest(
+        sessionID: "session-person-ref",
+        userMessage: "@段磊强 明天提醒我问他项目进展",
+        personReferences: [
+            PersonReference(
+                personID: ContactID(rawValue: "person-duan-leiqiang"),
+                displayName: "段磊强",
+                mentionText: "@段磊强",
+                status: .active
+            )
+        ]
+    )
+    var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+    assembly = try await AgentPromptDiagnosticsTransformer().transform(assembly, projectionMode: .legacySingleUserMessage)
+
+    let modelRequest = AgentTranscriptProjector(projectionMode: .legacySingleUserMessage).project(assembly, tools: [])
+    let userContent = try #require(modelRequest.messages.last?.content)
+
+    #expect(userContent.contains("Referenced People in Current User Request"))
+    #expect(userContent.contains("person_id: person-duan-leiqiang"))
+    let personContextIndex = try #require(userContent.range(of: "Referenced People in Current User Request")?.lowerBound)
+    let requestIndex = try #require(userContent.range(of: "@段磊强 明天提醒我问他项目进展")?.lowerBound)
+    #expect(personContextIndex < requestIndex)
+    #expect(request.normalizedPrompt == userContent)
+}
+
+@Test func agentPromptProjectorStructuredModeKeepsPersonContextBeforeCurrentRequest() async throws {
+    let request = AgentChatRequest(
+        sessionID: "session-person-ref",
+        userMessage: "请整理和 @段磊强 相关的事项",
+        recentMessages: [AgentMessage(id: "message-1", role: .assistant, content: "Earlier answer")],
+        personReferences: [
+            PersonReference(
+                personID: ContactID(rawValue: "person-duan-leiqiang"),
+                displayName: "段磊强",
+                mentionText: "@段磊强",
+                status: .active
+            )
+        ]
+    )
+    var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+    assembly = try await AgentPromptDiagnosticsTransformer().transform(assembly, projectionMode: .structuredContextMessages)
+
+    let modelRequest = AgentTranscriptProjector(projectionMode: .structuredContextMessages).project(assembly, tools: [])
+
+    #expect(modelRequest.messages.count == 4)
+    #expect(modelRequest.messages[1].content.contains("Context for continuity only"))
+    #expect(modelRequest.messages[2].content.contains("Referenced People in Current User Request"))
+    #expect(modelRequest.messages[2].content.contains("person_id: person-duan-leiqiang"))
+    #expect(modelRequest.messages[3].content == "请整理和 @段磊强 相关的事项")
 }
 
 @Test func agentPromptDedupeTransformerRemovesRepeatedConversationParagraphsOnly() async throws {
