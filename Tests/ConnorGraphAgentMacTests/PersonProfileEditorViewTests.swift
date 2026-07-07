@@ -14,6 +14,10 @@ struct PersonProfileEditorViewTests {
         #expect(presentation.subtitle.contains("Person Registry"))
         #expect(presentation.canSave == true)
         #expect(presentation.footerHint == "按 ⏎ 保存，按 Esc 取消。")
+        #expect(presentation.closeAccessibilityLabel == "关闭新建人物表单")
+        #expect(presentation.cancelAccessibilityLabel == "取消新建人物")
+        #expect(presentation.saveAccessibilityLabel == "保存新建人物")
+        #expect(presentation.saveHelp == "保存人物档案")
     }
 
     @Test func presentationUsesEditTitleForExistingDraft() {
@@ -26,6 +30,9 @@ struct PersonProfileEditorViewTests {
 
         #expect(presentation.isEditing == true)
         #expect(presentation.title == "编辑人物")
+        #expect(presentation.closeAccessibilityLabel == "关闭编辑人物表单")
+        #expect(presentation.cancelAccessibilityLabel == "取消编辑人物")
+        #expect(presentation.saveAccessibilityLabel == "保存人物修改")
     }
 
     @Test func presentationDisablesSaveWhenDisplayNameIsBlank() {
@@ -35,6 +42,7 @@ struct PersonProfileEditorViewTests {
 
         #expect(presentation.canSave == false)
         #expect(presentation.footerHint == "请输入显示名后保存。")
+        #expect(presentation.saveHelp == "请输入显示名后才能保存")
     }
 
     @Test func aliasFormattingTrimsAndSkipsEmptyAliases() {
