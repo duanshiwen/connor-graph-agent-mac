@@ -96,20 +96,25 @@ public struct MemoryOSPersonIdentityService: Sendable {
         for statement in try loadEntityStatements(store: store, entityID: anchor.id) {
             guard lines.count < Self.profileContextMaxRows else { break }
             guard seen.insert(statement.id).inserted else { continue }
-            lines.append(statement.text)
+            lines.append(appendUpdatedAtSuffix(statement.text, updatedAt: statement.committedAt))
         }
 
         for statement in try loadCurrentUserL2Statements(store: store, anchor: anchor) {
             guard lines.count < Self.profileContextMaxRows else { break }
             let dedupKey = "l2:\(statement.id)"
             guard seen.insert(dedupKey).inserted else { continue }
-            lines.append(statement.text)
+            lines.append(appendUpdatedAtSuffix(statement.text, updatedAt: statement.committedAt))
         }
 
         // Cache the result
         cache.setCachedProfile(lines)
         
         return lines
+    }
+
+    private func appendUpdatedAtSuffix(_ text: String, updatedAt: Date) -> String {
+        guard !text.contains("(updated_at:") else { return text }
+        return "\(text) (updated_at: \(ISO8601DateFormatter().string(from: updatedAt)))"
     }
 
     private func currentUserMetadata(_ metadata: [String: String]) -> [String: String] {
