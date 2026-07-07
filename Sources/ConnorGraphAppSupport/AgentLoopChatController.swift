@@ -119,18 +119,21 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 sessionID: session.id,
                 role: "user",
                 content: message.content,
-                occurredAt: message.createdAt
+                occurredAt: message.createdAt,
+                personReferences: message.personReferences
             )
             return
         }
         guard let memoryOSRepository else { return }
+        let formatter = MemoryOSPersonReferenceContextFormatter()
         let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
             sourceType: .chatMessage,
             sourceID: message.id,
             title: "User message",
-            content: message.content,
+            content: formatter.content(message.content, personReferences: message.personReferences),
             occurredAt: message.createdAt,
-            sessionID: session.id
+            sessionID: session.id,
+            metadata: formatter.metadata(personReferences: message.personReferences)
         ))
         try memoryOSRepository.save(result)
     }
