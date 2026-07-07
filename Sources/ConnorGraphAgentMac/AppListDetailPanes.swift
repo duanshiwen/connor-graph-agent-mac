@@ -540,23 +540,24 @@ struct CraftContactsListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("联系人")
+            HStack(spacing: 8) {
+                Text("人际关系")
                     .font(AppListTypography.header)
-                Spacer()
-                Button {
-                    viewModel.presentNewPersonProfileEditor()
-                } label: {
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.presentNewPersonProfileEditor() }) {
                     Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("新建人物")
+                .accessibilityLabel("新建人物")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
             if viewModel.contactsBrowserPresentation.rows.isEmpty {
-                ContentUnavailableView("还没有可显示的联系人", systemImage: "person.crop.circle.badge", description: Text("连接通讯录后，康纳同学会把可用联系人整理在这里，方便之后检索和关联会话。"))
+                ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
                 ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
