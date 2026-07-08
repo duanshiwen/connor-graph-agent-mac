@@ -107,6 +107,8 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     private var mailboxByID: [MailMailboxID: MailMailbox]
     private var messageByID: [MailMessageID: MailMessageSummary]
     private var sentMailboxIDs: Set<MailMailboxID>
+    private var receivedMessages: [MailMessageSummary]
+    private var sentMessages: [MailMessageSummary]
 
     public init(accounts: [MailAccount], mailboxes: [MailMailbox], messages: [MailMessageSummary]) {
         self.accounts = accounts
@@ -119,7 +121,10 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
         accountByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         mailboxByID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0) })
         messageByID = Dictionary(uniqueKeysWithValues: sortedMessages.map { ($0.id, $0) })
-        sentMailboxIDs = Set(mailboxes.filter { $0.role == .sent }.map(\.id))
+        let resolvedSentMailboxIDs = Set(mailboxes.filter { $0.role == .sent }.map(\.id))
+        sentMailboxIDs = resolvedSentMailboxIDs
+        sentMessages = sortedMessages.filter { resolvedSentMailboxIDs.contains($0.mailboxID) }
+        receivedMessages = sortedMessages.filter { !resolvedSentMailboxIDs.contains($0.mailboxID) }
     }
 
     public static func == (lhs: NativeMailBrowserPresentation, rhs: NativeMailBrowserPresentation) -> Bool {
@@ -152,15 +157,26 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
 
     public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String, direction: MailMessageDirectionFilter) -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return messages.filter { message in
+        let candidates = unqueriedMessages(direction: direction)
+        return candidates.filter { message in
             if let accountID, message.accountID != accountID { return false }
             if let mailboxID, message.mailboxID != mailboxID { return false }
-            if !matchesDirection(message, direction: direction) { return false }
             guard !normalized.isEmpty else { return true }
             return message.subject.lowercased().contains(normalized)
                 || message.snippet.lowercased().contains(normalized)
                 || message.from.email.lowercased().contains(normalized)
                 || (message.from.name?.lowercased().contains(normalized) ?? false)
+        }
+    }
+
+    public func unqueriedMessages(direction: MailMessageDirectionFilter) -> [MailMessageSummary] {
+        switch direction {
+        case .all:
+            return messages
+        case .received:
+            return receivedMessages
+        case .sent:
+            return sentMessages
         }
     }
 
