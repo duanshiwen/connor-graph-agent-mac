@@ -174,6 +174,27 @@ struct AppGlobalSearchTests {
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
+    @Test func openingMailSearchResultAcceptsPrefixedExternalID() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "prefixed-mail-target", subject: "带前缀的邮件结果")
+        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mail.account],
+            mailboxes: [mail.mailbox],
+            messages: [mail.summary]
+        )
+        var result = mail.searchResult
+        result.externalID = "mail:\(mail.summary.id.rawValue)"
+
+        fixture.viewModel.openGlobalSearchResult(result)
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+    }
+
     @Test func performingSelectedMailSearchItemSelectsMessageContext() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
