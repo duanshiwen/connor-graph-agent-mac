@@ -1676,7 +1676,7 @@ final class AppViewModel: NSObject, ObservableObject {
             mailSyncMessage = "无法打开这封邮件：搜索结果缺少有效 messageID。"
             return
         }
-        if let message = mailBrowserPresentation.message(id: messageID) {
+        if let message = mailBrowserPresentation.message(id: messageID) ?? mailBrowserPresentationMessageMatchingLegacySearchID(messageID) {
             selectMailMessage(message)
             return
         }
@@ -1689,10 +1689,18 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    /// Normalize a mail message ID to match the format stored in the search index.
-    /// The search index replaces `@` and `.` with `-` (e.g. `user@icloud.com-INBOX-123` → `user-icloud-com-INBOX-123`).
+    /// Normalize a mail message ID to match legacy search-index formats.
+    /// Older indexes may store IDs with a `mail-` prefix and replace account separators
+    /// such as `_`, `@`, and `.` with `-` (for example:
+    /// `yakii_d@icloud.com-INBOX-123` → `mail-yakii-d-icloud-com-INBOX-123`).
     static func normalizeMailIDForSearchIndex(_ rawID: String) -> String {
-        rawID.replacingOccurrences(of: "@", with: "-").replacingOccurrences(of: ".", with: "-")
+        var value = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("mail:") { value = String(value.dropFirst("mail:".count)) }
+        if value.hasPrefix("mail-") { value = String(value.dropFirst("mail-".count)) }
+        return value
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: "@", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
     }
 
     private func mailMessageID(from result: NativeSearchResult) -> MailMessageID? {
@@ -1704,6 +1712,13 @@ final class AppViewModel: NSObject, ObservableObject {
             return MailMessageID(rawValue: unprefixed)
         }
         return MailMessageID(rawValue: raw)
+    }
+
+    private func mailBrowserPresentationMessageMatchingLegacySearchID(_ messageID: MailMessageID) -> MailMessageSummary? {
+        let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
+        return mailBrowserPresentation.messages.first { message in
+            Self.normalizeMailIDForSearchIndex(message.id.rawValue) == normalizedLookup
+        }
     }
 
     func selectMailMessageFromList(_ message: MailMessageSummary) {
@@ -1733,11 +1748,11 @@ final class AppViewModel: NSObject, ObservableObject {
             selectMailMessage(message)
             return
         }
-        // Fallback: search index may store normalized IDs (@. → -) that differ from
+        // Fallback: legacy search indexes may store slugified IDs that differ from
         // the original message IDs in the mail database. Walk the in-memory
         // presentation to find a match by comparing normalized forms.
         let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
-        if let message = mailBrowserPresentation.messages.first(where: { Self.normalizeMailIDForSearchIndex($0.id.rawValue) == normalizedLookup }) {
+        if let message = mailBrowserPresentationMessageMatchingLegacySearchID(messageID) {
             selectMailMessage(message)
             return
         }

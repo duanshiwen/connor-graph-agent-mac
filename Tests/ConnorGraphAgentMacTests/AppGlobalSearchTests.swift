@@ -196,6 +196,28 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
     }
 
+    @Test func openingMailSearchResultAcceptsLegacySluggedExternalID() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "yakii_d@icloud.com-INBOX-100", subject: "旧索引邮件结果")
+        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mail.account],
+            mailboxes: [mail.mailbox],
+            messages: [mail.summary]
+        )
+        var result = mail.searchResult
+        result.id = "mail:mail-yakii-d-icloud-com-INBOX-100"
+        result.externalID = "mail-yakii-d-icloud-com-INBOX-100"
+
+        fixture.viewModel.openGlobalSearchResult(result)
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+    }
+
     @Test func performingSelectedMailSearchItemSelectsMessageContext() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
