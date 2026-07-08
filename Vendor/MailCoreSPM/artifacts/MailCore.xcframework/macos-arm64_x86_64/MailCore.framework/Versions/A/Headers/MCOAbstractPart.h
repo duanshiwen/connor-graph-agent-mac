@@ -47,6 +47,8 @@ namespace mailcore {
 }
 #endif
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface MCOAbstractPart : NSObject <NSCopying>
 
 #ifdef __cplusplus
@@ -64,7 +66,7 @@ namespace mailcore {
 @property (nonatomic, copy) NSString * mimeType;
 
 /** Returns charset of the part in case it's a text single part.*/
-@property (nonatomic, copy) NSString * charset;
+@property (nonatomic, copy) NSString * _Nullable charset;
 
 /** Returns the unique ID generated for this part.
  It's a unique identifier that's created when the object is created manually
@@ -72,13 +74,13 @@ namespace mailcore {
 @property (nonatomic, copy) NSString * uniqueID;
 
 /** Returns the value of the Content-ID field of the part.*/
-@property (nonatomic, copy) NSString * contentID;
+@property (nonatomic, copy) NSString * _Nullable contentID;
 
 /** Returns the value of the Content-Location field of the part.*/
-@property (nonatomic, copy) NSString * contentLocation;
+@property (nonatomic, copy) NSString * _Nullable contentLocation;
 
 /** Returns the value of the Content-Description field of the part.*/
-@property (nonatomic, copy) NSString * contentDescription;
+@property (nonatomic, copy) NSString * _Nullable contentDescription;
 
 /** Returns whether the part is an explicit inline attachment.*/
 @property (nonatomic, assign, getter=isInlineAttachment) BOOL inlineAttachment;
@@ -87,13 +89,13 @@ namespace mailcore {
 @property (nonatomic, assign, getter=isAttachment) BOOL attachment;
 
 /** Returns the part with the given Content-ID among this part and its subparts.*/
-- (MCOAbstractPart *) partForContentID:(NSString *)contentID;
+- (MCOAbstractPart * _Nullable) partForContentID:(NSString *)contentID;
 
 /** Returns the part with the given unique identifier among this part and its subparts.*/
-- (MCOAbstractPart *) partForUniqueID:(NSString *)uniqueID;
+- (MCOAbstractPart * _Nullable) partForUniqueID:(NSString *)uniqueID;
 
 /** Returns a string representation of the data according to charset.*/
-- (NSString *) decodedStringForData:(NSData *)data;
+- (NSString * _Nullable) decodedStringForData:(NSData *)data;
 
 /** Adds a content type parameter.*/
 - (void) setContentTypeParameterValue:(NSString *)value forName:(NSString *)name;
@@ -102,7 +104,7 @@ namespace mailcore {
 - (void) removeContentTypeParameterForName:(NSString *)name;
 
 /** Returns the value of a given content type parameter.*/
-- (NSString *) contentTypeParameterValueForName:(NSString *)name;
+- (NSString * _Nullable) contentTypeParameterValueForName:(NSString *)name;
 
 /** Returns an array with the names of all content type parameters.*/
 - (NSArray * /* NSString */) allContentTypeParametersNames;
@@ -114,5 +116,7 @@ namespace mailcore {
 + (instancetype) new NS_UNAVAILABLE;
 
 @end
+
+NS_ASSUME_NONNULL_END
 
 #endif
