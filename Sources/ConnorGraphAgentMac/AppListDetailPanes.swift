@@ -1629,9 +1629,7 @@ struct CraftMailListPane: View {
     }
 
     private func selectMessage(_ message: MailMessageSummary) {
-        viewModel.selectedMailAccountID = message.accountID
-        viewModel.selectedMailMailboxID = message.mailboxID
-        viewModel.selectedMailMessageID = message.id
+        viewModel.selectMailMessageFromList(message)
     }
 }
 

@@ -227,9 +227,33 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
         #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
         #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
         #expect(fixture.viewModel.mailBrowserPresentation.message(id: mail.summary.id) != nil)
         #expect(fixture.viewModel.mailSearchQuery.isEmpty)
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
+    @Test func selectedMailDetailUsesSearchSelectionSummaryWhenPresentationIsMissing() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "detail-fallback-mail", subject: "搜索打开后详情可见")
+        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mail.account],
+            mailboxes: [mail.mailbox],
+            messages: [mail.summary]
+        )
+
+        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+        fixture.viewModel.mailBrowserPresentation = .empty
+
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
+
+        await fixture.viewModel.reloadMailBrowserPresentation()
+
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
     }
 
     @Test func showAllBrowserHistoryCarriesGlobalSearchQueryIntoHistoryFilter() throws {
