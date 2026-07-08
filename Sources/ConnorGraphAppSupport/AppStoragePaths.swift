@@ -21,6 +21,7 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var runtimeLogsDirectory: URL
     public var sidecarsDirectory: URL
     public var browserDirectory: URL
+    public var searchDirectory: URL
     public var databaseURL: URL
     public var memoryOSDatabaseURL: URL
 
@@ -44,6 +45,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         runtimeLogsDirectory: URL? = nil,
         sidecarsDirectory: URL? = nil,
         browserDirectory: URL? = nil,
+        searchDirectory: URL? = nil,
         databaseURL: URL? = nil,
         memoryOSDatabaseURL: URL? = nil
     ) {
@@ -73,6 +75,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.runtimeLogsDirectory = runtimeLogsDirectory ?? resolvedLogsDirectory.appendingPathComponent("runtime", isDirectory: true)
         self.sidecarsDirectory = sidecarsDirectory ?? applicationSupportDirectory.appendingPathComponent("sidecars", isDirectory: true)
         self.browserDirectory = browserDirectory ?? applicationSupportDirectory.appendingPathComponent("browser", isDirectory: true)
+        self.searchDirectory = searchDirectory ?? applicationSupportDirectory.appendingPathComponent("search", isDirectory: true)
         self.databaseURL = databaseURL ?? resolvedGraphDirectory.appendingPathComponent("connor.sqlite")
         self.memoryOSDatabaseURL = memoryOSDatabaseURL ?? resolvedGraphDirectory.appendingPathComponent("memory-os.sqlite")
     }
@@ -112,7 +115,8 @@ public struct AppStoragePaths: Sendable, Equatable {
             auditLogsDirectory,
             runtimeLogsDirectory,
             sidecarsDirectory,
-            browserDirectory
+            browserDirectory,
+            searchDirectory
         ]
     }
 
@@ -125,15 +129,15 @@ public struct AppStoragePaths: Sendable, Equatable {
     }
 
     public var nativeSourceSearchDatabaseURL: URL {
-        applicationSupportDirectory
-            .appendingPathComponent("search", isDirectory: true)
-            .appendingPathComponent("native-source-search.sqlite")
+        searchDirectory.appendingPathComponent("native-source-search.sqlite")
     }
 
     public var sessionSearchDatabaseURL: URL {
-        applicationSupportDirectory
-            .appendingPathComponent("search", isDirectory: true)
-            .appendingPathComponent("session-search.sqlite")
+        searchDirectory.appendingPathComponent("session-search.sqlite")
+    }
+
+    public var globalSearchHistoryURL: URL {
+        searchDirectory.appendingPathComponent("global-search-history.json")
     }
 
     public func sessionArtifactDirectories(sessionID: String) -> AgentSessionArtifactDirectories {

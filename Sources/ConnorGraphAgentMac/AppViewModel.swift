@@ -362,6 +362,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
     @Published var globalSearchSelectedItem: GlobalSearchSelectableItem? = .action(.newChat)
     @Published private(set) var globalSearchTimings: [GlobalSearchSectionTiming] = []
+    @Published private(set) var globalSearchHistoryEntries: [GlobalSearchHistoryEntry] = []
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -411,6 +412,9 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailAccountID: MailAccountID?
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
+    @Published var selectedMailMessageSummary: MailMessageSummary?
+    @Published var mailNavigationTargetID: MailMessageID?
+    @Published var mailNavigationMessage: String?
     @Published var mailPreferences: MailPreferences = MailPreferences()
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var mailSyncMessage: String?
@@ -536,6 +540,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
+    private var globalSearchHistoryRepository: AppGlobalSearchHistoryRepository?
     private var globalSearchPreviewTask: Task<Void, Never>?
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
@@ -1070,7 +1075,11 @@ final class AppViewModel: NSObject, ObservableObject {
     func activateGlobalSearchField() {
         isGlobalSearchFieldFocused = true
         let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            isGlobalSearchOverlayPresented = !globalSearchHistoryEntries.isEmpty
+            globalSearchSelectedItem = globalSearchSelectableItems.first
+            return
+        }
         isGlobalSearchOverlayPresented = true
         if globalSearchPreviewState.query != trimmed {
             scheduleGlobalSearchPreview(for: trimmed)
@@ -1078,8 +1087,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func deactivateGlobalSearchField() {
-        isGlobalSearchFieldFocused = false
-        isGlobalSearchOverlayPresented = false
+        finishGlobalSearchInteraction(clearQuery: false)
     }
 
     func updateGlobalSearchQuery(_ query: String) {
@@ -1087,28 +1095,48 @@ final class AppViewModel: NSObject, ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         globalSearchPreviewTask?.cancel()
         guard !trimmed.isEmpty else {
-            isGlobalSearchOverlayPresented = false
             globalSearchPreviewState = .empty
-            globalSearchSelectedItem = .action(.newChat)
+            isGlobalSearchOverlayPresented = isGlobalSearchFieldFocused && !globalSearchHistoryEntries.isEmpty
+            globalSearchSelectedItem = globalSearchSelectableItems.first
             return
         }
         isGlobalSearchOverlayPresented = true
+        globalSearchSelectedItem = .action(.newChat)
         scheduleGlobalSearchPreview(for: trimmed)
     }
 
     func clearGlobalSearch() {
-        globalSearchPreviewTask?.cancel()
-        globalSearchQuery = ""
-        isGlobalSearchOverlayPresented = false
+        finishGlobalSearchInteraction(clearQuery: true)
         globalSearchPreviewState = .empty
         globalSearchSelectedItem = .action(.newChat)
     }
 
-    func dismissGlobalSearchOverlay() {
+    @discardableResult
+    func dismissGlobalSearchOverlay() -> Bool {
+        finishGlobalSearchInteraction(clearQuery: false)
+    }
+
+    @discardableResult
+    private func finishGlobalSearchInteraction(clearQuery: Bool) -> Bool {
+        let wasInteracting = isGlobalSearchOverlayPresented || isGlobalSearchFieldFocused
+        globalSearchPreviewTask?.cancel()
+        globalSearchPreviewTask = nil
+        if clearQuery { globalSearchQuery = "" }
+        isGlobalSearchFieldFocused = false
         isGlobalSearchOverlayPresented = false
+        return wasInteracting
+    }
+
+    private func performAfterGlobalSearchDismiss(_ action: @escaping @MainActor () -> Void) {
+        dismissGlobalSearchOverlay()
+        action()
     }
 
     var globalSearchSelectableItems: [GlobalSearchSelectableItem] {
+        let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty && globalSearchPreviewState == .empty {
+            return globalSearchHistoryEntries.prefix(8).map { .recentSearch($0.id) }
+        }
         var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
         items.append(contentsOf: globalSearchPreviewState.chatSessionResults.map { .chatSession($0.id) })
         items.append(contentsOf: globalSearchPreviewState.calendarResults.map { .nativeResult($0.id) })
@@ -1151,6 +1179,9 @@ final class AppViewModel: NSObject, ObservableObject {
         normalizeGlobalSearchSelection()
         guard let selected = globalSearchSelectedItem else { return }
         switch selected {
+        case .recentSearch(let entryID):
+            guard let entry = globalSearchHistoryEntries.first(where: { $0.id == entryID }) else { return }
+            selectGlobalSearchHistoryEntry(entry)
         case .action(.newChat):
             performGlobalSearchNewChat()
         case .action(.webSearch):
@@ -1167,6 +1198,63 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func selectGlobalSearchHistoryEntry(_ entry: GlobalSearchHistoryEntry) {
+        recordGlobalSearchHistoryIfNeeded(entry.query)
+        updateGlobalSearchQuery(entry.query)
+    }
+
+    func clearGlobalSearchHistory() {
+        do {
+            try globalSearchHistoryRepository?.clear()
+        } catch {
+            // Search history is a convenience feature; failing to clear persistence
+            // should not interrupt the foreground search interaction.
+        }
+        globalSearchHistoryEntries = []
+        globalSearchSelectedItem = nil
+        if globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isGlobalSearchOverlayPresented = false
+        }
+    }
+
+    func recordGlobalSearchHistoryForTesting(query: String) {
+        recordGlobalSearchHistoryIfNeeded(query)
+    }
+
+    private func recordGlobalSearchHistoryIfNeeded(_ query: String) {
+        let displayQuery = AppGlobalSearchHistoryRepository.displayQuery(for: query)
+        guard !displayQuery.isEmpty else { return }
+        if let globalSearchHistoryRepository {
+            if let entries = try? globalSearchHistoryRepository.record(query: displayQuery) {
+                globalSearchHistoryEntries = entries
+                return
+            }
+        }
+        let normalizedQuery = AppGlobalSearchHistoryRepository.normalizedQuery(for: displayQuery)
+        guard !normalizedQuery.isEmpty else { return }
+        if let existingIndex = globalSearchHistoryEntries.firstIndex(where: { $0.normalizedQuery == normalizedQuery }) {
+            var entry = globalSearchHistoryEntries.remove(at: existingIndex)
+            entry.query = displayQuery
+            entry.searchedAt = Date()
+            entry.useCount += 1
+            globalSearchHistoryEntries.insert(entry, at: 0)
+        } else {
+            globalSearchHistoryEntries.insert(
+                GlobalSearchHistoryEntry(
+                    id: normalizedQuery,
+                    query: displayQuery,
+                    normalizedQuery: normalizedQuery,
+                    searchedAt: Date(),
+                    useCount: 1
+                ),
+                at: 0
+            )
+        }
+        if globalSearchHistoryEntries.count > 20 {
+            globalSearchHistoryEntries = Array(globalSearchHistoryEntries.prefix(20))
+        }
+    }
+
     private func scheduleGlobalSearchPreview(for query: String) {
         globalSearchPreviewTask?.cancel()
         if globalSearchPreviewState == .empty {
@@ -1180,6 +1268,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func refreshGlobalSearchPreview(for query: String) async {
+        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let tokens = globalSearchDisplayTokens(for: trimmed)
@@ -1187,6 +1276,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let chatStartedAt = Date()
         let chatSessionResults = await searchChatSessions(query: trimmed, limit: 3)
         recordGlobalSearchTiming(query: trimmed, section: "chatSessions", startedAt: chatStartedAt, returnedCount: chatSessionResults.count, backend: sessionSearchIndexService == nil ? "fallback-scan" : "session-fts")
+        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
         guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
 
         globalSearchPreviewState = GlobalSearchPreviewState(
@@ -1214,6 +1304,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
 
         for kind in NativeSearchSourceKind.allCases {
+            guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
             let startedAt = Date()
             let limit = limitsBySource[kind] ?? 3
@@ -1228,6 +1319,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func refreshIndexedGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int], backend: any NativeSourceSearchBackend) async {
+        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
         let health = await backend.health()
         applyGlobalSearchNativeHealth(health, query: query, tokens: tokens)
         let coordinator = GlobalSearchPreviewCoordinator(
@@ -1236,6 +1328,7 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage: Self.userFacingGlobalSearchErrorMessage(for:)
         )
         for await sectionResult in coordinator.previewResults(query: query, limitsBySource: limitsBySource) {
+            guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
             globalSearchTimings.append(sectionResult.timing)
             applyGlobalSearchNativeSectionResult(
@@ -1264,6 +1357,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func applyGlobalSearchNativeHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String]) {
+        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
         guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
         var state = globalSearchPreviewState
         state.query = query
@@ -1292,6 +1386,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func applyGlobalSearchNativeSectionResult(_ sectionResult: GlobalSearchNativeSectionResult, query: String, tokens: [String]) {
+        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
         var state = globalSearchPreviewState
         state.query = query
         state.searchTokens = tokens
@@ -1575,7 +1670,10 @@ final class AppViewModel: NSObject, ObservableObject {
     func performGlobalSearchNewChat() {
         let prompt = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
-        clearGlobalSearch()
+        recordGlobalSearchHistoryIfNeeded(prompt)
+        finishGlobalSearchInteraction(clearQuery: true)
+        globalSearchPreviewState = .empty
+        globalSearchSelectedItem = .action(.newChat)
         newChatSession()
         selection = .agentChat
         Task { @MainActor in
@@ -1595,22 +1693,34 @@ final class AppViewModel: NSObject, ObservableObject {
         let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
         guard let url = defaultSearchURL(for: query) else { return }
-        dismissGlobalSearchOverlay()
-        openURLInCurrentChatBrowser(url)
+        recordGlobalSearchHistoryIfNeeded(query)
+        performAfterGlobalSearchDismiss { [self] in
+            openURLInCurrentChatBrowser(url)
+        }
     }
 
     func openGlobalSearchBrowserHistoryResult(_ record: BrowserHistoryRecord) {
-        dismissGlobalSearchOverlay()
-        navigateToHistoryRecord(record)
+        performAfterGlobalSearchDismiss { [self] in
+            navigateToHistoryRecord(record)
+        }
     }
 
     func openGlobalSearchChatSessionResult(_ sessionID: String) {
-        selection = .agentChat
-        dismissGlobalSearchOverlay()
-        selectChatSession(sessionID)
+        recordGlobalSearchHistoryIfNeeded(globalSearchQuery)
+        performAfterGlobalSearchDismiss { [self] in
+            selection = .agentChat
+            selectChatSession(sessionID)
+        }
     }
 
     func openGlobalSearchResult(_ result: NativeSearchResult) {
+        recordGlobalSearchHistoryIfNeeded(globalSearchQuery)
+        performAfterGlobalSearchDismiss { [self] in
+            openGlobalSearchResultAfterDismiss(result)
+        }
+    }
+
+    private func openGlobalSearchResultAfterDismiss(_ result: NativeSearchResult) {
         switch result.sourceKind {
         case .calendar:
             selection = .calendar
@@ -1632,28 +1742,79 @@ final class AppViewModel: NSObject, ObservableObject {
                 showBrowserWorkspace()
             }
         }
-        dismissGlobalSearchOverlay()
     }
 
     private func openGlobalSearchMailResult(_ result: NativeSearchResult) {
         selection = .mail
         mailSearchQuery = ""
-        let messageID = MailMessageID(rawValue: result.externalID)
-        if let message = mailBrowserPresentation.message(id: messageID) {
+        guard let messageID = mailMessageID(from: result) else {
+            mailSyncMessage = "无法打开这封邮件：搜索结果缺少有效 messageID。"
+            return
+        }
+        if let message = mailBrowserPresentation.message(id: messageID) ?? mailBrowserPresentationMessageMatchingLegacySearchID(messageID) {
             selectMailMessage(message)
             return
         }
 
         selectedMailMessageID = messageID
+        mailNavigationTargetID = messageID
+        mailNavigationMessage = "正在打开搜索结果中的邮件…"
         Task { @MainActor in
             await loadAndSelectMailMessageIfNeeded(messageID)
         }
+    }
+
+    /// Normalize a mail message ID to match legacy search-index formats.
+    /// Older indexes may store IDs with a `mail-` prefix and replace account separators
+    /// such as `_`, `@`, and `.` with `-` (for example:
+    /// `yakii_d@icloud.com-INBOX-123` → `mail-yakii-d-icloud-com-INBOX-123`).
+    static func normalizeMailIDForSearchIndex(_ rawID: String) -> String {
+        var value = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("mail:") { value = String(value.dropFirst("mail:".count)) }
+        if value.hasPrefix("mail-") { value = String(value.dropFirst("mail-".count)) }
+        return value
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: "@", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+    }
+
+    private func mailMessageID(from result: NativeSearchResult) -> MailMessageID? {
+        let raw = result.externalID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if raw.hasPrefix("mail:") {
+            let unprefixed = String(raw.dropFirst("mail:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !unprefixed.isEmpty else { return nil }
+            return MailMessageID(rawValue: unprefixed)
+        }
+        return MailMessageID(rawValue: raw)
+    }
+
+    private func mailBrowserPresentationMessageMatchingLegacySearchID(_ messageID: MailMessageID) -> MailMessageSummary? {
+        let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
+        return mailBrowserPresentation.messages.first { message in
+            Self.normalizeMailIDForSearchIndex(message.id.rawValue) == normalizedLookup
+        }
+    }
+
+    func selectMailMessageFromList(_ message: MailMessageSummary) {
+        selectMailMessage(message)
+    }
+
+    func selectedMailMessageForDetail() -> MailMessageSummary? {
+        if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
+            return message
+        }
+        guard selectedMailMessageSummary?.id == selectedMailMessageID else { return nil }
+        return selectedMailMessageSummary
     }
 
     private func selectMailMessage(_ message: MailMessageSummary) {
         selectedMailAccountID = message.accountID
         selectedMailMailboxID = message.mailboxID
         selectedMailMessageID = message.id
+        selectedMailMessageSummary = message
+        mailNavigationTargetID = nil
+        mailNavigationMessage = nil
     }
 
     private func loadAndSelectMailMessageIfNeeded(_ messageID: MailMessageID) async {
@@ -1662,9 +1823,21 @@ final class AppViewModel: NSObject, ObservableObject {
             selectMailMessage(message)
             return
         }
+        // Fallback: legacy search indexes may store slugified IDs that differ from
+        // the original message IDs in the mail database. Walk the in-memory
+        // presentation to find a match by comparing normalized forms.
+        let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
+        if let message = mailBrowserPresentationMessageMatchingLegacySearchID(messageID) {
+            selectMailMessage(message)
+            return
+        }
         do {
             guard let detail = try await mailStore?.message(id: messageID) else {
-                mailSyncMessage = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
+                let message = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
+                NSLog("[Connor.Mail] message not found in store: id=%@, normalized=%@, presentationCount=%d", messageID.rawValue, normalizedLookup, mailBrowserPresentation.messages.count)
+                mailSyncMessage = message
+                mailNavigationMessage = message
+                mailNavigationTargetID = nil
                 return
             }
             selectMailMessage(detail.summary)
@@ -1673,35 +1846,42 @@ final class AppViewModel: NSObject, ObservableObject {
                 selectMailMessage(message)
             }
             mailSyncMessage = nil
+            mailNavigationTargetID = nil
+            mailNavigationMessage = nil
         } catch {
-            mailSyncMessage = "无法打开这封邮件：\(error.localizedDescription)"
+            let message = "无法打开这封邮件：\(error.localizedDescription)"
+            NSLog("[Connor.Mail] failed to load message: id=%@, error=%@", messageID.rawValue, error.localizedDescription)
+            mailSyncMessage = message
+            mailNavigationMessage = message
+            mailNavigationTargetID = nil
         }
     }
 
     func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
         let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch kind {
-        case .chatSessions:
-            sessionSearchQuery = query
-            isBrowserVisible = false
-            selection = .agentChat
-        case .calendar:
-            calendarSearchQuery = query
-            selection = .calendar
-        case .rss:
-            rssSearchQuery = query
-            selection = .rss
-        case .mail:
-            mailSearchQuery = query
-            selection = .mail
-        case .browserHistory:
-            browserHistorySearchQuery = query
-            isBrowserHistoryPanelVisible = true
-            showBrowserWorkspace()
-            loadBrowserHistory()
-            filterBrowserHistory(query: browserHistorySearchQuery)
+        performAfterGlobalSearchDismiss { [self] in
+            switch kind {
+            case .chatSessions:
+                sessionSearchQuery = query
+                isBrowserVisible = false
+                selection = .agentChat
+            case .calendar:
+                calendarSearchQuery = query
+                selection = .calendar
+            case .rss:
+                rssSearchQuery = query
+                selection = .rss
+            case .mail:
+                mailSearchQuery = query
+                selection = .mail
+            case .browserHistory:
+                browserHistorySearchQuery = query
+                isBrowserHistoryPanelVisible = true
+                showBrowserWorkspace()
+                loadBrowserHistory()
+                filterBrowserHistory(query: browserHistorySearchQuery)
+            }
         }
-        dismissGlobalSearchOverlay()
     }
 
     func mailListMessages(direction: MailMessageDirectionFilter = .all) -> [MailMessageSummary] {
@@ -2099,6 +2279,9 @@ final class AppViewModel: NSObject, ObservableObject {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
             self.sessionSearchIndexService = try? SessionSearchIndexService(databaseURL: storagePaths.sessionSearchDatabaseURL)
+            let globalSearchHistoryRepository = AppGlobalSearchHistoryRepository(historyURL: storagePaths.globalSearchHistoryURL)
+            self.globalSearchHistoryRepository = globalSearchHistoryRepository
+            self.globalSearchHistoryEntries = (try? globalSearchHistoryRepository.load()) ?? []
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
@@ -2118,7 +2301,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 .appendingPathComponent("person-profiles.sqlite")
             self.personProfileStore = try? SQLitePersonProfileStore(databaseURL: personProfilesDatabaseURL)
             self.personRelationshipStore = try? SQLitePersonRelationshipStore(databaseURL: personProfilesDatabaseURL)
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
             self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
         if let repository {
@@ -2805,8 +2988,14 @@ final class AppViewModel: NSObject, ObservableObject {
             if selectedMailMailboxID == nil || mailBrowserPresentation.mailbox(id: selectedMailMailboxID) == nil {
                 selectedMailMailboxID = mailBrowserPresentation.defaultMailboxID(for: selectedMailAccountID)
             }
-            if selectedMailMessageID == nil || mailBrowserPresentation.message(id: selectedMailMessageID) == nil {
-                selectedMailMessageID = mailBrowserPresentation.defaultMessageID(accountID: selectedMailAccountID, mailboxID: selectedMailMailboxID)
+            if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
+                selectedMailMessageSummary = message
+            } else {
+                let hasSelectedSummaryFallback = selectedMailMessageSummary?.id == selectedMailMessageID
+                if selectedMailMessageID == nil || !hasSelectedSummaryFallback {
+                    selectedMailMessageID = mailBrowserPresentation.defaultMessageID(accountID: selectedMailAccountID, mailboxID: selectedMailMailboxID)
+                    selectedMailMessageSummary = mailBrowserPresentation.message(id: selectedMailMessageID)
+                }
             }
             errorMessage = nil
         } catch {
@@ -2850,13 +3039,13 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             guard !Task.isCancelled else { return .loading }
             if MailBodyOnDemandFetchPlanner.hasDisplayableBody(detail) {
-                return MailBodyDisplayPresentation(detail: detail)
+                return await MailBodyDisplayPresentation.preparing(detail: detail)
             }
             do {
                 try Task.checkCancellation()
                 let fetched = try await fetchAndCacheMailBodyIfNeeded(detail)
                 try Task.checkCancellation()
-                return MailBodyDisplayPresentation(detail: fetched)
+                return await MailBodyDisplayPresentation.preparing(detail: fetched)
             } catch is CancellationError {
                 return .loading
             } catch {
