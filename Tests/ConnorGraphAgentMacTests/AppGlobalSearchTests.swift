@@ -201,6 +201,23 @@ struct AppGlobalSearchTests {
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
+    @Test func openingMailSearchResultShowsLocatingStateWhileLoadingFromStore() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "locating-mail-target", subject: "正在定位的搜索邮件")
+        fixture.viewModel.mailBrowserPresentation = .empty
+        fixture.viewModel.isGlobalSearchOverlayPresented = true
+
+        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailNavigationTargetID == mail.summary.id)
+        #expect(fixture.viewModel.mailNavigationMessage == "正在打开搜索结果中的邮件…")
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
     @Test func openingMailSearchResultLoadsMessageFromStoreWhenPresentationIsStale() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
