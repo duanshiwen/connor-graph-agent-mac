@@ -63,6 +63,28 @@ struct NativeMailBrowserPresentationTests {
         #expect(presentation.messages(accountID: nil, mailboxID: nil, query: "", direction: .sent).map { $0.id.rawValue } == ["sent-message"])
     }
 
+    @Test func unqueriedDirectionMessagesUseCachedNewestFirstLists() {
+        let accountID = MailAccountID(rawValue: "account")
+        let inboxID = MailMailboxID(rawValue: "inbox")
+        let sentID = MailMailboxID(rawValue: "sent")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Test Mail", identities: [])
+        let inbox = MailMailbox(id: inboxID, accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
+        let sent = MailMailbox(id: sentID, accountID: accountID, name: "Sent", path: "Sent", role: .sent)
+        let olderReceived = Self.makeMessage(id: "received-older", accountID: accountID, mailboxID: inboxID, date: Date(timeIntervalSince1970: 100), subject: "Received")
+        let newerReceived = Self.makeMessage(id: "received-newer", accountID: accountID, mailboxID: inboxID, date: Date(timeIntervalSince1970: 300), subject: "Received")
+        let sentMessage = Self.makeMessage(id: "sent-message", accountID: accountID, mailboxID: sentID, date: Date(timeIntervalSince1970: 200), subject: "Sent")
+
+        let presentation = NativeMailBrowserPresentation(
+            accounts: [account],
+            mailboxes: [inbox, sent],
+            messages: [olderReceived, sentMessage, newerReceived]
+        )
+
+        #expect(presentation.unqueriedMessages(direction: .all).map { $0.id.rawValue } == ["received-newer", "sent-message", "received-older"])
+        #expect(presentation.unqueriedMessages(direction: .received).map { $0.id.rawValue } == ["received-newer", "received-older"])
+        #expect(presentation.unqueriedMessages(direction: .sent).map { $0.id.rawValue } == ["sent-message"])
+    }
+
     private static func makeMessage(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String) -> MailMessageSummary {
         MailMessageSummary(
             id: MailMessageID(rawValue: id),

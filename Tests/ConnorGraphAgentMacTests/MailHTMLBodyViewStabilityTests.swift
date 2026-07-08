@@ -20,6 +20,58 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(secondDecision)
     }
 
+    @Test func sameHTMLRenderIdentityDoesNotRequestReload() {
+        var state = MailHTMLBodyLoadState()
+        let identity = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p>Hello</p>",
+            allowsRemoteImages: false
+        )
+
+        let firstDecision = state.shouldReload(identity: identity)
+        let secondDecision = state.shouldReload(identity: identity)
+        #expect(firstDecision)
+        #expect(!secondDecision)
+    }
+
+    @Test func changedRemoteImagePolicyRequestsReload() {
+        var state = MailHTMLBodyLoadState()
+        let blocked = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p><img src=\"https://example.com/a.png\"></p>",
+            allowsRemoteImages: false
+        )
+        let allowed = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p><img src=\"https://example.com/a.png\"></p>",
+            allowsRemoteImages: true
+        )
+
+        let firstDecision = state.shouldReload(identity: blocked)
+        let secondDecision = state.shouldReload(identity: allowed)
+        #expect(firstDecision)
+        #expect(secondDecision)
+    }
+
+    @Test func changedMessageIDRequestsReloadEvenForSameHTML() {
+        var state = MailHTMLBodyLoadState()
+        let first = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p>Hello</p>",
+            allowsRemoteImages: false
+        )
+        let second = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-b"),
+            html: "<p>Hello</p>",
+            allowsRemoteImages: false
+        )
+
+        let firstDecision = state.shouldReload(identity: first)
+        let secondDecision = state.shouldReload(identity: second)
+        #expect(firstDecision)
+        #expect(secondDecision)
+    }
+
     @Test func layoutStabilizerIgnoresTinyDeltas() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
         let current = MailHTMLBodyLayout(mode: .inline, height: 300, documentHeight: 286)
@@ -40,11 +92,11 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 512, documentHeight: 500))
     }
 
-    @Test func layoutStabilizerKeepsLongHTMLInlineForPageScrolling() {
+    @Test func layoutStabilizerCapsLongHTMLWithScrollableViewport() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
         let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 500)
         let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 20_000)
-        #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 20_012, documentHeight: 20_000))
+        #expect(layout == MailHTMLBodyLayout(mode: .scrollable, height: 640, documentHeight: 20_000))
     }
 
     @Test func layoutStabilizerKeepsBoundaryHTMLInline() {
@@ -59,6 +111,25 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(layout.mode == .inline)
         #expect(abs(layout.height - stabilizer.inlineHeightLimit) < 0.001)
         #expect(abs(layout.documentHeight - boundaryHeight) < 0.001)
+    }
+
+    @Test func scrollableLongHTMLDoesNotNeedFollowUpHeightMeasurements() {
+        let stabilizer = MailHTMLBodyHeightStabilizer()
+        let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 500)
+        let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 20_000)
+        guard let layout else {
+            Issue.record("Expected long HTML to switch to scrollable layout")
+            return
+        }
+
+        #expect(!stabilizer.shouldScheduleFollowUpMeasurements(after: layout))
+    }
+
+    @Test func inlineHTMLCanUseFollowUpHeightMeasurements() {
+        let stabilizer = MailHTMLBodyHeightStabilizer()
+        let layout = MailHTMLBodyLayout(mode: .inline, height: 512, documentHeight: 500)
+
+        #expect(stabilizer.shouldScheduleFollowUpMeasurements(after: layout))
     }
 
     @Test func mailBodyLoadGateRejectsStaleMessageResult() {

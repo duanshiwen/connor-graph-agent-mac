@@ -1,7 +1,15 @@
 import SwiftUI
 import WebKit
+import os
 import ConnorGraphCore
 import ConnorGraphAppSupport
+
+private let mailBodyRenderingLogger = Logger(subsystem: AppPerformanceLog.subsystem, category: "MailBodyRendering")
+
+private func mailBodyDurationMilliseconds(from start: ContinuousClock.Instant) -> Double {
+    let elapsed = start.duration(to: ContinuousClock.now)
+    return Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+}
 
 struct MailBodyDisplayPresentation: Equatable {
     enum Kind: Equatable {
@@ -639,12 +647,33 @@ struct MailHTMLSanitizationRequest: Equatable {
     }
 }
 
+struct MailHTMLBodyRenderIdentity: Equatable {
+    var messageID: MailMessageID
+    var htmlFingerprint: Int
+    var htmlLength: Int
+    var allowsRemoteImages: Bool
+
+    init(messageID: MailMessageID, html: String, allowsRemoteImages: Bool) {
+        self.messageID = messageID
+        htmlFingerprint = html.hashValue
+        htmlLength = html.count
+        self.allowsRemoteImages = allowsRemoteImages
+    }
+}
+
 struct MailHTMLBodyLoadState: Equatable {
     private(set) var lastLoadedHTML: String?
+    private(set) var lastLoadedIdentity: MailHTMLBodyRenderIdentity?
 
     mutating func shouldReload(html: String) -> Bool {
         guard lastLoadedHTML != html else { return false }
         lastLoadedHTML = html
+        return true
+    }
+
+    mutating func shouldReload(identity: MailHTMLBodyRenderIdentity) -> Bool {
+        guard lastLoadedIdentity != identity else { return false }
+        lastLoadedIdentity = identity
         return true
     }
 }
@@ -702,15 +731,28 @@ struct MailHTMLBodyHeightStabilizer: Equatable {
 
     func stabilizedLayout(current: MailHTMLBodyLayout, measuredDocumentHeight: CGFloat) -> MailHTMLBodyLayout? {
         let padded = measuredDocumentHeight + bottomPadding
-        let next = MailHTMLBodyLayout(
-            mode: .inline,
-            height: max(padded, minimumHeight),
-            documentHeight: measuredDocumentHeight
-        )
+        let next: MailHTMLBodyLayout
+        if padded > inlineHeightLimit {
+            next = MailHTMLBodyLayout(
+                mode: .scrollable,
+                height: scrollableViewportHeight,
+                documentHeight: measuredDocumentHeight
+            )
+        } else {
+            next = MailHTMLBodyLayout(
+                mode: .inline,
+                height: max(padded, minimumHeight),
+                documentHeight: measuredDocumentHeight
+            )
+        }
         guard next.mode != current.mode
             || abs(next.height - current.height) >= significantDelta
             || abs(next.documentHeight - current.documentHeight) >= significantDelta else { return nil }
         return next
+    }
+
+    func shouldScheduleFollowUpMeasurements(after layout: MailHTMLBodyLayout) -> Bool {
+        layout.mode == .inline
     }
 }
 
@@ -729,6 +771,7 @@ private final class MailHTMLPassthroughScrollWebView: WKWebView {
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
+    var renderIdentity: MailHTMLBodyRenderIdentity
     var scrollPolicy: MailHTMLBodyScrollPolicy
     @Binding var layout: MailHTMLBodyLayout
 
@@ -753,15 +796,16 @@ private struct MailHTMLBodyView: NSViewRepresentable {
     func updateNSView(_ nsView: MailHTMLPassthroughScrollWebView, context: Context) {
         context.coordinator.layout = $layout
         configureScrolling(for: nsView)
-        guard context.coordinator.shouldReload(html: htmlContent) else { return }
+        guard context.coordinator.shouldReload(identity: renderIdentity) else { return }
         nsView.isHidden = true
         nsView.loadHTMLString(htmlContent, baseURL: nil)
     }
 
     private func configureScrolling(for view: MailHTMLPassthroughScrollWebView) {
-        view.forwardsScrollWheelToParent = scrollPolicy.forwardsWheelEventsToParent
-        view.enclosingScrollView?.hasVerticalScroller = scrollPolicy.isInternalScrollingEnabled
-        view.enclosingScrollView?.verticalScrollElasticity = scrollPolicy.isInternalScrollingEnabled ? .automatic : .none
+        let usesInternalScrolling = layout.mode == .scrollable || scrollPolicy.isInternalScrollingEnabled
+        view.forwardsScrollWheelToParent = !usesInternalScrolling && scrollPolicy.forwardsWheelEventsToParent
+        view.enclosingScrollView?.hasVerticalScroller = usesInternalScrolling
+        view.enclosingScrollView?.verticalScrollElasticity = usesInternalScrolling ? .automatic : .none
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
@@ -769,34 +813,43 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         private var loadState = MailHTMLBodyLoadState()
         private let heightStabilizer = MailHTMLBodyHeightStabilizer()
         private var measurementGeneration = 0
+        private var loadStartedAt: ContinuousClock.Instant?
 
         init(layout: Binding<MailHTMLBodyLayout>) {
             self.layout = layout
         }
 
-        func shouldReload(html: String) -> Bool {
-            guard loadState.shouldReload(html: html) else { return false }
+        func shouldReload(identity: MailHTMLBodyRenderIdentity) -> Bool {
+            guard loadState.shouldReload(identity: identity) else { return false }
             measurementGeneration += 1
+            loadStartedAt = ContinuousClock.now
+            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) messageID=\(identity.messageID.rawValue, privacy: .public) htmlLength=\(identity.htmlLength, privacy: .public) allowsRemoteImages=\(identity.allowsRemoteImages, privacy: .public)")
             return true
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webView.isHidden = false
+            if let loadStartedAt {
+                let milliseconds = mailBodyDurationMilliseconds(from: loadStartedAt)
+                mailBodyRenderingLogger.info("mailBody.webView.didFinish generation=\(self.measurementGeneration, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+            }
             scheduleHeightMeasurements(for: webView, generation: measurementGeneration)
         }
 
         private func scheduleHeightMeasurements(for webView: WKWebView, generation: Int) {
-            measureHeight(of: webView, generation: generation)
-            for delayNanoseconds in [150_000_000, 400_000_000, 900_000_000] {
-                Task { @MainActor [weak self, weak webView] in
-                    try? await Task.sleep(nanoseconds: UInt64(delayNanoseconds))
-                    guard let self, let webView else { return }
-                    self.measureHeight(of: webView, generation: generation)
+            measureHeight(of: webView, generation: generation) { [weak self, weak webView] shouldContinue in
+                guard shouldContinue else { return }
+                for delayNanoseconds in [250_000_000, 700_000_000] {
+                    Task { @MainActor [weak self, weak webView] in
+                        try? await Task.sleep(nanoseconds: UInt64(delayNanoseconds))
+                        guard let self, let webView else { return }
+                        self.measureHeight(of: webView, generation: generation)
+                    }
                 }
             }
         }
 
-        private func measureHeight(of webView: WKWebView, generation: Int) {
+        private func measureHeight(of webView: WKWebView, generation: Int, completion: ((Bool) -> Void)? = nil) {
             let script = """
             Math.max(
                 document.body ? document.body.scrollHeight : 0,
@@ -807,10 +860,22 @@ private struct MailHTMLBodyView: NSViewRepresentable {
             webView.evaluateJavaScript(script) { [weak self] value, _ in
                 guard let self else { return }
                 Task { @MainActor in
-                    guard generation == self.measurementGeneration else { return }
-                    guard let numericHeight = Self.numericHeight(from: value) else { return }
-                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: self.layout.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
+                    guard generation == self.measurementGeneration else {
+                        completion?(false)
+                        return
+                    }
+                    guard let numericHeight = Self.numericHeight(from: value) else {
+                        completion?(false)
+                        return
+                    }
+                    let currentLayout = self.layout.wrappedValue
+                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: currentLayout, measuredDocumentHeight: numericHeight) else {
+                        completion?(self.heightStabilizer.shouldScheduleFollowUpMeasurements(after: currentLayout))
+                        return
+                    }
+                    mailBodyRenderingLogger.info("mailBody.webView.height generation=\(generation, privacy: .public) measured=\(numericHeight, privacy: .public) oldMode=\(String(describing: currentLayout.mode), privacy: .public) oldHeight=\(currentLayout.height, privacy: .public) newMode=\(String(describing: stabilized.mode), privacy: .public) newHeight=\(stabilized.height, privacy: .public)")
                     self.layout.wrappedValue = stabilized
+                    completion?(self.heightStabilizer.shouldScheduleFollowUpMeasurements(after: stabilized))
                 }
             }
         }
@@ -865,6 +930,11 @@ private struct MailMessageDetailPane: View {
                             }
                             MailHTMLBodyView(
                                 htmlContent: prepared.html,
+                                renderIdentity: MailHTMLBodyRenderIdentity(
+                                    messageID: message.id,
+                                    html: prepared.html,
+                                    allowsRemoteImages: allowRemoteImagesForMessage
+                                ),
                                 scrollPolicy: .pageScrolling,
                                 layout: $bodyWebLayout
                             )
@@ -900,6 +970,8 @@ private struct MailMessageDetailPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
+            let startedAt = ContinuousClock.now
+            mailBodyRenderingLogger.info("mailBody.load.start messageID=\(token.messageID.rawValue, privacy: .public)")
             allowRemoteImagesForMessage = false
             preparedHTMLBody = nil
             bodyWebLayout = .initial
@@ -908,6 +980,8 @@ private struct MailMessageDetailPane: View {
             let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
+            let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
+            mailBodyRenderingLogger.info("mailBody.load.end messageID=\(token.messageID.rawValue, privacy: .public) kind=\(String(describing: display.kind), privacy: .public) htmlLength=\(display.html?.count ?? 0, privacy: .public) textLength=\(display.text.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             bodyDisplay = display
         }
         .task(id: htmlSanitizationRequest) {
@@ -920,11 +994,15 @@ private struct MailMessageDetailPane: View {
             preparedHTMLBody = nil
             bodyWebLayout = .initial
             let policy = MailHTMLDisplayPolicy(remoteContentMode: request.allowsRemoteImages ? .allowForMessage : .block)
+            let startedAt = ContinuousClock.now
+            mailBodyRenderingLogger.info("mailBody.sanitize.start messageID=\(request.messageID.rawValue, privacy: .public) htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
             let result = await Task.detached(priority: .userInitiated) {
                 MailHTMLBodySanitizer().prepareHTML(html, policy: policy)
             }.value
             guard !Task.isCancelled else { return }
             guard htmlSanitizationRequest == request else { return }
+            let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
+            mailBodyRenderingLogger.info("mailBody.sanitize.end messageID=\(request.messageID.rawValue, privacy: .public) outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             preparedHTMLBody = MailPreparedHTMLBodyPresentation(result)
         }
     }

@@ -1885,7 +1885,11 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func mailListMessages(direction: MailMessageDirectionFilter = .all) -> [MailMessageSummary] {
-        mailBrowserPresentation.messages(accountID: nil, mailboxID: nil, query: mailSearchQuery, direction: direction)
+        let query = mailSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return mailBrowserPresentation.unqueriedMessages(direction: direction)
+        }
+        return mailBrowserPresentation.messages(accountID: nil, mailboxID: nil, query: query, direction: direction)
     }
 
     private func rebuildCalendarSearchIndexIfNeeded() async throws {
