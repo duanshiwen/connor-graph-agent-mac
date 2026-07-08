@@ -289,8 +289,16 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         let mailboxRows = try querySQL("SELECT raw_json FROM mail_mailboxes ORDER BY path COLLATE NOCASE")
         let mailboxes = try mailboxRows.map { try decoder.decode(MailMailbox.self, from: Data($0[0].utf8)) }
         let messageRows = try querySQL("SELECT raw_json FROM mail_messages ORDER BY date DESC")
-        let messages = try messageRows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)).summary }
+        let details = try messageRows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)) }
+        try await repairSearchIndexIfNeeded(details: details)
+        let messages = details.map(\.summary)
         return NativeMailBrowserPresentation(accounts: accounts, mailboxes: mailboxes, messages: messages)
+    }
+
+    public func repairSearchIndexIfNeeded() async throws {
+        let ids = try allStoredMessageIDs()
+        let details = try loadMessageByIDs(ids.map(MailMessageID.init(rawValue:)))
+        try await repairSearchIndexIfNeeded(details: details)
     }
 
     // MARK: - Private Helpers
@@ -319,7 +327,49 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
     }
 
     private func primeSearchIndexIfNeeded(details: [MailMessageDetail]) async throws {
+        guard searchService != nil, !hasPrimedSearchIndex else { return }
+        try await rebuildSearchIndex(details: details)
+    }
+
+    private func repairSearchIndexIfNeeded(details: [MailMessageDetail]) async throws {
         guard let searchService, !hasPrimedSearchIndex else { return }
+        guard !details.isEmpty else {
+            hasPrimedSearchIndex = true
+            try await searchService.deleteBySource(kind: .mail, sourceInstanceID: nil)
+            return
+        }
+
+        let health = await searchService.health()
+        let indexedCount = health.documentCountBySource[.mail] ?? 0
+        guard indexedCount > 0 else {
+            try await rebuildSearchIndex(details: details)
+            return
+        }
+
+        let expectedIDs = Set(details.map { $0.id.rawValue })
+        let sampleLimit = min(50, max(1, indexedCount))
+        let sampleResults = try await searchService.search(NativeSearchQuery(
+            text: "",
+            sourceKinds: [.mail],
+            temporalSort: .timeDescThenRelevance,
+            limit: sampleLimit,
+            rankingProfile: .recentFirst
+        ))
+        let matchedSampleCount = sampleResults.reduce(into: 0) { count, result in
+            if expectedIDs.contains(result.externalID) { count += 1 }
+        }
+        let hasBadSample = !sampleResults.isEmpty && matchedSampleCount * 2 < sampleResults.count
+        let hasLargeCountMismatch = abs(indexedCount - details.count) > max(10, details.count / 5)
+        guard hasBadSample || hasLargeCountMismatch else {
+            hasPrimedSearchIndex = true
+            return
+        }
+
+        try await rebuildSearchIndex(details: details)
+    }
+
+    private func rebuildSearchIndex(details: [MailMessageDetail]) async throws {
+        guard let searchService else { return }
         try await searchService.rebuildSource(kind: .mail, sourceInstanceID: nil, documents: details.map(NativeSourceSearchAdapters.mailDocument(from:)))
         hasPrimedSearchIndex = true
     }
