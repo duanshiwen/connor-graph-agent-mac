@@ -360,7 +360,12 @@ struct MailSourceDetailView: View {
                 MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
-                MailDetailEmptyState(onAdd: { viewModel.presentAddMailAccountSheet() })
+                MailDetailEmptyState(
+                    state: viewModel.mailNavigationTargetID == nil ? .idle : .locating,
+                    message: viewModel.mailNavigationMessage,
+                    hasAccounts: !presentation.accounts.isEmpty,
+                    onAdd: { viewModel.presentAddMailAccountSheet() }
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -492,28 +497,115 @@ private struct MailSettingsAccountRow: View {
 }
 
 private struct MailDetailEmptyState: View {
+    enum State: Equatable {
+        case idle
+        case locating
+    }
+
+    var state: State = .idle
+    var message: String?
+    var hasAccounts: Bool = false
     var onAdd: () -> Void
 
     var body: some View {
-        VStack(spacing: AppShellLayout.spaceM) {
-            Image(systemName: "envelope.open")
-                .font(.system(size: 42, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
-            Text("选择一封邮件")
-                .font(AgentChatTypography.title)
-            Text("从左侧邮件列表选择邮件查看详情，或添加新的 IMAP/SMTP 账户开始同步。")
-                .font(AgentChatTypography.meta)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
-            Button(action: onAdd) {
-                Label("添加邮件账户", systemImage: "plus")
+        ZStack {
+            LinearGradient(
+                colors: [Color.accentColor.opacity(0.035), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: AppShellLayout.spaceM) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
+                    Image(systemName: iconName)
+                        .font(.system(size: 42, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 82, height: 82)
+                .overlay(alignment: .bottomTrailing) {
+                    if state == .locating {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(7)
+                            .background(Color(nsColor: .windowBackgroundColor), in: Circle())
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    Text(title)
+                        .font(AgentChatTypography.title)
+                        .foregroundStyle(.primary)
+                    Text(description)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 420)
+                }
+
+                HStack(spacing: 10) {
+                    Button(action: onAdd) {
+                        Label("添加邮件账户", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("添加 IMAP/SMTP 邮件账户")
+                    .accessibilityLabel("添加邮件账户")
+
+                    if hasAccounts && state == .idle {
+                        Text("也可以从左侧列表或全局搜索打开邮件")
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
-            .buttonStyle(.bordered)
+            .padding(.horizontal, AppShellLayout.spaceXL)
+            .padding(.vertical, 34)
+            .frame(maxWidth: 520)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.06), radius: 22, x: 0, y: 10)
+            .padding(AppShellLayout.spaceXL)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(AppShellLayout.spaceXL)
+    }
+
+    private var iconName: String {
+        switch state {
+        case .idle: hasAccounts ? "envelope.open" : "envelope.badge"
+        case .locating: "envelope.badge.magnifyingglass"
+        }
+    }
+
+    private var title: String {
+        switch state {
+        case .idle: hasAccounts ? "选择一封邮件" : "连接你的邮箱"
+        case .locating: "正在打开邮件"
+        }
+    }
+
+    private var description: String {
+        if let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return message
+        }
+        switch state {
+        case .idle:
+            return hasAccounts
+                ? "从左侧邮件列表选择邮件查看详情，或用全局搜索直接定位到本地缓存中的邮件。"
+                : "添加 IMAP/SMTP 账户后，康纳同学会把邮件同步到本地，并在需要时帮你快速定位。"
+        case .locating:
+            return "正在从本地邮件缓存中查找这封邮件。"
+        }
     }
 }
 
