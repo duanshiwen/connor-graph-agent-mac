@@ -159,6 +159,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum GlobalSearchSelectableItem: Equatable {
+    case recentSearch(String)
     case action(GlobalSearchActionKind)
     case chatSession(String)
     case nativeResult(String)

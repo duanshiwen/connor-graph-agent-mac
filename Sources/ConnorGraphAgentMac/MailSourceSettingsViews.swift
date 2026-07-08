@@ -45,6 +45,12 @@ struct MailBodyDisplayPresentation: Equatable {
 
     static let loading = MailBodyDisplayPresentation(kind: .loading, text: "正在加载邮件正文…")
 
+    static func preparing(detail: MailMessageDetail) async -> MailBodyDisplayPresentation {
+        await Task.detached(priority: .userInitiated) {
+            MailBodyDisplayPresentation(detail: detail)
+        }.value
+    }
+
     private static func recoverCachedHTMLIfNeeded(_ html: String, fallback: String) -> (html: String, plainText: String) {
         let parser = MailMIMEParser()
         let result = parser.parseBodyWithHTML(
@@ -351,7 +357,7 @@ struct MailSourceDetailView: View {
     }
 
     private var selectedMessage: MailMessageSummary? {
-        presentation.message(id: viewModel.selectedMailMessageID)
+        viewModel.selectedMailMessageForDetail()
     }
 
     var body: some View {
@@ -360,7 +366,12 @@ struct MailSourceDetailView: View {
                 MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
-                MailDetailEmptyState(onAdd: { viewModel.presentAddMailAccountSheet() })
+                MailDetailEmptyState(
+                    state: viewModel.mailNavigationTargetID == nil ? .idle : .locating,
+                    message: viewModel.mailNavigationMessage,
+                    hasAccounts: !presentation.accounts.isEmpty,
+                    onAdd: { viewModel.presentAddMailAccountSheet() }
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -492,28 +503,139 @@ private struct MailSettingsAccountRow: View {
 }
 
 private struct MailDetailEmptyState: View {
+    enum State: Equatable {
+        case idle
+        case locating
+    }
+
+    var state: State = .idle
+    var message: String?
+    var hasAccounts: Bool = false
     var onAdd: () -> Void
 
     var body: some View {
-        VStack(spacing: AppShellLayout.spaceM) {
-            Image(systemName: "envelope.open")
-                .font(.system(size: 42, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
-            Text("选择一封邮件")
-                .font(AgentChatTypography.title)
-            Text("从左侧邮件列表选择邮件查看详情，或添加新的 IMAP/SMTP 账户开始同步。")
-                .font(AgentChatTypography.meta)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
-            Button(action: onAdd) {
-                Label("添加邮件账户", systemImage: "plus")
+        ZStack {
+            LinearGradient(
+                colors: [Color.accentColor.opacity(0.035), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: AppShellLayout.spaceM) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
+                    Image(systemName: iconName)
+                        .font(.system(size: 42, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 82, height: 82)
+                .overlay(alignment: .bottomTrailing) {
+                    if state == .locating {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(7)
+                            .background(Color(nsColor: .windowBackgroundColor), in: Circle())
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    Text(title)
+                        .font(AgentChatTypography.title)
+                        .foregroundStyle(.primary)
+                    Text(description)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 420)
+                }
+
+                HStack(spacing: 10) {
+                    Button(action: onAdd) {
+                        Label("添加邮件账户", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("添加 IMAP/SMTP 邮件账户")
+                    .accessibilityLabel("添加邮件账户")
+
+                    if hasAccounts && state == .idle {
+                        Text("也可以从左侧列表或全局搜索打开邮件")
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
-            .buttonStyle(.bordered)
+            .padding(.horizontal, AppShellLayout.spaceXL)
+            .padding(.vertical, 34)
+            .frame(maxWidth: 520)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.06), radius: 22, x: 0, y: 10)
+            .padding(AppShellLayout.spaceXL)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(AppShellLayout.spaceXL)
+    }
+
+    private var iconName: String {
+        switch state {
+        case .idle: hasAccounts ? "envelope.open" : "envelope.badge"
+        case .locating: "envelope.badge.magnifyingglass"
+        }
+    }
+
+    private var title: String {
+        switch state {
+        case .idle: hasAccounts ? "选择一封邮件" : "连接你的邮箱"
+        case .locating: "正在打开邮件"
+        }
+    }
+
+    private var description: String {
+        if let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return message
+        }
+        switch state {
+        case .idle:
+            return hasAccounts
+                ? "从左侧邮件列表选择邮件查看详情，或用全局搜索直接定位到本地缓存中的邮件。"
+                : "添加 IMAP/SMTP 账户后，康纳同学会把邮件同步到本地，并在需要时帮你快速定位。"
+        case .locating:
+            return "正在从本地邮件缓存中查找这封邮件。"
+        }
+    }
+}
+
+struct MailPreparedHTMLBodyPresentation: Equatable {
+    var html: String
+    var blockedRemoteImageCount: Int
+
+    init(_ result: MailHTMLBodySanitizationResult) {
+        html = result.html
+        blockedRemoteImageCount = result.blockedRemoteImageCount
+    }
+}
+
+struct MailHTMLSanitizationRequest: Equatable {
+    var messageID: MailMessageID
+    var htmlFingerprint: Int
+    var htmlLength: Int
+    var allowsRemoteImages: Bool
+
+    init(messageID: MailMessageID, html: String, allowsRemoteImages: Bool) {
+        self.messageID = messageID
+        htmlFingerprint = html.hashValue
+        htmlLength = html.count
+        self.allowsRemoteImages = allowsRemoteImages
     }
 }
 
@@ -713,33 +835,46 @@ private struct MailMessageDetailPane: View {
     var message: MailMessageSummary
     @ObservedObject var viewModel: AppViewModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
+    @State private var preparedHTMLBody: MailPreparedHTMLBodyPresentation?
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
     @State private var allowRemoteImagesForMessage = false
     @State private var bodyLoadGate = MailBodyLoadRequestGate()
+
+    private var htmlSanitizationRequest: MailHTMLSanitizationRequest? {
+        guard bodyDisplay.kind == .html, let html = bodyDisplay.html else { return nil }
+        return MailHTMLSanitizationRequest(
+            messageID: message.id,
+            html: html,
+            allowsRemoteImages: allowRemoteImagesForMessage
+        )
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
                 MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
-                    if bodyDisplay.kind == .html, let bodyHTML = bodyDisplay.html {
-                        let sanitized = MailHTMLBodySanitizer().prepareHTML(
-                            bodyHTML,
-                            policy: MailHTMLDisplayPolicy(remoteContentMode: allowRemoteImagesForMessage ? .allowForMessage : .block)
-                        )
-                        if sanitized.blockedRemoteImageCount > 0 {
-                            MailRemoteImagesBlockedBanner(blockedCount: sanitized.blockedRemoteImageCount) {
-                                bodyWebLayout = .initial
-                                allowRemoteImagesForMessage = true
+                    if bodyDisplay.kind == .html, bodyDisplay.html != nil {
+                        if let prepared = preparedHTMLBody {
+                            if prepared.blockedRemoteImageCount > 0 {
+                                MailRemoteImagesBlockedBanner(blockedCount: prepared.blockedRemoteImageCount) {
+                                    preparedHTMLBody = nil
+                                    bodyWebLayout = .initial
+                                    allowRemoteImagesForMessage = true
+                                }
                             }
+                            MailHTMLBodyView(
+                                htmlContent: prepared.html,
+                                scrollPolicy: .pageScrolling,
+                                layout: $bodyWebLayout
+                            )
+                            .frame(height: bodyWebLayout.height)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            Text("正在准备 HTML 正文…")
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.secondary)
                         }
-                        MailHTMLBodyView(
-                            htmlContent: sanitized.html,
-                            scrollPolicy: .pageScrolling,
-                            layout: $bodyWebLayout
-                        )
-                        .frame(height: bodyWebLayout.height)
-                        .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text(bodyDisplay.text)
                             .font(AgentChatTypography.meta)
@@ -766,12 +901,31 @@ private struct MailMessageDetailPane: View {
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
             allowRemoteImagesForMessage = false
+            preparedHTMLBody = nil
             bodyWebLayout = .initial
             bodyDisplay = .loading
+            await Task.yield()
             let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
             bodyDisplay = display
+        }
+        .task(id: htmlSanitizationRequest) {
+            guard let request = htmlSanitizationRequest,
+                  bodyDisplay.kind == .html,
+                  let html = bodyDisplay.html else {
+                preparedHTMLBody = nil
+                return
+            }
+            preparedHTMLBody = nil
+            bodyWebLayout = .initial
+            let policy = MailHTMLDisplayPolicy(remoteContentMode: request.allowsRemoteImages ? .allowForMessage : .block)
+            let result = await Task.detached(priority: .userInitiated) {
+                MailHTMLBodySanitizer().prepareHTML(html, policy: policy)
+            }.value
+            guard !Task.isCancelled else { return }
+            guard htmlSanitizationRequest == request else { return }
+            preparedHTMLBody = MailPreparedHTMLBodyPresentation(result)
         }
     }
 }
