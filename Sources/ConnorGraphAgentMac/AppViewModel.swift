@@ -1641,7 +1641,10 @@ final class AppViewModel: NSObject, ObservableObject {
     private func openGlobalSearchMailResult(_ result: NativeSearchResult) {
         selection = .mail
         mailSearchQuery = ""
-        let messageID = MailMessageID(rawValue: result.externalID)
+        guard let messageID = mailMessageID(from: result) else {
+            mailSyncMessage = "无法打开这封邮件：搜索结果缺少有效 messageID。"
+            return
+        }
         if let message = mailBrowserPresentation.message(id: messageID) {
             selectMailMessage(message)
             return
@@ -1653,6 +1656,17 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { @MainActor in
             await loadAndSelectMailMessageIfNeeded(messageID)
         }
+    }
+
+    private func mailMessageID(from result: NativeSearchResult) -> MailMessageID? {
+        let raw = result.externalID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if raw.hasPrefix("mail:") {
+            let unprefixed = String(raw.dropFirst("mail:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !unprefixed.isEmpty else { return nil }
+            return MailMessageID(rawValue: unprefixed)
+        }
+        return MailMessageID(rawValue: raw)
     }
 
     func selectMailMessageFromList(_ message: MailMessageSummary) {
