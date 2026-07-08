@@ -2176,7 +2176,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 .appendingPathComponent("person-profiles.sqlite")
             self.personProfileStore = try? SQLitePersonProfileStore(databaseURL: personProfilesDatabaseURL)
             self.personRelationshipStore = try? SQLitePersonRelationshipStore(databaseURL: personProfilesDatabaseURL)
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
             self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
         if let repository {
