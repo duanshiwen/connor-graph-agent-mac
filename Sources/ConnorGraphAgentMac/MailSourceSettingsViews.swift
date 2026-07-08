@@ -609,6 +609,30 @@ private struct MailDetailEmptyState: View {
     }
 }
 
+struct MailPreparedHTMLBodyPresentation: Equatable {
+    var html: String
+    var blockedRemoteImageCount: Int
+
+    init(_ result: MailHTMLBodySanitizationResult) {
+        html = result.html
+        blockedRemoteImageCount = result.blockedRemoteImageCount
+    }
+}
+
+struct MailHTMLSanitizationRequest: Equatable {
+    var messageID: MailMessageID
+    var htmlFingerprint: Int
+    var htmlLength: Int
+    var allowsRemoteImages: Bool
+
+    init(messageID: MailMessageID, html: String, allowsRemoteImages: Bool) {
+        self.messageID = messageID
+        htmlFingerprint = html.hashValue
+        htmlLength = html.count
+        self.allowsRemoteImages = allowsRemoteImages
+    }
+}
+
 struct MailHTMLBodyLoadState: Equatable {
     private(set) var lastLoadedHTML: String?
 
@@ -805,33 +829,46 @@ private struct MailMessageDetailPane: View {
     var message: MailMessageSummary
     @ObservedObject var viewModel: AppViewModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
+    @State private var preparedHTMLBody: MailPreparedHTMLBodyPresentation?
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
     @State private var allowRemoteImagesForMessage = false
     @State private var bodyLoadGate = MailBodyLoadRequestGate()
+
+    private var htmlSanitizationRequest: MailHTMLSanitizationRequest? {
+        guard bodyDisplay.kind == .html, let html = bodyDisplay.html else { return nil }
+        return MailHTMLSanitizationRequest(
+            messageID: message.id,
+            html: html,
+            allowsRemoteImages: allowRemoteImagesForMessage
+        )
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MailMessageHero(account: account, mailbox: mailbox, message: message)
                 MailInfoSection(title: "邮件正文", systemImage: "doc.text.magnifyingglass") {
-                    if bodyDisplay.kind == .html, let bodyHTML = bodyDisplay.html {
-                        let sanitized = MailHTMLBodySanitizer().prepareHTML(
-                            bodyHTML,
-                            policy: MailHTMLDisplayPolicy(remoteContentMode: allowRemoteImagesForMessage ? .allowForMessage : .block)
-                        )
-                        if sanitized.blockedRemoteImageCount > 0 {
-                            MailRemoteImagesBlockedBanner(blockedCount: sanitized.blockedRemoteImageCount) {
-                                bodyWebLayout = .initial
-                                allowRemoteImagesForMessage = true
+                    if bodyDisplay.kind == .html, bodyDisplay.html != nil {
+                        if let prepared = preparedHTMLBody {
+                            if prepared.blockedRemoteImageCount > 0 {
+                                MailRemoteImagesBlockedBanner(blockedCount: prepared.blockedRemoteImageCount) {
+                                    preparedHTMLBody = nil
+                                    bodyWebLayout = .initial
+                                    allowRemoteImagesForMessage = true
+                                }
                             }
+                            MailHTMLBodyView(
+                                htmlContent: prepared.html,
+                                scrollPolicy: .pageScrolling,
+                                layout: $bodyWebLayout
+                            )
+                            .frame(height: bodyWebLayout.height)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            Text("正在准备 HTML 正文…")
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.secondary)
                         }
-                        MailHTMLBodyView(
-                            htmlContent: sanitized.html,
-                            scrollPolicy: .pageScrolling,
-                            layout: $bodyWebLayout
-                        )
-                        .frame(height: bodyWebLayout.height)
-                        .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text(bodyDisplay.text)
                             .font(AgentChatTypography.meta)
@@ -858,12 +895,31 @@ private struct MailMessageDetailPane: View {
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
             allowRemoteImagesForMessage = false
+            preparedHTMLBody = nil
             bodyWebLayout = .initial
             bodyDisplay = .loading
+            await Task.yield()
             let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
             bodyDisplay = display
+        }
+        .task(id: htmlSanitizationRequest) {
+            guard let request = htmlSanitizationRequest,
+                  bodyDisplay.kind == .html,
+                  let html = bodyDisplay.html else {
+                preparedHTMLBody = nil
+                return
+            }
+            preparedHTMLBody = nil
+            bodyWebLayout = .initial
+            let policy = MailHTMLDisplayPolicy(remoteContentMode: request.allowsRemoteImages ? .allowForMessage : .block)
+            let result = await Task.detached(priority: .userInitiated) {
+                MailHTMLBodySanitizer().prepareHTML(html, policy: policy)
+            }.value
+            guard !Task.isCancelled else { return }
+            guard htmlSanitizationRequest == request else { return }
+            preparedHTMLBody = MailPreparedHTMLBodyPresentation(result)
         }
     }
 }

@@ -103,6 +103,10 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
     public var accounts: [MailAccount]
     public var mailboxes: [MailMailbox]
     public var messages: [MailMessageSummary]
+    private var accountByID: [MailAccountID: MailAccount]
+    private var mailboxByID: [MailMailboxID: MailMailbox]
+    private var messageByID: [MailMessageID: MailMessageSummary]
+    private var sentMailboxIDs: Set<MailMailboxID>
 
     public init(accounts: [MailAccount], mailboxes: [MailMailbox], messages: [MailMessageSummary]) {
         self.accounts = accounts
@@ -110,22 +114,31 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
         // Mail browsers should behave like an inbox: newest sent/received message first.
         // Normalize here so UI lists, default selection, and any presentation fallback stay
         // stable even when an upstream cache/store returns insertion order or ascending order.
-        self.messages = Self.sortedNewestFirst(messages)
+        let sortedMessages = Self.sortedNewestFirst(messages)
+        self.messages = sortedMessages
+        accountByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
+        mailboxByID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0) })
+        messageByID = Dictionary(uniqueKeysWithValues: sortedMessages.map { ($0.id, $0) })
+        sentMailboxIDs = Set(mailboxes.filter { $0.role == .sent }.map(\.id))
+    }
+
+    public static func == (lhs: NativeMailBrowserPresentation, rhs: NativeMailBrowserPresentation) -> Bool {
+        lhs.accounts == rhs.accounts && lhs.mailboxes == rhs.mailboxes && lhs.messages == rhs.messages
     }
 
     public func account(id: MailAccountID?) -> MailAccount? {
         guard let id else { return nil }
-        return accounts.first { $0.id == id }
+        return accountByID[id]
     }
 
     public func mailbox(id: MailMailboxID?) -> MailMailbox? {
         guard let id else { return nil }
-        return mailboxes.first { $0.id == id }
+        return mailboxByID[id]
     }
 
     public func message(id: MailMessageID?) -> MailMessageSummary? {
         guard let id else { return nil }
-        return messages.first { $0.id == id }
+        return messageByID[id]
     }
 
     public func mailboxes(accountID: MailAccountID?) -> [MailMailbox] {
@@ -139,7 +152,7 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
 
     public func messages(accountID: MailAccountID?, mailboxID: MailMailboxID?, query: String, direction: MailMessageDirectionFilter) -> [MailMessageSummary] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let filtered = messages.filter { message in
+        return messages.filter { message in
             if let accountID, message.accountID != accountID { return false }
             if let mailboxID, message.mailboxID != mailboxID { return false }
             if !matchesDirection(message, direction: direction) { return false }
@@ -149,7 +162,6 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
                 || message.from.email.lowercased().contains(normalized)
                 || (message.from.name?.lowercased().contains(normalized) ?? false)
         }
-        return Self.sortedNewestFirst(filtered)
     }
 
     private func matchesDirection(_ message: MailMessageSummary, direction: MailMessageDirectionFilter) -> Bool {
@@ -157,9 +169,9 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
         case .all:
             return true
         case .received:
-            return mailbox(id: message.mailboxID)?.role != .sent
+            return !sentMailboxIDs.contains(message.mailboxID)
         case .sent:
-            return mailbox(id: message.mailboxID)?.role == .sent
+            return sentMailboxIDs.contains(message.mailboxID)
         }
     }
 
