@@ -1658,6 +1658,12 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    /// Normalize a mail message ID to match the format stored in the search index.
+    /// The search index replaces `@` and `.` with `-` (e.g. `user@icloud.com-INBOX-123` → `user-icloud-com-INBOX-123`).
+    static func normalizeMailIDForSearchIndex(_ rawID: String) -> String {
+        rawID.replacingOccurrences(of: "@", with: "-").replacingOccurrences(of: ".", with: "-")
+    }
+
     private func mailMessageID(from result: NativeSearchResult) -> MailMessageID? {
         let raw = result.externalID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
@@ -1696,10 +1702,18 @@ final class AppViewModel: NSObject, ObservableObject {
             selectMailMessage(message)
             return
         }
+        // Fallback: search index may store normalized IDs (@. → -) that differ from
+        // the original message IDs in the mail database. Walk the in-memory
+        // presentation to find a match by comparing normalized forms.
+        let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
+        if let message = mailBrowserPresentation.messages.first(where: { Self.normalizeMailIDForSearchIndex($0.id.rawValue) == normalizedLookup }) {
+            selectMailMessage(message)
+            return
+        }
         do {
             guard let detail = try await mailStore?.message(id: messageID) else {
                 let message = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
-                NSLog("[Connor.Mail] message not found in store: id=%@, presentationCount=%d", messageID.rawValue, mailBrowserPresentation.messages.count)
+                NSLog("[Connor.Mail] message not found in store: id=%@, normalized=%@, presentationCount=%d", messageID.rawValue, normalizedLookup, mailBrowserPresentation.messages.count)
                 mailSyncMessage = message
                 mailNavigationMessage = message
                 mailNavigationTargetID = nil
