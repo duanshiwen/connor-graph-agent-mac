@@ -351,7 +351,7 @@ struct MailSourceDetailView: View {
     }
 
     private var selectedMessage: MailMessageSummary? {
-        presentation.message(id: viewModel.selectedMailMessageID)
+        viewModel.selectedMailMessageForDetail()
     }
 
     var body: some View {

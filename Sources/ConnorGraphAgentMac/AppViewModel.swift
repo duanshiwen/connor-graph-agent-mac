@@ -411,6 +411,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailAccountID: MailAccountID?
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
+    @Published var selectedMailMessageSummary: MailMessageSummary?
     @Published var mailPreferences: MailPreferences = MailPreferences()
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var mailSyncMessage: String?
@@ -1650,10 +1651,23 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func selectMailMessageFromList(_ message: MailMessageSummary) {
+        selectMailMessage(message)
+    }
+
+    func selectedMailMessageForDetail() -> MailMessageSummary? {
+        if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
+            return message
+        }
+        guard selectedMailMessageSummary?.id == selectedMailMessageID else { return nil }
+        return selectedMailMessageSummary
+    }
+
     private func selectMailMessage(_ message: MailMessageSummary) {
         selectedMailAccountID = message.accountID
         selectedMailMailboxID = message.mailboxID
         selectedMailMessageID = message.id
+        selectedMailMessageSummary = message
     }
 
     private func loadAndSelectMailMessageIfNeeded(_ messageID: MailMessageID) async {
@@ -2805,8 +2819,14 @@ final class AppViewModel: NSObject, ObservableObject {
             if selectedMailMailboxID == nil || mailBrowserPresentation.mailbox(id: selectedMailMailboxID) == nil {
                 selectedMailMailboxID = mailBrowserPresentation.defaultMailboxID(for: selectedMailAccountID)
             }
-            if selectedMailMessageID == nil || mailBrowserPresentation.message(id: selectedMailMessageID) == nil {
-                selectedMailMessageID = mailBrowserPresentation.defaultMessageID(accountID: selectedMailAccountID, mailboxID: selectedMailMailboxID)
+            if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
+                selectedMailMessageSummary = message
+            } else {
+                let hasSelectedSummaryFallback = selectedMailMessageSummary?.id == selectedMailMessageID
+                if selectedMailMessageID == nil || !hasSelectedSummaryFallback {
+                    selectedMailMessageID = mailBrowserPresentation.defaultMessageID(accountID: selectedMailAccountID, mailboxID: selectedMailMailboxID)
+                    selectedMailMessageSummary = mailBrowserPresentation.message(id: selectedMailMessageID)
+                }
             }
             errorMessage = nil
         } catch {
