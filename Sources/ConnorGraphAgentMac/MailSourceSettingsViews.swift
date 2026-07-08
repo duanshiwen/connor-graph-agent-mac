@@ -750,6 +750,10 @@ struct MailHTMLBodyHeightStabilizer: Equatable {
             || abs(next.documentHeight - current.documentHeight) >= significantDelta else { return nil }
         return next
     }
+
+    func shouldScheduleFollowUpMeasurements(after layout: MailHTMLBodyLayout) -> Bool {
+        layout.mode == .inline
+    }
 }
 
 private final class MailHTMLPassthroughScrollWebView: WKWebView {
@@ -833,17 +837,19 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         }
 
         private func scheduleHeightMeasurements(for webView: WKWebView, generation: Int) {
-            measureHeight(of: webView, generation: generation)
-            for delayNanoseconds in [150_000_000, 400_000_000, 900_000_000] {
-                Task { @MainActor [weak self, weak webView] in
-                    try? await Task.sleep(nanoseconds: UInt64(delayNanoseconds))
-                    guard let self, let webView else { return }
-                    self.measureHeight(of: webView, generation: generation)
+            measureHeight(of: webView, generation: generation) { [weak self, weak webView] shouldContinue in
+                guard shouldContinue else { return }
+                for delayNanoseconds in [250_000_000, 700_000_000] {
+                    Task { @MainActor [weak self, weak webView] in
+                        try? await Task.sleep(nanoseconds: UInt64(delayNanoseconds))
+                        guard let self, let webView else { return }
+                        self.measureHeight(of: webView, generation: generation)
+                    }
                 }
             }
         }
 
-        private func measureHeight(of webView: WKWebView, generation: Int) {
+        private func measureHeight(of webView: WKWebView, generation: Int, completion: ((Bool) -> Void)? = nil) {
             let script = """
             Math.max(
                 document.body ? document.body.scrollHeight : 0,
@@ -854,12 +860,22 @@ private struct MailHTMLBodyView: NSViewRepresentable {
             webView.evaluateJavaScript(script) { [weak self] value, _ in
                 guard let self else { return }
                 Task { @MainActor in
-                    guard generation == self.measurementGeneration else { return }
-                    guard let numericHeight = Self.numericHeight(from: value) else { return }
+                    guard generation == self.measurementGeneration else {
+                        completion?(false)
+                        return
+                    }
+                    guard let numericHeight = Self.numericHeight(from: value) else {
+                        completion?(false)
+                        return
+                    }
                     let currentLayout = self.layout.wrappedValue
-                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: currentLayout, measuredDocumentHeight: numericHeight) else { return }
+                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: currentLayout, measuredDocumentHeight: numericHeight) else {
+                        completion?(self.heightStabilizer.shouldScheduleFollowUpMeasurements(after: currentLayout))
+                        return
+                    }
                     mailBodyRenderingLogger.info("mailBody.webView.height generation=\(generation, privacy: .public) measured=\(numericHeight, privacy: .public) oldMode=\(String(describing: currentLayout.mode), privacy: .public) oldHeight=\(currentLayout.height, privacy: .public) newMode=\(String(describing: stabilized.mode), privacy: .public) newHeight=\(stabilized.height, privacy: .public)")
                     self.layout.wrappedValue = stabilized
+                    completion?(self.heightStabilizer.shouldScheduleFollowUpMeasurements(after: stabilized))
                 }
             }
         }

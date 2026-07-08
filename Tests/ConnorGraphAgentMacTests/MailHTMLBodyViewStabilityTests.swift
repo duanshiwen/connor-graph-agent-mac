@@ -113,6 +113,25 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(abs(layout.documentHeight - boundaryHeight) < 0.001)
     }
 
+    @Test func scrollableLongHTMLDoesNotNeedFollowUpHeightMeasurements() {
+        let stabilizer = MailHTMLBodyHeightStabilizer()
+        let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 500)
+        let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 20_000)
+        guard let layout else {
+            Issue.record("Expected long HTML to switch to scrollable layout")
+            return
+        }
+
+        #expect(!stabilizer.shouldScheduleFollowUpMeasurements(after: layout))
+    }
+
+    @Test func inlineHTMLCanUseFollowUpHeightMeasurements() {
+        let stabilizer = MailHTMLBodyHeightStabilizer()
+        let layout = MailHTMLBodyLayout(mode: .inline, height: 512, documentHeight: 500)
+
+        #expect(stabilizer.shouldScheduleFollowUpMeasurements(after: layout))
+    }
+
     @Test func mailBodyLoadGateRejectsStaleMessageResult() {
         var gate = MailBodyLoadRequestGate()
         let first = gate.begin(messageID: MailMessageID(rawValue: "message-a"))
