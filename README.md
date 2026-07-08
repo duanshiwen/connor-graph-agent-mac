@@ -1,665 +1,256 @@
-# Connor Graph Agent Mac
+# 康纳同学 Connor
 
-文档更新时间：2026-07-01 22:00 GMT+8  
-定位：本 README 只记录当前架构、边界、运行布局和开发约束，不作为历史 changelog。
+康纳同学是一款本地优先的 macOS Agent 助手。你可以用它来聊天、读资料、整理附件、处理邮件和日程、浏览网页、记录人际关系、管理任务，也可以让它在需要时调用技能或本地工具帮你推进工作。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
-
-核心产品判断：**记忆系统是后台认知基础设施，不是普通用户的前台图谱编辑器。** 用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Memory OS 在后台提供连续性、可追溯性、证据化工作记忆、可复用知识层和稳定实体/概念图谱。
+你只需要像安排一位可靠的助手那样，把问题、资料和目标交给它。康纳同学会在后台整理重要上下文，让后续对话更连贯、任务推进更顺手。
 
 ---
 
-## 1. Product Boundaries
+## 你可以用康纳同学做什么？
 
-Connor 当前坚持这些主权边界：  
+### 1. 像和同事一样对话
 
-- **Session OS** owns sessions, runs, journals, approvals, branches, restore snapshots and Session Capsules.
-- **Policy Engine** owns permissions, approvals, audit and execution gates.
-- **Memory OS** owns memory ingestion, validation, projection, retrieval and current-view derivation.
-- **Source Platform** owns source registry, readiness, credentials, policy and ingestion rules.
-- **Swift Native Shell** owns the macOS UI; do not introduce Electron/Web UI or fork Craft UI.
-- **Task Management Stack** owns scheduled/event task lifecycle, run history and local management surfaces.
-- **Attachment Store** owns imported files, manifests, derivatives, extraction state and evidence candidates.
-- **Native runtimes** own Mail / RSS / Contacts / Calendar local account boundaries, sync state and cache.
+你可以直接把问题、资料、计划或想法发给康纳同学，例如：
 
-Explicit non-goals:
+- “帮我把这段资料整理成行动清单。”
+- “基于这几个附件，帮我总结关键结论。”
+- “继续推进刚才那个项目计划。”
+- “帮我检查这段代码为什么失败。”
+- “把这封邮件整理成可执行事项。”
+
+康纳同学会结合当前会话、你选择的模型、可用技能、数据源和长期记忆来回答。
+
+### 2. 管理会话和笔记
+
+左侧边栏提供两种常用入口：
+
+- **新建会话**：适合普通问答、研究、写作、开发、任务推进。
+- **新建或导入笔记**：适合把资料、想法或 Markdown 内容整理成可继续扩展的笔记。
+
+笔记也是一种会话，只是输入体验更偏向长文本、整理和沉淀。你可以让康纳同学帮你总结主题、识别关系、整理结构和提出后续问题。
+
+### 3. 连接你的数据源
+
+康纳同学可以按需连接和读取多种数据源：
+
+- **日历**：查看本机日历、ICS/Webcal、CalDAV 等日历源，帮助你安排时间。
+- **邮件**：读取邮件、整理邮件内容、创建草稿，并在你确认后发送。
+- **RSS**：订阅和阅读 RSS / Atom / JSON Feed。
+- **人际关系**：记录和理解人物档案、联系方式、组织归属、关系线索与结构化关系，而不只是传统通讯录联系人。
+- **外部工具和服务**：在需要时接入更多工具能力。
+
+建议按需要逐步连接，不需要一开始配置所有能力。
+
+### 4. 使用内置浏览器
+
+在会话输入栏可以打开浏览器工作区。你可以：
+
+- 一边浏览网页，一边让康纳同学帮你分析。
+- 把当前页面或选中文本放入上下文。
+- 基于网页内容提问、总结、翻译、比较或继续写作。
+- 保留与当前会话绑定的浏览状态。
+
+### 5. 添加附件并让它阅读
+
+你可以把文件拖入会话，或通过附件按钮添加文件。康纳同学会尽量提取可读内容，并把它作为当前任务的资料来源。
+
+适合处理：
+
+- PDF、Markdown、文本、代码、JSON、CSV、日志等文件。
+- 多个文档的合并总结。
+- 基于附件生成摘要、计划、邮件、报告或代码修改建议。
+- 在后续会话中继续引用已经导入的资料。
+
+### 6. 使用技能
+
+输入 `/` 或点击技能入口，可以选择当前会话使用的技能。
+
+技能用于告诉康纳同学“这轮任务应该按某种专业方式完成”，例如研究、写作、开发、排查、总结、规划等。技能不会替代你的指令，而是给康纳同学补充任务风格和处理流程。
+
+### 7. 创建任务和自动化
+
+康纳同学不只是被动回答，也可以帮你持续推进事情，例如：
+
+- 在指定时间创建一个会话并发送提醒。
+- 当某个会话到达特定状态时，自动继续发送消息。
+- 定期刷新邮件、日历或 RSS。
+- 定期整理后台记忆，让后续工作更连续。
+
+---
+
+## 第一次使用建议
+
+### 第一步：设置模型连接
+
+打开 **设置 → 模型连接**，选择一个模型提供方并填写必要配置。
+
+可选连接包括：
+
+- OpenAI / OpenAI-compatible
+- Anthropic
+- DeepSeek
+- 小米 MiMo
+- GitHub Copilot
+- 本地模型，例如 Ollama 或本地兼容网关
+
+API Key 会加密保存在本机，不会明文写入设置文件、项目文件或 Git 仓库。
+
+### 第二步：新建一个会话
+
+点击左侧 **新建会话**，直接输入你的任务。
+
+可以从具体任务开始，例如：
 
 ```text
-Public API
-Remote daemon / cloud sync
-OAuth server / team auth / multi-user permissions
-Craft UI fork
-Electron/Web UI
-Craft-style multi-workspace
-CLI/API direct graph write
-MCP server owning product state
-External model provider owning Connor session state
-Direct LLM access to IMAP / SMTP / OAuth / Contacts credentials
-Unapproved email sending
-Auto-projecting external-source facts into Memory OS truth records without validation
-Executing feed HTML JavaScript or auto-loading remote tracking resources
+请帮我整理今天要推进的三件事，并给出下一步行动。
 ```
 
----
-
-## 2. Package
+也可以先让它帮你澄清问题：
 
 ```text
-Package: ConnorGraphAgentMac
-Swift tools: 6.0
-Platform: macOS 14+
-Default localization: zh-Hans
-Dependencies: none (SQLite via system lib)
-Linked: sqlite3, Security, EventKit, Contacts, WebKit, AVFoundation, Speech, CoreLocation
-Rust sidecar: SearchKernel (Tantivy embedded search kernel, compiled in-process)
+我想研究一个产品方向。请先问我 3 个澄清问题，然后帮我形成一个初步计划。
 ```
 
-Products:
+### 第三步：设置当前会话工作目录
+
+如果你希望康纳同学处理本地项目文件，可以在输入栏附近设置当前会话的工作目录。
+
+设置后，康纳同学会围绕这个目录读取资料或执行你批准的本地操作。
+
+### 第四步：按需要连接数据源
+
+如果你的任务需要日历、邮件、RSS、人际关系或外部工具，可以在左侧 **数据源** 或 **设置** 中配置。
+
+---
+
+## 常见使用方式
+
+### 做研究
 
 ```text
-Libraries:
-- ConnorGraphCore
-- ConnorGraphMemory
-- ConnorGraphStore
-- ConnorGraphSearch
-- ConnorGraphAgent
-- ConnorGraphAppSupport
-
-Executables:
-- connor-graph-agent-mac    (SwiftUI macOS shell)
-- connor                    (local-only CLI)
-- ConnorFoundationKGSeedBuilder  (Foundation Knowledge Graph seed tool)
+请帮我研究这个主题：……
+先列出你需要的信息，再开始搜索和总结。
 ```
 
-Main targets:
+适合搭配浏览器、RSS、附件和长期记忆。
+
+### 整理资料
 
 ```text
-Sources/ConnorGraphCore            Domain models and governance primitives
-Sources/ConnorGraphMemory          Memory OS ingestion, processing, validation and projection
-Sources/ConnorGraphStore           SQLite persistence for Memory OS, sessions, audits and sources
-Sources/ConnorGraphSearch          Graph / hybrid retrieval and evaluation
-Sources/ConnorGraphAgent           Agent loop, tools, providers and policy boundary
-Sources/ConnorGraphAppSupport      App services, repositories, native runtime bridges, MCP
-Sources/ConnorGraphAgentMac        SwiftUI/AppKit macOS shell, browser workspace, chat viewport
-Sources/ConnorCLI                  Local-only CLI control surface
-Sources/ConnorFoundationKGSeedBuilder  Foundation KG seed data builder
+我会上传几个文件。请先分别总结，再合并成一份结构化报告。
 ```
 
-Tests: 328 source files, 7 test targets across all library modules plus the app shell.
+适合搭配附件和笔记会话。
 
----
-
-## 3. Architecture
+### 推进项目
 
 ```text
-SwiftUI Native Shell (chat, sidebar, browser, settings, approvals)
-  ↓
-ConnorGraphAppSupport (app services, MCP runtime, native source bridges)
-  ↓
-Session OS / Source Platform / Skill Runtime / Task Surface / Readiness Gate
-  ↓
-ConnorGraphAgent + Native Model Providers
-  ↓
-Memory OS Runtime Contract
-  ↓
-L0 Provenance → L1 Cache Buffer → L2 Operational Facts → L3 Knowledge → L4 Stable Entities
+这是我当前项目的背景。请帮我拆成里程碑、风险、下一步行动，并在后续会话中持续跟进。
 ```
 
-Target responsibilities:
+适合长期会话、任务、状态和记忆上下文。
 
-- **ConnorGraphCore**：stable domain models for Memory OS, sessions, policy, attachments, native sources, skills, tasks and automation.
-- **ConnorGraphMemory**：pre-ingestion, L0/L1 capture decisions, processing artifacts, validators, L2 entity memory, L3 beliefs, L4 entity projection and controlled type normalization.
-- **ConnorGraphStore**：SQLite schema, repositories, FTS/search tables, legacy graph import and session/run/audit persistence.
-- **ConnorGraphSearch**：retrieval contracts, hybrid search abstractions, evaluation cases and embedding seams.
-- **ConnorGraphAgent**：agent orchestration, streaming providers, tool execution, approvals, prompt assembly, compression and local tool policy checks.
-- **ConnorGraphAppSupport**：Session Capsule persistence, LLM settings, MCP runtime, attachment services, native Mail/RSS/Contacts/Calendar, browser context, skills and tasks.
-- **ConnorGraphAgentMac**：native app shell, chat viewport, composer, approvals, browser workspace, attachments, settings and native source surfaces.
-- **ConnorCLI**：local-only programmable control plane; it must respect Connor-owned repositories and policy boundaries.
-- **ConnorFoundationKGSeedBuilder**：builds Foundation Knowledge Graph seed databases from structured sources.
-
-Memory OS is deliberately not a user-visible navigation surface. The app can trigger ingestion, scheduling and tool execution, but it should not expose a Memory OS dashboard or direct graph editor.
-
----
-
-## 4. Runtime Layout
-
-Runtime paths are resolved by `AppStoragePaths` under the user Application Support `Connor` directory.
+### 处理邮件
 
 ```text
-Connor/
-├── config/
-├── sessions/
-├── sources/
-├── skills/
-├── tasks/
-├── labels/
-├── statuses/
-├── artifacts/
-├── search/
-│   └── native-source-index.json
-├── graph/
-│   ├── connor.sqlite
-│   ├── indexes/
-│   ├── search-index/
-│   │   └── memory-os-tantivy/
-│   ├── exports/
-│   ├── snapshots/
-│   └── evaluations/
-└── logs/
-    ├── audit/
-    └── runtime/
+请根据这封邮件帮我起草回复。不要直接发送，先给我确认。
 ```
 
-Session Capsule:
+康纳同学可以创建邮件草稿；真正发送邮件需要你确认。
+
+### 使用日历
 
 ```text
-sessions/{sessionID}/
-├── manifest.json
-├── state/
-├── browser/
-├── plans/
-├── data/
-├── attachments/
-├── exports/
-└── logs/
+请看一下我接下来三天的日程，帮我找出适合安排深度工作的时间段。
 ```
 
-Key state files include:
+当前日历能力适合查询、分析和计划。
+
+### 维护人际关系
 
 ```text
-config/session-governance.json
-config/product-os-registry.json
-config/runtime-settings.json
-config/llm-settings.json
-tasks/task-definitions.json
-tasks/task-run-history.jsonl
-tasks/task-event-log.jsonl
-tasks/task-deletion-log.jsonl
-labels/labels.json
-statuses/statuses.json
-graph/evaluations/retrieval-evaluation-cases.json
-graph/evaluations/reports/*.json
+请帮我记录这个人的背景、我们之间的关系，以及下次联系时应该注意什么。
 ```
 
-Credentials and API keys must not be stored in JSON settings files. Use Connor's local encrypted credential vault, and keep secrets out of plaintext settings, project files, logs and Git.
+适合整理人物档案、组织归属、联系线索和关系说明。
 
----
-
-## 5. Current Capability Areas
-
-### Session OS
-
-- Note Sessions (kind = .note): notes are regular chat sessions with a `kind` flag distinguishing them from normal conversations. Before the first message, the composer enters full-screen mode with a Markdown formatting toolbar — attachment (paperclip) button is disabled, only image insertion is allowed. Text files can be drag-dropped to extract content directly into the composer. On first message, a system note instruction is injected prompting the LLM to summarize, identify domain, map relations, and suggest expansions. After the first response, the session reverts to normal chat mode. Note sessions display a "📝 笔记" badge in the session list; the kind tag is system-protected (not user-editable).
-
-- Session list, active state, soft deletion, run/event/audit persistence
-- Session-local workspace roots and primary root
-- Per-session model override
-- JSONL records with best-effort recovery
-- Browser state and approvals inside Session Capsule
-
-### Local Tools and Workspace Policy
-
-- Session-scoped primary root plus additional allowed roots
-- Hidden app-support root for Connor configuration, skills and sources
-- File/shell operations must pass Connor policy checks before execution
-
-### Native Model Providers
-
-- OpenAI Responses-native path
-- OpenAI-compatible Chat Completions fallback
-- Anthropic Messages-native path
-- Streaming typed provider events
-- Function/tool continuation, reasoning metadata where supported, health checks and per-connection settings
-- Providers never own Connor session state, tool execution, approvals, audit or memory projection gates
-
-### Agent Runtime Contract
-
-Every user task should ground itself in this order:
-
-1. Get current time.
-2. Retrieve internal context and current user profile when relevant.
-3. Search/fetch current web information when freshness or external facts matter.
-4. Consider installed skills.
-5. Then decide whether to answer, plan, edit, debug, research or ask a clarification.
-
-System prompts are deliberately minimal: only context retrieval and user profile tools are injected. Memory OS write tools are not injected into system prompts; the LLM accesses them through normal tool definitions when needed.
-
-### MCP Source Platform
-
-- Source registry and runtime repository
-- HTTP and stdio transport
-- Tool discovery and definition-change checks
-- Credential materialization without query-string secrets
-- Readiness and release-gate checks
-
-### Attachment OS
-
-- Local-first import into Session Capsule
-- Text/code/markdown/json/csv/xml/yaml/log/image/document allowlist
-- PDFKit extraction for selectable PDFs
-- Office/iWork/presentation/spreadsheet extraction through sidecar best-effort paths
-- Quick Look / PDFKit native preview
-
-### Browser Workspace
-
-- Session-bound browser tabs and state
-- WebKit browsing surface
-- History, bookmarks, selection/page prompt folding and shortcut resolution
-
-### Mail / RSS / Contacts / Calendar
-
-- Native source domains and app-support repositories
-- Mail draft/send governance: AI may create drafts and request send; real SMTP send requires human approval in the same run
-- Mail approval integrity: approval payload stores an envelope hash; SMTP send is blocked if the draft changes after approval
-- Sent-message closure: sent cache, audit, receipt, index writeback and optional outbound Memory OS evidence
-- Governed outbound attachments: multipart composer support, filename injection checks and descriptor-only sent cache metadata
-- Native Mail release/demo docs: [`Docs/native-mail-release-checklist.md`](Docs/native-mail-release-checklist.md), [`Docs/native-mail-commercial-demo.md`](Docs/native-mail-commercial-demo.md)
-- RSS registry/cache/read-state boundaries
-- Contacts and Calendar adapter seams
-- Native Source Indexed Retrieval with time-aware search filters
-- Calendar search should use event interval overlap by default
-- Calendar detail reads are captured as memory evidence; title-only reads are not
-
-### Memory OS
-
-Connor Memory OS is the production memory boundary. It is not a graph editor, dashboard or direct LLM-write surface.
-
-- Five-layer architecture: L0 Provenance → L1 Cache Buffer → L2 Operational → L3 Knowledge → L4 Stable Entities.
-- LLM-facing tools: 17 total — 13 read tools (`memory_os_context`, `memory_os_search`, `memory_os_read_record`, `memory_os_read_provenance`, `memory_os_get_current_user_profile`, `memory_os_l2_find_entities`, `memory_os_l2_find_statements`, `memory_os_l3_expand_belief`, `memory_os_l3_list_domains`, `memory_os_l4_find_entity`, `memory_os_l4_neighbors`, `memory_os_l4_instances`, `memory_os_expand_l4`) and 4 write tools (`memory_os_l2_update_entities`, `memory_os_update_current_user_profile`, `memory_os_l3_update_beliefs`, `memory_os_l4_update_entities`).
-- Full architecture, layer contract, data models, write path, retrieval, ObserveLog and background pipeline → see **Section 6. Memory OS**.
-
-### Skills, Tasks and Automation
-
-- Skill package scanning, lifecycle and prompt augmentation
-- Task origins: `system`, `user`, `ai`
-- Trigger modes: `scheduled`, `eventTriggered`
-- Current user/AI templates:
-  - Send a message to a session when that session reaches a status
-  - Create a session and send a message at a scheduled time or recurrence
-- AI task tools:
-  - `tasks_list`
-  - `tasks_create_scheduled_session_message`
-  - `tasks_create_session_status_message`
-- System tasks include Memory OS daily sweeps, 10-minute Mail/Calendar refresh and per-source RSS refresh
-- Missed recurring schedules catch up once, then advance to the next future anchor
-
----
-
-## 6. Memory OS
-
-Memory OS is the cognitive infrastructure backbone of Connor. It is **not** a graph editor, dashboard or direct LLM-write surface.
-
-### 6.1 Layer Architecture
-
-| Layer | Name | Responsibility | Mutability | Data Model |
-|-------|------|---------------|------------|------------|
-| **L0** | Provenance Vault | Raw evidence objects and spans | **Immutable** | `MemoryOSProvenanceObject`, `MemoryOSProvenanceSpan` |
-| **L1** | Cache Buffer | Accumulates events until threshold (≥100 events or ≥24h); triggers unified L2/L3/L4 update | Processed events deleted after accepted projection (L0 retains permanent evidence) | `MemoryOSCaptureEvent`, `MemoryOSQueueItem` |
-| **L2** | Operational Memory | Entity-centered working memory extracted from validated evidence | Append-only statements | `MemoryOSNode`, `MemoryOSStatement` |
-| **L3** | Knowledge Layer | Reusable theories, claims, frameworks, patterns, standards, SOPs, decision bases | Direct-write by LLM | `MemoryOSBelief` |
-| **L4** | Stable Entity / Concept | Relaxed stable anchors for people, projects, organizations, work objects and concepts | Upsert with time-versioning | `MemoryOSEntity`, `MemoryOSEntityStatement` |
-
-L4 uses a controlled entity type vocabulary (`MemoryOSEntityType`); unsupported LLM-provided labels are normalized to `unknown` instead of schema-expanding one-off types. See `Docs/MemoryOS/L4RelaxedEntityGraph.md`.
-
-Read semantics: **query-time current view derivation** — historical semantic records are append-only; currentness is derived by newer validAt → newer committedAt → deterministic id.
+### 写笔记
 
 ```text
-                ┌─────────────────────────────────────┐
-                │           SwiftUI Shell             │
-                │  (chat, sidebar, browser, settings) │
-                └──────────────┬──────────────────────┘
-                               │
-                ┌──────────────▼──────────────────────┐
-                │     AppMemoryOSFacade (write gate)  │
-                └──────┬───────────────────┬──────────┘
-                       │                   │
-           ┌───────────▼───┐       ┌───────▼──────────┐
-           │  LLM Tools    │       │ Background Jobs  │
-           │  (17 tools)   │       │ (unified proj.)  │
-           └───┬───┬───┬───┘       └───────┬──────────┘
-               │   │   │                   │
-    ┌──────────▼┐  │  ┌▼──────────┐  ┌─────▼──────┐
-    │    L0     │  │  │  L3       │  │L1→L2+L4   │
-    │(immutable)│  │  │(beliefs)  │  │projection  │
-    └────┬──────┘  │  └───────────┘  └──┬────┬────┘
-         │         │                    │    │
-    ┌────▼────┐    │              ┌─────▼┐ ┌─▼────┐
-    │   L1    │    │              │  L2  │ │  L4  │
-    │ (queue) │    └──────────────┤(nodes│ │(ent.)│
-    └─────────┘                   │ stmts│ │relat)│
-                                  └──────┘ └──────┘
+请把这段笔记整理成：核心观点、相关概念、可能行动、后续问题。
 ```
 
-### 6.2 Data Models
+笔记模式更适合长文本输入和 Markdown 整理。
 
-**L0/L1 models** (`MemoryOSDomain.swift`):
-
-```swift
-// L0: immutable provenance
-MemoryOSProvenanceObject  // sourceType, sourceID, title, content, contentHash (SHA256),
-                          // occurredAt, ingestedAt, sessionID, workObjectID, confidentiality,
-                          // status. Immutable after creation.
-MemoryOSProvenanceSpan    // provenanceObjectID, startOffset, endOffset, text. Points to
-                          // a slice within the provenance object.
-
-// L1: capture events + queue
-MemoryOSCaptureEvent      // provenanceObjectID, eventType, occurredAt, tokenEstimate,
-                          // processingState (pending→leased→processing→succeeded|failed|deadLetter)
-MemoryOSQueueItem         // kind, status, priority, payloadJSON, attemptCount, maxAttempts,
-                          // nextRunAt, lockedAt/By, leaseExpiresAt, idempotencyKey, payloadHash
-```
-
-**L2 models** (`MemoryOSDomain.swift`, `MemoryOSL2EntityMemoryService.swift`):
-
-```swift
-// L2: operational working memory
-MemoryOSNode              // id, stableKey, nodeType, name, summary. Entity anchor in working memory.
-MemoryOSStatement         // id, subjectID, predicate, objectID?, text, assertionKind (observed/inferred/summarized),
-                          // confidence, validAt, committedAt, evidenceSpanIDs, sourceArtifactID.
-                          // Temporal: append-only; currentness derived by query-time logic.
-
-// L2 simplified entity model (for LLM tool interface)
-MemoryOSL2StoredEntity    // id, name, type, aliases[], summary, statements[]
-MemoryOSL2StoredStatement // id, text, relation, metadata (historical connectedEntityName column preserved)
-```
-
-**L3 models**:
-
-```swift
-// L3: reusable knowledge beliefs
-MemoryOSBelief            // id, statement, domain (normalized discipline domain),
-                          // relatedObjectNames (deduplicated, normalized). Domain aliases:
-                          // "cs"→"computer-science", "ai"/"ml"→"artificial-intelligence",
-                          // "software"→"software-engineering", "memory-os"→"knowledge-management"
-```
-
-**L4 models** (`MemoryOSDomain.swift`):
-
-```swift
-// L4: stable entities and entity statements
-MemoryOSEntity            // id, stableKey (scope:type:name), entityType (controlled vocab),
-                          // name, aliases[], summary, confidence, createdAt, updatedAt, validFrom?
-MemoryOSEntityStatement   // id, entityID, predicate (MemoryOSL4RelationPredicate),
-                          // objectEntityID?, text, assertionKind, confidence,
-                          // validAt, committedAt, evidenceSpanIDs, sourceArtifactID
-```
-
-**L4 Controlled Entity Type Vocabulary** (`MemoryOSEntityType` — 41 types):
+### 处理代码项目
 
 ```text
-person, organization, group, role, population, place, facility, spatial_object,
-concept, theory, framework, discipline, standard, language, metric, identifier_scheme,
-creative_work, document, dataset, software, product, media_object, website,
-project, event, process, decision, task, rule, agreement,
-physical_object, device, vehicle, biological_entity, medical_entity, chemical_entity,
-economic_entity, award, unknown
+请先阅读当前项目结构，然后告诉我这个 bug 可能在哪里，不要直接修改代码。
 ```
 
-Raw LLM labels go through `normalizeRawType()` with 80+ aliases (e.g. `human`→`person`, `company`→`organization`, `method`→`framework`, `app`→`software`, `policy`→`rule`, `workflow`→`process`). Unmatched labels become `unknown`.
-
-**L4 Relation Predicates** (`MemoryOSL4RelationPredicate` — 80+ predicates, 12 categories):
-
-| Category | Predicates (selected) | Retrieval Weight Range |
-|----------|-----------------------|-----------------------|
-| **Identity** | `SAME_AS`, `ALIAS_OF`, `EQUIVALENT_TO`, `EXACT_MATCH`, `CLOSE_MATCH` | 0.88 – 1.0 |
-| **Taxonomy** | `INSTANCE_OF`, `SUBCLASS_OF`, `BROADER_THAN`, `NARROWER_THAN` | 0.9 |
-| **Composition** | `HAS_PART`, `PART_OF`, `CONTAINS`, `MEMBER_OF`, `OVERLAPS_WITH` | 0.8 |
-| **Dependency** | `DEPENDS_ON`, `REQUIRES`, `ENABLES`, `PREVENTS`, `CONSTRAINS` | 0.72 – 0.8 |
-| **Capability** | `SUPPORTS_CAPABILITY`, `IMPLEMENTS`, `USES` | 0.72 – 0.75 |
-| **Applicability** | `APPLIES_TO`, `USED_FOR`, `SPECIALIZES`, `GENERALIZES`, `FIELD_OF_WORK`, `IN_INDUSTRY` | 0.7 – 0.75 |
-| **Provenance** | `DERIVED_FROM`, `BASED_ON`, `SUPPORTED_BY`, `CITES`, `QUOTES`, `GENERATED_BY`, `VALIDATED_BY`, `ATTRIBUTED_TO` | 0.68 – 0.75 |
-| **Governance** | `DECIDES`, `GOVERNS`, `COMPLIES_WITH`, `VIOLATES`, `REPLACES`, `SUPERSEDES`, `DEPRECATES` | 0.72 |
-| **Causality** | `CAUSES`, `INFLUENCES`, `MITIGATES`, `RISKS` | 0.65 – 0.7 |
-| **Contribution** | `CREATED_BY`, `MAINTAINED_BY`, `OWNED_BY`, `RESPONSIBLE_FOR`, `CONTRIBUTED_BY`, `REVIEWED_BY`, `AUTHORED_BY`, `DEVELOPED_BY`, `FOUNDED_BY`, `WORKS_ON` | 0.68 |
-| **Location** | `LOCATED_IN`, `HAS_LOCATION`, `HAS_COORDINATE` | 0.58 – 0.7 |
-| **Reference** | `DIFFERENT_FROM`, `OPPOSITE_OF`, `RELATED_TO`, `ASSOCIATED_WITH`, `ABOUT`, `MENTIONS` | 0.4 – 0.62 |
-
-Each predicate has four properties: **category** (1 of 12), **inverse** (optional reverse predicate, e.g. `HAS_PART`↔`PART_OF`), **isSymmetric** (e.g. `SAME_AS`, `RELATED_TO`), **isTransitive** (e.g. `SUBCLASS_OF`, `PART_OF`, `LOCATED_IN`, `DEPENDS_ON`).
-
-### 6.3 LLM Interface (17 tools)
-
-LLM-facing Memory OS tools, registered in `AppMemoryOSAgentTools.swift`:
-
-**Read tools (13):**
-
-| Tool | Layer | Description |
-|------|-------|-------------|
-| `memory_os_context` | All | Multi-term search across L1–L4, returns flat natural-language memory items |
-| `memory_os_search` | All | Full-text search across L0–L4, returns ranked hits with title/summary/matchedText/score |
-| `memory_os_read_record` | All | Read a single Memory OS record by layer and ID |
-| `memory_os_read_provenance` | L0 | Read L0 provenance object with optional span detail |
-| `memory_os_get_current_user_profile` | L2 | Retrieve all current-user personalization facts as flat natural-language strings |
-| `memory_os_l2_find_entities` | L2 | Find L2 working-memory entities by exact name or alias |
-| `memory_os_l2_find_statements` | L2 | Find L2 statement edges by text, subject ID, and/or predicate filters |
-| `memory_os_l3_expand_belief` | L3 | Expand L3 beliefs by ID, domain, or text query |
-| `memory_os_l3_list_domains` | L3 | List all L3 discipline domains and belief counts |
-| `memory_os_l4_find_entity` | L4 | Find L4 entity nodes by exact ID, stable key, name, or alias |
-| `memory_os_l4_neighbors` | L4 | Query outgoing/incoming/both-direction L4 graph neighbors for a known entity ID |
-| `memory_os_l4_instances` | L4 | Query L4 graph for instances of one or more class entities (INSTANCE_OF) |
-| `memory_os_expand_l4` | L4 | Depth-limited L4 entity neighborhood expansion |
-
-**Write tools (4):**
-
-| Tool | Layer | Description |
-|------|-------|-------------|
-| `memory_os_l2_update_entities` | L2 | Upsert L2 entities and append statements; entity names split/dedup/upsert |
-| `memory_os_update_current_user_profile` | L2 | Append current-user-scoped L2 fact statements |
-| `memory_os_l3_update_beliefs` | L3 | Direct-write L3 beliefs (bypasses promotion policy; domain + statement validated) |
-| `memory_os_l4_update_entities` | L4 | Direct-write L4 entities and relations; entity type normalized via `MemoryOSEntityType.normalizeRawType()`; structural validation applied |
-
-### 6.4 Write Path
-
-```text
-Chat messages ─────────┐
-Browser selections ────┤
-Native source evidence ┤   ┌─────────────────────────┐
-Source events ─────────┼──▶│   AppMemoryOSFacade     │
-Attachments ───────────┘   │   (write gate / facade) │
-                           └────┬──────────┬─────────┘
-                                │          │
-                    ┌───────────▼───┐  ┌───▼───────────────┐
-                    │ LLM Tools     │  │ Background AI Job │
-                    │ (7 tools)     │  │ unified_projection│
-                    └──┬──┬──┬──┬───┘  └──┬────────┬───────┘
-                       │  │  │  │         │        │
-              ┌────────▼┐ │  │ ┌▼───────┐ │  ┌─────▼────┐
-              │  L0/L1  │ │  │ │  L3    │ │  │ L2+L4   │
-              │(evidence│ │  │ │(belief)│ │  │(projec.)│
-              └────┬────┘ │  │ └────────┘ │  └─────────┘
-                   │      │  │            │
-              ┌────▼────┐ │  └────────────│──── L4 direct write
-              │   L1    │ │               │
-              │ (queue)─│─┘               │
-              └────┬────┘                 │
-                   │                      │
-                   ▼                      ▼
-           ┌───────────────┐    ┌──────────────────┐
-           │ L1→L2+L4      │    │ Artifact         │
-           │ Unified Proj. │───▶│ Validation +     │
-           │ (background)  │    │ Type Normalization│
-           └───────────────┘    └──────────────────┘
-```
-
-Key write-path rules:
-
-- **Dual write paths**: (1) LLM directly writes L2/L3/L4 in real-time conversation via tools; (2) L1 cache buffer accumulates events and triggers background unified projection when threshold is reached (≥100 events or ≥24h).
-- **L1 cache lifecycle**: Events accumulate from all sources → threshold triggers batch projection → LLM produces structured artifact → artifact validated → projected into L2/L3/L4 → processed L1 events physically deleted (L0 retains permanent evidence).
-- High confidence alone never promotes L2 facts to L3.
-- L4 normalizes raw LLM entity type labels into a controlled vocabulary; unsupported labels become `unknown`.
-- L4 does not use LLM-provided confidence or required evidence spans as relation gates.
-- L4 relation validation keeps structural checks (subject/object existence, known predicates, self-loop rejection, endpoint type sanity) but not confidence/evidence gates.
-- L4 expansion scoring uses predicate weight and graph depth decay, not LLM-provided confidence.
-- Historical semantic records are append-only; currentness is derived by query/current-view logic (newer validAt → newer committedAt → deterministic id).
-- L2 statements do not require evidence span IDs; the L1→L2 prompt emphasizes fact-first extraction with entity names and relation types.
-
-### 6.5 Retrieval & Context System
-
-**Tool result delivery contract** — all Memory OS read tools return actual data in `contentText` (the field the LLM sees). The `contentJSON` field preserves the full structured payload for programmatic consumers (UI, debugging). `AgentToolResultGate.gatedContent()` selects `contentText` when non-empty; tools must not rely on `contentJSON` being visible to the LLM.
-
-**Hybrid retrieval** — merged ranking across lexical (FTS), semantic (vector) and graph (L4 neighborhood expansion) retrieval modes.
-
-**Context building pipeline** (`MemoryOSContextBuilder`, `MemoryOSContextModels.swift`):
-
-1. Multi-layer retrieval collects relevant records from L0–L4.
-2. Context builder assembles: blocks, entity cards, relation cards, evidence snippets.
-3. Budget-trimmed to configured limits.
-4. Rendered as a `MemoryOSContextPackage` — the LLM's interface to memory.
-
-`MemoryOSContextPackage` contains: executive summary, context text, blocks, entity cards, relation cards, evidence cards, diagnostics, raw retrieval trace, suggested next actions, budget report, quality signals (relevance score, evidence coverage, relation coverage).
-
-Budget defaults: max 8,000 characters, 16 blocks, 10 entity cards, 24 relation cards, 8 evidence cards, 3 evidence refs per block.
-
-**Roles & priorities** (descending):
-
-| Role | Priority | Trigger |
-|------|----------|---------|
-| `currentUserProfile` | 100 | taskIntent == `.currentUserPersonalization` |
-| `conflict` | 95 | conflicting facts in retrieval set |
-| `projectState` | 90 | project-related retrieval |
-| `operationalFact` | 80 | L2 hits |
-| `relation` | 75 | L4 relation hits |
-| `stableEntity` | 70 | L4 entity hits |
-| `reusableKnowledge` | 65 | L3 hits |
-| `evidence` | 60 | L0/L1 hits |
-| `uncertainty` | 50 | low-confidence retrieval |
-| `historicalContext` | 40 | stale temporal records |
-| `nextStepHint` | 30 | suggested next actions |
-
-**Task intents** (`MemoryOSTaskIntent`): `answerQuestion`, `continueConversation`, `updateProject`, `debugCode`, `planWork`, `summarizeMemory`, `verifyClaim`, `resolveEntity`, `listInstances`, `explainRelationship`, `currentUserPersonalization`, `auto`.
-
-### 6.6 ObserveLog (Rolling Buffer)
-
-`ObserveLog.swift` — lightweight short-term buffer for observations that may be worth absorbing into Memory OS.
-
-| Field | Values / Notes |
-|-------|---------------|
-| Kinds (8) | `operation`, `tool_event`, `insight`, `fragment`, `observation`, `candidate_fact`, `decision_hint`, `user_preference` |
-| Sources (7) | `user`, `agent`, `tool`, `import`, `search`, `system` |
-| Statuses (4) | `active`, `promoted`, `dismissed`, `expired` |
-| Retention | 30 days default |
-| Expiring-soon window | 3 days before expiry |
-| System task | Daily sweep of expired entries |
-| Promotion path | Entry can be promoted to Memory OS node via `promoted(toNodeID:)` |
-
-### 6.7 Background Pipeline
-
-**Trigger conditions** (`MemoryOSL1ProcessingTriggerPolicy`):
-- Pending capture events ≥ 100 (`pendingCountThreshold`), **or**
-- Oldest pending event age ≥ 24h (`pendingAgeThreshold`), **or**
-- Manual trigger via CLI.
-
-**Job types** (`MemoryOSBackgroundJobKind`):
-- `memory.l1.unified_projection` — groups pending L1 captures (up to 30 events / 12k tokens per batch), projects operational facts into L2 + stable entity/concept facts into L4. After successful artifact acceptance, processed L1 capture events are physically deleted; L0 retains permanent evidence.
-- `memory.l1.synthesize_knowledge` — knowledge candidate synthesis (L2 candidates → L3 beliefs).
-
-**Time-block builder** (`MemoryOSTimeBlockBuilder`): target token limit 60k, hard limit 80k; splits on day boundaries and 3-hour gaps.
-
-**Execution tracking** (`MemoryOSBackgroundRunDomain.swift`): full message/tool-call history per run. `MemoryOSBackgroundRunRecord` (run lifecycle), `MemoryOSBackgroundMessageRecord` (messages), `MemoryOSBackgroundToolCallRecord` (tool calls). Supports idempotency keys, max 3 retries, dead-letter queue.
+如果你允许它修改，康纳同学会在需要时请求确认。
 
 ---
 
-## 7. Search Kernel
+## 权限与确认
 
-The Rust-based Tantivy embedded search kernel (`SearchKernel/`) is compiled as an in-process C-ABI sidecar. It is not a server, daemon or HTTP service.
+康纳同学会尽量把重要操作放在你能理解和确认的流程里。
 
-Responsibilities:
-- Chinese/full-text candidate retrieval via Jieba/CJK tokenization
-- Tantivy index schema and query execution
-- C ABI for Swift in-process calls
+常见需要注意的情况：
 
-Non-responsibilities (owned by Swift/SQLite Graph Retrieval Kernel):
-- L1/L2/L3/L4 graph traversal
-- Evidence trace
-- Instance enumeration
-- Timeline aggregation
+- **读取本地文件**：通常需要你选择或设置相关工作目录。
+- **修改文件或执行命令**：在高风险操作前应当让你知道它要做什么。
+- **发送邮件**：康纳同学可以起草邮件，但发送前需要你确认。
+- **使用 API Key**：密钥加密保存在本机，不会直接显示在普通设置文件中。
+- **连接数据源**：建议只连接当前任务需要的数据源。
 
-Build scripts:
-- `Scripts/package-search-kernel.sh` — compile and package the Rust sidecar
-- `Scripts/verify-memory-os-release.sh` — verify Memory OS release readiness
+当你看到权限请求时，可以先确认三件事：
 
----
-
-## 8. UI Guidelines
-
-Connor is a native macOS app.
-
-1. Prefer SwiftUI/AppKit/macOS-native components over custom web UI.
-2. Pure icon buttons need visible labels or `.accessibilityLabel(...)`; add `.help(...)` where useful.
-3. `NSViewRepresentable` / WebKit / PDFKit bridges should preserve platform accessibility semantics.
-4. Avoid duplicate sources of truth for sidebar, detail and settings navigation.
-5. Use existing design tokens in `AgentChatDesignSystem` / `AppShellDesignSystem` before adding ad-hoc colors or dimensions.
-6. Keep chat scrolling, pagination, unread markers and date sections inside the commercial Chat Viewport infrastructure; see `Sources/ConnorGraphAgentMac/ChatViewport/` before changing it.
-7. Avoid nested navigation titles leaking into macOS window/menu state.
-8. Destructive or governance actions must open review surfaces; shortcuts must not bypass Connor policy/review gates.
-
-User-facing copy should use the "康纳同学" voice: warm, precise, local-first and action-oriented. Avoid generic `Something went wrong`, `No data`, or raw error-code-only messages on end-user surfaces.
+1. 它要做什么？
+2. 它会访问哪些资料或位置？
+3. 这是否符合你当前的任务意图？
 
 ---
 
-## 9. Development Commands
+## 康纳同学如何“记住”上下文？
 
-From the repository root:
+康纳同学会在后台整理重要资料和上下文，让后续工作更连续。你不需要直接编辑这些记忆，也不需要管理图谱。
 
-```bash
-swift build
-swift test
-swift test --filter Browser
-swift run connor --help
-```
+你只需要知道：
 
-Search Kernel (Rust sidecar):
+- 它会保留重要证据和上下文。
+- 它会把零散信息整理成可复用的工作记忆。
+- 它会帮助康纳同学理解人、项目、概念、资料和关系。
+- 它不会把所有外部来源都直接当成事实；重要内容会经过整理和验证。
 
-```bash
-cd SearchKernel
-cargo build
-```
-
-Diagnostics:
-
-```bash
-git status --short
-swift --version
-find Sources Tests -name '*.swift' | wc -l
-```
+这套记忆能力的目标，是让康纳同学在长期工作中更可靠、更连续，而不是让你多维护一个复杂系统。
 
 ---
 
-## 10. Code Quality Checklist
+## 本地优先
 
-Before claiming a change is complete:
+康纳同学是 macOS 原生应用，运行数据主要保存在你的本机，包括：
 
-- Run the smallest relevant tests first; run full `swift test` before final handoff when feasible.
-- Keep provider, sidecar and source adapters behind Connor-owned policy and audit boundaries.
-- Keep credentials out of JSON, prompt context, audit payloads, README examples and source cache records.
-- Keep Memory OS writes behind provenance capture, artifact validation, audit logging and projection gates.
-- Keep attachment source of truth in Session Capsule / Attachment Store.
-- Keep native source search indexes updated or explicitly invalidated after source mutations.
-- Preserve temporal metadata in Mail/RSS/Calendar search results.
-- Mail sending must never trust model-supplied approval flags; only human approval in `AgentToolExecutionContext.approvedCapabilities(.sendMail)` authorizes SMTP send.
-- Add accessibility labels for pure icon controls.
-- Prefer structured errors over force unwraps or force casts.
-- L4 entity type labels must go through `MemoryOSEntityType.normalizeRawType()`; do not pass raw LLM labels to storage.
-- L2 entity operations must go through `MemoryOSL2EntityMemoryService`; do not bypass name-splitting, dedup or upsert logic.
-- Keep README concise and architectural; use focused design docs or issues for future work and changelogs.
+- 会话
+- 设置
+- 数据源
+- 技能
+- 任务
+- 附件
+- 搜索索引
+- 后台记忆数据
+- 运行日志
+
+你通常不需要手动编辑这些文件。日常使用中，只需要通过应用界面管理会话、数据源、技能和设置即可。
 
 ---
 
-## 11. Deferred / Non-goals
+## 工程文档
 
-- Remote daemon or cloud sync
-- Public API server
-- Team/multi-user permission model
-- Full OAuth server ownership
-- Direct CLI/API graph writes
-- External MCP/source owning Connor product state
-- Provider-native file API as source of truth
-- OCR for scanned PDFs
-- Full XLSX/PPT structured extraction model
-- Enterprise audit mirror
-- Browser automation that bypasses user intervention for CAPTCHA/login/security flows
+如果你是开发者，想了解工程结构、包划分、运行布局、Memory OS 细节和开发命令，请看 [ENGINEERING.md](ENGINEERING.md)。
 
 ---
 
-## 12. License
+## License
 
 See [LICENSE](LICENSE).

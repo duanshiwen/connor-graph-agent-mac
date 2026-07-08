@@ -150,6 +150,88 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.mailListMessages(direction: .all).map(\.id.rawValue) == ["matching-mail"])
     }
 
+    @Test func openingMailSearchResultSelectsMessageContextAndClearsMailFilter() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "global-mail-target", subject: "全国二线中高端岗位")
+        let other = makeMailFixture(messageID: "global-mail-other", subject: "Apple Store 订单")
+        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mail.account],
+            mailboxes: [mail.mailbox],
+            messages: [other.summary, mail.summary]
+        )
+        fixture.viewModel.mailSearchQuery = "旧筛选词"
+        fixture.viewModel.isGlobalSearchOverlayPresented = true
+
+        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailSearchQuery.isEmpty)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
+    @Test func performingSelectedMailSearchItemSelectsMessageContext() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "keyboard-mail-target", subject: "键盘打开邮件")
+        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mail.account],
+            mailboxes: [mail.mailbox],
+            messages: [mail.summary]
+        )
+        fixture.viewModel.globalSearchPreviewState = GlobalSearchPreviewState(
+            query: "键盘",
+            mailResults: [mail.searchResult],
+            searchTokens: ["键盘"]
+        )
+        fixture.viewModel.globalSearchSelectedItem = .nativeResult(mail.searchResult.id)
+        fixture.viewModel.isGlobalSearchOverlayPresented = true
+
+        fixture.viewModel.performSelectedGlobalSearchItem()
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
+    @Test func openingMailSearchResultLoadsMessageFromStoreWhenPresentationIsStale() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let mail = makeMailFixture(messageID: "stale-presentation-mail", subject: "缓存中存在但展示未刷新")
+        let store = FileBackedMailSourceStore(storagePaths: fixture.paths)
+        try await store.saveAccount(mail.account)
+        try await store.saveMailbox(mail.mailbox)
+        try await store.saveMessage(mail.detail)
+        fixture.viewModel.mailBrowserPresentation = .empty
+        fixture.viewModel.mailSearchQuery = "旧筛选词"
+        fixture.viewModel.isGlobalSearchOverlayPresented = true
+
+        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+        for _ in 0..<20 {
+            if fixture.viewModel.selectedMailAccountID == mail.summary.accountID,
+               fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID {
+                break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
+        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailBrowserPresentation.message(id: mail.summary.id) != nil)
+        #expect(fixture.viewModel.mailSearchQuery.isEmpty)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
     @Test func showAllBrowserHistoryCarriesGlobalSearchQueryIntoHistoryFilter() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -361,6 +443,25 @@ struct AppGlobalSearchTests {
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
+    @Test func globalSearchIncludesMailResultsInFallbackPreview() async throws {
+        let viewModel = AppViewModel(entities: [], statements: [], observeLogEntries: [])
+        let mails = (0..<5).map { index in
+            makeMailFixture(messageID: "fallback-mail-\(index)", subject: "Phoenix mail \(index)")
+        }
+        viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: [mails[0].account],
+            mailboxes: [mails[0].mailbox],
+            messages: mails.map(\.summary)
+        )
+        viewModel.updateGlobalSearchQuery("Phoenix")
+
+        await viewModel.refreshGlobalSearchPreview(for: "Phoenix")
+
+        #expect(viewModel.globalSearchPreviewState.mailResults.count == 3)
+        #expect(viewModel.globalSearchPreviewState.mailResults.allSatisfy { $0.sourceKind == .mail })
+        #expect(viewModel.globalSearchPreviewState.mailResults.allSatisfy { $0.title.contains("Phoenix mail") })
+    }
+
     @Test func globalSearchIncludesBrowserHistoryResults() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -452,11 +553,58 @@ struct AppGlobalSearchTests {
             storagePaths: paths
         )
         let repository = AppChatSessionRepository(store: graphRepository.store, storagePaths: paths)
-        return Fixture(root: root, viewModel: viewModel, repository: repository)
+        return Fixture(root: root, paths: paths, viewModel: viewModel, repository: repository)
+    }
+
+    private func makeMailFixture(messageID: String, subject: String) -> MailFixture {
+        let accountID = MailAccountID(rawValue: "shiwen@example.com")
+        let mailboxID = MailMailboxID(rawValue: "inbox")
+        let date = Date(timeIntervalSince1970: 1_783_148_400)
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "诗闻邮箱", identities: [])
+        let mailbox = MailMailbox(id: mailboxID, accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox)
+        let summary = MailMessageSummary(
+            id: MailMessageID(rawValue: messageID),
+            accountID: accountID,
+            mailboxID: mailboxID,
+            subject: subject,
+            from: MailAddress(email: "sender@example.com"),
+            to: [MailAddress(email: "shiwen@example.com")],
+            date: date,
+            snippet: "全局搜索邮件摘要"
+        )
+        let detail = MailMessageDetail(
+            summary: summary,
+            headers: MailMessageHeaders(messageIDHeader: "<\(messageID)@example.com>"),
+            body: MailMessageBody(redactedPreview: "全局搜索邮件摘要")
+        )
+        let result = NativeSearchResult(
+            id: "mail:\(messageID)",
+            sourceKind: .mail,
+            externalID: messageID,
+            sourceInstanceID: accountID.rawValue,
+            title: subject,
+            snippet: "sender@example.com · 全局搜索邮件摘要",
+            score: 1,
+            lexicalScore: 1,
+            freshnessScore: 1,
+            fieldScore: 1,
+            temporal: NativeSearchTemporalMetadata(primaryTime: date, primaryTimeKind: .sentAt, sentAt: date),
+            resultTimeLabel: date.connorLocalFormatted(date: .medium, time: .short)
+        )
+        return MailFixture(account: account, mailbox: mailbox, summary: summary, detail: detail, searchResult: result)
+    }
+
+    private struct MailFixture {
+        var account: MailAccount
+        var mailbox: MailMailbox
+        var summary: MailMessageSummary
+        var detail: MailMessageDetail
+        var searchResult: NativeSearchResult
     }
 
     private struct Fixture {
         var root: URL
+        var paths: AppStoragePaths
         var viewModel: AppViewModel
         var repository: AppChatSessionRepository
 
