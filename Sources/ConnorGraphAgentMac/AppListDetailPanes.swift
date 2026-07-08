@@ -1544,11 +1544,11 @@ private struct AddTaskAutomationSheet: View {
 struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var directionFilter: MailMessageDirectionFilter = .all
+    @State private var visibleMessagesCache: [MailMessageSummary] = []
+    @State private var visibleMessagesCacheKey = MailVisibleMessagesCacheKey.empty
 
     private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
-    private var visibleMessages: [MailMessageSummary] {
-        viewModel.mailListMessages(direction: directionFilter)
-    }
+    private var visibleMessages: [MailMessageSummary] { visibleMessagesCache }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1619,9 +1619,30 @@ struct CraftMailListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear(perform: refreshVisibleMessagesCacheIfNeeded)
+        .onChange(of: directionFilter) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
+        .onChange(of: viewModel.mailSearchQuery) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
+        .onChange(of: viewModel.mailBrowserPresentation.messages) { _, _ in refreshVisibleMessagesCache(force: true) }
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet(viewModel: viewModel)
         }
+    }
+
+    private func refreshVisibleMessagesCacheIfNeeded() {
+        refreshVisibleMessagesCache(force: false)
+    }
+
+    private func refreshVisibleMessagesCache(force: Bool) {
+        let key = MailVisibleMessagesCacheKey(
+            messageCount: viewModel.mailBrowserPresentation.messages.count,
+            firstMessageID: viewModel.mailBrowserPresentation.messages.first?.id,
+            lastMessageID: viewModel.mailBrowserPresentation.messages.last?.id,
+            query: viewModel.mailSearchQuery,
+            direction: directionFilter
+        )
+        guard force || key != visibleMessagesCacheKey else { return }
+        visibleMessagesCacheKey = key
+        visibleMessagesCache = viewModel.mailListMessages(direction: directionFilter)
     }
 
     private var visibleMessageIDs: [MailMessageID] {
@@ -1652,9 +1673,26 @@ struct CraftMailListPane: View {
         guard let selectedID = viewModel.selectedMailMessageID,
               visibleMessageIDs.contains(selectedID) else { return }
         Task { @MainActor in
+            await Task.yield()
             proxy.scrollTo(selectedID, anchor: .center)
         }
     }
+}
+
+private struct MailVisibleMessagesCacheKey: Equatable {
+    var messageCount: Int
+    var firstMessageID: MailMessageID?
+    var lastMessageID: MailMessageID?
+    var query: String
+    var direction: MailMessageDirectionFilter
+
+    static let empty = MailVisibleMessagesCacheKey(
+        messageCount: -1,
+        firstMessageID: nil,
+        lastMessageID: nil,
+        query: "",
+        direction: .all
+    )
 }
 
 extension MailMessageDirectionFilter {
