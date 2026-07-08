@@ -18,7 +18,7 @@ let package = Package(
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/vincedev/MailCoreSPM", branch: "master")
+        .package(path: "Vendor/MailCoreSPM")
     ],
     targets: [
         .target(name: "ConnorGraphCore"),

@@ -1191,14 +1191,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
         globalSearchPreviewState = GlobalSearchPreviewState(
             query: trimmed,
-            loadingSections: [.calendar, .rss, .browserHistory],
+            loadingSections: [.calendar, .rss, .mail, .browserHistory],
             chatSessionResults: chatSessionResults,
             searchTokens: tokens,
             errorMessage: nil
         )
         normalizeGlobalSearchSelection()
 
-        let limits: [NativeSearchSourceKind: Int] = [.calendar: 3, .rss: 3, .browserHistory: 3]
+        let limits: [NativeSearchSourceKind: Int] = [.calendar: 3, .rss: 3, .mail: 3, .browserHistory: 3]
         await refreshGlobalSearchNativePreviewSections(query: trimmed, tokens: tokens, limitsBySource: limits)
     }
 
@@ -1623,12 +1623,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 selectedRSSItemID = RSSItemID(rawValue: result.externalID)
             }
         case .mail:
-            selection = .mail
-            selectedMailMessageID = MailMessageID(rawValue: result.externalID)
-            if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
-                selectedMailAccountID = message.accountID
-                selectedMailMailboxID = message.mailboxID
-            }
+            openGlobalSearchMailResult(result)
         case .browserHistory:
             if let id = UUID(uuidString: result.externalID), let record = browserHistoryRecords.first(where: { $0.id == id }) ?? browserHistoryStore?.record(id: id) {
                 navigateToHistoryRecord(record)
@@ -1638,6 +1633,49 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         dismissGlobalSearchOverlay()
+    }
+
+    private func openGlobalSearchMailResult(_ result: NativeSearchResult) {
+        selection = .mail
+        mailSearchQuery = ""
+        let messageID = MailMessageID(rawValue: result.externalID)
+        if let message = mailBrowserPresentation.message(id: messageID) {
+            selectMailMessage(message)
+            return
+        }
+
+        selectedMailMessageID = messageID
+        Task { @MainActor in
+            await loadAndSelectMailMessageIfNeeded(messageID)
+        }
+    }
+
+    private func selectMailMessage(_ message: MailMessageSummary) {
+        selectedMailAccountID = message.accountID
+        selectedMailMailboxID = message.mailboxID
+        selectedMailMessageID = message.id
+    }
+
+    private func loadAndSelectMailMessageIfNeeded(_ messageID: MailMessageID) async {
+        guard selectedMailMessageID == messageID else { return }
+        if let message = mailBrowserPresentation.message(id: messageID) {
+            selectMailMessage(message)
+            return
+        }
+        do {
+            guard let detail = try await mailStore?.message(id: messageID) else {
+                mailSyncMessage = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
+                return
+            }
+            selectMailMessage(detail.summary)
+            await reloadMailBrowserPresentation()
+            if let message = mailBrowserPresentation.message(id: messageID) {
+                selectMailMessage(message)
+            }
+            mailSyncMessage = nil
+        } catch {
+            mailSyncMessage = "无法打开这封邮件：\(error.localizedDescription)"
+        }
     }
 
     func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
