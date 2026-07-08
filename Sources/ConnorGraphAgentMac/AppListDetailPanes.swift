@@ -1590,19 +1590,31 @@ struct CraftMailListPane: View {
                     ContentUnavailableView(mailEmptyListTitle, systemImage: mailEmptyListSystemImage, description: Text(mailEmptyListDescription))
                         .padding(.top, 56)
                 } else {
-                    List(visibleMessages) { message in
-                        MailMessageListRow(
-                            message: message,
-                            account: presentation.account(id: message.accountID),
-                            mailbox: presentation.mailbox(id: message.mailboxID),
-                            isSelected: message.id == viewModel.selectedMailMessageID,
-                            onSelect: { selectMessage(message) }
-                        )
-                        .nativeListRowStyle()
+                    ScrollViewReader { proxy in
+                        List(visibleMessages) { message in
+                            MailMessageListRow(
+                                message: message,
+                                account: presentation.account(id: message.accountID),
+                                mailbox: presentation.mailbox(id: message.mailboxID),
+                                isSelected: message.id == viewModel.selectedMailMessageID,
+                                onSelect: { selectMessage(message) }
+                            )
+                            .nativeListRowStyle()
+                            .id(message.id)
+                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .contentMargins(.top, 6, for: .scrollContent)
+                        .onAppear {
+                            scrollToSelectedMessage(with: proxy)
+                        }
+                        .onChange(of: viewModel.selectedMailMessageID) { _, _ in
+                            scrollToSelectedMessage(with: proxy)
+                        }
+                        .onChange(of: visibleMessageIDs) { _, _ in
+                            scrollToSelectedMessage(with: proxy)
+                        }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .contentMargins(.top, 6, for: .scrollContent)
                 }
             }
         }
@@ -1610,6 +1622,10 @@ struct CraftMailListPane: View {
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet(viewModel: viewModel)
         }
+    }
+
+    private var visibleMessageIDs: [MailMessageID] {
+        visibleMessages.map(\.id)
     }
 
     private var isFilteringBySearch: Bool {
@@ -1630,6 +1646,14 @@ struct CraftMailListPane: View {
 
     private func selectMessage(_ message: MailMessageSummary) {
         viewModel.selectMailMessageFromList(message)
+    }
+
+    private func scrollToSelectedMessage(with proxy: ScrollViewProxy) {
+        guard let selectedID = viewModel.selectedMailMessageID,
+              visibleMessageIDs.contains(selectedID) else { return }
+        Task { @MainActor in
+            proxy.scrollTo(selectedID, anchor: .center)
+        }
     }
 }
 
