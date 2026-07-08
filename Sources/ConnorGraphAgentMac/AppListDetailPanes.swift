@@ -1544,12 +1544,18 @@ private struct AddTaskAutomationSheet: View {
 struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var directionFilter: MailMessageDirectionFilter = .all
+    @State private var filteredMessagesCache: [MailMessageSummary] = []
     @State private var visibleMessagesCache: [MailMessageSummary] = []
     @State private var visibleMessageIDCache: Set<MailMessageID> = []
     @State private var visibleMessagesCacheKey = MailVisibleMessagesCacheKey.empty
+    @State private var visibleMessagesLimit = Self.initialVisibleMessagesLimit
+
+    private static let initialVisibleMessagesLimit = 500
+    private static let visibleMessagesBatchSize = 500
 
     private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
     private var visibleMessages: [MailMessageSummary] { visibleMessagesCache }
+    private var hiddenFilteredMessageCount: Int { max(filteredMessagesCache.count - visibleMessagesCache.count, 0) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1592,16 +1598,26 @@ struct CraftMailListPane: View {
                         .padding(.top, 56)
                 } else {
                     ScrollViewReader { proxy in
-                        List(visibleMessages) { message in
-                            MailMessageListRow(
-                                message: message,
-                                account: presentation.account(id: message.accountID),
-                                mailbox: presentation.mailbox(id: message.mailboxID),
-                                isSelected: message.id == viewModel.selectedMailMessageID,
-                                onSelect: { selectMessage(message) }
-                            )
-                            .equatable()
-                            .nativeListRowStyle()
+                        List {
+                            ForEach(visibleMessages) { message in
+                                MailMessageListRow(
+                                    message: message,
+                                    account: presentation.account(id: message.accountID),
+                                    mailbox: presentation.mailbox(id: message.mailboxID),
+                                    isSelected: message.id == viewModel.selectedMailMessageID,
+                                    onSelect: { selectMessage(message) }
+                                )
+                                .equatable()
+                                .nativeListRowStyle()
+                            }
+                            if hiddenFilteredMessageCount > 0 {
+                                MailListLoadMoreRow(
+                                    hiddenCount: hiddenFilteredMessageCount,
+                                    batchSize: Self.visibleMessagesBatchSize,
+                                    onLoadMore: loadMoreVisibleMessages
+                                )
+                                .nativeListRowStyle()
+                            }
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
@@ -1642,10 +1658,28 @@ struct CraftMailListPane: View {
             direction: directionFilter
         )
         guard force || key != visibleMessagesCacheKey else { return }
+        if key.query != visibleMessagesCacheKey.query
+            || key.direction != visibleMessagesCacheKey.direction
+            || key.messageCount != visibleMessagesCacheKey.messageCount
+            || key.firstMessageID != visibleMessagesCacheKey.firstMessageID
+            || key.lastMessageID != visibleMessagesCacheKey.lastMessageID {
+            visibleMessagesLimit = Self.initialVisibleMessagesLimit
+        }
         let messages = viewModel.mailListMessages(direction: directionFilter)
         visibleMessagesCacheKey = key
-        visibleMessagesCache = messages
-        visibleMessageIDCache = Set(messages.map(\.id))
+        filteredMessagesCache = messages
+        rebuildVisibleMessagesWindow()
+    }
+
+    private func loadMoreVisibleMessages() {
+        visibleMessagesLimit += Self.visibleMessagesBatchSize
+        rebuildVisibleMessagesWindow()
+    }
+
+    private func rebuildVisibleMessagesWindow() {
+        let windowedMessages = Array(filteredMessagesCache.prefix(visibleMessagesLimit))
+        visibleMessagesCache = windowedMessages
+        visibleMessageIDCache = Set(windowedMessages.map(\.id))
     }
 
     private var mailPresentationListSignature: MailPresentationListSignature {
@@ -1739,6 +1773,32 @@ extension MailMessageDirectionFilter {
         case .received: "tray"
         case .sent: "paperplane"
         }
+    }
+}
+
+private struct MailListLoadMoreRow: View, Equatable {
+    var hiddenCount: Int
+    var batchSize: Int
+    var onLoadMore: () -> Void
+
+    nonisolated static func == (lhs: MailListLoadMoreRow, rhs: MailListLoadMoreRow) -> Bool {
+        lhs.hiddenCount == rhs.hiddenCount && lhs.batchSize == rhs.batchSize
+    }
+
+    var body: some View {
+        Button(action: onLoadMore) {
+            VStack(spacing: 4) {
+                Text("显示更多邮件")
+                    .font(AppListTypography.rowCaptionEmphasized)
+                Text("还有 \(hiddenCount) 封，点击继续加载最近 \(min(batchSize, hiddenCount)) 封")
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
