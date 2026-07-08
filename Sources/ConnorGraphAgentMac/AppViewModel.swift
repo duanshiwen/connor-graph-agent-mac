@@ -412,6 +412,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
     @Published var selectedMailMessageSummary: MailMessageSummary?
+    @Published var mailNavigationTargetID: MailMessageID?
+    @Published var mailNavigationMessage: String?
     @Published var mailPreferences: MailPreferences = MailPreferences()
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var mailSyncMessage: String?
@@ -1646,6 +1648,8 @@ final class AppViewModel: NSObject, ObservableObject {
         }
 
         selectedMailMessageID = messageID
+        mailNavigationTargetID = messageID
+        mailNavigationMessage = "正在打开搜索结果中的邮件…"
         Task { @MainActor in
             await loadAndSelectMailMessageIfNeeded(messageID)
         }
@@ -1668,6 +1672,8 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedMailMailboxID = message.mailboxID
         selectedMailMessageID = message.id
         selectedMailMessageSummary = message
+        mailNavigationTargetID = nil
+        mailNavigationMessage = nil
     }
 
     private func loadAndSelectMailMessageIfNeeded(_ messageID: MailMessageID) async {
@@ -1678,7 +1684,9 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         do {
             guard let detail = try await mailStore?.message(id: messageID) else {
-                mailSyncMessage = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
+                let message = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
+                mailSyncMessage = message
+                mailNavigationMessage = message
                 return
             }
             selectMailMessage(detail.summary)
@@ -1687,8 +1695,12 @@ final class AppViewModel: NSObject, ObservableObject {
                 selectMailMessage(message)
             }
             mailSyncMessage = nil
+            mailNavigationTargetID = nil
+            mailNavigationMessage = nil
         } catch {
-            mailSyncMessage = "无法打开这封邮件：\(error.localizedDescription)"
+            let message = "无法打开这封邮件：\(error.localizedDescription)"
+            mailSyncMessage = message
+            mailNavigationMessage = message
         }
     }
 
