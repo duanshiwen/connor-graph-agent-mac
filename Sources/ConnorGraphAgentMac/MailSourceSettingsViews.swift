@@ -1,7 +1,15 @@
 import SwiftUI
 import WebKit
+import os
 import ConnorGraphCore
 import ConnorGraphAppSupport
+
+private let mailBodyRenderingLogger = Logger(subsystem: AppPerformanceLog.subsystem, category: "MailBodyRendering")
+
+private func mailBodyDurationMilliseconds(from start: ContinuousClock.Instant) -> Double {
+    let elapsed = start.duration(to: ContinuousClock.now)
+    return Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+}
 
 struct MailBodyDisplayPresentation: Equatable {
     enum Kind: Equatable {
@@ -779,6 +787,7 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         private var loadState = MailHTMLBodyLoadState()
         private let heightStabilizer = MailHTMLBodyHeightStabilizer()
         private var measurementGeneration = 0
+        private var loadStartedAt: ContinuousClock.Instant?
 
         init(layout: Binding<MailHTMLBodyLayout>) {
             self.layout = layout
@@ -787,11 +796,17 @@ private struct MailHTMLBodyView: NSViewRepresentable {
         func shouldReload(html: String) -> Bool {
             guard loadState.shouldReload(html: html) else { return false }
             measurementGeneration += 1
+            loadStartedAt = ContinuousClock.now
+            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) htmlLength=\(html.count, privacy: .public)")
             return true
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webView.isHidden = false
+            if let loadStartedAt {
+                let milliseconds = mailBodyDurationMilliseconds(from: loadStartedAt)
+                mailBodyRenderingLogger.info("mailBody.webView.didFinish generation=\(self.measurementGeneration, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+            }
             scheduleHeightMeasurements(for: webView, generation: measurementGeneration)
         }
 
@@ -819,7 +834,9 @@ private struct MailHTMLBodyView: NSViewRepresentable {
                 Task { @MainActor in
                     guard generation == self.measurementGeneration else { return }
                     guard let numericHeight = Self.numericHeight(from: value) else { return }
-                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: self.layout.wrappedValue, measuredDocumentHeight: numericHeight) else { return }
+                    let currentLayout = self.layout.wrappedValue
+                    guard let stabilized = self.heightStabilizer.stabilizedLayout(current: currentLayout, measuredDocumentHeight: numericHeight) else { return }
+                    mailBodyRenderingLogger.info("mailBody.webView.height generation=\(generation, privacy: .public) measured=\(numericHeight, privacy: .public) oldMode=\(String(describing: currentLayout.mode), privacy: .public) oldHeight=\(currentLayout.height, privacy: .public) newMode=\(String(describing: stabilized.mode), privacy: .public) newHeight=\(stabilized.height, privacy: .public)")
                     self.layout.wrappedValue = stabilized
                 }
             }
@@ -910,6 +927,8 @@ private struct MailMessageDetailPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
+            let startedAt = ContinuousClock.now
+            mailBodyRenderingLogger.info("mailBody.load.start messageID=\(token.messageID.rawValue, privacy: .public)")
             allowRemoteImagesForMessage = false
             preparedHTMLBody = nil
             bodyWebLayout = .initial
@@ -918,6 +937,8 @@ private struct MailMessageDetailPane: View {
             let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
+            let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
+            mailBodyRenderingLogger.info("mailBody.load.end messageID=\(token.messageID.rawValue, privacy: .public) kind=\(String(describing: display.kind), privacy: .public) htmlLength=\(display.html?.count ?? 0, privacy: .public) textLength=\(display.text.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             bodyDisplay = display
         }
         .task(id: htmlSanitizationRequest) {
@@ -930,11 +951,15 @@ private struct MailMessageDetailPane: View {
             preparedHTMLBody = nil
             bodyWebLayout = .initial
             let policy = MailHTMLDisplayPolicy(remoteContentMode: request.allowsRemoteImages ? .allowForMessage : .block)
+            let startedAt = ContinuousClock.now
+            mailBodyRenderingLogger.info("mailBody.sanitize.start messageID=\(request.messageID.rawValue, privacy: .public) htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
             let result = await Task.detached(priority: .userInitiated) {
                 MailHTMLBodySanitizer().prepareHTML(html, policy: policy)
             }.value
             guard !Task.isCancelled else { return }
             guard htmlSanitizationRequest == request else { return }
+            let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
+            mailBodyRenderingLogger.info("mailBody.sanitize.end messageID=\(request.messageID.rawValue, privacy: .public) outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             preparedHTMLBody = MailPreparedHTMLBodyPresentation(result)
         }
     }
