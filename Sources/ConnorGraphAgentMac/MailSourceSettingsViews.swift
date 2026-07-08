@@ -45,6 +45,12 @@ struct MailBodyDisplayPresentation: Equatable {
 
     static let loading = MailBodyDisplayPresentation(kind: .loading, text: "正在加载邮件正文…")
 
+    static func preparing(detail: MailMessageDetail) async -> MailBodyDisplayPresentation {
+        await Task.detached(priority: .userInitiated) {
+            MailBodyDisplayPresentation(detail: detail)
+        }.value
+    }
+
     private static func recoverCachedHTMLIfNeeded(_ html: String, fallback: String) -> (html: String, plainText: String) {
         let parser = MailMIMEParser()
         let result = parser.parseBodyWithHTML(

@@ -149,6 +149,28 @@ struct MailSettingsSectionTests {
     }
 
     @Test func mailBodyDisplayRecoversCachedQuotedPrintableHTMLBeforeRendering() {
+        let detail = quotedPrintableHTMLMessageDetail()
+
+        let display = MailBodyDisplayPresentation(detail: detail)
+
+        #expect(display.kind == .html)
+        #expect(display.html?.contains("段诗闻") == true)
+        #expect(display.html?.contains("=E6=AE") == false)
+        #expect(display.text.contains("段诗闻"))
+    }
+
+    @Test func mailBodyDisplayCanBePreparedAsynchronouslyWithoutChangingRecoveredHTML() async {
+        let detail = quotedPrintableHTMLMessageDetail()
+
+        let display = await MailBodyDisplayPresentation.preparing(detail: detail)
+
+        #expect(display.kind == .html)
+        #expect(display.html?.contains("段诗闻") == true)
+        #expect(display.html?.contains("=E6=AE") == false)
+        #expect(display.text.contains("段诗闻"))
+    }
+
+    private func quotedPrintableHTMLMessageDetail() -> MailMessageDetail {
         let accountID = MailAccountID(rawValue: "shiwen@example.com")
         let mailboxID = MailMailboxID(rawValue: "inbox")
         let summary = MailMessageSummary(
@@ -161,7 +183,7 @@ struct MailSettingsSectionTests {
             date: Date(timeIntervalSince1970: 1_783_148_400),
             snippet: "=E6=AE=B5=E8=AF=97=E9=97=BB"
         )
-        let detail = MailMessageDetail(
+        return MailMessageDetail(
             summary: summary,
             body: MailMessageBody(
                 plainText: nil,
@@ -173,13 +195,6 @@ struct MailSettingsSectionTests {
                 redactedPreview: "=E6=AE=B5=E8=AF=97=E9=97=BB"
             )
         )
-
-        let display = MailBodyDisplayPresentation(detail: detail)
-
-        #expect(display.kind == .html)
-        #expect(display.html?.contains("段诗闻") == true)
-        #expect(display.html?.contains("=E6=AE") == false)
-        #expect(display.text.contains("段诗闻"))
     }
 
     @Test func mailMessageListPresentationUsesSentDateInContextText() {

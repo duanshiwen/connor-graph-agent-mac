@@ -3039,13 +3039,13 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             guard !Task.isCancelled else { return .loading }
             if MailBodyOnDemandFetchPlanner.hasDisplayableBody(detail) {
-                return MailBodyDisplayPresentation(detail: detail)
+                return await MailBodyDisplayPresentation.preparing(detail: detail)
             }
             do {
                 try Task.checkCancellation()
                 let fetched = try await fetchAndCacheMailBodyIfNeeded(detail)
                 try Task.checkCancellation()
-                return MailBodyDisplayPresentation(detail: fetched)
+                return await MailBodyDisplayPresentation.preparing(detail: fetched)
             } catch is CancellationError {
                 return .loading
             } catch {
