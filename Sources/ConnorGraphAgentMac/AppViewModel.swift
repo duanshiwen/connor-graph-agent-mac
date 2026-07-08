@@ -1699,8 +1699,10 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             guard let detail = try await mailStore?.message(id: messageID) else {
                 let message = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
+                NSLog("[Connor.Mail] message not found in store: id=%@, presentationCount=%d", messageID.rawValue, mailBrowserPresentation.messages.count)
                 mailSyncMessage = message
                 mailNavigationMessage = message
+                mailNavigationTargetID = nil
                 return
             }
             selectMailMessage(detail.summary)
@@ -1713,8 +1715,10 @@ final class AppViewModel: NSObject, ObservableObject {
             mailNavigationMessage = nil
         } catch {
             let message = "无法打开这封邮件：\(error.localizedDescription)"
+            NSLog("[Connor.Mail] failed to load message: id=%@, error=%@", messageID.rawValue, error.localizedDescription)
             mailSyncMessage = message
             mailNavigationMessage = message
+            mailNavigationTargetID = nil
         }
     }
 
