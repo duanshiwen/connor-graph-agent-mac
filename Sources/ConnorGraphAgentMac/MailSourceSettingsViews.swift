@@ -702,11 +702,20 @@ struct MailHTMLBodyHeightStabilizer: Equatable {
 
     func stabilizedLayout(current: MailHTMLBodyLayout, measuredDocumentHeight: CGFloat) -> MailHTMLBodyLayout? {
         let padded = measuredDocumentHeight + bottomPadding
-        let next = MailHTMLBodyLayout(
-            mode: .inline,
-            height: max(padded, minimumHeight),
-            documentHeight: measuredDocumentHeight
-        )
+        let next: MailHTMLBodyLayout
+        if padded > inlineHeightLimit {
+            next = MailHTMLBodyLayout(
+                mode: .scrollable,
+                height: scrollableViewportHeight,
+                documentHeight: measuredDocumentHeight
+            )
+        } else {
+            next = MailHTMLBodyLayout(
+                mode: .inline,
+                height: max(padded, minimumHeight),
+                documentHeight: measuredDocumentHeight
+            )
+        }
         guard next.mode != current.mode
             || abs(next.height - current.height) >= significantDelta
             || abs(next.documentHeight - current.documentHeight) >= significantDelta else { return nil }
@@ -759,9 +768,10 @@ private struct MailHTMLBodyView: NSViewRepresentable {
     }
 
     private func configureScrolling(for view: MailHTMLPassthroughScrollWebView) {
-        view.forwardsScrollWheelToParent = scrollPolicy.forwardsWheelEventsToParent
-        view.enclosingScrollView?.hasVerticalScroller = scrollPolicy.isInternalScrollingEnabled
-        view.enclosingScrollView?.verticalScrollElasticity = scrollPolicy.isInternalScrollingEnabled ? .automatic : .none
+        let usesInternalScrolling = layout.mode == .scrollable || scrollPolicy.isInternalScrollingEnabled
+        view.forwardsScrollWheelToParent = !usesInternalScrolling && scrollPolicy.forwardsWheelEventsToParent
+        view.enclosingScrollView?.hasVerticalScroller = usesInternalScrolling
+        view.enclosingScrollView?.verticalScrollElasticity = usesInternalScrolling ? .automatic : .none
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
