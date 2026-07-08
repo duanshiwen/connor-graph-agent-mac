@@ -1,6 +1,16 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
+let mailCoreSwiftSettings: [SwiftSetting] = [
+    // MailCoreSPM ships a binary framework whose public headers include NNTP
+    // headers that are not re-exported by MailCore.h. Xcode's Clang module
+    // validation reports this as an incomplete umbrella error when importing
+    // MailCore from Swift. The framework itself remains usable for the IMAP and
+    // MIME APIs Connor uses, so keep the dependency local and suppress only this
+    // third-party module warning for targets that compile MailCore imports.
+    .unsafeFlags(["-Xcc", "-Wno-incomplete-umbrella"])
+]
+
 let package = Package(
     name: "ConnorGraphAgentMac",
     defaultLocalization: "zh-Hans",
@@ -40,6 +50,7 @@ let package = Package(
                 "ConnorGraphAgent",
                 .product(name: "MailCore", package: "MailCoreSPM")
             ],
+            swiftSettings: mailCoreSwiftSettings,
             linkerSettings: [
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),
@@ -85,6 +96,10 @@ let package = Package(
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
         .testTarget(name: "ConnorGraphAgentMacTests", dependencies: ["ConnorGraphAgentMac"]),
-        .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"])
+        .testTarget(
+            name: "ConnorGraphAppSupportTests",
+            dependencies: ["ConnorGraphAppSupport"],
+            swiftSettings: mailCoreSwiftSettings
+        )
     ]
 )
