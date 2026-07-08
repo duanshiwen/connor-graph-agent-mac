@@ -122,7 +122,7 @@ struct AppShellView: View {
             BrowserBackgroundTaskRunnerView(viewModel: viewModel)
         }
         .overlay(alignment: .top) {
-            if viewModel.isGlobalSearchOverlayPresented && !viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if viewModel.isGlobalSearchOverlayPresented && (!viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.globalSearchHistoryEntries.isEmpty) {
                 AppGlobalSearchOverlayView(viewModel: viewModel)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
