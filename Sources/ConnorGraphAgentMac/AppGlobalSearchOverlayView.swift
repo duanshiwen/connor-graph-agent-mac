@@ -81,17 +81,21 @@ struct AppGlobalSearchOverlayView: View {
 
     private var overlayContent: some View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-            actionRows
-            tokenChips
+            if query.isEmpty && state == .empty {
+                recentSearchesSection
+            } else {
+                actionRows
+                tokenChips
 
-            chatSessionSection(results: state.chatSessionResults)
-            resultSection(kind: .calendar, results: state.calendarResults)
-            resultSection(kind: .rss, results: state.rssResults)
-            resultSection(kind: .mail, results: state.mailResults)
-            browserHistorySection(results: state.browserHistoryResults)
+                chatSessionSection(results: state.chatSessionResults)
+                resultSection(kind: .calendar, results: state.calendarResults)
+                resultSection(kind: .rss, results: state.rssResults)
+                resultSection(kind: .mail, results: state.mailResults)
+                browserHistorySection(results: state.browserHistoryResults)
 
-            if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
-                errorRow(errorMessage)
+                if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
+                    errorRow(errorMessage)
+                }
             }
         }
         .padding(AppShellLayout.spaceS)
@@ -109,6 +113,52 @@ struct AppGlobalSearchOverlayView: View {
             )
             .hidden()
             .allowsHitTesting(false)
+    }
+
+    private var recentSearchesSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text("最近搜索")
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                if !viewModel.globalSearchHistoryEntries.isEmpty {
+                    Text("\(min(viewModel.globalSearchHistoryEntries.count, 8)) 条")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    viewModel.clearGlobalSearchHistory()
+                } label: {
+                    Text("清空")
+                        .font(AppListTypography.rowCaptionEmphasized)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(viewModel.globalSearchHistoryEntries.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                .disabled(viewModel.globalSearchHistoryEntries.isEmpty)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.top, AppShellLayout.spaceXS)
+
+            VStack(spacing: 1) {
+                ForEach(viewModel.globalSearchHistoryEntries.prefix(8)) { entry in
+                    Button {
+                        viewModel.selectGlobalSearchHistoryEntry(entry)
+                    } label: {
+                        GlobalSearchRecentSearchRow(
+                            entry: entry,
+                            isSelected: stateSelected(.recentSearch(entry.id))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.bottom, 2)
     }
 
     private var tokenChips: some View {
@@ -385,6 +435,54 @@ private struct GlobalSearchEmptySourceRow: View {
         }
         .padding(.horizontal, AppShellLayout.spaceS)
         .padding(.vertical, 8)
+    }
+}
+
+private struct GlobalSearchRecentSearchRow: View {
+    var entry: GlobalSearchHistoryEntry
+    var isSelected: Bool = false
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.teal)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
+                    Text(entry.query)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(entry.searchedAt.connorLocalFormatted(date: .medium, time: .short))
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Text(entry.useCount > 1 ? "已搜索 \(entry.useCount) 次" : "点击恢复这次搜索")
+                    .font(AppListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "return")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.secondary.opacity(isSelected ? 0.8 : 0.45))
+                .padding(.top, 2)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 6)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
     }
 }
 
