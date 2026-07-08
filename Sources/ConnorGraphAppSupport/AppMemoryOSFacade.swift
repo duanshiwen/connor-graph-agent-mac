@@ -543,7 +543,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     public func enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
         let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
         let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(from: events, now: now)
-        return try drafts.map { draft in
+        var inserted: [MemoryOSQueueItem] = []
+        for draft in drafts {
             let payload = store.json(draft)
             let item = MemoryOSQueueItem(
                 kind: draft.kind,
@@ -555,9 +556,14 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 createdAt: now,
                 updatedAt: now
             )
-            try store.enqueue(item)
-            return item
+            switch try store.enqueueIfAbsent(item) {
+            case .inserted(let item):
+                inserted.append(item)
+            case .existing:
+                continue
+            }
         }
+        return inserted
     }
 
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) throws -> [MemoryOSProjectionRunSummary] {
@@ -632,6 +638,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     private func deleteL1CaptureEvents(ids: [String]) throws {
         guard !ids.isEmpty else { return }
         let quoted = ids.map { store.quote($0) }.joined(separator: ",")
+        try store.execute("DELETE FROM memory_l1_time_block_events WHERE capture_event_id IN (\(quoted));")
         try store.execute("DELETE FROM memory_l1_capture_events WHERE id IN (\(quoted));")
     }
 
@@ -649,14 +656,16 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
-        try store.query(sql: """
+        let referencedIDs = try captureEventIDsReferencedByActiveL1QueueItems()
+        return try store.query(sql: """
         SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
         FROM memory_l1_capture_events
         WHERE processing_state = 'pending'
         ORDER BY occurred_at ASC
         LIMIT \(limit)
-        """).map { row in
-            MemoryOSCaptureEvent(
+        """).compactMap { row in
+            guard !referencedIDs.contains(row[0]) else { return nil }
+            return MemoryOSCaptureEvent(
                 id: row[0],
                 provenanceObjectID: row[1],
                 eventType: row[2],
@@ -666,6 +675,30 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 metadata: (try? store.decode([String: String].self, row[6])) ?? [:]
             )
         }
+    }
+
+    private func captureEventIDsReferencedByActiveL1QueueItems() throws -> Set<String> {
+        let kinds = MemoryOSBackgroundJobKind.l1ExecutableRawValues.map { store.quote($0) }.joined(separator: ",")
+        let statuses = [
+            MemoryOSQueueStatus.pending,
+            .leased,
+            .processing,
+            .retryScheduled,
+            .succeeded,
+            .deadLetter
+        ].map { store.quote($0.rawValue) }.joined(separator: ",")
+        let payloads = try store.queryStrings(sql: """
+        SELECT payload_json
+        FROM memory_l1_processing_queue
+        WHERE kind IN (\(kinds))
+          AND status IN (\(statuses))
+        """)
+        var ids = Set<String>()
+        for payload in payloads {
+            guard let draft = try? store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, payload) else { continue }
+            ids.formUnion(draft.captureEventIDs)
+        }
+        return ids
     }
 
     private func statements(for ids: [String]) throws -> [MemoryOSStatement] {
