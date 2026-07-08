@@ -40,11 +40,11 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 512, documentHeight: 500))
     }
 
-    @Test func layoutStabilizerKeepsLongHTMLInlineForPageScrolling() {
+    @Test func layoutStabilizerCapsLongHTMLWithScrollableViewport() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
         let current = MailHTMLBodyLayout(mode: .inline, height: 500, documentHeight: 500)
         let layout = stabilizer.stabilizedLayout(current: current, measuredDocumentHeight: 20_000)
-        #expect(layout == MailHTMLBodyLayout(mode: .inline, height: 20_012, documentHeight: 20_000))
+        #expect(layout == MailHTMLBodyLayout(mode: .scrollable, height: 640, documentHeight: 20_000))
     }
 
     @Test func layoutStabilizerKeepsBoundaryHTMLInline() {
