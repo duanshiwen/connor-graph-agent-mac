@@ -50,6 +50,79 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchQuery == "invoice")
     }
 
+    @Test func focusEmptyGlobalSearchShowsRecentSearches() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.recordGlobalSearchHistoryForTesting(query: "SwiftUI 搜索")
+        fixture.viewModel.globalSearchQuery = ""
+
+        fixture.viewModel.activateGlobalSearchField()
+
+        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchSelectableItems == [.recentSearch("swiftui 搜索")])
+    }
+
+    @Test func emptyQueryWithoutHistoryDoesNotShowOverlay() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.activateGlobalSearchField()
+
+        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchSelectableItems.isEmpty)
+    }
+
+    @Test func selectingRecentSearchFillsQueryAndRefreshesPreview() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.recordGlobalSearchHistoryForTesting(query: "Mail sync")
+        let entry = try #require(fixture.viewModel.globalSearchHistoryEntries.first)
+
+        fixture.viewModel.selectGlobalSearchHistoryEntry(entry)
+
+        #expect(fixture.viewModel.globalSearchQuery == "Mail sync")
+        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchPreviewState.query == "Mail sync")
+        #expect(fixture.viewModel.globalSearchHistoryEntries.first?.normalizedQuery == "mail sync")
+        #expect(fixture.viewModel.globalSearchHistoryEntries.first?.useCount == 2)
+    }
+
+    @Test func globalSearchActionsRecordDeduplicatedHistory() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.defaultSearchEngine = .google
+        fixture.viewModel.updateGlobalSearchQuery("  SwiftUI   Search  ")
+        fixture.viewModel.performGlobalSearchWebSearch()
+
+        fixture.viewModel.updateGlobalSearchQuery("swiftui search")
+        fixture.viewModel.performGlobalSearchWebSearch()
+
+        #expect(fixture.viewModel.globalSearchHistoryEntries.count == 1)
+        #expect(fixture.viewModel.globalSearchHistoryEntries[0].query == "swiftui search")
+        #expect(fixture.viewModel.globalSearchHistoryEntries[0].normalizedQuery == "swiftui search")
+        #expect(fixture.viewModel.globalSearchHistoryEntries[0].useCount == 2)
+    }
+
+    @Test func clearGlobalSearchHistoryClearsEntriesAndDismissesZeroStateOverlay() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.recordGlobalSearchHistoryForTesting(query: "SwiftUI 搜索")
+        fixture.viewModel.activateGlobalSearchField()
+        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+
+        fixture.viewModel.clearGlobalSearchHistory()
+
+        #expect(fixture.viewModel.globalSearchHistoryEntries.isEmpty)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
+    }
+
     @Test func defaultSearchURLUsesSelectedSearchEngine() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

@@ -362,6 +362,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
     @Published var globalSearchSelectedItem: GlobalSearchSelectableItem? = .action(.newChat)
     @Published private(set) var globalSearchTimings: [GlobalSearchSectionTiming] = []
+    @Published private(set) var globalSearchHistoryEntries: [GlobalSearchHistoryEntry] = []
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -539,6 +540,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
+    private var globalSearchHistoryRepository: AppGlobalSearchHistoryRepository?
     private var globalSearchPreviewTask: Task<Void, Never>?
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
@@ -1073,7 +1075,11 @@ final class AppViewModel: NSObject, ObservableObject {
     func activateGlobalSearchField() {
         isGlobalSearchFieldFocused = true
         let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            isGlobalSearchOverlayPresented = !globalSearchHistoryEntries.isEmpty
+            globalSearchSelectedItem = globalSearchSelectableItems.first
+            return
+        }
         isGlobalSearchOverlayPresented = true
         if globalSearchPreviewState.query != trimmed {
             scheduleGlobalSearchPreview(for: trimmed)
@@ -1089,12 +1095,13 @@ final class AppViewModel: NSObject, ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         globalSearchPreviewTask?.cancel()
         guard !trimmed.isEmpty else {
-            finishGlobalSearchInteraction(clearQuery: false)
             globalSearchPreviewState = .empty
-            globalSearchSelectedItem = .action(.newChat)
+            isGlobalSearchOverlayPresented = isGlobalSearchFieldFocused && !globalSearchHistoryEntries.isEmpty
+            globalSearchSelectedItem = globalSearchSelectableItems.first
             return
         }
         isGlobalSearchOverlayPresented = true
+        globalSearchSelectedItem = .action(.newChat)
         scheduleGlobalSearchPreview(for: trimmed)
     }
 
@@ -1126,6 +1133,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     var globalSearchSelectableItems: [GlobalSearchSelectableItem] {
+        let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty && globalSearchPreviewState == .empty {
+            return globalSearchHistoryEntries.prefix(8).map { .recentSearch($0.id) }
+        }
         var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
         items.append(contentsOf: globalSearchPreviewState.chatSessionResults.map { .chatSession($0.id) })
         items.append(contentsOf: globalSearchPreviewState.calendarResults.map { .nativeResult($0.id) })
@@ -1168,6 +1179,9 @@ final class AppViewModel: NSObject, ObservableObject {
         normalizeGlobalSearchSelection()
         guard let selected = globalSearchSelectedItem else { return }
         switch selected {
+        case .recentSearch(let entryID):
+            guard let entry = globalSearchHistoryEntries.first(where: { $0.id == entryID }) else { return }
+            selectGlobalSearchHistoryEntry(entry)
         case .action(.newChat):
             performGlobalSearchNewChat()
         case .action(.webSearch):
@@ -1181,6 +1195,63 @@ final class AppViewModel: NSObject, ObservableObject {
                 + globalSearchPreviewState.browserHistoryResults
             guard let result = results.first(where: { $0.id == resultID }) else { return }
             openGlobalSearchResult(result)
+        }
+    }
+
+    func selectGlobalSearchHistoryEntry(_ entry: GlobalSearchHistoryEntry) {
+        recordGlobalSearchHistoryIfNeeded(entry.query)
+        updateGlobalSearchQuery(entry.query)
+    }
+
+    func clearGlobalSearchHistory() {
+        do {
+            try globalSearchHistoryRepository?.clear()
+        } catch {
+            // Search history is a convenience feature; failing to clear persistence
+            // should not interrupt the foreground search interaction.
+        }
+        globalSearchHistoryEntries = []
+        globalSearchSelectedItem = nil
+        if globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isGlobalSearchOverlayPresented = false
+        }
+    }
+
+    func recordGlobalSearchHistoryForTesting(query: String) {
+        recordGlobalSearchHistoryIfNeeded(query)
+    }
+
+    private func recordGlobalSearchHistoryIfNeeded(_ query: String) {
+        let displayQuery = AppGlobalSearchHistoryRepository.displayQuery(for: query)
+        guard !displayQuery.isEmpty else { return }
+        if let globalSearchHistoryRepository {
+            if let entries = try? globalSearchHistoryRepository.record(query: displayQuery) {
+                globalSearchHistoryEntries = entries
+                return
+            }
+        }
+        let normalizedQuery = AppGlobalSearchHistoryRepository.normalizedQuery(for: displayQuery)
+        guard !normalizedQuery.isEmpty else { return }
+        if let existingIndex = globalSearchHistoryEntries.firstIndex(where: { $0.normalizedQuery == normalizedQuery }) {
+            var entry = globalSearchHistoryEntries.remove(at: existingIndex)
+            entry.query = displayQuery
+            entry.searchedAt = Date()
+            entry.useCount += 1
+            globalSearchHistoryEntries.insert(entry, at: 0)
+        } else {
+            globalSearchHistoryEntries.insert(
+                GlobalSearchHistoryEntry(
+                    id: normalizedQuery,
+                    query: displayQuery,
+                    normalizedQuery: normalizedQuery,
+                    searchedAt: Date(),
+                    useCount: 1
+                ),
+                at: 0
+            )
+        }
+        if globalSearchHistoryEntries.count > 20 {
+            globalSearchHistoryEntries = Array(globalSearchHistoryEntries.prefix(20))
         }
     }
 
@@ -1599,6 +1670,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func performGlobalSearchNewChat() {
         let prompt = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
+        recordGlobalSearchHistoryIfNeeded(prompt)
         finishGlobalSearchInteraction(clearQuery: true)
         globalSearchPreviewState = .empty
         globalSearchSelectedItem = .action(.newChat)
@@ -1621,6 +1693,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
         guard let url = defaultSearchURL(for: query) else { return }
+        recordGlobalSearchHistoryIfNeeded(query)
         performAfterGlobalSearchDismiss { [self] in
             openURLInCurrentChatBrowser(url)
         }
@@ -1633,6 +1706,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func openGlobalSearchChatSessionResult(_ sessionID: String) {
+        recordGlobalSearchHistoryIfNeeded(globalSearchQuery)
         performAfterGlobalSearchDismiss { [self] in
             selection = .agentChat
             selectChatSession(sessionID)
@@ -1640,6 +1714,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func openGlobalSearchResult(_ result: NativeSearchResult) {
+        recordGlobalSearchHistoryIfNeeded(globalSearchQuery)
         performAfterGlobalSearchDismiss { [self] in
             openGlobalSearchResultAfterDismiss(result)
         }
@@ -2204,6 +2279,9 @@ final class AppViewModel: NSObject, ObservableObject {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
             self.sessionSearchIndexService = try? SessionSearchIndexService(databaseURL: storagePaths.sessionSearchDatabaseURL)
+            let globalSearchHistoryRepository = AppGlobalSearchHistoryRepository(historyURL: storagePaths.globalSearchHistoryURL)
+            self.globalSearchHistoryRepository = globalSearchHistoryRepository
+            self.globalSearchHistoryEntries = (try? globalSearchHistoryRepository.load()) ?? []
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
