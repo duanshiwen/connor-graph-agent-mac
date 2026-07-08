@@ -235,6 +235,11 @@ public struct MemoryOSTimeBlock: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public enum MemoryOSQueueEnqueueResult: Sendable, Equatable {
+    case inserted(MemoryOSQueueItem)
+    case existing(MemoryOSQueueItem)
+}
+
 public struct MemoryOSQueueItem: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var kind: String

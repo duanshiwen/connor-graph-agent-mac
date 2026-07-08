@@ -130,6 +130,86 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     #expect(try store.schemaHealthReport().status == .healthy)
 }
 
+@Test func enqueueExistingQueueItemWithAttemptsDoesNotReplaceParentRow() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 1_500)
+    let createdAt = now.addingTimeInterval(-60)
+    let item = MemoryOSQueueItem(
+        id: "queue-existing-parent",
+        kind: "memory.l1.synthesize_knowledge",
+        status: .pending,
+        payloadJSON: #"{"captureEventIDs":["capture-1"]}"#,
+        nextRunAt: now,
+        idempotencyKey: "idem-existing-parent",
+        payloadHash: "payload-v1",
+        createdAt: createdAt,
+        updatedAt: createdAt
+    )
+    try store.enqueue(item)
+    try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: 1, status: .failed, startedAt: now, finishedAt: now, errorCode: "first_failure")
+
+    var updated = item
+    updated.status = .retryScheduled
+    updated.attemptCount = 1
+    updated.nextRunAt = now.addingTimeInterval(300)
+    updated.updatedAt = now.addingTimeInterval(10)
+    updated.errorCode = "retry_later"
+    updated.errorMessage = "Retry without replacing parent row"
+
+    try store.enqueue(updated)
+
+    let loaded = try #require(try store.queueItem(id: item.id))
+    #expect(loaded.status == .retryScheduled)
+    #expect(loaded.errorCode == "retry_later")
+    #expect(loaded.createdAt == createdAt)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_queue_attempts WHERE queue_item_id = 'queue-existing-parent';").first?.first == "1")
+}
+
+@Test func enqueueIfAbsentReturnsExistingQueueItemForDuplicateIdempotencyKey() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 1_600)
+    let itemA = MemoryOSQueueItem(
+        id: "queue-1",
+        kind: "memory.l1.synthesize_knowledge",
+        status: .processing,
+        priority: 10,
+        payloadJSON: #"{"captureEventIDs":["capture-a"]}"#,
+        nextRunAt: now,
+        idempotencyKey: "same-idempotency-key",
+        payloadHash: "payload-a",
+        createdAt: now,
+        updatedAt: now
+    )
+    try store.enqueue(itemA)
+    let itemB = MemoryOSQueueItem(
+        id: "queue-2",
+        kind: "memory.l1.synthesize_knowledge",
+        status: .pending,
+        priority: 99,
+        payloadJSON: #"{"captureEventIDs":["capture-b"]}"#,
+        nextRunAt: now,
+        idempotencyKey: "same-idempotency-key",
+        payloadHash: "payload-b",
+        createdAt: now.addingTimeInterval(1),
+        updatedAt: now.addingTimeInterval(1)
+    )
+
+    let result = try store.enqueueIfAbsent(itemB)
+
+    switch result {
+    case .inserted:
+        Issue.record("Duplicate idempotency key should not insert a new queue item")
+    case .existing(let existing):
+        #expect(existing.id == itemA.id)
+        #expect(existing.payloadHash == "payload-a")
+        #expect(existing.status == .processing)
+    }
+    #expect(try store.queueItem(id: "queue-2") == nil)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_processing_queue WHERE idempotency_key = 'same-idempotency-key';").first?.first == "1")
+}
+
 @Test func sqliteMemoryOSStoreRoundTripsBackgroundRunTrace() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
     try store.migrate()
