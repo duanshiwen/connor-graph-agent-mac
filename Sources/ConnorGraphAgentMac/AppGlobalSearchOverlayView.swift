@@ -116,7 +116,7 @@ struct AppGlobalSearchOverlayView: View {
     }
 
     private var recentSearchesSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
             HStack(spacing: AppShellLayout.spaceXS) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 11.5, weight: .medium))
@@ -144,7 +144,7 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            VStack(spacing: 1) {
+            VStack(spacing: AppShellLayout.spaceXS) {
                 ForEach(viewModel.globalSearchHistoryEntries.prefix(8)) { entry in
                     Button {
                         viewModel.selectGlobalSearchHistoryEntry(entry)
@@ -158,7 +158,7 @@ struct AppGlobalSearchOverlayView: View {
                 }
             }
         }
-        .padding(.bottom, 2)
+        .padding(.bottom, AppShellLayout.spaceXS)
     }
 
     private var tokenChips: some View {
@@ -474,7 +474,7 @@ private struct GlobalSearchRecentSearchRow: View {
                 .padding(.top, 2)
         }
         .padding(.horizontal, AppShellLayout.spaceS)
-        .padding(.vertical, 6)
+        .padding(.vertical, AppShellLayout.spaceXS)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
         .onHover { isHovering = $0 }
