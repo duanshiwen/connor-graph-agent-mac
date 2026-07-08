@@ -647,12 +647,33 @@ struct MailHTMLSanitizationRequest: Equatable {
     }
 }
 
+struct MailHTMLBodyRenderIdentity: Equatable {
+    var messageID: MailMessageID
+    var htmlFingerprint: Int
+    var htmlLength: Int
+    var allowsRemoteImages: Bool
+
+    init(messageID: MailMessageID, html: String, allowsRemoteImages: Bool) {
+        self.messageID = messageID
+        htmlFingerprint = html.hashValue
+        htmlLength = html.count
+        self.allowsRemoteImages = allowsRemoteImages
+    }
+}
+
 struct MailHTMLBodyLoadState: Equatable {
     private(set) var lastLoadedHTML: String?
+    private(set) var lastLoadedIdentity: MailHTMLBodyRenderIdentity?
 
     mutating func shouldReload(html: String) -> Bool {
         guard lastLoadedHTML != html else { return false }
         lastLoadedHTML = html
+        return true
+    }
+
+    mutating func shouldReload(identity: MailHTMLBodyRenderIdentity) -> Bool {
+        guard lastLoadedIdentity != identity else { return false }
+        lastLoadedIdentity = identity
         return true
     }
 }
@@ -746,6 +767,7 @@ private final class MailHTMLPassthroughScrollWebView: WKWebView {
 /// WKWebView wrapper for rendering email HTML bodies with image support.
 private struct MailHTMLBodyView: NSViewRepresentable {
     var htmlContent: String
+    var renderIdentity: MailHTMLBodyRenderIdentity
     var scrollPolicy: MailHTMLBodyScrollPolicy
     @Binding var layout: MailHTMLBodyLayout
 
@@ -770,7 +792,7 @@ private struct MailHTMLBodyView: NSViewRepresentable {
     func updateNSView(_ nsView: MailHTMLPassthroughScrollWebView, context: Context) {
         context.coordinator.layout = $layout
         configureScrolling(for: nsView)
-        guard context.coordinator.shouldReload(html: htmlContent) else { return }
+        guard context.coordinator.shouldReload(identity: renderIdentity) else { return }
         nsView.isHidden = true
         nsView.loadHTMLString(htmlContent, baseURL: nil)
     }
@@ -793,11 +815,11 @@ private struct MailHTMLBodyView: NSViewRepresentable {
             self.layout = layout
         }
 
-        func shouldReload(html: String) -> Bool {
-            guard loadState.shouldReload(html: html) else { return false }
+        func shouldReload(identity: MailHTMLBodyRenderIdentity) -> Bool {
+            guard loadState.shouldReload(identity: identity) else { return false }
             measurementGeneration += 1
             loadStartedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) htmlLength=\(html.count, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) messageID=\(identity.messageID.rawValue, privacy: .public) htmlLength=\(identity.htmlLength, privacy: .public) allowsRemoteImages=\(identity.allowsRemoteImages, privacy: .public)")
             return true
         }
 
@@ -892,6 +914,11 @@ private struct MailMessageDetailPane: View {
                             }
                             MailHTMLBodyView(
                                 htmlContent: prepared.html,
+                                renderIdentity: MailHTMLBodyRenderIdentity(
+                                    messageID: message.id,
+                                    html: prepared.html,
+                                    allowsRemoteImages: allowRemoteImagesForMessage
+                                ),
                                 scrollPolicy: .pageScrolling,
                                 layout: $bodyWebLayout
                             )

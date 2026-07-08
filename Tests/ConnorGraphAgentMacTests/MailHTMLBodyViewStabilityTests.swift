@@ -20,6 +20,58 @@ struct MailHTMLBodyViewStabilityTests {
         #expect(secondDecision)
     }
 
+    @Test func sameHTMLRenderIdentityDoesNotRequestReload() {
+        var state = MailHTMLBodyLoadState()
+        let identity = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p>Hello</p>",
+            allowsRemoteImages: false
+        )
+
+        let firstDecision = state.shouldReload(identity: identity)
+        let secondDecision = state.shouldReload(identity: identity)
+        #expect(firstDecision)
+        #expect(!secondDecision)
+    }
+
+    @Test func changedRemoteImagePolicyRequestsReload() {
+        var state = MailHTMLBodyLoadState()
+        let blocked = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p><img src=\"https://example.com/a.png\"></p>",
+            allowsRemoteImages: false
+        )
+        let allowed = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p><img src=\"https://example.com/a.png\"></p>",
+            allowsRemoteImages: true
+        )
+
+        let firstDecision = state.shouldReload(identity: blocked)
+        let secondDecision = state.shouldReload(identity: allowed)
+        #expect(firstDecision)
+        #expect(secondDecision)
+    }
+
+    @Test func changedMessageIDRequestsReloadEvenForSameHTML() {
+        var state = MailHTMLBodyLoadState()
+        let first = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-a"),
+            html: "<p>Hello</p>",
+            allowsRemoteImages: false
+        )
+        let second = MailHTMLBodyRenderIdentity(
+            messageID: MailMessageID(rawValue: "message-b"),
+            html: "<p>Hello</p>",
+            allowsRemoteImages: false
+        )
+
+        let firstDecision = state.shouldReload(identity: first)
+        let secondDecision = state.shouldReload(identity: second)
+        #expect(firstDecision)
+        #expect(secondDecision)
+    }
+
     @Test func layoutStabilizerIgnoresTinyDeltas() {
         let stabilizer = MailHTMLBodyHeightStabilizer()
         let current = MailHTMLBodyLayout(mode: .inline, height: 300, documentHeight: 286)
