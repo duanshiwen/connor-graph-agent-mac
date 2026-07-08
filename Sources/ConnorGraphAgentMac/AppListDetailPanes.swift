@@ -1545,6 +1545,7 @@ struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var directionFilter: MailMessageDirectionFilter = .all
     @State private var visibleMessagesCache: [MailMessageSummary] = []
+    @State private var visibleMessageIDCache: Set<MailMessageID> = []
     @State private var visibleMessagesCacheKey = MailVisibleMessagesCacheKey.empty
 
     private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
@@ -1599,8 +1600,8 @@ struct CraftMailListPane: View {
                                 isSelected: message.id == viewModel.selectedMailMessageID,
                                 onSelect: { selectMessage(message) }
                             )
+                            .equatable()
                             .nativeListRowStyle()
-                            .id(message.id)
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
@@ -1611,7 +1612,7 @@ struct CraftMailListPane: View {
                         .onChange(of: viewModel.selectedMailMessageID) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
-                        .onChange(of: visibleMessageIDs) { _, _ in
+                        .onChange(of: visibleMessagesCacheKey) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
                     }
@@ -1622,7 +1623,7 @@ struct CraftMailListPane: View {
         .onAppear(perform: refreshVisibleMessagesCacheIfNeeded)
         .onChange(of: directionFilter) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
         .onChange(of: viewModel.mailSearchQuery) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
-        .onChange(of: viewModel.mailBrowserPresentation.messages) { _, _ in refreshVisibleMessagesCache(force: true) }
+        .onChange(of: mailPresentationListSignature) { _, _ in refreshVisibleMessagesCache(force: true) }
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet(viewModel: viewModel)
         }
@@ -1641,12 +1642,18 @@ struct CraftMailListPane: View {
             direction: directionFilter
         )
         guard force || key != visibleMessagesCacheKey else { return }
+        let messages = viewModel.mailListMessages(direction: directionFilter)
         visibleMessagesCacheKey = key
-        visibleMessagesCache = viewModel.mailListMessages(direction: directionFilter)
+        visibleMessagesCache = messages
+        visibleMessageIDCache = Set(messages.map(\.id))
     }
 
-    private var visibleMessageIDs: [MailMessageID] {
-        visibleMessages.map(\.id)
+    private var mailPresentationListSignature: MailPresentationListSignature {
+        MailPresentationListSignature(
+            messageCount: viewModel.mailBrowserPresentation.messages.count,
+            firstMessageID: viewModel.mailBrowserPresentation.messages.first?.id,
+            lastMessageID: viewModel.mailBrowserPresentation.messages.last?.id
+        )
     }
 
     private var isFilteringBySearch: Bool {
@@ -1671,7 +1678,7 @@ struct CraftMailListPane: View {
 
     private func scrollToSelectedMessage(with proxy: ScrollViewProxy) {
         guard let selectedID = viewModel.selectedMailMessageID,
-              visibleMessageIDs.contains(selectedID) else { return }
+              visibleMessageIDCache.contains(selectedID) else { return }
         Task { @MainActor in
             await Task.yield()
             proxy.scrollTo(selectedID, anchor: .center)
@@ -1693,6 +1700,12 @@ private struct MailVisibleMessagesCacheKey: Equatable {
         query: "",
         direction: .all
     )
+}
+
+private struct MailPresentationListSignature: Equatable {
+    var messageCount: Int
+    var firstMessageID: MailMessageID?
+    var lastMessageID: MailMessageID?
 }
 
 extension MailMessageDirectionFilter {
@@ -1820,12 +1833,19 @@ struct MailMessageListRowPresentation: Equatable {
     }
 }
 
-private struct MailMessageListRow: View {
+private struct MailMessageListRow: View, Equatable {
     var message: MailMessageSummary
     var account: MailAccount?
     var mailbox: MailMailbox?
     var isSelected: Bool
     var onSelect: () -> Void
+
+    nonisolated static func == (lhs: MailMessageListRow, rhs: MailMessageListRow) -> Bool {
+        lhs.message == rhs.message
+            && lhs.account == rhs.account
+            && lhs.mailbox == rhs.mailbox
+            && lhs.isSelected == rhs.isSelected
+    }
 
     private var presentation: MailMessageListRowPresentation {
         MailMessageListRowPresentation(message: message, account: account, mailbox: mailbox)
