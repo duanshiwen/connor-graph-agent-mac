@@ -170,6 +170,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
         #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
         #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailListMessages(direction: .all).contains { $0.id == mail.summary.id })
         #expect(fixture.viewModel.mailSearchQuery.isEmpty)
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
@@ -267,6 +268,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
         #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
         #expect(fixture.viewModel.mailBrowserPresentation.message(id: mail.summary.id) != nil)
+        #expect(fixture.viewModel.mailListMessages(direction: .all).contains { $0.id == mail.summary.id })
         #expect(fixture.viewModel.mailSearchQuery.isEmpty)
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
