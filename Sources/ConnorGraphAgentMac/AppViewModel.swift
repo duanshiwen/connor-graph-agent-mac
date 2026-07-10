@@ -4303,7 +4303,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        showWelcomePlaceholder = llmConnectionConfigs.isEmpty || llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID }) == nil
+        let defaultConnection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID })
+        showWelcomePlaceholder = !AppLLMSettings.isUsableConnection(defaultConnection)
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
@@ -4551,6 +4552,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
+            updateWelcomeState()
             if rebuildRuntime {
                 let session = activeChatSession
                 fallbackChatSession = session
@@ -4571,6 +4573,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             try llmSettingsRepository.clearAPIKey()
             loadLLMSettings()
+            updateWelcomeState()
             let session = activeChatSession
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)

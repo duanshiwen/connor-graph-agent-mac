@@ -259,6 +259,19 @@ public struct AppLLMSettings: Sendable, Equatable {
     public var defaultConnectionID: String
     public var defaultThinkingLevel: AppLLMThinkingLevel
 
+    public static func isUsableConnection(_ connection: AppLLMConnectionConfig?) -> Bool {
+        guard let connection else { return false }
+        let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else { return false }
+        switch connection.connectionKind {
+        case .chatGPTCodex, .githubCopilot:
+            return connection.hasAPIKey
+        case .openAIResponses, .openAICompatible, .anthropicCompatible:
+            let baseURL = connection.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            return connection.hasAPIKey && !baseURL.isEmpty
+        }
+    }
+
     public init(
         connections: [AppLLMConnectionConfig],
         defaultConnectionID: String,
@@ -319,6 +332,7 @@ public struct AppLLMSettings: Sendable, Equatable {
     }
 
     public var effectiveThinkingLevel: AppLLMThinkingLevel { defaultThinkingLevel }
+    public var hasUsableDefaultConnection: Bool { Self.isUsableConnection(defaultConnection) }
 
     public static func modelOptions(in rawValue: String) -> [String] { AppLLMConnectionConfig.modelOptions(in: rawValue) }
     public static func firstModel(in rawValue: String) -> String { AppLLMConnectionConfig.firstModel(in: rawValue) }
@@ -414,11 +428,11 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     private func loadLegacySettings() throws -> AppLLMSettings {
-        let legacyProviderMode = settingsStore.string(forKey: Keys.providerMode)
-        let legacyBaseURL = settingsStore.string(forKey: Keys.baseURLString)
-        let legacyModel = settingsStore.string(forKey: Keys.model)
-        let legacySelectedModel = settingsStore.string(forKey: Keys.selectedModel)
-        let legacyAPIKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
+        let legacyProviderMode = settingsStore.string(forKey: Keys.providerMode)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyBaseURL = settingsStore.string(forKey: Keys.baseURLString)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyModel = settingsStore.string(forKey: Keys.model)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacySelectedModel = settingsStore.string(forKey: Keys.selectedModel)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyAPIKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let hasLegacyConnectionShape =
             legacyProviderMode?.isEmpty == false ||
@@ -427,19 +441,29 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             legacySelectedModel?.isEmpty == false ||
             legacyAPIKey?.isEmpty == false
 
+        let thinkingLevel = AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
         guard hasLegacyConnectionShape else {
             return AppLLMSettings(
                 connections: [],
                 defaultConnectionID: "",
-                defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
+                defaultThinkingLevel: thinkingLevel
             )
         }
 
-        let fallbackProviderMode: AppLLMProviderMode = .openAICompatible
-        let fallbackBaseURL = "https://api.openai.com/v1"
-        let fallbackModel = "gpt-4o-mini"
-        let modeRaw = legacyProviderMode ?? fallbackProviderMode.rawValue
-        let mode = AppLLMProviderMode(rawValue: modeRaw) ?? fallbackProviderMode
+        guard
+            let modeRaw = legacyProviderMode, !modeRaw.isEmpty,
+            let mode = AppLLMProviderMode(rawValue: modeRaw),
+            let baseURL = legacyBaseURL, !baseURL.isEmpty,
+            let model = legacyModel, !model.isEmpty,
+            let apiKey = legacyAPIKey, !apiKey.isEmpty
+        else {
+            return AppLLMSettings(
+                connections: [],
+                defaultConnectionID: "",
+                defaultThinkingLevel: thinkingLevel
+            )
+        }
+
         let id: String
         let name: String
         switch mode {
@@ -457,15 +481,15 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             id: id,
             name: name,
             providerMode: mode,
-            baseURLString: legacyBaseURL ?? fallbackBaseURL,
-            model: legacyModel ?? fallbackModel,
+            baseURLString: baseURL,
+            model: model,
             selectedModel: legacySelectedModel ?? "",
-            hasAPIKey: legacyAPIKey?.isEmpty == false,
+            hasAPIKey: !apiKey.isEmpty,
         )
         return AppLLMSettings(
             connections: [connection],
             defaultConnectionID: id,
-            defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
+            defaultThinkingLevel: thinkingLevel
         )
     }
 
