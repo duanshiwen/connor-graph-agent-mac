@@ -4303,8 +4303,13 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        let defaultConnection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID })
-        showWelcomePlaceholder = !AppLLMSettings.isUsableConnection(defaultConnection)
+        do {
+            let settings = try llmSettingsRepository.loadSettings()
+            showWelcomePlaceholder = !settings.hasUsableDefaultConnection
+        } catch {
+            let defaultConnection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID })
+            showWelcomePlaceholder = !AppLLMSettings.isUsableConnection(defaultConnection)
+        }
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
@@ -4452,6 +4457,7 @@ final class AppViewModel: NSObject, ObservableObject {
         if llmConnectionConfigs.count == 1, let firstConnection = llmConnectionConfigs.first {
             selectDefaultLLMConnection(firstConnection.id)
         }
+        updateWelcomeState()
         rebuildNativeSessionManagerForActiveSession()
         await reloadLLMModelConnections()
         llmSettingsMessage = result.message

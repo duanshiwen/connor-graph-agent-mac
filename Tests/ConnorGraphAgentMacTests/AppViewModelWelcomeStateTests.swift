@@ -106,3 +106,85 @@ private func makeWelcomeStateViewModel(
 
     #expect(viewModel.showWelcomePlaceholder == false)
 }
+
+@MainActor
+@Test func appViewModelHidesWelcomeWhenStoredConnectionHydratesAPIKeyFromCredentialStore() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let persistedShell = AppLLMConnectionConfig(
+        id: "hydrated",
+        name: "Hydrated",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        hasAPIKey: false
+    )
+    try repository.save(settings: AppLLMSettings(connections: [persistedShell], defaultConnectionID: persistedShell.id), apiKey: "real-key")
+
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+    viewModel.updateWelcomeState()
+
+    #expect(viewModel.llmConnectionConfigs.first?.hasAPIKey == true)
+    #expect(viewModel.showWelcomePlaceholder == false)
+}
+
+@MainActor
+@Test func appViewModelHidesWelcomeImmediatelyAfterFirstUsableConnectionBecomesDefault() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let shell = AppLLMConnectionConfig(
+        id: "first",
+        name: "First",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        hasAPIKey: false
+    )
+    try repository.save(settings: AppLLMSettings(connections: [shell], defaultConnectionID: shell.id), apiKey: "real-key")
+
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.selectDefaultLLMConnection("first")
+
+    #expect(viewModel.showWelcomePlaceholder == false)
+}
+
+@MainActor
+@Test func selectingUsableDefaultConnectionPersistsBeforeWelcomeStateRecalculation() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+
+    let first = AppLLMConnectionConfig(
+        id: "first",
+        name: "First",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        hasAPIKey: true
+    )
+    let second = AppLLMConnectionConfig(
+        id: "second",
+        name: "Second",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.org/v1",
+        model: "gpt-4.1-mini",
+        selectedModel: "gpt-4.1-mini",
+        hasAPIKey: true
+    )
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "real-key")
+    try repository.saveAPIKey("other-key", connectionID: second.id)
+
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+    viewModel.selectDefaultLLMConnection("second")
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.defaultConnectionID == "second")
+    #expect(viewModel.showWelcomePlaceholder == false)
+}
