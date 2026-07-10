@@ -23,6 +23,26 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(relation.subjectName == "段福强")
         #expect(relation.objectName == "段诗闻")
         #expect(relation.predicate == .relatedTo)
+        #expect(relation.metadata["alias_predicate"] == "FAMILY_OF")
+        #expect(relation.metadata["semantic_family"] == "kinship")
+        #expect(relation.metadata["kinship_role"] == "family")
+    }
+
+    @Test func l4RelationInputPreservesFineGrainedKinshipMetadata() throws {
+        let json = #"""
+        {
+          "subjectName": "段福强",
+          "predicate": "BROTHER_OF",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .relatedTo)
+        #expect(relation.metadata["semantic_family"] == "kinship")
+        #expect(relation.metadata["kinship_role"] == "sibling")
+        #expect(relation.metadata["kinship_subrole"] == "brother")
     }
 
     @Test func l4RelationInputNormalizesCreatedByAliases() throws {
@@ -38,6 +58,23 @@ struct AppMemoryOSCLIInspectorTests {
         let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
 
         #expect(relation.predicate == .createdBy)
+        #expect(relation.metadata["semantic_family"] == "creation")
+    }
+
+    @Test func l4RelationInputNormalizesAuthorshipAliasesMorePrecisely() throws {
+        let json = #"""
+        {
+          "subjectName": "Graph Design Notes",
+          "predicate": "WRITTEN_BY",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .authoredBy)
+        #expect(relation.metadata["semantic_family"] == "authorship")
+        #expect(relation.metadata["normalized_direction"] == "same")
     }
 
     @Test func l4RelationInputNormalizesSeparatorVariants() throws {
@@ -52,6 +89,7 @@ struct AppMemoryOSCLIInspectorTests {
         let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
 
         #expect(relation.predicate == .createdBy)
+        #expect(relation.metadata["normalization_strategy"] == "separator_variant")
     }
 
     @Test func l4RelationInputNormalizesInverseContributionAliases() throws {
@@ -66,6 +104,22 @@ struct AppMemoryOSCLIInspectorTests {
         let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
 
         #expect(relation.predicate == .worksOn)
+        #expect(relation.metadata["semantic_family"] == "work")
+    }
+
+    @Test func l4RelationInputNormalizesDevelopmentAliasesMorePrecisely() throws {
+        let json = #"""
+        {
+          "subjectName": "Connor Graph Agent",
+          "predicate": "IMPLEMENTED_BY",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .developedBy)
+        #expect(relation.metadata["semantic_family"] == "development")
     }
 
     @Test func memoryOSCLIInspectorReportsEmptyStoreStatus() throws {
