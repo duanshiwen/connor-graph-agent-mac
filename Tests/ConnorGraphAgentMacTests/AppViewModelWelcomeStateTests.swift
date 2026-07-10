@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 import ConnorGraphStore
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
@@ -186,5 +187,38 @@ private func makeWelcomeStateViewModel(
 
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "second")
+    #expect(viewModel.showWelcomePlaceholder == false)
+}
+
+@MainActor
+@Test func setupLLMConnectionUsesServicePersistenceAsSingleSourceOfTruth() async throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let service = AppLLMConnectionSetupService(
+        settingsRepository: repository,
+        openAICompatibleHealthCheck: { config in
+            LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+        }
+    )
+    let input = AppLLMConnectionSetupInput(
+        id: "provider-setup",
+        kind: .openAICompatible,
+        name: "Provider Setup",
+        baseURLString: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        apiKey: "real-key"
+    )
+
+    _ = try await service.setupConnection(input)
+
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+    viewModel.updateWelcomeState()
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.defaultConnectionID == "provider-setup")
+    #expect(loaded.defaultConnection?.id == "provider-setup")
     #expect(viewModel.showWelcomePlaceholder == false)
 }
