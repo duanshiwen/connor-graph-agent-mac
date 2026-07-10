@@ -547,7 +547,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             if let queueItem {
                 _ = try recordQueueFailure(queueItem, errorCode: "projection_validation_failed", errorMessage: build.validation.issues.map(\.message).joined(separator: "; "), now: now)
             }
-            return MemoryOSProjectionRunSummary(artifactID: envelope.id, accepted: false, issues: build.validation.issues)
+            return MemoryOSProjectionRunSummary(artifactID: envelope.id, accepted: false, acceptanceMode: build.validation.acceptanceMode, repairedRecordCount: build.validation.repairedRecordCount, degradedRecordCount: build.validation.degradedRecordCount, droppedRecordCount: build.validation.droppedRecordCount, issues: build.validation.issues)
         }
         try store.saveProjectionBatch(batch)
         if let queueItem {
@@ -570,11 +570,16 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return MemoryOSProjectionRunSummary(
             artifactID: envelope.id,
             accepted: true,
+            acceptanceMode: build.validation.acceptanceMode,
             nodeCount: batch.nodes.count,
             statementCount: batch.statements.count,
             entityCount: batch.entities.count,
             entityStatementCount: batch.entityStatements.count,
-            beliefCount: batch.beliefs.count
+            beliefCount: batch.beliefs.count,
+            repairedRecordCount: build.validation.repairedRecordCount,
+            degradedRecordCount: build.validation.degradedRecordCount,
+            droppedRecordCount: build.validation.droppedRecordCount,
+            issues: build.validation.issues
         )
     }
 

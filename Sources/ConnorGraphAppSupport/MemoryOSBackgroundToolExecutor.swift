@@ -174,6 +174,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let anchor = try facade.ensureCurrentUserAnchor(now: now)
             var statementIDs: [String] = []
             var artifactIDs: [String] = []
+            var acceptanceModes: [String] = []
             for (index, factValue) in facts.enumerated() {
                 guard let factObj = factValue as? [String: Any],
                       let statement = factObj["statement"] as? String, !statement.isEmpty,
@@ -190,8 +191,9 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                     throw MemoryOSBackgroundToolExecutionError.invalidArguments("Current user fact rejected: \(summary.issues.map(\.message).joined(separator: "; "))")
                 }
                 statementIDs.append(contentsOf: try facade.l2StatementIDs(sourceArtifactID: summary.artifactID))
+                acceptanceModes.append(summary.acceptanceMode)
             }
-            let payload: [String: Any] = ["accepted": true, "statementCount": statementIDs.count, "artifactCount": artifactIDs.count]
+            let payload: [String: Any] = ["accepted": true, "statementCount": statementIDs.count, "artifactCount": artifactIDs.count, "acceptanceModes": acceptanceModes]
             let resultData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
             return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Updated current_user profile with \(statementIDs.count) statement(s).", citations: statementIDs + artifactIDs)
