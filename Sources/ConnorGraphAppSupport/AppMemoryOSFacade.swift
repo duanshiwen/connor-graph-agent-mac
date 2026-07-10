@@ -540,10 +540,21 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 eventType: "memory_os.projection.rejected",
                 actor: "memory-os",
                 subjectID: envelope.id,
-                payload: ["issue_count": String(build.validation.issues.count), "model_id": modelID],
+                payload: [
+                    "issue_count": String(build.validation.issues.count),
+                    "model_id": modelID,
+                    "acceptance_mode": build.validation.acceptanceMode,
+                    "repaired_record_count": String(build.validation.repairedRecordCount),
+                    "degraded_record_count": String(build.validation.degradedRecordCount),
+                    "dropped_record_count": String(build.validation.droppedRecordCount)
+                ],
                 createdAt: now
             ))
             try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 0, dimensions: ["model_id": modelID], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.rejected", value: 1, dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.repaired", value: Double(build.validation.repairedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.degraded", value: Double(build.validation.degradedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.dropped", value: Double(build.validation.droppedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
             if let queueItem {
                 _ = try recordQueueFailure(queueItem, errorCode: "projection_validation_failed", errorMessage: build.validation.issues.map(\.message).joined(separator: "; "), now: now)
             }
@@ -562,11 +573,21 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 "statement_count": String(batch.statements.count),
                 "entity_count": String(batch.entities.count),
                 "entity_statement_count": String(batch.entityStatements.count),
-                "belief_count": String(batch.beliefs.count)
+                "belief_count": String(batch.beliefs.count),
+                "acceptance_mode": build.validation.acceptanceMode,
+                "repaired_record_count": String(build.validation.repairedRecordCount),
+                "degraded_record_count": String(build.validation.degradedRecordCount),
+                "dropped_record_count": String(build.validation.droppedRecordCount)
             ],
             createdAt: now
         ))
-        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 1, dimensions: ["model_id": modelID], createdAt: now))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 1, dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+        if build.validation.acceptanceModeKind == .degradedAccepted {
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.degraded_accepted", value: 1, dimensions: ["model_id": modelID], createdAt: now))
+        }
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.repaired", value: Double(build.validation.repairedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.degraded", value: Double(build.validation.degradedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.dropped", value: Double(build.validation.droppedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
         return MemoryOSProjectionRunSummary(
             artifactID: envelope.id,
             accepted: true,

@@ -540,6 +540,20 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
     }
 
+    public func recentMetricSums(names: [String]) throws -> [String: Double] {
+        guard !names.isEmpty else { return [:] }
+        let nameList = names.map(quote).joined(separator: ", ")
+        return try query(sql: """
+        SELECT metric_name, COALESCE(SUM(metric_value), 0)
+        FROM memory_processing_metrics
+        WHERE metric_name IN (\(nameList))
+        GROUP BY metric_name
+        """).reduce(into: [:]) { partial, row in
+            guard row.count >= 2 else { return }
+            partial[row[0]] = Double(row[1]) ?? 0
+        }
+    }
+
     public func save(backgroundRun run: MemoryOSBackgroundRunRecord) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_background_runs

@@ -19,6 +19,14 @@ public struct AppMemoryOSCLIInspector: Sendable {
         let health = try store.schemaHealthReport(now: now)
         let queue = try store.queueOperationalSnapshot(now: now)
         let layers = try layerCounts()
+        let metrics = try store.recentMetricSums(names: [
+            "memory_os.projection.accepted",
+            "memory_os.projection.rejected",
+            "memory_os.projection.degraded_accepted",
+            "memory_os.projection.records.repaired",
+            "memory_os.projection.records.degraded",
+            "memory_os.projection.records.dropped"
+        ])
         return MemoryOSCLIStatus(
             databasePath: databasePath,
             schema: MemoryOSCLISchemaStatus(
@@ -49,6 +57,14 @@ public struct AppMemoryOSCLIInspector: Sendable {
                 failed: queue.failed,
                 deadLetter: queue.deadLetter,
                 expiredLeases: queue.expiredLeases
+            ),
+            observability: MemoryOSCLIObservabilityStatus(
+                acceptedProjectionCount: Int(metrics["memory_os.projection.accepted", default: 0]),
+                rejectedProjectionCount: Int(metrics["memory_os.projection.rejected", default: 0]),
+                degradedAcceptedProjectionCount: Int(metrics["memory_os.projection.degraded_accepted", default: 0]),
+                repairedRecordCount: Int(metrics["memory_os.projection.records.repaired", default: 0]),
+                degradedRecordCount: Int(metrics["memory_os.projection.records.degraded", default: 0]),
+                droppedRecordCount: Int(metrics["memory_os.projection.records.dropped", default: 0])
             )
         )
     }
@@ -863,12 +879,32 @@ public struct MemoryOSCLIStatus: Codable, Sendable, Equatable {
     public var schema: MemoryOSCLISchemaStatus
     public var layers: MemoryOSCLIStatusLayerCounts
     public var queue: MemoryOSCLIQueueCounts
+    public var observability: MemoryOSCLIObservabilityStatus
 
     enum CodingKeys: String, CodingKey {
         case databasePath = "database_path"
         case schema
         case layers
         case queue
+        case observability
+    }
+}
+
+public struct MemoryOSCLIObservabilityStatus: Codable, Sendable, Equatable {
+    public var acceptedProjectionCount: Int
+    public var rejectedProjectionCount: Int
+    public var degradedAcceptedProjectionCount: Int
+    public var repairedRecordCount: Int
+    public var degradedRecordCount: Int
+    public var droppedRecordCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case acceptedProjectionCount = "accepted_projection_count"
+        case rejectedProjectionCount = "rejected_projection_count"
+        case degradedAcceptedProjectionCount = "degraded_accepted_projection_count"
+        case repairedRecordCount = "repaired_record_count"
+        case degradedRecordCount = "degraded_record_count"
+        case droppedRecordCount = "dropped_record_count"
     }
 }
 
