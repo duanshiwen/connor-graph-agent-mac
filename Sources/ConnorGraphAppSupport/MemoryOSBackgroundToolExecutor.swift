@@ -181,12 +181,9 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                       let rawRelation = factObj["relation"] as? String, !rawRelation.isEmpty else {
                     throw MemoryOSBackgroundToolExecutionError.invalidArguments("facts[\(index)] must have statement, factType, and relation")
                 }
-                let normalized = rawRelation.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: "-", with: "_")
-                    .replacingOccurrences(of: " ", with: "_")
-                    .uppercased()
-                let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
-                let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: factType, predicate: predicate, anchor: anchor, now: now)
+                let predicate = MemoryOSCanonicalizer.canonicalizeGraphPredicate(rawRelation) ?? .relatedTo
+                let normalizedFactType = MemoryOSCanonicalizer.canonicalizeL2FactType(factType) ?? factType
+                let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: normalizedFactType, predicate: predicate, anchor: anchor, now: now)
                 let summary = try facade.projectAndRecordLLMArtifact(rawContent: artifactJSON, modelID: "memory_os_update_current_user_profile", processingRunID: context.runID, artifactType: "memory_os_current_user_fact_update", schemaName: "MemoryOSL1UnifiedProjectionOutput", now: now)
                 artifactIDs.append(summary.artifactID)
                 guard summary.accepted else {
