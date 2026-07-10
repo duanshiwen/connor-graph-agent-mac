@@ -130,9 +130,10 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
     public var predicate: MemoryOSL4RelationPredicate
     public var objectName: String
     public var text: String?
+    public var metadata: [String: String]
 
-    public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String? = nil) {
-        self.subjectName = subjectName; self.predicate = predicate; self.objectName = objectName; self.text = text
+    public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String? = nil, metadata: [String: String] = [:]) {
+        self.subjectName = subjectName; self.predicate = predicate; self.objectName = objectName; self.text = text; self.metadata = metadata
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -140,6 +141,12 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
         case predicate
         case objectName
         case text
+        case metadata
+    }
+
+    private struct NormalizedPredicateResult {
+        let predicate: MemoryOSL4RelationPredicate
+        let metadata: [String: String]
     }
 
     public init(from decoder: Decoder) throws {
@@ -148,11 +155,14 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
         let predicateRaw = try container.decode(String.self, forKey: .predicate)
         let objectName = try container.decode(String.self, forKey: .objectName)
         let text = try container.decodeIfPresent(String.self, forKey: .text)
+        let inputMetadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        let normalized = Self.normalizePredicate(predicateRaw)
         self.init(
             subjectName: subjectName,
-            predicate: Self.normalizePredicate(predicateRaw),
+            predicate: normalized.predicate,
             objectName: objectName,
-            text: text
+            text: text,
+            metadata: inputMetadata.merging(normalized.metadata) { current, _ in current }
         )
     }
 
@@ -162,12 +172,15 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
         try container.encode(predicate.rawValue, forKey: .predicate)
         try container.encode(objectName, forKey: .objectName)
         try container.encodeIfPresent(text, forKey: .text)
+        if !metadata.isEmpty {
+            try container.encode(metadata, forKey: .metadata)
+        }
     }
 
-    private static func normalizePredicate(_ raw: String) -> MemoryOSL4RelationPredicate {
+    private static func normalizePredicate(_ raw: String) -> NormalizedPredicateResult {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let exact = MemoryOSL4RelationPredicate(rawValue: trimmed) {
-            return exact
+            return NormalizedPredicateResult(predicate: exact, metadata: [:])
         }
 
         let normalized = trimmed
@@ -176,35 +189,216 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
             .uppercased()
 
         if let exactNormalized = MemoryOSL4RelationPredicate(rawValue: normalized) {
-            return exactNormalized
+            return NormalizedPredicateResult(predicate: exactNormalized, metadata: normalized == trimmed ? [:] : [
+                "alias_predicate": trimmed,
+                "normalized_predicate": exactNormalized.rawValue,
+                "normalization_strategy": "separator_variant"
+            ])
         }
 
-        switch normalized {
-        case "FAMILY_OF", "SIBLING_OF", "BROTHER_OF", "SISTER_OF", "CHILD_OF", "PARENT_OF", "MOTHER_OF", "FATHER_OF", "SON_OF", "DAUGHTER_OF", "HUSBAND_OF", "WIFE_OF", "SPOUSE_OF", "RELATIVE_OF", "KIN_OF":
-            return .relatedTo
-        case "BUILT_BY", "MADE_BY", "WRITTEN_BY", "IMPLEMENTED_BY":
-            return .createdBy
-        case "MAKER_OF", "CREATOR_OF", "AUTHOR_OF", "OWNER_OF", "MAINTAINER_OF", "DEVELOPER_OF", "FOUNDER_OF", "PUBLISHER_OF", "CURATOR_OF", "REVIEWER_OF", "CONTRIBUTOR_OF", "STAKEHOLDER_IN", "WORKING_ON":
-            return inverseContributionAlias(normalized)
-        default:
-            return .relatedTo
+        if let alias = aliasMapping(for: normalized, raw: trimmed) {
+            return alias
         }
+
+        return NormalizedPredicateResult(
+            predicate: .relatedTo,
+            metadata: [
+                "alias_predicate": trimmed,
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "unknown",
+                "normalization_strategy": "fallback"
+            ]
+        )
     }
 
-    private static func inverseContributionAlias(_ normalized: String) -> MemoryOSL4RelationPredicate {
+    private static func aliasMapping(for normalized: String, raw: String) -> NormalizedPredicateResult? {
+        let base: [String: String] = [
+            "alias_predicate": raw,
+            "normalization_source": normalized
+        ]
+
         switch normalized {
-        case "OWNER_OF": return .ownedBy
-        case "MAINTAINER_OF": return .maintainedBy
-        case "DEVELOPER_OF": return .developedBy
-        case "FOUNDER_OF": return .foundedBy
-        case "PUBLISHER_OF": return .publishedBy
-        case "CURATOR_OF": return .curatedBy
-        case "REVIEWER_OF": return .reviewedBy
-        case "CONTRIBUTOR_OF": return .contributedBy
-        case "STAKEHOLDER_IN": return .stakeholderOf
-        case "WORKING_ON": return .worksOn
-        case "AUTHOR_OF", "CREATOR_OF", "MAKER_OF": return .createdBy
-        default: return .relatedTo
+        case "FAMILY_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "family",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "SIBLING_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "sibling",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "BROTHER_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "sibling",
+                "kinship_subrole": "brother",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "SISTER_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "sibling",
+                "kinship_subrole": "sister",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "PARENT_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "parent",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "MOTHER_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "parent",
+                "kinship_subrole": "mother",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "FATHER_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "parent",
+                "kinship_subrole": "father",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "CHILD_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "child",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "SON_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "child",
+                "kinship_subrole": "son",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "DAUGHTER_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "child",
+                "kinship_subrole": "daughter",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "SPOUSE_OF", "HUSBAND_OF", "WIFE_OF":
+            let subrole: String? = switch normalized {
+            case "HUSBAND_OF": "husband"
+            case "WIFE_OF": "wife"
+            default: nil
+            }
+            var metadata = base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "spouse",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new }
+            if let subrole { metadata["kinship_subrole"] = subrole }
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: metadata)
+        case "RELATIVE_OF", "KIN_OF":
+            return NormalizedPredicateResult(predicate: .relatedTo, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.relatedTo.rawValue,
+                "semantic_family": "kinship",
+                "kinship_role": "relative",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "WRITTEN_BY", "AUTHOR_OF":
+            return NormalizedPredicateResult(predicate: .authoredBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.authoredBy.rawValue,
+                "semantic_family": "authorship",
+                "normalized_direction": normalized == "AUTHOR_OF" ? "inverted" : "same",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "BUILT_BY", "MADE_BY", "CREATOR_OF", "MAKER_OF":
+            return NormalizedPredicateResult(predicate: .createdBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.createdBy.rawValue,
+                "semantic_family": "creation",
+                "normalized_direction": ["CREATOR_OF", "MAKER_OF"].contains(normalized) ? "inverted" : "same",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "IMPLEMENTED_BY", "DEVELOPER_OF":
+            return NormalizedPredicateResult(predicate: .developedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.developedBy.rawValue,
+                "semantic_family": "development",
+                "normalized_direction": normalized == "DEVELOPER_OF" ? "inverted" : "same",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "OWNER_OF":
+            return NormalizedPredicateResult(predicate: .ownedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.ownedBy.rawValue,
+                "semantic_family": "ownership",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "MAINTAINER_OF":
+            return NormalizedPredicateResult(predicate: .maintainedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.maintainedBy.rawValue,
+                "semantic_family": "maintenance",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "PUBLISHER_OF":
+            return NormalizedPredicateResult(predicate: .publishedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.publishedBy.rawValue,
+                "semantic_family": "publication",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "CURATOR_OF":
+            return NormalizedPredicateResult(predicate: .curatedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.curatedBy.rawValue,
+                "semantic_family": "curation",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "REVIEWER_OF":
+            return NormalizedPredicateResult(predicate: .reviewedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.reviewedBy.rawValue,
+                "semantic_family": "review",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "CONTRIBUTOR_OF":
+            return NormalizedPredicateResult(predicate: .contributedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.contributedBy.rawValue,
+                "semantic_family": "contribution",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "FOUNDER_OF":
+            return NormalizedPredicateResult(predicate: .foundedBy, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.foundedBy.rawValue,
+                "semantic_family": "founding",
+                "normalized_direction": "inverted",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "STAKEHOLDER_IN":
+            return NormalizedPredicateResult(predicate: .stakeholderOf, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.stakeholderOf.rawValue,
+                "semantic_family": "stakeholder",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        case "WORKING_ON":
+            return NormalizedPredicateResult(predicate: .worksOn, metadata: base.merging([
+                "normalized_predicate": MemoryOSL4RelationPredicate.worksOn.rawValue,
+                "semantic_family": "work",
+                "normalization_strategy": "semantic_alias"
+            ]) { _, new in new })
+        default:
+            return nil
         }
     }
 }
