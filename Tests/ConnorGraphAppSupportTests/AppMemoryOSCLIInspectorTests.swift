@@ -8,6 +8,37 @@ import ConnorGraphAppSupport
 
 @Suite("Memory OS CLI Inspector Tests")
 struct AppMemoryOSCLIInspectorTests {
+    @Test func l2StatementUpdateRequestDecodesStringShorthandArray() throws {
+        let json = #"""
+        {
+          "entities": [
+            {
+              "name": "段福强",
+              "statements": [
+                "段福强的英文名是 Oisin。",
+                {
+                  "text": "段福强是段诗闻的弟弟。",
+                  "relation": "RELATED_TO",
+                  "factType": "relationship"
+                }
+              ]
+            }
+          ]
+        }
+        """#.data(using: .utf8)!
+
+        let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: json)
+
+        #expect(request.entities.count == 1)
+        #expect(request.entities[0].statements.count == 2)
+        #expect(request.entities[0].statements[0].text == "段福强的英文名是 Oisin。")
+        #expect(request.entities[0].statements[0].relation == nil)
+        #expect(request.entities[0].statements[0].factType == nil)
+        #expect(request.entities[0].statements[1].text == "段福强是段诗闻的弟弟。")
+        #expect(request.entities[0].statements[1].relation == "RELATED_TO")
+        #expect(request.entities[0].statements[1].factType == "relationship")
+    }
+
     @Test func l4RelationInputNormalizesFamilyPredicateShorthand() throws {
         let json = #"""
         {
