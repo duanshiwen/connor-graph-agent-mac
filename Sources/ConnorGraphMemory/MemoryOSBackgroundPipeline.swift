@@ -662,7 +662,7 @@ public enum MemoryOSBackgroundToolCatalog {
             name: "memory_os_l4_update_entities",
             description: "Write L4 stable entities and typed entity-to-entity relations. Entities are upserted by name+type.",
             inputSchemaJSON: "{\"entities\":[{\"name\":\"string\",\"type?\":\"string\",\"domain?\":\"string\",\"summary?\":\"string\",\"aliases?\":\"string\"}],\"relations\":[{\"subjectName\":\"string\",\"predicate\":\"L4Predicate\",\"objectName\":\"string\",\"text?\":\"string\"}]}",
-            usagePolicy: "Search L4 first to check for existing entities. Create conceptEntities only when the concept has a stable name, useful summary, clear type, and future retrieval value. Use controlled entity types."
+            usagePolicy: "Search L4 first to check for existing entities. Create conceptEntities only when the concept has a stable name, useful summary, clear type, and future retrieval value. Use controlled entity types. Common natural-language or graph-style predicate aliases are normalized conservatively at write time."
         )
     }
 }
