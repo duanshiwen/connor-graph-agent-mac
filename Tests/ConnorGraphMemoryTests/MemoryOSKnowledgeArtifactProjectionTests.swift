@@ -68,10 +68,11 @@ import ConnorGraphMemory
     #expect(!batch.entities.contains { $0.entityType == "parameter" })
 }
 
-@Test func memoryOSProjectionServiceRejectsKnowledgeArtifactWithNoiseCandidate() throws {
+@Test func memoryOSProjectionServiceGracefullyDropsNoiseKnowledgeCandidate() throws {
     let output = MemoryOSKnowledgeExtractionOutput(
         knowledgeCandidates: [
             MemoryOSKnowledgeCandidate(
+                id: "noise-candidate-1",
                 title: "张三喜欢吃杨梅",
                 claim: "张三喜欢吃杨梅。",
                 category: "personal",
@@ -90,6 +91,9 @@ import ConnorGraphMemory
 
     let result = MemoryOSProjectionService().projectionBatch(from: artifact, validation: validation)
 
-    #expect(!result.accepted)
+    #expect(result.accepted)
+    #expect(result.validation.acceptanceModeKind == .degradedAccepted)
+    #expect(result.validation.droppedRecordCount == 1)
     #expect(result.validation.issues.contains { $0.code == "knowledge_promotion_rejected" })
+    #expect(result.batch?.beliefs.isEmpty == true)
 }

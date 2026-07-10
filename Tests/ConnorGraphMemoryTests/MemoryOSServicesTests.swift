@@ -104,7 +104,7 @@ import ConnorGraphMemory
     #expect(validation.normalizedRecordCount == 5)
 }
 
-@Test func memoryOSArtifactValidatorRejectsL1UnifiedKnowledgeCandidateWithoutAcceptedSignals() throws {
+@Test func memoryOSArtifactValidatorGracefullyDropsL1UnifiedKnowledgeCandidateWithoutAcceptedSignals() throws {
     var output = makeAcceptedL1UnifiedProjectionOutput()
     output.knowledgeCandidates[0].signalAssessment = MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: false, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["Not reusable"])
     let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
@@ -112,7 +112,9 @@ import ConnorGraphMemory
 
     let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
 
-    #expect(!validation.accepted)
+    #expect(validation.accepted)
+    #expect(validation.acceptanceModeKind == .degradedAccepted)
+    #expect(validation.droppedRecordCount == 1)
     #expect(validation.issues.contains { $0.code == "knowledge_promotion_rejected" })
 }
 
@@ -181,16 +183,21 @@ import ConnorGraphMemory
     #expect(!validation.issues.contains { $0.code == "missing_l4_relation_metadata" })
 }
 
-@Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithUnknownEntity() throws {
+@Test func memoryOSArtifactValidatorGracefullyDropsL1UnifiedConceptRelationWithUnknownEntity() throws {
     var output = makeAcceptedL1UnifiedProjectionOutput()
     output.conceptRelations[0].objectName = "missing-concept"
     let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
     let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
 
     let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+    let build = MemoryOSProjectionService().projectionBatch(from: artifact, validation: validation)
 
-    #expect(!validation.accepted)
+    #expect(validation.accepted)
+    #expect(validation.acceptanceModeKind == .degradedAccepted)
+    #expect(validation.droppedRecordCount == 1)
     #expect(validation.issues.contains { $0.code == "unknown_relation_object" })
+    #expect(build.accepted)
+    #expect(build.batch?.entityStatements.isEmpty == true)
 }
 
 private func makeAcceptedL1UnifiedProjectionOutput() -> MemoryOSL1UnifiedProjectionOutput {
