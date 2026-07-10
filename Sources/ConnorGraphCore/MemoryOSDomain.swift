@@ -54,17 +54,59 @@ public enum MemoryOSHealthStatus: String, Codable, Sendable, Equatable, CaseIter
     case failed
 }
 
+public enum MemoryOSAcceptanceMode: String, Codable, Sendable, Equatable, CaseIterable {
+    case strictAccepted = "strict_accepted"
+    case normalizedAccepted = "normalized_accepted"
+    case repairedAccepted = "repaired_accepted"
+    case degradedAccepted = "degraded_accepted"
+    case rejected
+
+    public var isAccepted: Bool {
+        self != .rejected
+    }
+}
+
+public enum MemoryOSIssueSeverity: String, Codable, Sendable, Equatable, CaseIterable {
+    case fatal
+    case warning
+    case informational
+}
+
+public enum MemoryOSIssueDisposition: String, Codable, Sendable, Equatable, CaseIterable {
+    case rejectArtifact = "reject_artifact"
+    case normalizeAndKeep = "normalize_and_keep"
+    case repairAndKeep = "repair_and_keep"
+    case dropRecord = "drop_record"
+    case keepWithWarning = "keep_with_warning"
+}
+
 public struct MemoryOSValidationIssue: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var code: String
     public var message: String
     public var severity: String
+    public var scope: String?
+    public var disposition: String?
+    public var recordReference: String?
+    public var repairHint: String?
 
-    public init(id: String = UUID().uuidString, code: String, message: String, severity: String = "error") {
+    public var severityKind: MemoryOSIssueSeverity {
+        MemoryOSIssueSeverity(rawValue: severity) ?? .warning
+    }
+
+    public var dispositionKind: MemoryOSIssueDisposition? {
+        disposition.flatMap(MemoryOSIssueDisposition.init(rawValue:))
+    }
+
+    public init(id: String = UUID().uuidString, code: String, message: String, severity: String = MemoryOSIssueSeverity.warning.rawValue, scope: String? = nil, disposition: String? = nil, recordReference: String? = nil, repairHint: String? = nil) {
         self.id = id
         self.code = code
         self.message = message
         self.severity = severity
+        self.scope = scope
+        self.disposition = disposition
+        self.recordReference = recordReference
+        self.repairHint = repairHint
     }
 }
 
@@ -107,11 +149,30 @@ public struct MemoryOSLLMArtifactEnvelope: Codable, Sendable, Equatable, Identif
 public struct MemoryOSArtifactValidationResult: Codable, Sendable, Equatable {
     public var artifactID: String
     public var accepted: Bool
+    public var acceptanceMode: String
     public var issues: [MemoryOSValidationIssue]
     public var normalizedRecordCount: Int
+    public var acceptedRecordCount: Int
+    public var repairedRecordCount: Int
+    public var degradedRecordCount: Int
+    public var droppedRecordCount: Int
 
-    public init(artifactID: String, accepted: Bool, issues: [MemoryOSValidationIssue] = [], normalizedRecordCount: Int = 0) {
-        self.artifactID = artifactID; self.accepted = accepted; self.issues = issues; self.normalizedRecordCount = normalizedRecordCount
+    public var acceptanceModeKind: MemoryOSAcceptanceMode {
+        MemoryOSAcceptanceMode(rawValue: acceptanceMode) ?? (accepted ? .strictAccepted : .rejected)
+    }
+
+    public init(artifactID: String, accepted: Bool, acceptanceMode: String? = nil, issues: [MemoryOSValidationIssue] = [], normalizedRecordCount: Int = 0, acceptedRecordCount: Int? = nil, repairedRecordCount: Int = 0, degradedRecordCount: Int = 0, droppedRecordCount: Int = 0) {
+        let resolvedMode = acceptanceMode ?? (accepted ? MemoryOSAcceptanceMode.strictAccepted.rawValue : MemoryOSAcceptanceMode.rejected.rawValue)
+        let resolvedAcceptedRecordCount = acceptedRecordCount ?? normalizedRecordCount
+        self.artifactID = artifactID
+        self.accepted = accepted
+        self.acceptanceMode = resolvedMode
+        self.issues = issues
+        self.normalizedRecordCount = normalizedRecordCount
+        self.acceptedRecordCount = resolvedAcceptedRecordCount
+        self.repairedRecordCount = repairedRecordCount
+        self.degradedRecordCount = degradedRecordCount
+        self.droppedRecordCount = droppedRecordCount
     }
 }
 
@@ -759,11 +820,19 @@ public struct MemoryOSProjectionBatch: Codable, Sendable, Equatable {
 
 public struct MemoryOSProjectionBuildResult: Codable, Sendable, Equatable {
     public var accepted: Bool
+    public var acceptanceMode: String
     public var batch: MemoryOSProjectionBatch?
     public var validation: MemoryOSArtifactValidationResult
 
-    public init(accepted: Bool, batch: MemoryOSProjectionBatch? = nil, validation: MemoryOSArtifactValidationResult) {
-        self.accepted = accepted; self.batch = batch; self.validation = validation
+    public var acceptanceModeKind: MemoryOSAcceptanceMode {
+        MemoryOSAcceptanceMode(rawValue: acceptanceMode) ?? validation.acceptanceModeKind
+    }
+
+    public init(accepted: Bool, acceptanceMode: String? = nil, batch: MemoryOSProjectionBatch? = nil, validation: MemoryOSArtifactValidationResult) {
+        self.accepted = accepted
+        self.acceptanceMode = acceptanceMode ?? validation.acceptanceMode
+        self.batch = batch
+        self.validation = validation
     }
 }
 

@@ -162,3 +162,62 @@ import ConnorGraphCore
 
     #expect(decoded.predicate == .dependsOn)
 }
+
+@Test func memoryOSAcceptanceModeTreatsGracefulModesAsAccepted() {
+    #expect(MemoryOSAcceptanceMode.strictAccepted.isAccepted)
+    #expect(MemoryOSAcceptanceMode.normalizedAccepted.isAccepted)
+    #expect(MemoryOSAcceptanceMode.repairedAccepted.isAccepted)
+    #expect(MemoryOSAcceptanceMode.degradedAccepted.isAccepted)
+    #expect(!MemoryOSAcceptanceMode.rejected.isAccepted)
+}
+
+@Test func memoryOSArtifactValidationResultDefaultsAcceptanceModeFromAcceptedFlag() {
+    let accepted = MemoryOSArtifactValidationResult(
+        artifactID: "artifact-1",
+        accepted: true,
+        normalizedRecordCount: 3
+    )
+    let rejected = MemoryOSArtifactValidationResult(
+        artifactID: "artifact-2",
+        accepted: false
+    )
+
+    #expect(accepted.acceptanceModeKind == .strictAccepted)
+    #expect(accepted.acceptedRecordCount == 3)
+    #expect(rejected.acceptanceModeKind == .rejected)
+    #expect(rejected.acceptedRecordCount == 0)
+}
+
+@Test func memoryOSValidationIssueExposesTypedSeverityAndDisposition() {
+    let issue = MemoryOSValidationIssue(
+        code: "separator_variant",
+        message: "created by was normalized to CREATED_BY",
+        severity: MemoryOSIssueSeverity.informational.rawValue,
+        scope: "relation",
+        disposition: MemoryOSIssueDisposition.normalizeAndKeep.rawValue,
+        recordReference: "relation-1",
+        repairHint: "Prefer canonical predicate names in future outputs."
+    )
+
+    #expect(issue.severityKind == .informational)
+    #expect(issue.dispositionKind == .normalizeAndKeep)
+    #expect(issue.scope == "relation")
+    #expect(issue.recordReference == "relation-1")
+}
+
+@Test func memoryOSProjectionBuildResultDefaultsAcceptanceModeFromValidation() {
+    let validation = MemoryOSArtifactValidationResult(
+        artifactID: "artifact-1",
+        accepted: true,
+        acceptanceMode: MemoryOSAcceptanceMode.degradedAccepted.rawValue,
+        normalizedRecordCount: 2,
+        degradedRecordCount: 1
+    )
+
+    let result = MemoryOSProjectionBuildResult(
+        accepted: true,
+        validation: validation
+    )
+
+    #expect(result.acceptanceModeKind == .degradedAccepted)
+}
