@@ -45,8 +45,12 @@ import ConnorGraphStore
     let builtin = try memoryStore.builtinDataset(id: FoundationKGMemoryOSMapper.builtinDatasetID)
     let l4Entities = try memoryStore.query(sql: "SELECT COUNT(*) FROM memory_l4_entities;").first?.first.flatMap(Int.init) ?? -1
 
+    let currentUser = try memoryStore.entity(id: MemoryOSPersonIdentityConstants.currentUserEntityID)
+
     #expect(builtin == nil)
-    #expect(l4Entities == 0)
+    #expect(l4Entities == 1)
+    #expect(currentUser?.stableKey == MemoryOSPersonIdentityConstants.currentUserStableKey)
+    #expect(currentUser?.metadata["person_role"] == MemoryOSPersonIdentityConstants.currentUserPersonRole)
 }
 
 private final class EmptyBootstrapSettingsStore: LLMSettingsStore, @unchecked Sendable {
