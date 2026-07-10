@@ -693,19 +693,9 @@ public struct MemoryOSProjectionService: Sendable {
         let droppedCandidateIDs = droppedKnowledgeCandidateIDs(from: validationIssues)
         let droppedRelationRefs = droppedRelationReferences(from: validationIssues)
 
-        // 3. Build name index from conceptEntities for knowledge candidate resolution
-        let conceptEntityByName = Dictionary(uniqueKeysWithValues: output.conceptEntities.map { concept in
-            let scope = concept.domain ?? "knowledge"
-            let entityType = MemoryOSEntityType.normalizeRawType(concept.conceptType)
-            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entityType, name: concept.name, scope: scope)
-            let entityID = "l4-entity:\(stableKey)"
-            return (concept.name, entityID)
-        })
-
         let remappedCandidates = output.knowledgeCandidates.filter { !droppedCandidateIDs.contains($0.id) }.map { candidate in
             var next = candidate
             next.evidenceStatementIDs = candidate.evidenceStatementIDs.map { localStatementIDMap[$0] ?? $0 }
-            next.relatedEntityNames = candidate.relatedEntityNames.compactMap { conceptEntityByName[$0] }
             next.metadata = next.metadata.merging(["source_stage": "l1_unified_projection"]) { _, new in new }
             return next
         }

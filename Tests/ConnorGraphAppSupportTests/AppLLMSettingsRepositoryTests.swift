@@ -92,6 +92,37 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(try credentialStore.readSecret(service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount) == nil)
 }
 
+@Test func settingsRepositoryDoesNotReviveDefaultConnectionFromPartialLegacyShape() throws {
+    let settingsStore = FakeSettingsStore()
+    settingsStore.set("https://api.openai.com/v1", forKey: "llm.baseURLString")
+    settingsStore.set("gpt-4o-mini", forKey: "llm.model")
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: FakeCredentialStore())
+
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.connections.isEmpty)
+    #expect(loaded.defaultConnectionID.isEmpty)
+    #expect(loaded.defaultConnection == nil)
+}
+
+@Test func settingsRepositoryMigratesOnlyCompleteLegacyConnectionShape() throws {
+    let settingsStore = FakeSettingsStore()
+    let credentialStore = FakeCredentialStore()
+    settingsStore.set("openai_compatible", forKey: "llm.providerMode")
+    settingsStore.set("https://example.com/v1", forKey: "llm.baseURLString")
+    settingsStore.set("mimo-v2.5", forKey: "llm.model")
+    settingsStore.set("mimo-v2.5", forKey: "llm.selectedModel")
+    try credentialStore.saveSecret("legacy-key", service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount)
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.defaultConnectionID == "openai-compatible")
+    #expect(loaded.defaultConnection?.baseURLString == "https://example.com/v1")
+    #expect(loaded.defaultConnection?.effectiveModel == "mimo-v2.5")
+    #expect(loaded.defaultConnection?.hasAPIKey == true)
+}
+
 @Test func providerHealthCheckerReportsNotConfiguredWhenNoDefaultConnectionExists() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     let checker = AppLLMProviderHealthChecker(settingsRepository: repository)

@@ -18,11 +18,10 @@ import ConnorGraphAppSupport
     #expect(try coordinator.evaluateAfterL1Capture(now: now).isEmpty)
     _ = try facade.ingestChatMessage(messageID: "message-99", sessionID: "session", role: "user", content: "Important memory content 99", occurredAt: now.addingTimeInterval(99))
 
-    let enqueued = try coordinator.evaluateAfterL1Capture(now: now)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_processing_queue WHERE kind = '\(MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)';").first?.first == "4")
 
-    #expect(enqueued.count == 4)
-    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now)
-    #expect(runnable.count == 4)
+    let enqueued = try coordinator.evaluateAfterL1Capture(now: now.addingTimeInterval(99))
+    #expect(enqueued.isEmpty)
 }
 
 @Test func coordinatorDailySweepEnqueuesL1UnifiedProjectionWhenOldestPendingCaptureIs24HoursOld() throws {
