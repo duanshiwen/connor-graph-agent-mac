@@ -88,6 +88,29 @@ struct LLMConnectionSetupTests {
         #expect(try repository.apiKey(for: "provider-1") == "secret")
     }
 
+    @Test func setupConnectionMakesFirstCreatedConnectionDefaultWithoutExplicitMakeDefault() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") }
+        )
+
+        _ = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "first-provider",
+            kind: .openAICompatible,
+            name: "First Provider",
+            baseURLString: "https://api.example.com/v1",
+            model: "gpt-test",
+            apiKey: "secret"
+        ))
+
+        let loaded = try repository.loadSettings()
+        #expect(loaded.defaultConnectionID == "first-provider")
+        #expect(loaded.defaultConnection?.id == "first-provider")
+    }
+
     @Test func openAICompatibleUsesValidationModelWithoutPersistingItAsCatalogModel() async throws {
         let store = MemoryLLMSettingsStore()
         let credentials = MemoryCredentialStore()
