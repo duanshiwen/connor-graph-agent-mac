@@ -301,17 +301,17 @@ public struct AppLLMSettings: Sendable, Equatable {
         self.init(connections: [connection], defaultConnectionID: id)
     }
 
-    public var defaultConnection: AppLLMConnectionConfig {
-        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first ?? .defaultOpenAICompatible
+    public var defaultConnection: AppLLMConnectionConfig? {
+        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first
     }
 
-    public var baseURLString: String { defaultConnection.baseURLString }
-    public var model: String { defaultConnection.model }
-    public var selectedModel: String { defaultConnection.selectedModel }
-    public var effectiveModel: String { defaultConnection.effectiveModel }
-    public var hasAPIKey: Bool { defaultConnection.hasAPIKey }
-    public var providerMode: AppLLMProviderMode { defaultConnection.providerMode }
-    public var modelOptions: [String] { defaultConnection.modelOptions }
+    public var baseURLString: String { defaultConnection?.baseURLString ?? "" }
+    public var model: String { defaultConnection?.model ?? "" }
+    public var selectedModel: String { defaultConnection?.selectedModel ?? "" }
+    public var effectiveModel: String { defaultConnection?.effectiveModel ?? "" }
+    public var hasAPIKey: Bool { defaultConnection?.hasAPIKey ?? false }
+    public var providerMode: AppLLMProviderMode { defaultConnection?.providerMode ?? .openAICompatible }
+    public var modelOptions: [String] { defaultConnection?.modelOptions ?? [] }
 
     public func connection(id: String?) -> AppLLMConnectionConfig? {
         guard let id, !id.isEmpty else { return defaultConnection }
@@ -414,12 +414,32 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     private func loadLegacySettings() throws -> AppLLMSettings {
+        let legacyProviderMode = settingsStore.string(forKey: Keys.providerMode)
+        let legacyBaseURL = settingsStore.string(forKey: Keys.baseURLString)
+        let legacyModel = settingsStore.string(forKey: Keys.model)
+        let legacySelectedModel = settingsStore.string(forKey: Keys.selectedModel)
+        let legacyAPIKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
+
+        let hasLegacyConnectionShape =
+            legacyProviderMode?.isEmpty == false ||
+            legacyBaseURL?.isEmpty == false ||
+            legacyModel?.isEmpty == false ||
+            legacySelectedModel?.isEmpty == false ||
+            legacyAPIKey?.isEmpty == false
+
+        guard hasLegacyConnectionShape else {
+            return AppLLMSettings(
+                connections: [],
+                defaultConnectionID: "",
+                defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
+            )
+        }
+
         let fallbackProviderMode: AppLLMProviderMode = .openAICompatible
         let fallbackBaseURL = "https://api.openai.com/v1"
         let fallbackModel = "gpt-4o-mini"
-        let modeRaw = settingsStore.string(forKey: Keys.providerMode) ?? fallbackProviderMode.rawValue
+        let modeRaw = legacyProviderMode ?? fallbackProviderMode.rawValue
         let mode = AppLLMProviderMode(rawValue: modeRaw) ?? fallbackProviderMode
-        let apiKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
         let id: String
         let name: String
         switch mode {
@@ -437,10 +457,10 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             id: id,
             name: name,
             providerMode: mode,
-            baseURLString: settingsStore.string(forKey: Keys.baseURLString) ?? fallbackBaseURL,
-            model: settingsStore.string(forKey: Keys.model) ?? fallbackModel,
-            selectedModel: settingsStore.string(forKey: Keys.selectedModel) ?? "",
-            hasAPIKey: apiKey?.isEmpty == false,
+            baseURLString: legacyBaseURL ?? fallbackBaseURL,
+            model: legacyModel ?? fallbackModel,
+            selectedModel: legacySelectedModel ?? "",
+            hasAPIKey: legacyAPIKey?.isEmpty == false,
         )
         return AppLLMSettings(
             connections: [connection],
@@ -450,33 +470,42 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     public func save(settings: AppLLMSettings, apiKey: String?) throws {
-        let effectiveSettings = settings.connections.isEmpty
-            ? AppLLMSettings(connections: [settings.defaultConnection], defaultConnectionID: settings.defaultConnection.id, defaultThinkingLevel: settings.defaultThinkingLevel)
-            : settings
+        let effectiveDefaultConnectionID: String = {
+            if settings.connections.contains(where: { $0.id == settings.defaultConnectionID }) {
+                return settings.defaultConnectionID
+            }
+            return settings.connections.first?.id ?? ""
+        }()
         let sanitized = AppLLMSettings(
-            connections: effectiveSettings.connections.map { connection in
+            connections: settings.connections.map { connection in
                 var copy = connection
                 copy.hasAPIKey = false
                 return copy
             },
-            defaultConnectionID: effectiveSettings.defaultConnectionID,
-            defaultThinkingLevel: effectiveSettings.defaultThinkingLevel
+            defaultConnectionID: effectiveDefaultConnectionID,
+            defaultThinkingLevel: settings.defaultThinkingLevel
         )
         settingsStore.set(sanitized.defaultThinkingLevel.rawValue, forKey: Keys.defaultThinkingLevel)
         let data = try JSONEncoder().encode(sanitized.connections)
         settingsStore.set(String(decoding: data, as: UTF8.self), forKey: Keys.connections)
         settingsStore.set(sanitized.defaultConnectionID, forKey: Keys.defaultConnectionID)
 
-        let defaultConnection = effectiveSettings.defaultConnection
-        settingsStore.set(defaultConnection.providerMode.rawValue, forKey: Keys.providerMode)
-        settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
-        settingsStore.set(defaultConnection.model, forKey: Keys.model)
-        settingsStore.set(defaultConnection.effectiveModel, forKey: Keys.selectedModel)
-        if let apiKey, !apiKey.isEmpty {
-            try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount(for: defaultConnection.id))
-            if defaultConnection.id == "openai-compatible" || defaultConnection.id == "openai-responses" {
-                try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount)
+        if let defaultConnection = sanitized.defaultConnection {
+            settingsStore.set(defaultConnection.providerMode.rawValue, forKey: Keys.providerMode)
+            settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
+            settingsStore.set(defaultConnection.model, forKey: Keys.model)
+            settingsStore.set(defaultConnection.effectiveModel, forKey: Keys.selectedModel)
+            if let apiKey, !apiKey.isEmpty {
+                try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount(for: defaultConnection.id))
+                if defaultConnection.id == "openai-compatible" || defaultConnection.id == "openai-responses" {
+                    try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount)
+                }
             }
+        } else {
+            settingsStore.set("", forKey: Keys.providerMode)
+            settingsStore.set("", forKey: Keys.baseURLString)
+            settingsStore.set("", forKey: Keys.model)
+            settingsStore.set("", forKey: Keys.selectedModel)
         }
     }
 
@@ -704,7 +733,7 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
 
     private func fallbackConnections(error: Error) -> [AppLLMModelConnection] {
         let settings = (try? settingsRepository.loadSettings()) ?? .default
-        let connection = settings.defaultConnection
+        guard let connection = settings.defaultConnection else { return [] }
         return [AppLLMModelConnection(id: connection.id, title: connection.name, subtitle: "模型目录不可用：\(error.localizedDescription)", providerMode: connection.providerMode, models: configuredOptions(from: connection), isLiveCatalog: false)]
     }
 

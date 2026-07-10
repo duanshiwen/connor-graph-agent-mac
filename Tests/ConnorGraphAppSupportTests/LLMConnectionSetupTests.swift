@@ -80,7 +80,7 @@ struct LLMConnectionSetupTests {
         #expect(result.connection.id == "provider-1")
         let loaded = try repository.loadSettings()
         let savedConnection = try #require(loaded.connections.first { $0.id == "provider-1" })
-        #expect(loaded.defaultConnectionID != "provider-1")
+        #expect(loaded.defaultConnectionID == "provider-1")
         #expect(savedConnection.connectionKind == .openAICompatible)
         #expect(savedConnection.hasAPIKey)
         #expect(store.values.values.contains(where: { $0.contains("Provider 1") }))
@@ -495,7 +495,7 @@ struct LLMConnectionSetupTests {
         let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: MemoryCredentialStore())
 
         let settings = try repository.loadSettings()
-        #expect(settings.defaultConnection.connectionKind == .openAICompatible)
+        #expect(settings.defaultConnection?.connectionKind == .openAICompatible)
     }
 
     @Test func chatGPTCodexOAuthURLMatchesCraftOSSConfiguration() throws {
