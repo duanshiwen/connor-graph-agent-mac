@@ -134,6 +134,79 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
     public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String? = nil) {
         self.subjectName = subjectName; self.predicate = predicate; self.objectName = objectName; self.text = text
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case subjectName
+        case predicate
+        case objectName
+        case text
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let subjectName = try container.decode(String.self, forKey: .subjectName)
+        let predicateRaw = try container.decode(String.self, forKey: .predicate)
+        let objectName = try container.decode(String.self, forKey: .objectName)
+        let text = try container.decodeIfPresent(String.self, forKey: .text)
+        self.init(
+            subjectName: subjectName,
+            predicate: Self.normalizePredicate(predicateRaw),
+            objectName: objectName,
+            text: text
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(subjectName, forKey: .subjectName)
+        try container.encode(predicate.rawValue, forKey: .predicate)
+        try container.encode(objectName, forKey: .objectName)
+        try container.encodeIfPresent(text, forKey: .text)
+    }
+
+    private static func normalizePredicate(_ raw: String) -> MemoryOSL4RelationPredicate {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let exact = MemoryOSL4RelationPredicate(rawValue: trimmed) {
+            return exact
+        }
+
+        let normalized = trimmed
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+            .uppercased()
+
+        if let exactNormalized = MemoryOSL4RelationPredicate(rawValue: normalized) {
+            return exactNormalized
+        }
+
+        switch normalized {
+        case "FAMILY_OF", "SIBLING_OF", "BROTHER_OF", "SISTER_OF", "CHILD_OF", "PARENT_OF", "MOTHER_OF", "FATHER_OF", "SON_OF", "DAUGHTER_OF", "HUSBAND_OF", "WIFE_OF", "SPOUSE_OF", "RELATIVE_OF", "KIN_OF":
+            return .relatedTo
+        case "BUILT_BY", "MADE_BY", "WRITTEN_BY", "IMPLEMENTED_BY":
+            return .createdBy
+        case "MAKER_OF", "CREATOR_OF", "AUTHOR_OF", "OWNER_OF", "MAINTAINER_OF", "DEVELOPER_OF", "FOUNDER_OF", "PUBLISHER_OF", "CURATOR_OF", "REVIEWER_OF", "CONTRIBUTOR_OF", "STAKEHOLDER_IN", "WORKING_ON":
+            return inverseContributionAlias(normalized)
+        default:
+            return .relatedTo
+        }
+    }
+
+    private static func inverseContributionAlias(_ normalized: String) -> MemoryOSL4RelationPredicate {
+        switch normalized {
+        case "OWNER_OF": return .ownedBy
+        case "MAINTAINER_OF": return .maintainedBy
+        case "DEVELOPER_OF": return .developedBy
+        case "FOUNDER_OF": return .foundedBy
+        case "PUBLISHER_OF": return .publishedBy
+        case "CURATOR_OF": return .curatedBy
+        case "REVIEWER_OF": return .reviewedBy
+        case "CONTRIBUTOR_OF": return .contributedBy
+        case "STAKEHOLDER_IN": return .stakeholderOf
+        case "WORKING_ON": return .worksOn
+        case "AUTHOR_OF", "CREATOR_OF", "MAKER_OF": return .createdBy
+        default: return .relatedTo
+        }
+    }
 }
 
 public struct MemoryOSL4WriteResult: Codable, Sendable, Equatable {

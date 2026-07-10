@@ -8,6 +8,66 @@ import ConnorGraphAppSupport
 
 @Suite("Memory OS CLI Inspector Tests")
 struct AppMemoryOSCLIInspectorTests {
+    @Test func l4RelationInputNormalizesFamilyPredicateShorthand() throws {
+        let json = #"""
+        {
+          "subjectName": "段福强",
+          "predicate": "FAMILY_OF",
+          "objectName": "段诗闻",
+          "text": "段福强 is 段诗闻's younger brother"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.subjectName == "段福强")
+        #expect(relation.objectName == "段诗闻")
+        #expect(relation.predicate == .relatedTo)
+    }
+
+    @Test func l4RelationInputNormalizesCreatedByAliases() throws {
+        let json = #"""
+        {
+          "subjectName": "康纳同学",
+          "predicate": "BUILT_BY",
+          "objectName": "段诗闻",
+          "text": "康纳同学 was built by 段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .createdBy)
+    }
+
+    @Test func l4RelationInputNormalizesSeparatorVariants() throws {
+        let json = #"""
+        {
+          "subjectName": "康纳同学",
+          "predicate": "created by",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .createdBy)
+    }
+
+    @Test func l4RelationInputNormalizesInverseContributionAliases() throws {
+        let json = #"""
+        {
+          "subjectName": "段诗闻",
+          "predicate": "WORKING_ON",
+          "objectName": "康纳同学"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .worksOn)
+    }
+
     @Test func memoryOSCLIInspectorReportsEmptyStoreStatus() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let inspector = AppMemoryOSCLIInspector(store: store)
