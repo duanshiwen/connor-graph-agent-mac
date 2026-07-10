@@ -268,6 +268,24 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(loaded.defaultConnectionID == added.id)
 }
 
+@Test func saveConnectionMakesFirstConnectionDefaultWhenNoDefaultExists() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let added = AppLLMConnectionConfig(
+        id: "first",
+        name: "First",
+        providerMode: .openAICompatible,
+        baseURLString: "https://first.example/v1",
+        model: "first-model",
+        selectedModel: "first-model"
+    )
+
+    try repository.saveConnection(added, apiKey: "first-key")
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.defaultConnectionID == added.id)
+    #expect(loaded.defaultConnection?.id == added.id)
+}
+
 @Test func modelCatalogLoadsOpenAICompatibleModelsFromProvider() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(

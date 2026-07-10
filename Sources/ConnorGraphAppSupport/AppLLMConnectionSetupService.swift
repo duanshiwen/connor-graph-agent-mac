@@ -342,9 +342,10 @@ public extension AppLLMSettingsRepository {
         } else {
             connections.append(connection)
         }
+        let shouldBecomeDefault = makeDefault || current.defaultConnectionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !current.connections.contains(where: { $0.id == current.defaultConnectionID })
         let settings = AppLLMSettings(
             connections: connections,
-            defaultConnectionID: makeDefault ? connection.id : current.defaultConnectionID
+            defaultConnectionID: shouldBecomeDefault ? connection.id : current.defaultConnectionID
         )
         try save(settings: settings, apiKey: nil)
         if let apiKey, !apiKey.isEmpty {
