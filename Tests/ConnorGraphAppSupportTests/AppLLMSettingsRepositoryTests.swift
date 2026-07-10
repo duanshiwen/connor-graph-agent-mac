@@ -36,6 +36,31 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     }
 }
 
+@Test func settingsRepositoryReturnsTrulyEmptySettingsWhenNoConfigurationExists() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.connections.isEmpty)
+    #expect(loaded.defaultConnectionID.isEmpty)
+    #expect(loaded.defaultConnection == nil)
+    #expect(loaded.hasAPIKey == false)
+}
+
+@Test func settingsRepositoryPersistsExplicitlyEmptySettingsWithoutInjectingDefaultConnection() throws {
+    let settingsStore = FakeSettingsStore()
+    let credentialStore = FakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+
+    try repository.save(settings: .default, apiKey: nil)
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.connections.isEmpty)
+    #expect(loaded.defaultConnectionID.isEmpty)
+    #expect(loaded.defaultConnection == nil)
+    #expect(settingsStore.values["llm.connections"] == "[]")
+}
+
 @Test func settingsRepositoryPersistsNonSecretSettings() throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     let settings = AppLLMSettings(
@@ -53,7 +78,7 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(loaded.providerMode == .openAICompatible)
 }
 
-@Test func settingsRepositoryStoresAPIKeyOnlyInCredentialStore() throws {
+@Test func settingsRepositoryDoesNotPersistOrphanedAPIKeyWithoutConnection() throws {
     let settingsStore = FakeSettingsStore()
     let credentialStore = FakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -61,9 +86,19 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     try repository.save(settings: .default, apiKey: "secret-key")
     let loaded = try repository.loadSettings()
 
-    #expect(loaded.hasAPIKey == true)
+    #expect(loaded.connections.isEmpty)
+    #expect(loaded.hasAPIKey == false)
     #expect(settingsStore.values.values.contains("secret-key") == false)
-    #expect(try credentialStore.readSecret(service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount) == "secret-key")
+    #expect(try credentialStore.readSecret(service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount) == nil)
+}
+
+@Test func providerHealthCheckerReportsNotConfiguredWhenNoDefaultConnectionExists() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let checker = AppLLMProviderHealthChecker(settingsRepository: repository)
+
+    let result = await checker.testConnection()
+
+    #expect(result.status == .notConfigured)
 }
 
 @Test func settingsRepositoryClearsAPIKey() throws {

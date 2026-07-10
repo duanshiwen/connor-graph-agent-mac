@@ -4280,13 +4280,13 @@ final class AppViewModel: NSObject, ObservableObject {
             let connection = settings.defaultConnection
             llmConnectionConfigs = settings.connections
             llmDefaultConnectionID = settings.defaultConnectionID
-            llmConnectionName = connection.name
-            llmProviderMode = connection.providerMode
-            llmBaseURLString = connection.baseURLString
-            llmModel = connection.model
-            llmSelectedModel = connection.effectiveModel
+            llmConnectionName = connection?.name ?? ""
+            llmProviderMode = connection?.providerMode ?? .openAICompatible
+            llmBaseURLString = connection?.baseURLString ?? ""
+            llmModel = connection?.model ?? ""
+            llmSelectedModel = connection?.effectiveModel ?? ""
             llmThinkingLevel = settings.defaultThinkingLevel
-            llmHasAPIKey = connection.hasAPIKey
+            llmHasAPIKey = connection?.hasAPIKey ?? false
             llmAPIKeyInput = ""
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
@@ -4303,8 +4303,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        // 有连接配置就不显示欢迎页，不管连接是否可用
-        showWelcomePlaceholder = llmConnectionConfigs.isEmpty
+        showWelcomePlaceholder = llmConnectionConfigs.isEmpty || llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID }) == nil
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
@@ -4644,8 +4643,8 @@ final class AppViewModel: NSObject, ObservableObject {
             sessionStateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
             return existing
         }
-        guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
-        let connection = settings.defaultConnection
+        guard let settings = try? llmSettingsRepository.loadSettings(),
+              let connection = settings.defaultConnection else { return nil }
         let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return nil }
         var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -4695,10 +4694,10 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
-            llmSelectedModel = settings?.defaultConnection.effectiveModel ?? llmSelectedModel
+            llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? ""
             llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-            llmProviderMode = settings?.defaultConnection.providerMode ?? llmProviderMode
-            llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
+            llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
+            llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
         }
     }
 
@@ -4718,10 +4717,10 @@ final class AppViewModel: NSObject, ObservableObject {
 
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
-        llmSelectedModel = settings?.defaultConnection.effectiveModel ?? llmSelectedModel
+        llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? ""
         llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-        llmProviderMode = settings?.defaultConnection.providerMode ?? llmProviderMode
-        llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
+        llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
+        llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
 
         rebuildNativeSessionManagerForActiveSession()
         Task { await reloadLLMModelConnections() }
