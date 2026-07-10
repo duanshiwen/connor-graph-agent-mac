@@ -62,12 +62,8 @@ public enum AppMemoryOSCLIRouter {
     public static func makeLiveInspector() throws -> AppMemoryOSCLIInspector {
         let paths = try AppStoragePaths.live()
         try paths.ensureDirectoryHierarchy()
-        if let builtinURL = builtinFoundationKGDatabaseURLFromEnvironment() {
-            _ = try FoundationKGBuiltinBootstrapper.ensureBuiltinDatabaseIfNeeded(memoryOSDatabaseURL: paths.memoryOSDatabaseURL, builtinDatabaseURL: builtinURL)
-        }
         let store = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
         try store.migrate()
-        try AppMemoryOSFacade(store: store).ensureCurrentUserAnchor()
         let isExplicitSearchIndexRebuild = CommandLine.arguments.dropFirst().elementsEqual(["memory", "search-index", "rebuild"])
         let searchKernel = isExplicitSearchIndexRebuild
             ? try AppMemoryOSSearchKernelFactory.makeLiveWithoutRebuild(paths: paths)
