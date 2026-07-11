@@ -732,6 +732,39 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(errorToolMessage.content.contains("Invalid arguments"))
 }
 
+@Test func agentLoopRecoversCalendarWriteAfterUnknownCalendarID() async throws {
+    let exactID = "calendar-exact-id"
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-bad", name: "calendar_write", argumentsJSON: #"{"operation":"create_event","calendarID":"default","title":"Test","start":"2026-07-12T01:30:00Z","end":"2026-07-12T02:00:00Z"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-list", name: "calendar_read", argumentsJSON: #"{"operation":"list_calendars"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-good", name: "calendar_write", argumentsJSON: #"{"operation":"create_event","calendarID":"calendar-exact-id","title":"Test","start":"2026-07-12T01:30:00Z","end":"2026-07-12T02:00:00Z"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: "Created safely.", usage: .init(promptTokens: 1, completionTokens: 1))
+    ])
+    let runtime = InMemoryAgentCalendarRuntime(calendars: [.init(id: .init(rawValue: exactID), accountID: .init(rawValue: "account"), displayName: "Connor Test")])
+    var registry = AgentToolRegistry()
+    registry.registerNativeCalendarTools(runtime: runtime)
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: .init(permissionMode: .allowAll))
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(runID: "run-calendar-recovery", sessionID: "session-calendar-recovery", userMessage: "Create a test event", permissionMode: .allowAll)) {
+        events.append(event)
+        if case .permissionRequested(let request) = event {
+            Task {
+                await loop.resolveApproval(.init(requestID: request.id, runID: request.runID, sessionID: request.sessionID, capability: request.capability, toolName: request.toolName, payloadJSON: request.payloadJSON), status: .approved)
+            }
+        }
+    }
+
+    #expect(events.map(\.kind).contains(.toolFailed))
+    #expect(events.last?.kind == .runCompleted)
+    let recoveryRequest = try #require(await provider.requests.dropFirst().first)
+    let failure = try #require(recoveryRequest.messages.first { $0.role == .tool && $0.toolCallID == "calendar-bad" })
+    #expect(failure.content.contains("Calendar 'default' was not found"))
+    #expect(failure.content.contains("list_calendars"))
+    let createdEvents = try await runtime.listEvents(calendarID: .init(rawValue: exactID), runID: nil, sessionID: nil)
+    #expect(createdEvents.count == 1)
+}
+
 @Test func agentLoopReturnsUnknownToolAsToolResultAndLetsModelRecover() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

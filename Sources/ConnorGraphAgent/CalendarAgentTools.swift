@@ -62,7 +62,10 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
         switch request.operation {
         case .create:
             guard let draft = request.draft else { throw CalendarMutationError.invalidInput("draft is required") }
-            guard calendars.isEmpty || calendars.contains(where: { $0.id == draft.calendarID && !$0.isReadOnly }) else { throw CalendarMutationError.readOnlyCollection(nil) }
+            if !calendars.isEmpty {
+                guard let calendar = calendars.first(where: { $0.id == draft.calendarID }) else { throw CalendarMutationError.calendarNotFound(draft.calendarID) }
+                guard !calendar.isReadOnly else { throw CalendarMutationError.readOnlyCollection(calendar.capabilities.readOnlyReason) }
+            }
             let version = CalendarMutationVersion(value: UUID().uuidString)
             let event = CalendarEvent(id: CalendarEventID(rawValue: "event-\(UUID().uuidString)"), calendarID: draft.calendarID, title: draft.title, start: draft.start, end: draft.end, isAllDay: draft.isAllDay, location: draft.location, url: draft.url, notes: draft.notes, sourceMetadata: CalendarEventSourceMetadata(sourceKind: .macOSEventKit, etag: version.value))
             events.append(event)
