@@ -119,7 +119,7 @@ struct SettingsCalendarSection: View {
                 SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
                 SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
                 SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
-                Text("支持本机日历（EventKit）、ICS/Webcal 订阅、CalDAV（通用、iCloud、Fastmail、Nextcloud）只读同步。Google 和 Microsoft 365 将通过 OAuth 接入。所有日历源暂不支持事件写入。")
+                Text("本机日历可通过 EventKit 安全修改；标准 CalDAV、iCloud、Fastmail 与 Nextcloud 可在账户行显式开启修改。ICS/Webcal 始终只读。每次真实写入仍需审批，并使用版本冲突保护。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,6 +160,7 @@ struct SettingsCalendarSection: View {
                         CalendarSourceSettingsRow(
                             account: account,
                             calendarCount: viewModel.calendarCollections.filter { $0.accountID == account.id }.count,
+                            onSyncModeChange: { viewModel.setCalendarSyncMode(accountID: account.id, mode: $0) },
                             onDelete: { viewModel.deleteCalendarSource(account) }
                         )
                         if account.id != viewModel.calendarAccounts.last?.id {
@@ -178,6 +179,7 @@ struct SettingsCalendarSection: View {
 private struct CalendarSourceSettingsRow: View {
     var account: CalendarAccount
     var calendarCount: Int
+    var onSyncModeChange: (CalendarSourceSyncMode) -> Void
     var onDelete: () -> Void
 
     var body: some View {
@@ -194,6 +196,16 @@ private struct CalendarSourceSettingsRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if account.sourceKind.supportsWrite && account.sourceKind != .macOSEventKit {
+                Toggle("允许修改", isOn: Binding(get: { account.configuration.syncMode == .bidirectional }, set: { onSyncModeChange($0 ? .bidirectional : .readOnly) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("开启后，康纳可在每次审批后创建、修改或删除普通单次事件。")
+            } else {
+                Text(account.configuration.syncMode == .bidirectional ? "可修改" : "只读")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+            }
             Button(role: .destructive, action: onDelete) {
                 Label("删除", systemImage: "trash")
                     .labelStyle(.iconOnly)

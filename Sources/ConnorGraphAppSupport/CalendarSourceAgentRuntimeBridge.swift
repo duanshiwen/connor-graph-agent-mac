@@ -4,9 +4,11 @@ import ConnorGraphAgent
 
 public struct CalendarSourceAgentRuntimeBridge: AgentCalendarRuntime {
     private let store: FileBackedCalendarSourceRuntimeStore
+    private let mutationService: CalendarMutationService?
 
-    public init(store: FileBackedCalendarSourceRuntimeStore) {
+    public init(store: FileBackedCalendarSourceRuntimeStore, mutationService: CalendarMutationService? = nil) {
         self.store = store
+        self.mutationService = mutationService
     }
 
     public func listCalendars(runID: String?, sessionID: String?) async throws -> [CalendarCollection] {
@@ -41,7 +43,7 @@ public struct CalendarSourceAgentRuntimeBridge: AgentCalendarRuntime {
     }
 
     public func mutate(_ request: CalendarMutationRequest) async throws -> CalendarMutationResult {
-        _ = request
-        throw AgentToolError.permissionDenied("日历真实写入适配器尚未连接。")
+        guard let mutationService else { throw AgentToolError.permissionDenied("日历真实写入适配器尚未连接。") }
+        return try await mutationService.mutate(request)
     }
 }

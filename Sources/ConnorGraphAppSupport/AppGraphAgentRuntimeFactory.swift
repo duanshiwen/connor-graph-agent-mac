@@ -164,7 +164,21 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceTableComputeTool())
         registry.registerTimeAnalysisTool()
         if let storagePaths {
-            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
+            let calendarStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
+            let calendarCredentialStore = AppCalendarCredentialStore()
+            let calDAVAdapter = CalDAVCalendarMutationAdapter { account in
+                guard account.configuration.authMode != .none, let username = account.configuration.username else { return nil }
+                let binding = AppCalendarCredentialStore.binding(accountID: account.id, username: username, authMode: account.configuration.authMode)
+                return try calendarCredentialStore.readCredential(binding: binding)
+            }
+            let calendarMutationService = CalendarMutationService(store: calendarStore, adapters: [
+                .macOSEventKit: EventKitCalendarMutationAdapter(),
+                .genericCalDAV: calDAVAdapter,
+                .appleICloudCalDAV: calDAVAdapter,
+                .fastmailCalDAV: calDAVAdapter,
+                .nextcloudCalDAV: calDAVAdapter
+            ])
+            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: calendarStore, mutationService: calendarMutationService), recorder: nativeSourceReferenceRecorder)
             registry.registerNativeRSSTools(runtime: RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
