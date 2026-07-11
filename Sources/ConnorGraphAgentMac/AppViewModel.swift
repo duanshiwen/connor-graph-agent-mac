@@ -344,15 +344,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
-    enum AppEntryState: Equatable {
-        case welcome
-        case main
-    }
-
-    @Published var appEntryState: AppEntryState = .welcome
-    var showWelcomePlaceholder: Bool {
-        appEntryState == .welcome
-    }
+    @Published var showWelcomePlaceholder: Bool = true
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
@@ -4311,22 +4303,17 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        appEntryState = resolveAppEntryState()
+        do {
+            let settings = try llmSettingsRepository.loadSettings()
+            showWelcomePlaceholder = settings.connections.isEmpty
+        } catch {
+            showWelcomePlaceholder = llmConnectionConfigs.isEmpty
+        }
     }
 
     func handleSuccessfulLLMSetup() {
         loadLLMSettings()
-        appEntryState = .main
-    }
-
-    func resolveAppEntryState() -> AppEntryState {
-        do {
-            let settings = try llmSettingsRepository.loadSettings()
-            return settings.hasUsableDefaultConnection ? .main : .welcome
-        } catch {
-            let defaultConnection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID })
-            return AppLLMSettings.isUsableConnection(defaultConnection) ? .main : .welcome
-        }
+        showWelcomePlaceholder = false
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
