@@ -77,6 +77,7 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
     public var cachedToolNames: Set<String>
     public var serverTools: [AnthropicServerTool]
     public var betaHeaders: [String]
+    public var strictToolUseEnabled: Bool
 
     public init(
         streamingEnabled: Bool = true,
@@ -85,7 +86,8 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
         eagerInputStreamingToolNames: Set<String> = [],
         cachedToolNames: Set<String> = [],
         serverTools: [AnthropicServerTool] = [],
-        betaHeaders: [String] = []
+        betaHeaders: [String] = [],
+        strictToolUseEnabled: Bool = false
     ) {
         self.streamingEnabled = streamingEnabled
         self.thinking = thinking
@@ -94,6 +96,7 @@ public struct AnthropicCompatibleFeatureOptions: Codable, Sendable, Equatable {
         self.cachedToolNames = cachedToolNames
         self.serverTools = serverTools
         self.betaHeaders = betaHeaders
+        self.strictToolUseEnabled = strictToolUseEnabled
     }
 }
 

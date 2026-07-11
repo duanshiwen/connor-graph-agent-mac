@@ -200,6 +200,29 @@ public struct CalendarWriteTool: AgentTool {
     public var name: String { "calendar_write" }
     public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. Read the event first before update/delete and never overwrite a version conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
+    public var inputExamples: [[String: SendableJSONValue]] {
+        [
+            [
+                "operation": .string("create_event"),
+                "calendarID": .string("calendar-work"),
+                "title": .string("Project review"),
+                "start": .string("2026-07-12T02:00:00Z"),
+                "end": .string("2026-07-12T03:00:00Z"),
+                "isAllDay": .bool(false)
+            ],
+            [
+                "operation": .string("update_event"),
+                "eventID": .string("event-id-from-calendar-read"),
+                "expectedVersion": .string("version-from-calendar-read"),
+                "title": .string("Updated project review")
+            ],
+            [
+                "operation": .string("delete_event"),
+                "eventID": .string("event-id-from-calendar-read"),
+                "expectedVersion": .string("version-from-calendar-read")
+            ]
+        ]
+    }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["create_event", "update_event", "delete_event"], description: "Calendar mutation operation"),
