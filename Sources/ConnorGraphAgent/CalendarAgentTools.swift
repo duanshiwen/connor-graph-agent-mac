@@ -329,6 +329,19 @@ public struct CalendarWriteTool: AgentTool {
         }
     }
 
+    public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
+        guard let arguments = try? AgentToolArguments(json: call.argumentsJSON),
+              let eventID = arguments.string("eventID"),
+              let evidence = await evidenceRegistry?.evidence(runID: context.runID, sessionID: context.sessionID, eventID: eventID),
+              let event = try? await runtime.getEvent(id: .init(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
+        else { return call.argumentsJSON }
+        var payload = arguments.values
+        payload["verifiedEventTitle"] = .string(event.title)
+        payload["verifiedCalendarID"] = .string(evidence.calendarID)
+        guard let data = try? JSONSerialization.data(withJSONObject: payload.mapValues(\.jsonCompatibleObject), options: [.sortedKeys]), let text = String(data: data, encoding: .utf8) else { return call.argumentsJSON }
+        return text
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard context.approvedCapabilities.contains(.mutateCalendar) else { throw AgentToolError.permissionDenied("Calendar write requires trusted mutateCalendar approval") }
         let formatter = ISO8601DateFormatter()
