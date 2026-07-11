@@ -298,11 +298,6 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).knowledgeContext(terms: terms)
     }
 
-    @available(*, deprecated, message: "Use memoryOSRecentContext and memoryOSKnowledgeContext separately")
-    public func memoryOSFlatContext(terms: [String]) throws -> [String] {
-        try memoryOSRecentContext(terms: terms) + memoryOSKnowledgeContext(terms: terms)
-    }
-
     public func findMemoryOSL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l2FindStatements(MemoryOSL2StatementFindQuery(text: text, subjectID: subjectID, predicates: predicates, limit: limit))
     }

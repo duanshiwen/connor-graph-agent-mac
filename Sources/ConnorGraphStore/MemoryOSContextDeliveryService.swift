@@ -94,11 +94,6 @@ public struct MemoryOSContextDeliveryService: Sendable {
         )
     }
 
-    @available(*, deprecated, message: "Use recentContext and knowledgeContext separately")
-    public func flatContext(terms: [String]) throws -> [String] {
-        try recentContext(terms: terms) + knowledgeContext(terms: terms)
-    }
-
     private func searchTerms(_ terms: [String], layers: [MemoryOSRetrievalLayer]) throws -> [MemoryOSRetrievalHit] {
         let normalizedTerms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !normalizedTerms.isEmpty else { return [] }

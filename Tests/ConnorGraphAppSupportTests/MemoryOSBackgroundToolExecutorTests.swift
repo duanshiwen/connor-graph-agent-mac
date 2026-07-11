@@ -58,6 +58,28 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(result.citations == ["prov-1", "span-1"])
     }
 
+    @Test func exposesSeparatedBackgroundContextToolsAndRejectsLegacyTool() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 2_000)
+        try store.upsert(node: MemoryOSNode(id: "project", stableKey: "project:context", nodeType: "project", name: "Context Split"))
+        try store.upsert(statement: MemoryOSStatement(id: "status", subjectID: "project", predicate: "status", text: "Context Split is currently active.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
+        try store.upsert(belief: MemoryOSBelief(id: "belief", statement: "Context Split separates operational and durable semantics.", domain: "knowledge", relatedObjectNames: "Context Split", createdAt: now, updatedAt: now))
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+        let context = MemoryOSBackgroundToolExecutionContext(runID: "run", iteration: 1)
+
+        let recent = try executor.execute(MemoryOSBackgroundToolCall(id: "recent", name: "memory_os_recent_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
+        let knowledge = try executor.execute(MemoryOSBackgroundToolCall(id: "knowledge", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
+
+        #expect(recent.contentText.contains("currently active"))
+        #expect(!recent.contentText.contains("durable semantics"))
+        #expect(knowledge.contentText.contains("durable semantics"))
+        #expect(!knowledge.contentText.contains("currently active"))
+        #expect(throws: MemoryOSBackgroundToolExecutionError.self) {
+            try executor.execute(MemoryOSBackgroundToolCall(id: "legacy", name: "memory_os_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
+        }
+    }
+
     @Test func l2UpdateToolAcceptsStatementStringShorthandInBackgroundExecutor() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()

@@ -20,7 +20,8 @@ struct MemoryOSBackgroundToolContractTests {
         let request = try #require(executor.requests.first)
         let toolNames = request.availableTools.map(\.name)
         // Read tools
-        #expect(toolNames.contains("memory_os_context"))
+        #expect(toolNames.contains("memory_os_recent_context"))
+        #expect(toolNames.contains("memory_os_knowledge_context"))
         #expect(toolNames.contains("memory_os_read_provenance"))
         #expect(toolNames.contains("memory_os_expand_l4"))
         // Write tools
@@ -29,7 +30,8 @@ struct MemoryOSBackgroundToolContractTests {
         #expect(toolNames.contains("memory_os_l3_update_beliefs"))
         #expect(toolNames.contains("memory_os_l4_update_entities"))
         #expect(request.prompt.contains("Available tools"))
-        #expect(request.prompt.contains("memory_os_context"))
+        #expect(request.prompt.contains("memory_os_recent_context"))
+        #expect(request.prompt.contains("memory_os_knowledge_context"))
         #expect(request.prompt.contains("memory_os_l2_update_entities"))
         #expect(request.prompt.contains("memory_os_update_current_user_profile"))
     }
