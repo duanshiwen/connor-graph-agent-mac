@@ -26,6 +26,21 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("overlapSeconds") == true)
     }
 
+    @Test func calendarReadSchemaAndExecutionFailClosed() async throws {
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime())
+        let schema = tool.inputSchema.jsonObject
+        #expect(schema["additionalProperties"] as? Bool == false)
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let operation = try #require(properties["operation"] as? [String: Any])
+        #expect(operation["enum"] as? [String] == ["list_calendars", "list_events", "get_event", "get_agenda", "get_free_busy"])
+        await Self.expectInvalidArguments(containing: "Missing required calendar_read argument: operation") {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{}"), context: Self.context(toolCallID: "call-calendar-read-missing-operation"))
+        }
+        await Self.expectInvalidArguments(containing: "eventID is required for calendar_read get_event") {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\"}"), context: Self.context(toolCallID: "call-calendar-read-missing-event"))
+        }
+    }
+
     @Test func calendarReadToolSummarizesExactWritableCalendarIDs() async throws {
         let writable = CalendarCollection(id: .init(rawValue: "calendar-exact-write-id"), accountID: .init(rawValue: "account"), displayName: "Work")
         let readOnly = CalendarCollection(id: .init(rawValue: "calendar-holidays"), accountID: .init(rawValue: "account"), displayName: "Holidays", isReadOnly: true, capabilities: .init(canCreateEvents: false, canUpdateEvents: false, canDeleteEvents: false, supportsScheduling: false, readOnlyReason: "subscription"))
