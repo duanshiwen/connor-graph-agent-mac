@@ -74,20 +74,45 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
     }
 
-    @Test func calendarWriteToolIsCurrentlyDisabledEvenWithApproval() async throws {
-        let runtime = InMemoryAgentCalendarRuntime(events: [])
-        let tool = CalendarWriteTool(runtime: runtime)
-
-        var deniedCalendarWrite = false
-        do {
-            _ = try await tool.execute(
+    @Test func calendarWriteRequiresTrustedExecutionApproval() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(
                 arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"approved\":true}"),
-                context: Self.context(toolCallID: "call-calendar-write-disabled")
+                context: Self.context(toolCallID: "call-calendar-untrusted")
             )
-        } catch AgentToolError.permissionDenied(let message) {
-            deniedCalendarWrite = message.contains("暂不支持")
         }
-        #expect(deniedCalendarWrite)
+    }
+
+    @Test func calendarWriteCreatesUpdatesAndDeletesWithTrustedApproval() async throws {
+        let runtime = InMemoryAgentCalendarRuntime(calendars: [CalendarCollection(id: .init(rawValue: "calendar-work"), accountID: .init(rawValue: "account"), displayName: "Work")])
+        let tool = CalendarWriteTool(runtime: runtime)
+        let context = Self.context(toolCallID: "call-calendar-write").approving(.mutateCalendar)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let created = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"location\":\"杭州\"}"), context: context)
+        let createResult = try #require(created.contentJSON).data(using: .utf8).map { try decoder.decode(CalendarMutationResult.self, from: $0) }
+        let eventID = try #require(createResult?.confirmedEvent?.id.rawValue)
+        let version = try #require(createResult?.remoteVersion?.value)
+        let updated = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"update_event\",\"eventID\":\"\(eventID)\",\"expectedVersion\":\"\(version)\",\"title\":\"调整后的日程\",\"clearLocation\":true}"), context: context)
+        #expect(updated.contentJSON?.contains("调整后的日程") == true)
+        let updatedJSON = try #require(updated.contentJSON)
+        let updateResult = try decoder.decode(CalendarMutationResult.self, from: Data(updatedJSON.utf8))
+        let newVersion = try #require(updateResult.remoteVersion?.value)
+        let deleted = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"delete_event\",\"eventID\":\"\(eventID)\",\"expectedVersion\":\"\(newVersion)\"}"), context: context)
+        #expect(deleted.contentText.contains("Deleted"))
+        #expect(try await runtime.getEvent(id: .init(rawValue: eventID), runID: nil, sessionID: nil) == nil)
+    }
+
+    @Test func calendarWriteRejectsInvalidTimeRangeAndEmptyPatch() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid").approving(.mutateCalendar)
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"Bad\",\"calendarID\":\"c\",\"start\":\"2026-06-19T08:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\"}"), context: context)
+        }
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"update_event\",\"eventID\":\"e\",\"expectedVersion\":\"v\"}"), context: context)
+        }
     }
 
     @Test func contactsReadAndWriteToolsUseAggregatedOperations() async throws {

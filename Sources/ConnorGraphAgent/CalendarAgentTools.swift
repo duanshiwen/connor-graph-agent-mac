@@ -6,7 +6,7 @@ public protocol AgentCalendarRuntime: Sendable {
     func listEvents(calendarID: CalendarID?, runID: String?, sessionID: String?) async throws -> [CalendarEvent]
     func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, limit: Int, runID: String?, sessionID: String?) async throws -> [CalendarEvent]
     func getEvent(id: CalendarEventID, runID: String?, sessionID: String?) async throws -> CalendarEvent?
-    func createEvent(calendarID: CalendarID, title: String, start: Date, end: Date, approved: Bool, runID: String?, sessionID: String?) async throws -> CalendarWriteReceipt
+    func mutate(_ request: CalendarMutationRequest) async throws -> CalendarMutationResult
 }
 
 public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
@@ -57,17 +57,54 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
         events.first { $0.id == id }
     }
 
-    public func createEvent(calendarID: CalendarID, title: String, start: Date, end: Date, approved: Bool, runID: String?, sessionID: String?) async throws -> CalendarWriteReceipt {
-        guard approved else { throw AgentToolError.permissionDenied("Calendar write approval required") }
-        let event = CalendarEvent(
-            id: CalendarEventID(rawValue: "event-\(UUID().uuidString)"),
-            calendarID: calendarID,
-            title: title,
-            start: CalendarEventDateTime(date: start),
-            end: CalendarEventDateTime(date: end)
-        )
-        events.append(event)
-        return CalendarWriteReceipt(mutationKind: .createEvent, eventID: event.id, approved: true, summary: "Created approved calendar event \(event.id.rawValue)")
+    public func mutate(_ request: CalendarMutationRequest) async throws -> CalendarMutationResult {
+        let request = try request.validated()
+        switch request.operation {
+        case .create:
+            guard let draft = request.draft else { throw CalendarMutationError.invalidInput("draft is required") }
+            guard calendars.isEmpty || calendars.contains(where: { $0.id == draft.calendarID && !$0.isReadOnly }) else { throw CalendarMutationError.readOnlyCollection(nil) }
+            let version = CalendarMutationVersion(value: UUID().uuidString)
+            let event = CalendarEvent(id: CalendarEventID(rawValue: "event-\(UUID().uuidString)"), calendarID: draft.calendarID, title: draft.title, start: draft.start, end: draft.end, isAllDay: draft.isAllDay, location: draft.location, url: draft.url, notes: draft.notes, sourceMetadata: CalendarEventSourceMetadata(sourceKind: .macOSEventKit, etag: version.value))
+            events.append(event)
+            let receipt = CalendarWriteReceipt(mutationKind: .createEvent, eventID: event.id, approved: true, summary: "Created approved calendar event \(event.id.rawValue)")
+            return CalendarMutationResult(receipt: receipt, confirmedEvent: event, remoteVersion: version)
+        case .update:
+            guard let eventID = request.eventID, let index = events.firstIndex(where: { $0.id == eventID }), let patch = request.patch else { throw CalendarMutationError.eventNotFound }
+            guard events[index].sourceMetadata?.etag == request.expectedVersion?.value else { throw CalendarMutationError.conflict(expected: request.expectedVersion?.value, actual: events[index].sourceMetadata?.etag) }
+            var event = events[index]
+            apply(patch.title, to: &event.title)
+            apply(patch.start, to: &event.start)
+            apply(patch.end, to: &event.end)
+            apply(patch.isAllDay, to: &event.isAllDay)
+            applyOptional(patch.location, to: &event.location)
+            applyOptional(patch.url, to: &event.url)
+            applyOptional(patch.notes, to: &event.notes)
+            guard event.end.date > event.start.date else { throw CalendarMutationError.invalidInput("end must be after start") }
+            let version = CalendarMutationVersion(value: UUID().uuidString)
+            event.sourceMetadata?.etag = version.value
+            event.updatedAt = Date()
+            events[index] = event
+            let receipt = CalendarWriteReceipt(mutationKind: .updateEvent, eventID: event.id, approved: true, summary: "Updated approved calendar event \(event.id.rawValue)")
+            return CalendarMutationResult(receipt: receipt, confirmedEvent: event, remoteVersion: version)
+        case .delete:
+            guard let eventID = request.eventID, let index = events.firstIndex(where: { $0.id == eventID }) else { throw CalendarMutationError.eventNotFound }
+            guard events[index].sourceMetadata?.etag == request.expectedVersion?.value else { throw CalendarMutationError.conflict(expected: request.expectedVersion?.value, actual: events[index].sourceMetadata?.etag) }
+            events.remove(at: index)
+            let receipt = CalendarWriteReceipt(mutationKind: .deleteEvent, eventID: eventID, approved: true, summary: "Deleted approved calendar event \(eventID.rawValue)")
+            return CalendarMutationResult(receipt: receipt)
+        }
+    }
+
+    private func apply<Value>(_ patch: CalendarPatchValue<Value>, to value: inout Value) {
+        if case .set(let replacement) = patch { value = replacement }
+    }
+
+    private func applyOptional<Value>(_ patch: CalendarPatchValue<Value>, to value: inout Value?) {
+        switch patch {
+        case .unchanged: break
+        case .clear: value = nil
+        case .set(let replacement): value = replacement
+        }
     }
 }
 
@@ -161,23 +198,62 @@ public struct CalendarReadTool: AgentTool {
 public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public var name: String { "calendar_write" }
-    public var description: String { "Calendar write operations are currently disabled. Connor calendar sources are read-only until write approval, conflict detection, and audit are implemented." }
+    public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. Read the event first before update/delete and never overwrite a version conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "operation": .string(description: "create_event | update_event | delete_event | respond_to_invite; currently disabled"),
-            "calendarID": .string(description: "Calendar ID"),
+            "operation": .string(description: "create_event | update_event | delete_event"),
+            "calendarID": .string(description: "Calendar ID; required for create"),
+            "eventID": .string(description: "Event ID; required for update/delete"),
+            "expectedVersion": .string(description: "Version returned by the latest event read; required for update/delete"),
             "title": .string(description: "Event title"),
             "start": .string(description: "ISO-8601 start timestamp"),
             "end": .string(description: "ISO-8601 end timestamp"),
-            "approved": .boolean(description: "Explicit user approval")
-        ], required: ["operation", "approved"])
+            "isAllDay": .boolean(description: "Whether this is an all-day event"),
+            "location": .string(description: "Event location"),
+            "url": .string(description: "Event URL"),
+            "notes": .string(description: "Event notes"),
+            "clearLocation": .boolean(description: "Clear the existing location on update"),
+            "clearURL": .boolean(description: "Clear the existing URL on update"),
+            "clearNotes": .boolean(description: "Clear the existing notes on update")
+        ], required: ["operation"])
     }
 
     public init(runtime: any AgentCalendarRuntime) { self.runtime = runtime }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        throw AgentToolError.permissionDenied("日历写入功能暂不支持。当前 Calendar Source Platform 仅开放只读同步与读取工具；写入需要后续实现审批、冲突检测和审计后再启用。")
+        guard context.approvedCapabilities.contains(.mutateCalendar) else { throw AgentToolError.permissionDenied("Calendar write requires trusted mutateCalendar approval") }
+        let formatter = ISO8601DateFormatter()
+        let operation = arguments.string("operation") ?? ""
+        let request: CalendarMutationRequest
+        switch operation {
+        case "create_event":
+            guard let calendarID = arguments.string("calendarID"), let title = arguments.string("title"), let startText = arguments.string("start"), let endText = arguments.string("end"), let start = formatter.date(from: startText), let end = formatter.date(from: endText) else { throw AgentToolError.invalidArguments("calendarID, title, start, and end are required") }
+            request = CalendarMutationRequest(operation: .create, draft: CalendarEventDraft(calendarID: CalendarID(rawValue: calendarID), title: title, start: CalendarEventDateTime(date: start), end: CalendarEventDateTime(date: end), isAllDay: arguments.bool("isAllDay") ?? false, location: arguments.string("location"), url: arguments.string("url").flatMap(URL.init(string:)), notes: arguments.string("notes")), runID: context.runID, sessionID: context.sessionID)
+        case "update_event":
+            guard let eventID = arguments.string("eventID"), let expectedVersion = arguments.string("expectedVersion") else { throw AgentToolError.invalidArguments("eventID and expectedVersion are required") }
+            request = CalendarMutationRequest(operation: .update, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), patch: CalendarEventPatch(title: arguments.string("title").map(CalendarPatchValue.set) ?? .unchanged, start: datePatch("start", arguments: arguments, formatter: formatter), end: datePatch("end", arguments: arguments, formatter: formatter), isAllDay: arguments.bool("isAllDay").map(CalendarPatchValue.set) ?? .unchanged, location: optionalPatch(value: arguments.string("location"), clear: arguments.bool("clearLocation") == true), url: optionalPatch(value: arguments.string("url").flatMap(URL.init(string:)), clear: arguments.bool("clearURL") == true), notes: optionalPatch(value: arguments.string("notes"), clear: arguments.bool("clearNotes") == true)), runID: context.runID, sessionID: context.sessionID)
+        case "delete_event":
+            guard let eventID = arguments.string("eventID"), let expectedVersion = arguments.string("expectedVersion") else { throw AgentToolError.invalidArguments("eventID and expectedVersion are required") }
+            request = CalendarMutationRequest(operation: .delete, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), runID: context.runID, sessionID: context.sessionID)
+        default:
+            throw AgentToolError.invalidArguments("Unsupported calendar_write operation: \(operation)")
+        }
+        do {
+            let result = try await runtime.mutate(request.validated())
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: result.receipt.summary, contentJSON: try ContactJSON.encode(result))
+        } catch let error as AgentToolError { throw error }
+        catch { throw AgentToolError.invalidArguments(String(describing: error)) }
+    }
+
+    private func datePatch(_ key: String, arguments: AgentToolArguments, formatter: ISO8601DateFormatter) -> CalendarPatchValue<CalendarEventDateTime> {
+        guard let text = arguments.string(key), let date = formatter.date(from: text) else { return .unchanged }
+        return .set(CalendarEventDateTime(date: date))
+    }
+
+    private func optionalPatch<Value>(value: Value?, clear: Bool) -> CalendarPatchValue<Value> where Value: Codable & Sendable & Equatable & Hashable {
+        if clear { return .clear }
+        return value.map(CalendarPatchValue.set) ?? .unchanged
     }
 }
 
