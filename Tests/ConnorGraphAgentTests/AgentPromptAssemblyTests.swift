@@ -80,11 +80,34 @@ import ConnorGraphAgent
     #expect(prompt.contains("browser_history_get"))
     #expect(prompt.contains("Search/list first"))
     #expect(prompt.contains("Calendar workflow: call `calendar_search_events` first to find candidate events"))
-    #expect(prompt.contains("call `calendar_read` with `operation: get_event` for selected event details"))
+    #expect(prompt.contains("copy the exact `eventID` from a search/list candidate"))
+    #expect(prompt.contains("then call `calendar_read` with `operation: get_event`"))
     #expect(!prompt.contains("Calendar search results already return full event details"))
     #expect(prompt.contains("contentMarkdown"))
     #expect(prompt.contains("automatically capture source references into Memory OS L1"))
     #expect(prompt.contains("Do not attempt to write to memory directly"))
+}
+
+@Test func defaultSystemPromptDocumentsCalendarMutationWorkflow() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("For create, first call `calendar_read` with `operation: list_calendars`"))
+    #expect(prompt.contains("exact writable `calendarID`"))
+    #expect(prompt.contains("`default` is not a special calendar ID"))
+    #expect(prompt.contains("display names or example IDs"))
+    #expect(prompt.contains("copy the exact writable ID returned by that call"))
+    #expect(prompt.contains("`operation: create_event`"))
+    #expect(prompt.contains("`calendarID`, `title`, `start`, `end`, and `isAllDay`"))
+    #expect(prompt.contains("`operation: update_event`"))
+    #expect(prompt.contains("`operation: delete_event`"))
+    #expect(prompt.contains("exact `expectedVersion`"))
+    #expect(prompt.contains("copy the exact `eventID` from a search/list candidate"))
+    #expect(prompt.contains("only after `get_event` succeeds"))
+    #expect(prompt.contains("never reuse an ID that `get_event` did not find"))
+    #expect(prompt.contains("`calendarID` is not an `eventID`"))
+    #expect(prompt.contains("always pass `operation` explicitly"))
+    #expect(prompt.contains("never guess calendar/event IDs or time zones"))
+    #expect(prompt.contains("recurring or contains organizer/attendee scheduling semantics"))
 }
 
 @Test func defaultSystemPromptDocumentsOutboundMailApprovalWorkflow() {

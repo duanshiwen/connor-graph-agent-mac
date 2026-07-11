@@ -32,6 +32,12 @@ struct CalendarSourceSyncEngineTests {
         #expect(result.diagnostics.isEmpty)
     }
 
+    @Test func syncEnginePullsBidirectionalAccountThroughRegisteredConnector() async throws {
+        let account = CalendarAccount(id: .init(rawValue: "a"), provider: .genericCalDAVCardDAV, sourceKind: .genericCalDAV, displayName: "CalDAV", configuration: .init(sourceKind: .genericCalDAV, authMode: .appPassword, syncMode: .bidirectional))
+        let result = try await CalendarSourceSyncEngine(connectors: [StubCalendarSourceConnector(kind: .genericCalDAV)]).sync(request: .init(account: account, credential: "secret", runID: "run"))
+        #expect(result.insertedEvents == 2)
+    }
+
     @Test func syncEnginePersistsSuccessfulSyncResultWhenRuntimeStoreIsProvided() async throws {
         let storeURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("calendar-engine-store-\(UUID().uuidString)", isDirectory: true)

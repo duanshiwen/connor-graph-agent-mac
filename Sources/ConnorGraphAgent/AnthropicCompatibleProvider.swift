@@ -258,6 +258,10 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                     "description": tool.description,
                     "input_schema": tool.inputSchema.jsonObject
                 ]
+                if config.featureOptions.strictToolUseEnabled { object["strict"] = true }
+                if !tool.inputExamples.isEmpty {
+                    object["input_examples"] = tool.inputExamples.map { $0.mapValues(\.jsonCompatibleObject) }
+                }
                 if config.featureOptions.eagerInputStreamingToolNames.contains(tool.name) { object["eager_input_streaming"] = true }
                 if config.featureOptions.cachedToolNames.contains(tool.name) { object["cache_control"] = ["type": "ephemeral"] }
                 return object

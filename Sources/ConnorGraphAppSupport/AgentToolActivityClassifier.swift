@@ -157,6 +157,18 @@ public struct AgentToolActivityClassifier: Sendable {
             )
         case "Bash":
             return shellDescriptor(command: string(arguments["command"]) ?? string(result["command"]))
+        case "calendar_write":
+            let operation = string(arguments["operation"])
+            let title: String
+            switch operation {
+            case "create_event": title = "Calendar: Create Event"
+            case "update_event": title = "Calendar: Update Event"
+            case "delete_event": title = "Calendar: Delete Event"
+            default: title = "Calendar: Write"
+            }
+            return ToolDescriptor(semanticKind: .calendar, title: title, target: string(arguments["calendarID"]) ?? string(arguments["eventID"]), subtitle: operation, icon: "calendar.badge.plus")
+        case "calendar_read", "calendar_search_events":
+            return ToolDescriptor(semanticKind: .calendar, title: "Calendar: Read", target: string(arguments["calendarID"]) ?? string(arguments["eventID"]), subtitle: string(arguments["operation"]), icon: "calendar")
         default:
             if let mcp = mcpDescriptor(rawToolName) { return mcp }
             if rawToolName.localizedCaseInsensitiveContains("browser") {

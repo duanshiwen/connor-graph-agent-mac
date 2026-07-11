@@ -27,6 +27,9 @@ struct CalendarCalDAVEventFetcherTests {
         #expect(events.count == 1)
         #expect(events[0].title == "CalDAV Meeting")
         #expect(events[0].calendarID == collection.id)
+        #expect(events[0].sourceMetadata?.remoteIdentifier == "event-1")
+        #expect(events[0].sourceMetadata?.etag == "etag-1")
+        #expect(events[0].sourceMetadata?.resourceURL == URL(string: "https://cal.example.com/cal/work/event-1.ics"))
         #expect(transport.lastRequest?.method == "REPORT")
         #expect(transport.lastRequest?.body.contains("calendar-query") == true)
     }

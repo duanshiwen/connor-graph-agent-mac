@@ -26,6 +26,10 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
             self.title = mail.title
             self.detail = [mail.recipientSummary, mail.subjectSummary, mail.securitySummary].joined(separator: " · ")
             self.allowsAlwaysAllow = false
+        } else if approval.toolName == "calendar_write", let calendar = Self.calendarPayload(approval.payloadJSON) {
+            self.title = calendar.title
+            self.detail = calendar.detail
+            self.allowsAlwaysAllow = false
         } else {
             self.title = "Permission requested: \(approval.capability.rawValue)"
             let tool = approval.toolName.map { " · Tool: \($0)" } ?? ""
@@ -35,6 +39,22 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         self.statusLabel = approval.status.rawValue
         self.severity = Self.severity(for: approval.status)
         self.createdAt = approval.createdAt
+    }
+
+    private static func calendarPayload(_ json: String) -> (title: String, detail: String)? {
+        guard let data = json.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let operation = object["operation"] as? String else { return nil }
+        let title: String
+        switch operation {
+        case "create_event": title = "Calendar: Create Event"
+        case "update_event": title = "Calendar: Update Event"
+        case "delete_event": title = "Calendar: Delete Event"
+        default: title = "Calendar: Write"
+        }
+        let eventTitle = object["verifiedEventTitle"] as? String ?? object["title"] as? String ?? "Untitled event"
+        let eventID = object["eventID"] as? String
+        let calendarID = object["verifiedCalendarID"] as? String ?? object["calendarID"] as? String
+        let fields = [eventTitle, eventID.map { "eventID: \($0)" }, calendarID.map { "calendarID: \($0)" }].compactMap { $0 }
+        return (title, fields.joined(separator: " · "))
     }
 
     private static func severity(for status: AgentPendingApprovalStatus) -> AppAgentPendingApprovalSeverity {

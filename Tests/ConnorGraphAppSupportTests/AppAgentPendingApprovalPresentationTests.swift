@@ -107,6 +107,16 @@ import ConnorGraphCore
     #expect(mail.envelopeHash == "hash-2")
 }
 
+@Test func appPendingApprovalPresentationShowsVerifiedCalendarTarget() {
+    let approval = AgentPendingApproval(requestID: "request-calendar", runID: "run-1", sessionID: "session-1", capability: .mutateCalendar, toolName: "calendar_write", payloadJSON: "{\"operation\":\"delete_event\",\"eventID\":\"event:opaque/id\",\"expectedVersion\":\"version-1\",\"verifiedEventTitle\":\"Connor Test\",\"verifiedCalendarID\":\"calendar-test\"}")
+    let row = AppAgentPendingApprovalPresentation(approval)
+    #expect(row.title == "Calendar: Delete Event")
+    #expect(row.detail.contains("Connor Test"))
+    #expect(row.detail.contains("eventID: event:opaque/id"))
+    #expect(row.detail.contains("calendar-test"))
+    #expect(row.allowsAlwaysAllow == false)
+}
+
 @Test func appPendingApprovalPresentationMapsResolvedStatusesForNativeUI() {
     let statuses: [AgentPendingApprovalStatus] = [.pending, .approved, .denied, .cancelled]
 
