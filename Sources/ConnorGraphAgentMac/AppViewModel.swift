@@ -4314,6 +4314,11 @@ final class AppViewModel: NSObject, ObservableObject {
         appEntryState = resolveAppEntryState()
     }
 
+    func handleSuccessfulLLMSetup() {
+        loadLLMSettings()
+        appEntryState = .main
+    }
+
     func resolveAppEntryState() -> AppEntryState {
         do {
             let settings = try llmSettingsRepository.loadSettings()

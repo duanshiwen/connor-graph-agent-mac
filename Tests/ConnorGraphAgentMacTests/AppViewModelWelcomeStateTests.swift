@@ -229,3 +229,29 @@ private func makeWelcomeStateViewModel(
     #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
+
+@MainActor
+@Test func successfulLLMSetupTransitionsEntryStateDirectlyToMain() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    #expect(viewModel.appEntryState == .welcome)
+
+    let connection = AppLLMConnectionConfig(
+        id: "usable",
+        name: "Usable",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        hasAPIKey: true
+    )
+    try repository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: "real-key")
+
+    viewModel.handleSuccessfulLLMSetup()
+
+    #expect(viewModel.appEntryState == .main)
+    #expect(viewModel.showWelcomePlaceholder == false)
+}

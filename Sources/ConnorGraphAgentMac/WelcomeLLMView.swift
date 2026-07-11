@@ -14,8 +14,7 @@ struct WelcomeLLMView: View {
                 viewModel: viewModel,
                 option: option,
                 complete: {
-                    setupOption = nil
-                    viewModel.updateWelcomeState()
+                    viewModel.handleSuccessfulLLMSetup()
                 },
                 back: {
                     setupOption = nil
