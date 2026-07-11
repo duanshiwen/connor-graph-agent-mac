@@ -655,6 +655,8 @@ public enum CalendarMutationError: Error, Codable, Sendable, Equatable, Hashable
     case invalidInput(String)
     case readOnlySource
     case readOnlyCollection(String?)
+    case calendarNotFound(CalendarID)
+    case accountNotFound(CalendarAccountID)
     case eventNotFound
     case recurrenceUnsupported
     case schedulingUnsupported

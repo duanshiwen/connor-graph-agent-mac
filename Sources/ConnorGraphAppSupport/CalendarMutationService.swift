@@ -14,9 +14,16 @@ public struct CalendarMutationService: Sendable {
     public func mutate(_ input: CalendarMutationRequest) async throws -> CalendarMutationResult {
         let request = try input.validated()
         let snapshot = try await store.loadSnapshot()
-        let current = request.eventID.flatMap { id in snapshot.events.first { $0.id == id } }
-        let calendarID = request.draft?.calendarID ?? current?.calendarID
-        guard let calendarID, let collection = snapshot.collections.first(where: { $0.id == calendarID }), let account = snapshot.accounts.first(where: { $0.id == collection.accountID }) else { throw CalendarMutationError.eventNotFound }
+        let current: CalendarEvent?
+        if let eventID = request.eventID {
+            guard let event = snapshot.events.first(where: { $0.id == eventID }) else { throw CalendarMutationError.eventNotFound }
+            current = event
+        } else {
+            current = nil
+        }
+        guard let calendarID = request.draft?.calendarID ?? current?.calendarID else { throw CalendarMutationError.eventNotFound }
+        guard let collection = snapshot.collections.first(where: { $0.id == calendarID }) else { throw CalendarMutationError.calendarNotFound(calendarID) }
+        guard let account = snapshot.accounts.first(where: { $0.id == collection.accountID }) else { throw CalendarMutationError.accountNotFound(collection.accountID) }
         guard account.configuration.syncMode == .bidirectional, account.sourceKind.supportsWrite else { throw CalendarMutationError.readOnlySource }
         guard !collection.isReadOnly else { throw CalendarMutationError.readOnlyCollection(collection.capabilities.readOnlyReason) }
         if current?.sourceMetadata?.isRecurring == true || current?.recurrenceSummary != nil { throw CalendarMutationError.recurrenceUnsupported }
