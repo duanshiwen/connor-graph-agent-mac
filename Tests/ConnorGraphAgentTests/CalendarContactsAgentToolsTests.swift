@@ -102,6 +102,21 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("PRIVATE-LONG-NOTES") == true)
     }
 
+    @Test func calendarDetailReadEvidenceIsScopedAndContainsNoPrivateBody() async throws {
+        let evidence = CalendarDetailReadEvidenceRegistry()
+        let event = CalendarEvent(id: .init(rawValue: "event-evidence"), calendarID: .init(rawValue: "calendar-work"), title: "Private title", start: .init(date: Date(timeIntervalSince1970: 1_000)), end: .init(date: Date(timeIntervalSince1970: 4_600)), notes: "SECRET NOTES", sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "version-7"))
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [event]), evidenceRegistry: evidence)
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-evidence\"}"), context: Self.context(toolCallID: "call-evidence"))
+
+        #expect(await evidence.matches(runID: "run-calendar-contacts", sessionID: "session-calendar-contacts", eventID: "event-evidence", expectedVersion: "version-7"))
+        #expect(!(await evidence.matches(runID: "other-run", sessionID: "session-calendar-contacts", eventID: "event-evidence", expectedVersion: "version-7")))
+        #expect(!(await evidence.matches(runID: "run-calendar-contacts", sessionID: "session-calendar-contacts", eventID: "event-evidence", expectedVersion: "wrong")))
+        #expect(!(await evidence.debugDescription().contains("SECRET NOTES")))
+
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"missing\"}"), context: Self.context(toolCallID: "call-missing-evidence"))
+        #expect(!(await evidence.matches(runID: "run-calendar-contacts", sessionID: "session-calendar-contacts", eventID: "missing", expectedVersion: "version-7")))
+    }
+
     @Test func calendarReadGetEventReturnsMutationReadyIdentityAndVersion() async throws {
         let event = CalendarEvent(
             id: .init(rawValue: "event:opaque/id"),

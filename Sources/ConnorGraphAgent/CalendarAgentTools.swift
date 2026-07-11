@@ -152,9 +152,55 @@ public struct CalendarSearchEventsTool: AgentTool {
     }
 }
 
+public struct CalendarDetailReadEvidence: Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var eventID: String
+    public var calendarID: String
+    public var expectedVersion: String
+    public var readAt: Date
+
+    public init(runID: String, sessionID: String, eventID: String, calendarID: String, expectedVersion: String, readAt: Date = Date()) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.eventID = eventID
+        self.calendarID = calendarID
+        self.expectedVersion = expectedVersion
+        self.readAt = readAt
+    }
+}
+
+public actor CalendarDetailReadEvidenceRegistry {
+    private var entries: [String: CalendarDetailReadEvidence] = [:]
+    private let maximumEntries: Int
+
+    public init(maximumEntries: Int = 256) { self.maximumEntries = max(1, maximumEntries) }
+
+    public func record(_ evidence: CalendarDetailReadEvidence) {
+        entries[key(runID: evidence.runID, sessionID: evidence.sessionID, eventID: evidence.eventID)] = evidence
+        if entries.count > maximumEntries, let oldest = entries.min(by: { $0.value.readAt < $1.value.readAt })?.key { entries.removeValue(forKey: oldest) }
+    }
+
+    public func matches(runID: String, sessionID: String, eventID: String, expectedVersion: String) -> Bool {
+        guard let evidence = entries[key(runID: runID, sessionID: sessionID, eventID: eventID)] else { return false }
+        return evidence.expectedVersion == expectedVersion
+    }
+
+    public func evidence(runID: String, sessionID: String, eventID: String) -> CalendarDetailReadEvidence? {
+        entries[key(runID: runID, sessionID: sessionID, eventID: eventID)]
+    }
+
+    public func debugDescription() -> String {
+        entries.values.map { "\($0.runID)|\($0.sessionID)|\($0.eventID)|\($0.calendarID)|\($0.expectedVersion)" }.joined(separator: "\n")
+    }
+
+    private func key(runID: String, sessionID: String, eventID: String) -> String { "\(runID)\u{1F}\(sessionID)\u{1F}\(eventID)" }
+}
+
 public struct CalendarReadTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let recorder: (any NativeSourceReferenceRecording)?
+    public let evidenceRegistry: CalendarDetailReadEvidenceRegistry?
     public var name: String { "calendar_read" }
     public var description: String { "Read Connor-owned calendar data using operations: list_calendars, list_events, get_event, get_agenda, get_free_busy." }
     public var permission: AgentPermissionCapability { .readCalendar }
@@ -166,9 +212,10 @@ public struct CalendarReadTool: AgentTool {
         ], required: ["operation"])
     }
 
-    public init(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+    public init(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil, evidenceRegistry: CalendarDetailReadEvidenceRegistry? = nil) {
         self.runtime = runtime
         self.recorder = recorder
+        self.evidenceRegistry = evidenceRegistry
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -196,6 +243,9 @@ public struct CalendarReadTool: AgentTool {
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
             if let event {
                 await recorder?.record([NativeSourceReference.calendarEvent(event, query: nil, strength: .detailRead, toolName: name, context: context)])
+                if mutationEligibility(event) == "eligible", let version = event.sourceMetadata?.etag, !version.isEmpty {
+                    await evidenceRegistry?.record(.init(runID: context.runID, sessionID: context.sessionID, eventID: event.id.rawValue, calendarID: event.calendarID.rawValue, expectedVersion: version))
+                }
                 return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventDetailTextRenderer.render(event), contentJSON: try ContactJSON.encode(event))
             }
             let text = "Calendar event not found for eventID '\(eventID)'. Do not reuse or guess this ID. Search or list events again and copy a returned eventID exactly. Do not call calendar_write with this ID."
