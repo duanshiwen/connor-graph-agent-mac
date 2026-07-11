@@ -201,11 +201,11 @@ public struct CalendarWriteTool: AgentTool {
     public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. Read the event first before update/delete and never overwrite a version conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
-            "operation": .string(description: "create_event | update_event | delete_event"),
-            "calendarID": .string(description: "Calendar ID; required for create"),
-            "eventID": .string(description: "Event ID; required for update/delete"),
-            "expectedVersion": .string(description: "Version returned by the latest event read; required for update/delete"),
+        .closedObject(properties: [
+            "operation": .stringEnumeration(values: ["create_event", "update_event", "delete_event"], description: "Calendar mutation operation"),
+            "calendarID": .string(description: "Exact writable calendar ID returned by calendar_read list_calendars; required for create_event"),
+            "eventID": .string(description: "Exact event ID returned by calendar_read get_event; required for update_event and delete_event"),
+            "expectedVersion": .string(description: "Exact version returned by the latest event read; required for update_event and delete_event"),
             "title": .string(description: "Event title"),
             "start": .string(description: "ISO-8601 start timestamp"),
             "end": .string(description: "ISO-8601 end timestamp"),
@@ -224,20 +224,38 @@ public struct CalendarWriteTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard context.approvedCapabilities.contains(.mutateCalendar) else { throw AgentToolError.permissionDenied("Calendar write requires trusted mutateCalendar approval") }
         let formatter = ISO8601DateFormatter()
-        let operation = arguments.string("operation") ?? ""
+        guard let operation = arguments.string("operation") else {
+            throw AgentToolError.invalidArguments("Missing required calendar_write argument: operation. Use create_event, update_event, or delete_event.")
+        }
         let request: CalendarMutationRequest
         switch operation {
         case "create_event":
-            guard let calendarID = arguments.string("calendarID"), let title = arguments.string("title"), let startText = arguments.string("start"), let endText = arguments.string("end"), let start = formatter.date(from: startText), let end = formatter.date(from: endText) else { throw AgentToolError.invalidArguments("calendarID, title, start, and end are required") }
+            let requiredKeys = ["calendarID", "title", "start", "end"]
+            let missingKeys = requiredKeys.filter { arguments.string($0) == nil }
+            guard missingKeys.isEmpty else {
+                throw AgentToolError.invalidArguments("Missing required create_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are calendarID, title, start, end. Call calendar_read with operation list_calendars first and use an exact writable calendarID.")
+            }
+            let calendarID = arguments.string("calendarID")!
+            let title = arguments.string("title")!
+            let startText = arguments.string("start")!
+            let endText = arguments.string("end")!
+            guard let start = formatter.date(from: startText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp: \(startText)") }
+            guard let end = formatter.date(from: endText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp: \(endText)") }
             request = CalendarMutationRequest(operation: .create, draft: CalendarEventDraft(calendarID: CalendarID(rawValue: calendarID), title: title, start: CalendarEventDateTime(date: start), end: CalendarEventDateTime(date: end), isAllDay: arguments.bool("isAllDay") ?? false, location: arguments.string("location"), url: arguments.string("url").flatMap(URL.init(string:)), notes: arguments.string("notes")), runID: context.runID, sessionID: context.sessionID)
         case "update_event":
-            guard let eventID = arguments.string("eventID"), let expectedVersion = arguments.string("expectedVersion") else { throw AgentToolError.invalidArguments("eventID and expectedVersion are required") }
+            let missingKeys = ["eventID", "expectedVersion"].filter { arguments.string($0) == nil }
+            guard missingKeys.isEmpty else { throw AgentToolError.invalidArguments("Missing required update_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are eventID, expectedVersion.") }
+            let eventID = arguments.string("eventID")!
+            let expectedVersion = arguments.string("expectedVersion")!
+            if let startText = arguments.string("start"), formatter.date(from: startText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp: \(startText)") }
+            if let endText = arguments.string("end"), formatter.date(from: endText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp: \(endText)") }
             request = CalendarMutationRequest(operation: .update, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), patch: CalendarEventPatch(title: arguments.string("title").map(CalendarPatchValue.set) ?? .unchanged, start: datePatch("start", arguments: arguments, formatter: formatter), end: datePatch("end", arguments: arguments, formatter: formatter), isAllDay: arguments.bool("isAllDay").map(CalendarPatchValue.set) ?? .unchanged, location: optionalPatch(value: arguments.string("location"), clear: arguments.bool("clearLocation") == true), url: optionalPatch(value: arguments.string("url").flatMap(URL.init(string:)), clear: arguments.bool("clearURL") == true), notes: optionalPatch(value: arguments.string("notes"), clear: arguments.bool("clearNotes") == true)), runID: context.runID, sessionID: context.sessionID)
         case "delete_event":
-            guard let eventID = arguments.string("eventID"), let expectedVersion = arguments.string("expectedVersion") else { throw AgentToolError.invalidArguments("eventID and expectedVersion are required") }
-            request = CalendarMutationRequest(operation: .delete, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), runID: context.runID, sessionID: context.sessionID)
+            let missingKeys = ["eventID", "expectedVersion"].filter { arguments.string($0) == nil }
+            guard missingKeys.isEmpty else { throw AgentToolError.invalidArguments("Missing required delete_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are eventID, expectedVersion.") }
+            request = CalendarMutationRequest(operation: .delete, eventID: CalendarEventID(rawValue: arguments.string("eventID")!), expectedVersion: CalendarMutationVersion(value: arguments.string("expectedVersion")!), runID: context.runID, sessionID: context.sessionID)
         default:
-            throw AgentToolError.invalidArguments("Unsupported calendar_write operation: \(operation)")
+            throw AgentToolError.invalidArguments("Unsupported calendar_write operation '\(String(operation.prefix(80)))'. Use create_event, update_event, or delete_event.")
         }
         do {
             let result = try await runtime.mutate(request.validated())
