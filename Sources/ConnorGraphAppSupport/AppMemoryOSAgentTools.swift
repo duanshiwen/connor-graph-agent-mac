@@ -114,7 +114,7 @@ private extension SendableJSONValue {
     }
 }
 
-private enum MemoryOSContextToolSupport {
+private enum MemoryOSLayeredContextSupport {
     static let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Use 2-5 focused search terms separated by semicolons (; or ；). Include aliases and both Chinese and English terms when useful.")
     ], required: ["query"])
@@ -143,14 +143,14 @@ public struct MemoryOSRecentContextTool: AgentTool {
     public let name = "memory_os_recent_context"
     public let description = "Search only Memory OS L1 and L2 for recent captures, current project/task state, recent decisions, and mutable operational facts. Results may change quickly; compare updated_at when records conflict. This tool never returns L3/L4 durable knowledge."
     public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = MemoryOSContextToolSupport.inputSchema
+    public let inputSchema = MemoryOSLayeredContextSupport.inputSchema
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let terms = try MemoryOSContextToolSupport.terms(from: arguments)
-        return try MemoryOSContextToolSupport.result(name: name, semanticLabel: "operational context", terms: terms, items: facade.memoryOSRecentContext(terms: terms), context: context)
+        let terms = try MemoryOSLayeredContextSupport.terms(from: arguments)
+        return try MemoryOSLayeredContextSupport.result(name: name, semanticLabel: "operational context", terms: terms, items: facade.memoryOSRecentContext(terms: terms), context: context)
     }
 }
 
@@ -158,14 +158,14 @@ public struct MemoryOSKnowledgeContextTool: AgentTool {
     public let name = "memory_os_knowledge_context"
     public let description = "Search only Memory OS L3 and L4 for reusable knowledge, stable entities, concepts, and durable relationships. Matching L4 entities are expanded through five relationship hops by default and compiled into natural-language statements before return. Treat non-obvious graph connections as hypotheses requiring validation, not current operational state."
     public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = MemoryOSContextToolSupport.inputSchema
+    public let inputSchema = MemoryOSLayeredContextSupport.inputSchema
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let terms = try MemoryOSContextToolSupport.terms(from: arguments)
-        return try MemoryOSContextToolSupport.result(name: name, semanticLabel: "knowledge context", terms: terms, items: facade.memoryOSKnowledgeContext(terms: terms), context: context)
+        let terms = try MemoryOSLayeredContextSupport.terms(from: arguments)
+        return try MemoryOSLayeredContextSupport.result(name: name, semanticLabel: "knowledge context", terms: terms, items: facade.memoryOSKnowledgeContext(terms: terms), context: context)
     }
 }
 
