@@ -189,7 +189,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
                 "name": tool.name,
                 "description": tool.description,
                 "parameters": tool.inputSchema.jsonObject,
-                "strict": true
+                "strict": tool.inputSchema.isOpenAIStrictCompatible
             ] as [String: Any]
         }
         if !tools.isEmpty {
