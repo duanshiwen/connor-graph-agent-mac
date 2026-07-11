@@ -31,7 +31,8 @@ public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, Cu
 
 public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public static let defaultAllowedToolNames: Set<String> = [
-        "memory_os_context",
+        "memory_os_recent_context",
+        "memory_os_knowledge_context",
         "memory_os_search",
         "memory_os_read_record",
         "memory_os_read_provenance",
@@ -56,24 +57,20 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
         let args = try Arguments(json: call.argumentsJSON)
         switch call.name {
-        case "memory_os_context":
+        case "memory_os_recent_context", "memory_os_knowledge_context":
             let rawQuery = try args.requiredString("query")
-            let terms = rawQuery.split(separator: ";").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            let terms = rawQuery.split { $0 == ";" || $0 == "\u{FF1B}" }.map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             guard !terms.isEmpty else {
                 throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("query contained no valid search terms")
             }
-            let items = try facade.memoryOSFlatContext(terms: terms)
+            let isRecent = call.name == "memory_os_recent_context"
+            let items = try isRecent ? facade.memoryOSRecentContext(terms: terms) : facade.memoryOSKnowledgeContext(terms: terms)
             let json = try JSONSerialization.data(withJSONObject: items)
             let jsonString = String(data: json, encoding: .utf8) ?? "[]"
-            let readableText: String
-            if items.isEmpty {
-                readableText = "Memory OS context returned 0 items for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
-            } else {
-                let header = "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
-                let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-                readableText = "\(header)\n\n\(body)"
-            }
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: jsonString, contentText: readableText, citations: [])
+            let label = isRecent ? "operational context" : "knowledge context"
+            let header = "Memory OS \(label) returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
+            let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: jsonString, contentText: items.isEmpty ? header : "\(header)\n\n\(body)", citations: [])
 
         case "memory_os_search":
             let query = try args.requiredString("query")

@@ -367,7 +367,8 @@ struct MemoryOSBackgroundPromptContractTests {
         let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("Tool usage summary"))
-        #expect(prompt.contains("memory_os_context"))
+        #expect(prompt.contains("memory_os_recent_context"))
+        #expect(prompt.contains("memory_os_knowledge_context"))
         #expect(prompt.contains("memory_os_l2_update_entities"))
         #expect(prompt.contains("memory_os_update_current_user_profile"))
         #expect(prompt.contains("memory_os_l3_update_beliefs"))
@@ -381,7 +382,7 @@ struct MemoryOSBackgroundPromptContractTests {
 
         let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
-        #expect(prompt.contains("Do NOT call memory_os_context first for current-user facts"))
+        #expect(prompt.contains("Do NOT call either context search first for current-user facts"))
         #expect(prompt.contains("memory_os_update_current_user_profile directly"))
         #expect(prompt.contains("Skip for current-user facts"))
     }
