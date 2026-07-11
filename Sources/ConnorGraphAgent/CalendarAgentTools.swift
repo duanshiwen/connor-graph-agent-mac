@@ -194,8 +194,10 @@ public struct CalendarReadTool: AgentTool {
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
             if let event {
                 await recorder?.record([NativeSourceReference.calendarEvent(event, query: nil, strength: .detailRead, toolName: name, context: context)])
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventDetailTextRenderer.render(event), contentJSON: try ContactJSON.encode(event))
             }
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: event == nil ? "Calendar event not found" : "Loaded calendar event", contentJSON: try ContactJSON.encode(event))
+            let text = "Calendar event not found for eventID '\(eventID)'. Do not reuse or guess this ID. Search or list events again and copy a returned eventID exactly. Do not call calendar_write with this ID."
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text, contentJSON: try ContactJSON.encode(event))
         case "get_free_busy":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             let blocks = events.map { CalendarFreeBusyBlock(calendarID: $0.calendarID, start: $0.start.date, end: $0.end.date) }
@@ -341,6 +343,38 @@ public struct CalendarWriteTool: AgentTool {
     }
 }
 
+private enum CalendarEventDetailTextRenderer {
+    static func render(_ event: CalendarEvent) -> String {
+        let formatter = ISO8601DateFormatter()
+        let eligibility = mutationEligibility(event)
+        let version = event.sourceMetadata?.etag
+        let ready = eligibility == "eligible" && version?.isEmpty == false
+        var lines = [
+            ready ? "Loaded mutation-ready calendar event." : "Loaded calendar event; it is not mutation-ready.",
+            "eventID: \(event.id.rawValue)",
+            "calendarID: \(event.calendarID.rawValue)",
+            "expectedVersion: \(version?.isEmpty == false ? version! : "unavailable")",
+            "title: \(event.title)",
+            "start: \(formatter.string(from: event.start.date))",
+            "end: \(formatter.string(from: event.end.date))",
+            "isAllDay: \(event.isAllDay)",
+            "mutationEligibility: \(version?.isEmpty == false ? eligibility : "version-unavailable")"
+        ]
+        if ready {
+            lines.append("For update_event or delete_event, copy eventID and expectedVersion exactly. Do not use calendarID as eventID.")
+        } else {
+            lines.append("Do not call calendar_write for this event until a fresh detail read reports mutationEligibility: eligible and an exact expectedVersion.")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+private func mutationEligibility(_ event: CalendarEvent) -> String {
+    if event.sourceMetadata?.isRecurring == true || event.recurrenceSummary != nil { return "recurring" }
+    if event.sourceMetadata?.hasAttendees == true || !event.attendees.isEmpty || event.sourceMetadata?.organizerEmail != nil || event.sourceMetadata?.scheduleTag != nil { return "scheduling" }
+    return "eligible"
+}
+
 private enum CalendarEventCandidateTextRenderer {
     static func render(_ events: [CalendarEvent], verb: String) -> String {
         guard !events.isEmpty else {
@@ -362,11 +396,7 @@ private enum CalendarEventCandidateTextRenderer {
         return "\(verb) \(events.count) calendar event \(noun).\n\n\(rows)\n\nNext: call calendar_read with operation get_event and copy eventID exactly."
     }
 
-    private static func eligibility(_ event: CalendarEvent) -> String {
-        if event.sourceMetadata?.isRecurring == true || event.recurrenceSummary != nil { return "recurring" }
-        if event.sourceMetadata?.hasAttendees == true || !event.attendees.isEmpty || event.sourceMetadata?.organizerEmail != nil || event.sourceMetadata?.scheduleTag != nil { return "scheduling" }
-        return "eligible"
-    }
+    private static func eligibility(_ event: CalendarEvent) -> String { mutationEligibility(event) }
 }
 
 public extension AgentToolRegistry {
