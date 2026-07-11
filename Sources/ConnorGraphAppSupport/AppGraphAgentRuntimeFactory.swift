@@ -3,6 +3,23 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
 
+public enum AppLLMRuntimeConfigurationError: Error, LocalizedError, Equatable, Sendable {
+    case missingConnection(connectionID: String?, providerMode: AppLLMProviderMode, connectionKind: AppLLMConnectionKind)
+    case missingCredentialOrConfiguration(connectionID: String, providerMode: AppLLMProviderMode, connectionKind: AppLLMConnectionKind)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .missingConnection(connectionID, providerMode, connectionKind):
+            if let connectionID, !connectionID.isEmpty {
+                return "未找到可用于运行时的 AI 连接：\(connectionID)（mode=\(providerMode.rawValue), kind=\(connectionKind.rawValue)）。"
+            }
+            return "当前没有可用于运行时的 AI 连接（mode=\(providerMode.rawValue), kind=\(connectionKind.rawValue)）。"
+        case let .missingCredentialOrConfiguration(connectionID, providerMode, connectionKind):
+            return "连接 \(connectionID) 无法构造运行时配置：缺少凭据或兼容模式/Endpoint/模型配置不匹配（mode=\(providerMode.rawValue), kind=\(connectionKind.rawValue)）。"
+        }
+    }
+}
+
 public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
@@ -193,8 +210,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.connections.first else {
-                return AnyAgentModelProvider(modelID: "未找到连接，请先添加 AI 连接") { _ in
-                    throw OpenAICompatibleProviderError.missingAPIKey
+                let requestedMode = sessionLLMOverride.flatMap { AppLLMProviderMode(rawValue: $0.providerMode) } ?? settings.defaultConnection?.providerMode ?? .openAICompatible
+                let requestedKind = settings.connection(id: sessionLLMOverride?.connectionID)?.connectionKind
+                    ?? settings.defaultConnection?.connectionKind
+                    ?? .openAICompatible
+                return AnyAgentModelProvider(modelID: "missing-llm-connection") { _ in
+                    throw AppLLMRuntimeConfigurationError.missingConnection(
+                        connectionID: sessionLLMOverride?.connectionID,
+                        providerMode: requestedMode,
+                        connectionKind: requestedKind
+                    )
                 }
             }
             let effectiveProviderMode: AppLLMProviderMode
@@ -220,14 +245,22 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             case .openAIResponses:
                 guard let config = try openAIResponsesConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-responses-config") { _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
+                        throw AppLLMRuntimeConfigurationError.missingCredentialOrConfiguration(
+                            connectionID: effectiveConnectionID,
+                            providerMode: .openAIResponses,
+                            connectionKind: effectiveConnectionKind
+                        )
                     }
                 }
                 return AnyAgentModelProvider(OpenAIResponsesProvider(config: config))
             case .anthropicMessages:
                 guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
+                        throw AppLLMRuntimeConfigurationError.missingCredentialOrConfiguration(
+                            connectionID: effectiveConnectionID,
+                            providerMode: .anthropicMessages,
+                            connectionKind: effectiveConnectionKind
+                        )
                     }
                 }
                 return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
@@ -235,14 +268,22 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 if effectiveConnectionKind == .anthropicCompatible {
                     guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                         return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
-                            throw OpenAICompatibleProviderError.missingAPIKey
+                            throw AppLLMRuntimeConfigurationError.missingCredentialOrConfiguration(
+                                connectionID: effectiveConnectionID,
+                                providerMode: .openAICompatible,
+                                connectionKind: effectiveConnectionKind
+                            )
                         }
                     }
                     return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
                 }
                 guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
+                        throw AppLLMRuntimeConfigurationError.missingCredentialOrConfiguration(
+                            connectionID: effectiveConnectionID,
+                            providerMode: .openAICompatible,
+                            connectionKind: effectiveConnectionKind
+                        )
                     }
                 }
                 if effectiveConnectionKind == .githubCopilot {
