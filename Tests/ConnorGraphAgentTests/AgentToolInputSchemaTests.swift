@@ -21,6 +21,28 @@ import ConnorGraphAgent
     #expect(schema["description"] as? String == "Optional calendar ID")
 }
 
+@Test func agentToolInputSchemaReportsOpenAIStrictCompatibility() {
+    let compatible = AgentToolInputSchema.closedObject(
+        properties: [
+            "operation": .stringEnumeration(values: ["create"], description: "Operation"),
+            "optionalID": .nullable(.string(description: "Optional ID"))
+        ],
+        required: ["operation", "optionalID"]
+    )
+    let missingRequired = AgentToolInputSchema.closedObject(
+        properties: ["operation": .string(description: "Operation"), "optionalID": .string(description: "Optional ID")],
+        required: ["operation"]
+    )
+    let openObject = AgentToolInputSchema.object(
+        properties: ["operation": .string(description: "Operation")],
+        required: ["operation"]
+    )
+
+    #expect(compatible.isOpenAIStrictCompatible)
+    #expect(!missingRequired.isOpenAIStrictCompatible)
+    #expect(!openObject.isOpenAIStrictCompatible)
+}
+
 @Test func agentToolInputSchemaSerializesClosedObject() throws {
     let schema = AgentToolInputSchema.closedObject(
         properties: ["operation": .string(description: "Operation")],

@@ -12,6 +12,19 @@ public indirect enum AgentToolInputSchema: Sendable, Equatable {
     case closedObject(properties: [String: AgentToolInputSchema], required: [String])
     case nullable(AgentToolInputSchema)
 
+    public var isOpenAIStrictCompatible: Bool {
+        switch self {
+        case .string, .stringEnumeration, .integer, .number, .boolean:
+            return true
+        case .array(let items, _), .nullable(let items):
+            return items.isOpenAIStrictCompatible
+        case .object:
+            return false
+        case .closedObject(let properties, let required):
+            return Set(required) == Set(properties.keys) && properties.values.allSatisfy(\.isOpenAIStrictCompatible)
+        }
+    }
+
     public var jsonObject: [String: Any] {
         switch self {
         case .string(let description):
