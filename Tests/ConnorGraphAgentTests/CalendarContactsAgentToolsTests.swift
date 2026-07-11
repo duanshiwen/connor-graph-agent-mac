@@ -232,6 +232,19 @@ struct CalendarContactsAgentToolsTests {
         #expect(tool.description.contains("exact"))
         #expect(tool.inputExamples.first?["calendarID"] == .string("exact-calendar-id-from-list-calendars"))
         #expect(tool.inputExamples.first?["calendarID"] != .string("calendar-work"))
+        #expect(tool.description.contains("calendarID is only for create_event"))
+        #expect(tool.description.contains("eventID and expectedVersion are only for update_event and delete_event"))
+        #expect(tool.inputExamples.count == 3)
+        #expect(tool.inputExamples[1]["calendarID"] == nil)
+        #expect(tool.inputExamples[2]["calendarID"] == nil)
+    }
+
+    @Test func calendarWritePreflightRejectsMissingOperationBeforeApproval() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime(), evidenceRegistry: .init())
+        await Self.expectInvalidArguments(containing: "Missing required calendar_write argument: operation") {
+            try await tool.preflight(call: .init(name: "calendar_write", argumentsJSON: "{\"calendarID\":\"calendar-work\",\"title\":\"Test\"}"), context: Self.context(toolCallID: "call-missing-write-operation"))
+            return AgentToolResult(toolCallID: "unexpected", toolName: "calendar_write", contentText: "unexpected")
+        }
     }
 
     @Test func calendarWriteSchemaConstrainsOperationAndExtraProperties() throws {
