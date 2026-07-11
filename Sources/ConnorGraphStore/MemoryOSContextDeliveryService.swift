@@ -65,45 +65,60 @@ public struct MemoryOSContextDeliveryService: Sendable {
         return package
     }
 
-    /// Search Memory OS L1-L4 with multiple search terms in parallel, merge and deduplicate results.
-    /// - Parameter terms: Search terms extracted by the LLM (pre-split by semicolons).
-    /// - Returns: Deduplicated array of natural-language memory items.
-    public func flatContext(terms: [String]) throws -> [String] {
-        let layers: [MemoryOSRetrievalLayer] = [.l1, .l2, .l3, .l4]
-        var allHits: [MemoryOSRetrievalHit] = []
-        var allExpansions: [String: [MemoryOSL4ExpansionHit]] = [:]
+    /// Search volatile operational memory only. L1/L2 results describe recent captures and
+    /// current working state; no durable knowledge or graph expansion is included.
+    public func recentContext(terms: [String]) throws -> [String] {
+        let hits = try searchTerms(terms, layers: [.l1, .l2])
+        return builder.buildRecentContextStrings(hits: hits)
+    }
 
-        if let searchKernel, !terms.isEmpty {
-            // Use Rust/Tantivy search kernel: combine all terms into a single query.
-            // Jieba tokenization + OR logic handles multi-term better than per-term FTS5.
-            let combinedQuery = terms.joined(separator: ";")
+    /// Search reusable knowledge and stable graph memory only. Every matching L4 entity is
+    /// expanded through five relationship hops by default and rendered into natural language.
+    public func knowledgeContext(terms: [String], l4Depth: Int = 5) throws -> [String] {
+        let depth = max(1, min(l4Depth, 5))
+        let hits = try searchTerms(terms, layers: [.l3, .l4])
+        var expansions: [String: [MemoryOSL4ExpansionHit]] = [:]
+        let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
+
+        for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
+            guard expansions[hit.recordID] == nil else { continue }
+            let entityRef = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
+            let expanded = try retrieval.expandL4(entityName: entityRef, depth: depth, limit: 200)
+            if !expanded.isEmpty { expansions[hit.recordID] = expanded }
+        }
+
+        return builder.buildKnowledgeContextStrings(
+            hits: hits,
+            expansions: expansions,
+            extraEntityNames: try resolveEntityNames(from: expansions)
+        )
+    }
+
+    private func searchTerms(_ terms: [String], layers: [MemoryOSRetrievalLayer]) throws -> [MemoryOSRetrievalHit] {
+        let normalizedTerms = terms.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !normalizedTerms.isEmpty else { return [] }
+
+        let hits: [MemoryOSRetrievalHit]
+        if let searchKernel {
+            let kernelLayers = layers.compactMap { MemoryOSSearchKernelLayer(rawValue: $0.rawValue) }
             let response = try searchKernel.search(MemoryOSSearchKernelRequest(
-                query: combinedQuery,
-                layers: [.l0, .l1, .l2, .l3, .l4],
+                query: normalizedTerms.joined(separator: ";"),
+                layers: kernelLayers,
                 limit: 200
             ))
-            allHits = response.hits.map { Self.hitFromKernel($0) }
+            hits = response.hits.map(Self.hitFromKernel)
         } else {
-            // Fallback: SQLite FTS5 per-term search
             let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
-            for term in terms {
-                let hits = try retrieval.search(MemoryOSRetrievalQuery(
-                    text: term, layers: layers, limit: 50, depth: 5
-                ))
-                allHits.append(contentsOf: hits)
+            hits = try normalizedTerms.flatMap { term in
+                try retrieval.search(MemoryOSRetrievalQuery(text: term, layers: layers, limit: 50))
             }
         }
 
-        // L4 graph expansion always uses SQLite (graph traversal, not full-text search)
-        for hit in allHits where hit.layer == .l4 && hit.canExpandDepth {
-            if allExpansions[hit.recordID] != nil { continue }
-            let entityRef = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
-            let expanded = try SQLiteMemoryOSUnifiedRetrievalService(store: store)
-                .expandL4(entityName: entityRef, depth: 5, limit: 8)
-            if !expanded.isEmpty { allExpansions[hit.recordID] = expanded }
-        }
-
-        return builder.buildFlatStrings(hits: allHits, expansions: allExpansions, extraEntityNames: try resolveEntityNames(from: allExpansions))
+        var seen = Set<String>()
+        return hits.sorted { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.id < rhs.id
+        }.filter { seen.insert($0.id).inserted }
     }
 
     // MARK: - Search Kernel Bridge
