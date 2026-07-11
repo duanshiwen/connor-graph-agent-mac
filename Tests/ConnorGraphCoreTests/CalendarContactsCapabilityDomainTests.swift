@@ -91,7 +91,8 @@ struct CalendarContactsCapabilityDomainTests {
         let decoded = try JSONDecoder().decode(CalendarSourceConfiguration.self, from: data)
 
         #expect(decoded == configuration)
-        #expect(decoded.sourceKind.supportsWrite == false)
+        #expect(decoded.sourceKind.supportsWrite == true)
+        #expect(decoded.syncMode == .readOnly)
         #expect(decoded.sourceKind.displayName == "标准 CalDAV")
     }
 
