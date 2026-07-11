@@ -22,6 +22,22 @@ struct CalendarMutationServiceTests {
         #expect(snapshot.mutationAudits[0].status == .confirmed)
     }
 
+    @Test func rejectsUnknownCalendarIDWithoutMutationAudit() async throws {
+        let store = FileBackedCalendarSourceRuntimeStore(storeURL: temporaryURL())
+        let account = CalendarAccount(id: .init(rawValue: "a"), provider: .genericCalDAVCardDAV, sourceKind: .genericCalDAV, displayName: "CalDAV", configuration: .init(sourceKind: .genericCalDAV, authMode: .appPassword, syncMode: .bidirectional))
+        let collection = CalendarCollection(id: .init(rawValue: "calendar-real-id"), accountID: account.id, displayName: "Work")
+        try await store.saveSnapshot(.init(accounts: [account], collections: [collection]))
+        let service = CalendarMutationService(store: store, adapters: [.genericCalDAV: StubCalendarMutationAdapter(result: nil)])
+        let unknownID = CalendarID(rawValue: "default")
+
+        await #expect(throws: CalendarMutationError.calendarNotFound(unknownID)) {
+            try await service.mutate(.init(operation: .create, draft: .init(calendarID: unknownID, title: "x", start: .init(date: Date(timeIntervalSince1970: 10)), end: .init(date: Date(timeIntervalSince1970: 20)))))
+        }
+        let snapshot = try await store.loadSnapshot()
+        #expect(snapshot.events.isEmpty)
+        #expect(snapshot.mutationAudits.isEmpty)
+    }
+
     @Test func rejectsReadOnlyAccountBeforeAdapterCall() async throws {
         let store = FileBackedCalendarSourceRuntimeStore(storeURL: temporaryURL())
         let account = CalendarAccount(id: .init(rawValue: "a"), provider: .genericCalDAVCardDAV, sourceKind: .genericCalDAV, displayName: "CalDAV")
