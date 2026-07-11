@@ -334,6 +334,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmBaseURLString: String = ""
     @Published var llmModel: String = ""
     @Published var llmSelectedModel: String = ""
+    @Published var llmShouldFetchModelsList: Bool = true
     @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
@@ -4288,6 +4289,7 @@ final class AppViewModel: NSObject, ObservableObject {
             llmBaseURLString = connection?.baseURLString ?? ""
             llmModel = connection?.model ?? ""
             llmSelectedModel = connection?.effectiveModel ?? ""
+            llmShouldFetchModelsList = connection?.shouldFetchModelsList ?? true
             llmThinkingLevel = settings.defaultThinkingLevel
             llmHasAPIKey = connection?.hasAPIKey ?? false
             llmAPIKeyInput = ""
@@ -4355,6 +4357,7 @@ final class AppViewModel: NSObject, ObservableObject {
         llmBaseURLString = connection.baseURLString
         llmModel = connection.model
         llmSelectedModel = connection.effectiveModel
+        llmShouldFetchModelsList = connection.shouldFetchModelsList
         llmHasAPIKey = connection.hasAPIKey
         llmAPIKeyInput = ""
         persistLLMSettings(rebuildRuntime: true)
@@ -4479,7 +4482,8 @@ final class AppViewModel: NSObject, ObservableObject {
         baseURLString: String? = nil,
         model: String? = nil,
         selectedModel: String? = nil,
-        hasAPIKey: Bool
+        hasAPIKey: Bool,
+        shouldFetchModelsList: Bool = true
     ) -> AppLLMConnectionConfig {
         let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
         let defaultBaseURL = providerMode == .openAICompatible ? "https://api.openai.com/v1" : ""
@@ -4493,7 +4497,8 @@ final class AppViewModel: NSObject, ObservableObject {
             baseURLString: baseURLString ?? defaultBaseURL,
             model: normalizedModel,
             selectedModel: normalizedSelectedModel,
-            hasAPIKey: hasAPIKey
+            hasAPIKey: hasAPIKey,
+            shouldFetchModelsList: shouldFetchModelsList
         )
         llmConnectionConfigs.removeAll { $0.id == connection.id }
         llmConnectionConfigs.append(connection)
@@ -4550,7 +4555,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 selectedModel: llmSelectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                hasAPIKey: llmHasAPIKey
+                hasAPIKey: llmHasAPIKey,
+                shouldFetchModelsList: llmShouldFetchModelsList
             )
             if let index = connections.firstIndex(where: { $0.id == targetID }) {
                 connections[index] = updatedConnection

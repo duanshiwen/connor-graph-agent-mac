@@ -26,12 +26,24 @@ private final class FakeSettingsStore: LLMSettingsStore, @unchecked Sendable {
     func set(_ value: String, forKey key: String) { values[key] = value }
 }
 
+private actor FakeAgentHTTPClientState {
+    private(set) var observedRequests: [AgentHTTPRequest] = []
+
+    func record(_ request: AgentHTTPRequest) {
+        observedRequests.append(request)
+    }
+
+    func requests() -> [AgentHTTPRequest] {
+        observedRequests
+    }
+}
+
 private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     var response: AgentHTTPResponse
-    var observedRequests: [AgentHTTPRequest] = []
+    var state: FakeAgentHTTPClientState = FakeAgentHTTPClientState()
 
     mutating func send(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
-        observedRequests.append(request)
+        await state.record(request)
         return response
     }
 }
@@ -59,6 +71,29 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(loaded.defaultConnectionID.isEmpty)
     #expect(loaded.defaultConnection == nil)
     #expect(settingsStore.values["llm.connections"] == "[]")
+}
+
+@Test func settingsRepositoryDefaultsMissingShouldFetchModelsListToTrue() throws {
+    let settingsStore = FakeSettingsStore()
+    settingsStore.set("""
+    [{
+      "id":"legacy-openai-compatible",
+      "name":"Legacy OpenAI Compatible",
+      "providerMode":"openai_compatible",
+      "connectionKind":"openai_compatible",
+      "baseURLString":"https://example.com/v1",
+      "model":"gpt-5.6",
+      "selectedModel":"gpt-5.6",
+      "hasAPIKey":false,
+      "extraHTTPHeaders":{}
+    }]
+    """, forKey: "llm.connections")
+    settingsStore.set("legacy-openai-compatible", forKey: "llm.defaultConnectionID")
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: FakeCredentialStore())
+
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.defaultConnection?.shouldFetchModelsList == true)
 }
 
 @Test func settingsRepositoryPersistsNonSecretSettings() throws {
@@ -360,6 +395,38 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(loadedConnection.providerMode == .anthropicMessages)
     #expect(loadedConnection.isLiveCatalog == false)
     #expect(loadedConnection.models.isEmpty)
+}
+
+@Test func modelCatalogUsesConfiguredModelsWithoutRequestWhenFetchModelsListDisabled() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "manual-only",
+        name: "Manual Only",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-5.6, gpt-5.6-mini",
+        selectedModel: "gpt-5.6",
+        hasAPIKey: true,
+        shouldFetchModelsList: false
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "secret-key"
+    )
+    let client = FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: #"{"data":[{"id":"should-not-be-used"}]}"#.data(using: .utf8)!))
+    let state = client.state
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: client
+    )
+
+    let connections = await catalog.loadConnections()
+    let loadedConnection = try #require(connections.first)
+    let requests = await state.requests()
+
+    #expect(loadedConnection.isLiveCatalog == false)
+    #expect(loadedConnection.models.map(\.id) == ["gpt-5.6", "gpt-5.6-mini"])
+    #expect(requests.isEmpty)
 }
 
 @Test func modelCatalogFallsBackToConfiguredModelWhenOpenAIKeyMissing() async throws {
