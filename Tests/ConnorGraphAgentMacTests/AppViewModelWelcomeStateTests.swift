@@ -59,6 +59,7 @@ private func makeWelcomeStateViewModel(
     viewModel.loadLLMSettings()
     viewModel.updateWelcomeState()
 
+    #expect(viewModel.appEntryState == .welcome)
     #expect(viewModel.showWelcomePlaceholder == true)
 }
 
@@ -82,6 +83,7 @@ private func makeWelcomeStateViewModel(
     viewModel.loadLLMSettings()
     viewModel.updateWelcomeState()
 
+    #expect(viewModel.appEntryState == .welcome)
     #expect(viewModel.showWelcomePlaceholder == true)
 }
 
@@ -105,6 +107,7 @@ private func makeWelcomeStateViewModel(
     viewModel.loadLLMSettings()
     viewModel.updateWelcomeState()
 
+    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
@@ -129,6 +132,7 @@ private func makeWelcomeStateViewModel(
     viewModel.updateWelcomeState()
 
     #expect(viewModel.llmConnectionConfigs.first?.hasAPIKey == true)
+    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
@@ -151,6 +155,7 @@ private func makeWelcomeStateViewModel(
     let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
     viewModel.selectDefaultLLMConnection("first")
 
+    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
@@ -187,6 +192,7 @@ private func makeWelcomeStateViewModel(
 
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "second")
+    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
@@ -220,5 +226,6 @@ private func makeWelcomeStateViewModel(
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "provider-setup")
     #expect(loaded.defaultConnection?.id == "provider-setup")
+    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
