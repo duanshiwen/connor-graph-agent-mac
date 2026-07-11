@@ -237,7 +237,7 @@ private enum AnthropicFixtures {
     let examples = try #require(requestTool["input_examples"] as? [[String: Any]])
     #expect(examples.count == 3)
     #expect(examples.first?["operation"] as? String == "create_event")
-    #expect(examples.first?["calendarID"] as? String == "calendar-work")
+    #expect(examples.first?["calendarID"] as? String == "exact-calendar-id-from-list-calendars")
 }
 
 @Test func anthropicToolRequestOmitsDefaultToolChoiceAuto() async throws {

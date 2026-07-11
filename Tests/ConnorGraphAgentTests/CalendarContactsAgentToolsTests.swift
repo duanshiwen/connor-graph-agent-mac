@@ -95,6 +95,15 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
     }
 
+    @Test func calendarWriteExamplesCannotBeMistakenForRealCalendarIDs() {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        #expect(tool.description.contains("default"))
+        #expect(tool.description.contains("example IDs"))
+        #expect(tool.description.contains("exact"))
+        #expect(tool.inputExamples.first?["calendarID"] == .string("exact-calendar-id-from-list-calendars"))
+        #expect(tool.inputExamples.first?["calendarID"] != .string("calendar-work"))
+    }
+
     @Test func calendarWriteSchemaConstrainsOperationAndExtraProperties() throws {
         let schema = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime()).inputSchema.jsonObject
         #expect(schema["additionalProperties"] as? Bool == false)
