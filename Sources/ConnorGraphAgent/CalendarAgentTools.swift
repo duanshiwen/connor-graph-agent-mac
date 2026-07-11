@@ -264,7 +264,7 @@ public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let evidenceRegistry: CalendarDetailReadEvidenceRegistry?
     public var name: String { "calendar_write" }
-    public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. For create, first call calendar_read list_calendars and copy an exact writable calendar id; 'default', display names, and example IDs are not valid substitutes. Read the event first before update/delete and never overwrite a version conflict." }
+    public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. Always pass operation explicitly. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputExamples: [[String: SendableJSONValue]] {
         [
@@ -315,7 +315,9 @@ public struct CalendarWriteTool: AgentTool {
 
     public func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
         let arguments = try AgentToolArguments(json: call.argumentsJSON)
-        guard let operation = arguments.string("operation") else { return }
+        guard let operation = arguments.string("operation") else {
+            throw AgentToolError.invalidArguments("Missing required calendar_write argument: operation. Use create_event, update_event, or delete_event.")
+        }
         guard operation == "update_event" || operation == "delete_event" else { return }
         guard let eventID = arguments.string("eventID"), let expectedVersion = arguments.string("expectedVersion") else { return }
         guard let evidenceRegistry,
