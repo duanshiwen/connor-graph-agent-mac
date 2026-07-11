@@ -87,6 +87,20 @@ import ConnorGraphAgent
     #expect(prompt.contains("Do not attempt to write to memory directly"))
 }
 
+@Test func defaultSystemPromptDocumentsCalendarMutationWorkflow() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("For create, first call `calendar_read` with `operation: list_calendars`"))
+    #expect(prompt.contains("exact writable `calendarID`"))
+    #expect(prompt.contains("`operation: create_event`"))
+    #expect(prompt.contains("`calendarID`, `title`, `start`, `end`, and `isAllDay`"))
+    #expect(prompt.contains("`operation: update_event`"))
+    #expect(prompt.contains("`operation: delete_event`"))
+    #expect(prompt.contains("exact `expectedVersion`"))
+    #expect(prompt.contains("never guess calendar/event IDs or time zones"))
+    #expect(prompt.contains("recurring or contains organizer/attendee scheduling semantics"))
+}
+
 @Test func defaultSystemPromptDocumentsOutboundMailApprovalWorkflow() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
