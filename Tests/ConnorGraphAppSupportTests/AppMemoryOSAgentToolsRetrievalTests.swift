@@ -26,26 +26,33 @@ import ConnorGraphAppSupport
     #expect(json.contains("Connor Memory OS"))
 }
 
-@Test func memoryOSContextToolReturnsFlatStringArray() async throws {
+@Test func memoryOSRecentAndKnowledgeContextToolsReturnDifferentSemantics() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 12_000)
+    try store.upsert(node: MemoryOSNode(id: "memory-os-node", stableKey: "system:connor-memory-os-current", nodeType: "project", name: "Connor Memory OS"))
+    try store.upsert(statement: MemoryOSStatement(id: "current-status", subjectID: "memory-os-node", predicate: "status", text: "Connor Memory OS is currently splitting retrieval tools.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
+    try store.upsert(belief: MemoryOSBelief(id: "knowledge-rule", statement: "Connor Memory OS separates operational state from reusable knowledge.", domain: "knowledge", relatedObjectNames: "Connor Memory OS", createdAt: now, updatedAt: now))
     try store.upsert(entity: MemoryOSEntity(id: "entity-memory-os", stableKey: "system:connor-memory-os", entityType: "system", name: "Connor Memory OS", summary: "Background memory infrastructure", confidence: 0.95))
-    try store.upsert(entity: MemoryOSEntity(id: "entity-l4", stableKey: "layer:l4", entityType: "memory_layer", name: "L4 Stable Entity / Concept Layer", summary: "Stores stable entities and concepts", confidence: 0.95))
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-l4", entityID: "entity-memory-os", predicate: .hasPart, objectEntityID: "entity-l4", text: "Connor Memory OS contains L4 Stable Entity / Concept Layer.", assertionKind: .summarized, confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: []))
+    try store.upsert(entity: MemoryOSEntity(id: "entity-l4", stableKey: "layer:l4", entityType: "memory_layer", name: "L4 Stable Entity Layer", summary: "Stores stable entities and concepts", confidence: 0.95))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-l4", entityID: "entity-memory-os", predicate: .hasPart, objectEntityID: "entity-l4", text: "Connor Memory OS contains L4 Stable Entity Layer.", assertionKind: .summarized, confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: []))
 
-    let tool = MemoryOSContextTool(facade: facade)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS;L4"}"#), context: memoryOSToolContext())
+    let recentResult = try await MemoryOSRecentContextTool(facade: facade).execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS；retrieval tools"}"#), context: memoryOSToolContext())
+    let knowledgeResult = try await MemoryOSKnowledgeContextTool(facade: facade).execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS;reusable knowledge"}"#), context: memoryOSToolContext())
 
-    #expect(result.toolName == "memory_os_context")
-    #expect(result.contentText.contains("item(s) for"))
-    #expect(result.contentText.contains("search term"))
+    #expect(recentResult.toolName == "memory_os_recent_context")
+    #expect(recentResult.contentText.contains("operational context"))
+    let recentItems = try JSONDecoder().decode([String].self, from: Data(try #require(recentResult.contentJSON).utf8))
+    #expect(recentItems.contains { $0.contains("currently splitting retrieval tools") })
+    #expect(!recentItems.contains { $0.contains("reusable knowledge") })
 
-    let contentJSON = try #require(result.contentJSON)
-    let items = try JSONDecoder().decode([String].self, from: Data(contentJSON.utf8))
-    #expect(!items.isEmpty)
-    #expect(items.contains { $0.contains("Connor Memory OS") })
+    #expect(knowledgeResult.toolName == "memory_os_knowledge_context")
+    #expect(knowledgeResult.contentText.contains("knowledge context"))
+    let knowledgeItems = try JSONDecoder().decode([String].self, from: Data(try #require(knowledgeResult.contentJSON).utf8))
+    #expect(knowledgeItems.contains { $0.contains("reusable knowledge") })
+    #expect(knowledgeItems.contains { $0.contains("L4 Stable Entity Layer") })
+    #expect(!knowledgeItems.contains { $0.contains("currently splitting retrieval tools") })
 }
 
 @Test func memoryOSGetCurrentUserProfileToolAggregatesCurrentUserHitsWithoutNameCoupling() async throws {

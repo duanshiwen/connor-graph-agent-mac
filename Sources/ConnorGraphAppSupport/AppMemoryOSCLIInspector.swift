@@ -417,7 +417,8 @@ public struct AppMemoryOSCLIInspector: Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !terms.isEmpty else { return [] }
-        return try AppMemoryOSFacade(store: store).memoryOSFlatContext(terms: terms)
+        let facade = AppMemoryOSFacade(store: store)
+        return try facade.memoryOSRecentContext(terms: terms) + facade.memoryOSKnowledgeContext(terms: terms)
     }
 
     private func searchHitContent(for hit: MemoryOSRetrievalHit) -> String {

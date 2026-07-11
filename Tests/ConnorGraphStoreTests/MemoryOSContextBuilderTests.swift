@@ -71,13 +71,14 @@ import ConnorGraphStore
         ]
     ]
 
-    let result = MemoryOSContextBuilder().buildFlatStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-b": "Dependency"])
+    let recent = MemoryOSContextBuilder().buildRecentContextStrings(hits: hits)
+    let knowledge = MemoryOSContextBuilder().buildKnowledgeContextStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-b": "Dependency"])
 
-    #expect(result.contains { $0.contains("User considered option A.") && $0.contains("(updated_at: 2026-05-01T10:00:00Z)") })
-    #expect(result.contains { $0.contains("User moved to option B.") && $0.contains("(updated_at: 2026-07-01T10:00:00Z)") })
-    #expect(result.contains { $0.contains("Option B is current direction.") && $0.contains("(updated_at: 2026-07-02T10:00:00Z)") })
-    #expect(result.contains { $0.contains("Option B") && $0.contains("(updated_at: 2026-07-03T10:00:00Z)") })
-    #expect(result.contains { $0.contains("Option B") && $0.contains("Dependency") && $0.contains("(updated_at: 2026-07-04T10:00:00Z)") })
+    #expect(recent.contains { $0.contains("User considered option A.") && $0.contains("(updated_at: 2026-05-01T10:00:00Z)") })
+    #expect(recent.contains { $0.contains("User moved to option B.") && $0.contains("(updated_at: 2026-07-01T10:00:00Z)") })
+    #expect(knowledge.contains { $0.contains("Option B is current direction.") && $0.contains("(updated_at: 2026-07-02T10:00:00Z)") })
+    #expect(knowledge.contains { $0.contains("Option B") && $0.contains("(updated_at: 2026-07-03T10:00:00Z)") })
+    #expect(knowledge.contains { $0.contains("Option B") && $0.contains("Dependency") && $0.contains("(updated_at: 2026-07-04T10:00:00Z)") })
 }
 
 @Test func buildFlatStringsFiltersSelfReferencingRelations() throws {
@@ -91,7 +92,7 @@ import ConnorGraphStore
         ]
     ]
 
-    let result = MemoryOSContextBuilder().buildFlatStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-b": "信息系统"])
+    let result = MemoryOSContextBuilder().buildKnowledgeContextStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-b": "信息系统"])
 
     #expect(result.contains { $0.contains("has part") && $0.contains("信息系统") })
     #expect(!result.contains { $0.contains("subclass of") && $0.components(separatedBy: "社会技术系统").count > 2 })
@@ -108,7 +109,7 @@ import ConnorGraphStore
         ]
     ]
 
-    let result = MemoryOSContextBuilder().buildFlatStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-d": "模型"])
+    let result = MemoryOSContextBuilder().buildKnowledgeContextStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-d": "模型"])
 
     #expect(!result.contains { $0.contains("unknown") })
     #expect(result.contains { $0.contains("relates to") && $0.contains("模型") })
