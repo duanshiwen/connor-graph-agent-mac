@@ -1415,6 +1415,7 @@ struct AIConnectionSetupView: View {
                         Text("自定义连接")
                             .font(SettingsListTypography.header)
                     }
+
                     aiConnectionSettingsRow(title: "服务商") {
                         Picker("服务商", selection: $selectedProviderPresetID) {
                             ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
@@ -1454,11 +1455,16 @@ struct AIConnectionSetupView: View {
                     }
 
                     if selectedProviderPresetID == "custom" && customProtocol == .openAICompatible {
-                        aiConnectionSettingsRow(title: "模型目录") {
-                            Toggle("请求 Models 列表", isOn: $shouldFetchModelsList)
-                                .toggleStyle(.switch)
+                        aiConnectionSettingsRow(title: "模型目录", help: "开启后会自动请求兼容接口的 /models 获取远程模型目录；关闭后只使用手动填写的模型列表。") {
+                            HStack(spacing: SettingsListLayout.spaceM) {
+                                Text("请求 Models 列表")
+                                    .font(SettingsListTypography.rowTitleSelected)
+                                Toggle("请求 Models 列表", isOn: $shouldFetchModelsList)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                            }
+                            .frame(minHeight: SettingsListLayout.rowMinHeight, alignment: .leading)
                         }
-                        aiConnectionHelpText("开启后会自动请求兼容接口的 /models 获取远程模型目录；关闭后只使用手动填写的模型列表。")
                     }
                 }
             }
@@ -1499,11 +1505,10 @@ struct AIConnectionSetupView: View {
     }
 
     private func aiConnectionSettingsRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .top, spacing: SettingsListLayout.spaceL) {
+        HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceL) {
             Text(title)
                 .font(SettingsListTypography.header)
-                .frame(width: 104, alignment: .leading)
-                .padding(.top, 8)
+                .frame(width: 112, alignment: .leading)
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
                 content()
                 if let help, !help.isEmpty {
@@ -1512,7 +1517,7 @@ struct AIConnectionSetupView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight, alignment: .leading)
     }
 
     private func aiConnectionFormRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
@@ -1552,7 +1557,7 @@ struct AIConnectionSetupView: View {
 
     private func aiConnectionHelpText(_ text: String) -> some View {
         Text(text)
-            .font(SettingsListTypography.rowTitle)
+            .font(SettingsListTypography.rowSubtitle)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
