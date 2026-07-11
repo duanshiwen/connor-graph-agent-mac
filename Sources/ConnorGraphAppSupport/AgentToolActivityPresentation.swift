@@ -25,6 +25,7 @@ public enum AgentToolSemanticKind: String, Codable, Sendable, Equatable {
     case python
     case node
     case browser
+    case calendar
     case mcp
     case unknown
 }
