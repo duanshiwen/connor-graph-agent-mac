@@ -262,6 +262,7 @@ public struct CalendarReadTool: AgentTool {
 
 public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
+    public let evidenceRegistry: CalendarDetailReadEvidenceRegistry?
     public var name: String { "calendar_write" }
     public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. For create, first call calendar_read list_calendars and copy an exact writable calendar id; 'default', display names, and example IDs are not valid substitutes. Read the event first before update/delete and never overwrite a version conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
@@ -307,7 +308,24 @@ public struct CalendarWriteTool: AgentTool {
         ], required: ["operation"])
     }
 
-    public init(runtime: any AgentCalendarRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentCalendarRuntime, evidenceRegistry: CalendarDetailReadEvidenceRegistry? = nil) {
+        self.runtime = runtime
+        self.evidenceRegistry = evidenceRegistry
+    }
+
+    public func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
+        let arguments = try AgentToolArguments(json: call.argumentsJSON)
+        guard let operation = arguments.string("operation") else { return }
+        guard operation == "update_event" || operation == "delete_event" else { return }
+        guard let eventID = arguments.string("eventID"), let expectedVersion = arguments.string("expectedVersion") else { return }
+        guard let evidenceRegistry,
+              let evidence = await evidenceRegistry.evidence(runID: context.runID, sessionID: context.sessionID, eventID: eventID) else {
+            throw AgentToolError.invalidArguments("Calendar \(operation) requires a successful calendar_read get_event in this run and session. Search or list events, copy an exact eventID, then read it before requesting a mutation.")
+        }
+        guard evidence.expectedVersion == expectedVersion else {
+            throw AgentToolError.invalidArguments("expectedVersion does not match the latest successful detail read for eventID '\(eventID)'. Copy eventID and expectedVersion exactly from calendar_read get_event.")
+        }
+    }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard context.approvedCapabilities.contains(.mutateCalendar) else { throw AgentToolError.permissionDenied("Calendar write requires trusted mutateCalendar approval") }
@@ -452,9 +470,9 @@ private enum CalendarEventCandidateTextRenderer {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerNativeCalendarTools(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+    mutating func registerNativeCalendarTools(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil, evidenceRegistry: CalendarDetailReadEvidenceRegistry = .init()) {
         register(CalendarSearchEventsTool(runtime: runtime, recorder: recorder))
-        register(CalendarReadTool(runtime: runtime, recorder: recorder))
-        register(CalendarWriteTool(runtime: runtime))
+        register(CalendarReadTool(runtime: runtime, recorder: recorder, evidenceRegistry: evidenceRegistry))
+        register(CalendarWriteTool(runtime: runtime, evidenceRegistry: evidenceRegistry))
     }
 }

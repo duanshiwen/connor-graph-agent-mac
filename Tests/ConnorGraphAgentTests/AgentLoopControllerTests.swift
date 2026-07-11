@@ -732,6 +732,24 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(errorToolMessage.content.contains("Invalid arguments"))
 }
 
+@Test func agentLoopRejectsUnverifiedCalendarMutationBeforeApproval() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-unverified-delete", name: "calendar_write", argumentsJSON: #"{"operation":"delete_event","eventID":"guessed-event","expectedVersion":"1"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: "Stopped safely.", usage: .init(promptTokens: 1, completionTokens: 1))
+    ])
+    let runtime = InMemoryAgentCalendarRuntime()
+    var registry = AgentToolRegistry()
+    registry.registerNativeCalendarTools(runtime: runtime)
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: .init(permissionMode: .askToWrite))
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(runID: "run-unverified-calendar", sessionID: "session-unverified-calendar", userMessage: "Delete it", permissionMode: .askToWrite)) { events.append(event) }
+
+    #expect(events.map(\.kind).contains(.toolFailed))
+    #expect(!events.map(\.kind).contains(.permissionRequested))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopRecoversCalendarWriteAfterUnknownCalendarID() async throws {
     let exactID = "calendar-exact-id"
     let provider = ScriptedModelProvider(responses: [

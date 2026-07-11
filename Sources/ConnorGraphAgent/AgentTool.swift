@@ -309,12 +309,15 @@ public protocol AgentTool: Sendable {
     var inputSchema: AgentToolInputSchema { get }
     var inputExamples: [[String: SendableJSONValue]] { get }
 
+    func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult
 }
 
 public extension AgentTool {
     var inputExamples: [[String: SendableJSONValue]] { [] }
+
+    func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {}
 
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         call.argumentsJSON
@@ -383,6 +386,7 @@ public struct AgentToolRegistry: Sendable {
         guard let tool = tools[call.name] else {
             throw AgentToolError.unknownTool(call.name)
         }
+        try await tool.preflight(call: call, context: context)
         if !context.approvedCapabilities.contains(tool.permission) {
             let approvalPayloadJSON = await tool.approvalPayloadJSON(for: call, context: context)
             let decision = await context.policyEngine.evaluate(
