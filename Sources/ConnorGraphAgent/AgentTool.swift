@@ -68,11 +68,13 @@ public struct AgentToolDefinition: Sendable, Equatable {
     public var name: String
     public var description: String
     public var inputSchema: AgentToolInputSchema
+    public var inputExamples: [[String: SendableJSONValue]]
 
-    public init(name: String, description: String, inputSchema: AgentToolInputSchema) {
+    public init(name: String, description: String, inputSchema: AgentToolInputSchema, inputExamples: [[String: SendableJSONValue]] = []) {
         self.name = name
         self.description = description
         self.inputSchema = inputSchema
+        self.inputExamples = inputExamples
     }
 }
 
@@ -114,6 +116,18 @@ public struct AgentToolArguments: Sendable, Equatable {
 }
 
 public extension SendableJSONValue {
+    var jsonCompatibleObject: Any {
+        switch self {
+        case .string(let value): value
+        case .int(let value): value
+        case .double(let value): value
+        case .bool(let value): value
+        case .object(let value): value.mapValues(\.jsonCompatibleObject)
+        case .array(let value): value.map(\.jsonCompatibleObject)
+        case .null: NSNull()
+        }
+    }
+
     var objectValue: [String: SendableJSONValue]? {
         if case .object(let value) = self { return value }
         return nil
@@ -293,12 +307,15 @@ public protocol AgentTool: Sendable {
     var description: String { get }
     var permission: AgentPermissionCapability { get }
     var inputSchema: AgentToolInputSchema { get }
+    var inputExamples: [[String: SendableJSONValue]] { get }
 
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult
 }
 
 public extension AgentTool {
+    var inputExamples: [[String: SendableJSONValue]] { [] }
+
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         call.argumentsJSON
     }
@@ -351,7 +368,7 @@ public struct AgentToolRegistry: Sendable {
 
     public func definition(named name: String) -> AgentToolDefinition? {
         guard let tool = tools[name] else { return nil }
-        return AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema)
+        return AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema, inputExamples: tool.inputExamples)
     }
 
     public func permission(named name: String) -> AgentPermissionCapability? {

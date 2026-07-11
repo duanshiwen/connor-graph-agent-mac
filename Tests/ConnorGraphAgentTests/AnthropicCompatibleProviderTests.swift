@@ -213,6 +213,33 @@ private enum AnthropicFixtures {
     #expect(requestTools.first?["input_schema"] != nil)
 }
 
+@Test func anthropicToolDefinitionsCanSendStrictAndInputExamples() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-test",
+            featureOptions: AnthropicCompatibleFeatureOptions(strictToolUseEnabled: true)
+        ),
+        httpClient: client
+    )
+    let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+    let definition = AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema, inputExamples: tool.inputExamples)
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Create an event")], tools: [definition]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    let requestTool = try #require(tools.first)
+    #expect(requestTool["strict"] as? Bool == true)
+    let examples = try #require(requestTool["input_examples"] as? [[String: Any]])
+    #expect(examples.count == 3)
+    #expect(examples.first?["operation"] as? String == "create_event")
+    #expect(examples.first?["calendarID"] as? String == "calendar-work")
+}
+
 @Test func anthropicToolRequestOmitsDefaultToolChoiceAuto() async throws {
     let client = AnthropicCapturingHTTPClient()
     let provider = AnthropicCompatibleProvider(
