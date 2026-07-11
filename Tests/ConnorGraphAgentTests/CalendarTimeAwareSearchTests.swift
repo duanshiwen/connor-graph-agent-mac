@@ -35,8 +35,8 @@ struct CalendarTimeAwareSearchTests {
 
     @Test func calendarReadToolSchemaDoesNotExposeInternalSearchOperation() {
         let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime())
-        guard case .object(let properties, _) = tool.inputSchema else {
-            Issue.record("calendar_read schema should be an object")
+        guard case .closedObject(let properties, _) = tool.inputSchema else {
+            Issue.record("calendar_read schema should be a closed object")
             return
         }
         #expect(!tool.description.contains("search_events"))
