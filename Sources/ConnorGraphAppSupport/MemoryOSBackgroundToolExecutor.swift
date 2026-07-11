@@ -174,6 +174,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let anchor = try facade.ensureCurrentUserAnchor(now: now)
             var statementIDs: [String] = []
             var artifactIDs: [String] = []
+            var acceptanceModes: [String] = []
             for (index, factValue) in facts.enumerated() {
                 guard let factObj = factValue as? [String: Any],
                       let statement = factObj["statement"] as? String, !statement.isEmpty,
@@ -181,20 +182,18 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                       let rawRelation = factObj["relation"] as? String, !rawRelation.isEmpty else {
                     throw MemoryOSBackgroundToolExecutionError.invalidArguments("facts[\(index)] must have statement, factType, and relation")
                 }
-                let normalized = rawRelation.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: "-", with: "_")
-                    .replacingOccurrences(of: " ", with: "_")
-                    .uppercased()
-                let predicate = GraphPredicate(rawValue: normalized) ?? .relatedTo
-                let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: factType, predicate: predicate, anchor: anchor, now: now)
+                let predicate = MemoryOSCanonicalizer.canonicalizeGraphPredicate(rawRelation) ?? .relatedTo
+                let normalizedFactType = MemoryOSCanonicalizer.canonicalizeL2FactType(factType) ?? factType
+                let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: normalizedFactType, predicate: predicate, anchor: anchor, now: now)
                 let summary = try facade.projectAndRecordLLMArtifact(rawContent: artifactJSON, modelID: "memory_os_update_current_user_profile", processingRunID: context.runID, artifactType: "memory_os_current_user_fact_update", schemaName: "MemoryOSL1UnifiedProjectionOutput", now: now)
                 artifactIDs.append(summary.artifactID)
                 guard summary.accepted else {
                     throw MemoryOSBackgroundToolExecutionError.invalidArguments("Current user fact rejected: \(summary.issues.map(\.message).joined(separator: "; "))")
                 }
                 statementIDs.append(contentsOf: try facade.l2StatementIDs(sourceArtifactID: summary.artifactID))
+                acceptanceModes.append(summary.acceptanceMode)
             }
-            let payload: [String: Any] = ["accepted": true, "statementCount": statementIDs.count, "artifactCount": artifactIDs.count]
+            let payload: [String: Any] = ["accepted": true, "statementCount": statementIDs.count, "artifactCount": artifactIDs.count, "acceptanceModes": acceptanceModes]
             let resultData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
             return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: resultJSON, contentText: "Updated current_user profile with \(statementIDs.count) statement(s).", citations: statementIDs + artifactIDs)

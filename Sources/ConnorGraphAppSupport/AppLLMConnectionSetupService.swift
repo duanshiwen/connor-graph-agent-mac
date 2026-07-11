@@ -19,6 +19,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var makeDefault: Bool
     public var explicitVisionSupport: Bool?
+    public var shouldFetchModelsList: Bool
 
     public init(
         id: String? = nil,
@@ -33,7 +34,8 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         makeDefault: Bool = false,
-        explicitVisionSupport: Bool? = nil
+        explicitVisionSupport: Bool? = nil,
+        shouldFetchModelsList: Bool = true
     ) {
         self.id = id
         self.kind = kind
@@ -48,6 +50,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.openAIAPIKeyHeaderKind = openAIAPIKeyHeaderKind
         self.makeDefault = makeDefault
         self.explicitVisionSupport = explicitVisionSupport
+        self.shouldFetchModelsList = shouldFetchModelsList
     }
 }
 
@@ -186,6 +189,7 @@ public struct AppLLMConnectionSetupService: Sendable {
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
+            shouldFetchModelsList: input.shouldFetchModelsList,
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
             explicitVisionSupport: input.explicitVisionSupport
         )
@@ -342,9 +346,10 @@ public extension AppLLMSettingsRepository {
         } else {
             connections.append(connection)
         }
+        let shouldBecomeDefault = makeDefault || current.defaultConnectionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !current.connections.contains(where: { $0.id == current.defaultConnectionID })
         let settings = AppLLMSettings(
             connections: connections,
-            defaultConnectionID: makeDefault ? connection.id : current.defaultConnectionID
+            defaultConnectionID: shouldBecomeDefault ? connection.id : current.defaultConnectionID
         )
         try save(settings: settings, apiKey: nil)
         if let apiKey, !apiKey.isEmpty {

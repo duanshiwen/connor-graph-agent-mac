@@ -40,7 +40,7 @@ private final class HealthCheckCapturedAnthropicConfig: @unchecked Sendable {
     let result = await checker.testConnection()
 
     #expect(result.status == .notConfigured)
-    #expect(result.message.contains("API Key"))
+    #expect(result.message.contains("尚未配置 AI 连接"))
 }
 
 @Test func healthCheckerReportsMissingOpenAICompatibleConfig() async throws {

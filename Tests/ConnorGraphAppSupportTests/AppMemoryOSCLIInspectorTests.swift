@@ -8,6 +8,151 @@ import ConnorGraphAppSupport
 
 @Suite("Memory OS CLI Inspector Tests")
 struct AppMemoryOSCLIInspectorTests {
+    @Test func l2StatementUpdateRequestDecodesStringShorthandArray() throws {
+        let json = #"""
+        {
+          "entities": [
+            {
+              "name": "段福强",
+              "statements": [
+                "段福强的英文名是 Oisin。",
+                {
+                  "text": "段福强是段诗闻的弟弟。",
+                  "relation": "RELATED_TO",
+                  "factType": "relationship"
+                }
+              ]
+            }
+          ]
+        }
+        """#.data(using: .utf8)!
+
+        let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: json)
+
+        #expect(request.entities.count == 1)
+        #expect(request.entities[0].statements.count == 2)
+        #expect(request.entities[0].statements[0].text == "段福强的英文名是 Oisin。")
+        #expect(request.entities[0].statements[0].relation == nil)
+        #expect(request.entities[0].statements[0].factType == nil)
+        #expect(request.entities[0].statements[1].text == "段福强是段诗闻的弟弟。")
+        #expect(request.entities[0].statements[1].relation == "RELATED_TO")
+        #expect(request.entities[0].statements[1].factType == "relationship")
+    }
+
+    @Test func l4RelationInputNormalizesFamilyPredicateShorthand() throws {
+        let json = #"""
+        {
+          "subjectName": "段福强",
+          "predicate": "FAMILY_OF",
+          "objectName": "段诗闻",
+          "text": "段福强 is 段诗闻's younger brother"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.subjectName == "段福强")
+        #expect(relation.objectName == "段诗闻")
+        #expect(relation.predicate == .relatedTo)
+        #expect(relation.metadata["alias_predicate"] == "FAMILY_OF")
+        #expect(relation.metadata["semantic_family"] == "kinship")
+        #expect(relation.metadata["kinship_role"] == "family")
+    }
+
+    @Test func l4RelationInputPreservesFineGrainedKinshipMetadata() throws {
+        let json = #"""
+        {
+          "subjectName": "段福强",
+          "predicate": "BROTHER_OF",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .relatedTo)
+        #expect(relation.metadata["semantic_family"] == "kinship")
+        #expect(relation.metadata["kinship_role"] == "sibling")
+        #expect(relation.metadata["kinship_subrole"] == "brother")
+    }
+
+    @Test func l4RelationInputNormalizesCreatedByAliases() throws {
+        let json = #"""
+        {
+          "subjectName": "康纳同学",
+          "predicate": "BUILT_BY",
+          "objectName": "段诗闻",
+          "text": "康纳同学 was built by 段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .createdBy)
+        #expect(relation.metadata["semantic_family"] == "creation")
+    }
+
+    @Test func l4RelationInputNormalizesAuthorshipAliasesMorePrecisely() throws {
+        let json = #"""
+        {
+          "subjectName": "Graph Design Notes",
+          "predicate": "WRITTEN_BY",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .authoredBy)
+        #expect(relation.metadata["semantic_family"] == "authorship")
+        #expect(relation.metadata["normalized_direction"] == "same")
+    }
+
+    @Test func l4RelationInputNormalizesSeparatorVariants() throws {
+        let json = #"""
+        {
+          "subjectName": "康纳同学",
+          "predicate": "created by",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .createdBy)
+        #expect(relation.metadata["normalization_strategy"] == "separator_variant")
+    }
+
+    @Test func l4RelationInputNormalizesInverseContributionAliases() throws {
+        let json = #"""
+        {
+          "subjectName": "段诗闻",
+          "predicate": "WORKING_ON",
+          "objectName": "康纳同学"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .worksOn)
+        #expect(relation.metadata["semantic_family"] == "work")
+    }
+
+    @Test func l4RelationInputNormalizesDevelopmentAliasesMorePrecisely() throws {
+        let json = #"""
+        {
+          "subjectName": "Connor Graph Agent",
+          "predicate": "IMPLEMENTED_BY",
+          "objectName": "段诗闻"
+        }
+        """#.data(using: .utf8)!
+
+        let relation = try JSONDecoder().decode(MemoryOSL4RelationInput.self, from: json)
+
+        #expect(relation.predicate == .developedBy)
+        #expect(relation.metadata["semantic_family"] == "development")
+    }
+
     @Test func memoryOSCLIInspectorReportsEmptyStoreStatus() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let inspector = AppMemoryOSCLIInspector(store: store)
@@ -23,6 +168,10 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(status.layers.l3Beliefs == 0)
         #expect(status.layers.l4Entities == 0)
         #expect(status.queue.pending == 0)
+        #expect(status.observability.acceptedProjectionCount == 0)
+        #expect(status.observability.rejectedProjectionCount == 0)
+        #expect(status.observability.degradedAcceptedProjectionCount == 0)
+        #expect(status.observability.droppedRecordCount == 0)
     }
 
     @Test func memoryOSCLIInspectorReportsLayerCounts() throws {
@@ -336,6 +485,8 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(transcript.contains("Assistant response"))
         #expect(transcript.contains("memory_os_search"))
         #expect(transcript.contains("Projection: accepted=true"))
+        #expect(transcript.contains("mode=strict_accepted"))
+        #expect(transcript.contains("dropped=0"))
         #expect(transcript.contains("swift run connor memory run memory-run:queue-1 messages"))
     }
 
@@ -381,6 +532,31 @@ struct AppMemoryOSCLIInspectorTests {
 
         #expect(output.contains("\"schema\""))
         #expect(output.contains("\"layers\""))
+        #expect(output.contains("\"observability\""))
+    }
+
+    @Test func memoryOSCLIInspectorStatusReportsGracefulAcceptanceMetrics() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let facade = AppMemoryOSFacade(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let now = Date(timeIntervalSince1970: 61_000)
+        let raw = try degradedL1UnifiedProjectionJSON()
+
+        let summary = try facade.projectAndRecordLLMArtifact(
+            rawContent: raw,
+            modelID: "test-model",
+            artifactType: "memory_os_l1_unified_projection",
+            schemaName: "MemoryOSL1UnifiedProjectionOutput",
+            now: now
+        )
+        let status = try inspector.status(now: now)
+
+        #expect(summary.accepted)
+        #expect(summary.acceptanceModeKind == .degradedAccepted)
+        #expect(summary.droppedRecordCount == 1)
+        #expect(status.observability.acceptedProjectionCount == 1)
+        #expect(status.observability.degradedAcceptedProjectionCount == 1)
+        #expect(status.observability.droppedRecordCount == 1)
     }
 
     @Test func memoryOSCLIRouterRoutesLayerListCommands() throws {
@@ -590,6 +766,39 @@ private func memoryOSCLIDebugEncodedL1Artifact() throws -> String {
         ],
         evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "Connor Memory OS CLI")],
         knowledgeCandidates: [],
+        conceptEntities: [],
+        conceptRelations: [],
+        promotionDecisions: []
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    return String(data: try encoder.encode(output), encoding: .utf8)!
+}
+
+private func degradedL1UnifiedProjectionJSON() throws -> String {
+    let output = MemoryOSL1UnifiedProjectionOutput(
+        operationalEntities: [
+            GraphStructuredExtractedEntity(localID: "project-1", name: "Connor Memory OS", entityKind: .workObject, scope: .project, confidence: 0.93, evidenceSpanIDs: ["span-1"])
+        ],
+        operationalStatements: [
+            GraphStructuredExtractedStatement(explicitID: "stmt-good-1", subjectLocalID: "project-1", predicate: .relatedTo, objectLocalID: "project-1", statementText: "Connor Memory OS supports graceful acceptance.", confidence: 0.92, evidenceSpanIDs: ["span-1"])
+        ],
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "graceful acceptance")],
+        knowledgeCandidates: [
+            MemoryOSKnowledgeCandidate(
+                id: "knowledge-noise-1",
+                title: "Memory layer projection discipline",
+                claim: "This candidate should be dropped gracefully.",
+                category: "heuristic",
+                knowledgeType: "heuristic",
+                domain: "software-engineering",
+                signalAssessment: MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: false, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["Not reusable"]),
+                confidence: 0.72,
+                evidenceStatementIDs: ["stmt-good-1"],
+                evidenceSpanIDs: ["span-1"],
+                relatedEntityNames: ["Connor Memory OS"]
+            )
+        ],
         conceptEntities: [],
         conceptRelations: [],
         promotionDecisions: []

@@ -80,12 +80,35 @@ struct LLMConnectionSetupTests {
         #expect(result.connection.id == "provider-1")
         let loaded = try repository.loadSettings()
         let savedConnection = try #require(loaded.connections.first { $0.id == "provider-1" })
-        #expect(loaded.defaultConnectionID != "provider-1")
+        #expect(loaded.defaultConnectionID == "provider-1")
         #expect(savedConnection.connectionKind == .openAICompatible)
         #expect(savedConnection.hasAPIKey)
         #expect(store.values.values.contains(where: { $0.contains("Provider 1") }))
         #expect(!store.values.values.contains(where: { $0.contains("secret") }))
         #expect(try repository.apiKey(for: "provider-1") == "secret")
+    }
+
+    @Test func setupConnectionMakesFirstCreatedConnectionDefaultWithoutExplicitMakeDefault() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") }
+        )
+
+        _ = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "first-provider",
+            kind: .openAICompatible,
+            name: "First Provider",
+            baseURLString: "https://api.example.com/v1",
+            model: "gpt-test",
+            apiKey: "secret"
+        ))
+
+        let loaded = try repository.loadSettings()
+        #expect(loaded.defaultConnectionID == "first-provider")
+        #expect(loaded.defaultConnection?.id == "first-provider")
     }
 
     @Test func openAICompatibleUsesValidationModelWithoutPersistingItAsCatalogModel() async throws {
@@ -495,7 +518,7 @@ struct LLMConnectionSetupTests {
         let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: MemoryCredentialStore())
 
         let settings = try repository.loadSettings()
-        #expect(settings.defaultConnection.connectionKind == .openAICompatible)
+        #expect(settings.defaultConnection?.connectionKind == .openAICompatible)
     }
 
     @Test func chatGPTCodexOAuthURLMatchesCraftOSSConfiguration() throws {

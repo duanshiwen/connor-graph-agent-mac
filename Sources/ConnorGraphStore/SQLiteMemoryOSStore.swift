@@ -257,10 +257,40 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     public func enqueue(_ item: MemoryOSQueueItem) throws {
         try execute("""
-        INSERT OR REPLACE INTO memory_l1_processing_queue
+        INSERT INTO memory_l1_processing_queue
         (id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message)
         VALUES (\(quote(item.id)), \(quote(item.kind)), \(quote(item.status.rawValue)), \(item.priority), \(quote(item.payloadJSON)), \(item.attemptCount), \(item.maxAttempts), \(quote(iso(item.nextRunAt))), \(quote(item.lockedAt.map(iso))), \(quote(item.lockedBy)), \(quote(item.leaseExpiresAt.map(iso))), \(quote(item.idempotencyKey)), \(quote(item.payloadHash)), \(quote(iso(item.createdAt))), \(quote(iso(item.updatedAt))), \(quote(item.errorCode)), \(quote(item.errorMessage)))
+        ON CONFLICT(id) DO UPDATE SET
+            kind = excluded.kind,
+            status = excluded.status,
+            priority = excluded.priority,
+            payload_json = excluded.payload_json,
+            attempt_count = excluded.attempt_count,
+            max_attempts = excluded.max_attempts,
+            next_run_at = excluded.next_run_at,
+            locked_at = excluded.locked_at,
+            locked_by = excluded.locked_by,
+            lease_expires_at = excluded.lease_expires_at,
+            idempotency_key = excluded.idempotency_key,
+            payload_hash = excluded.payload_hash,
+            updated_at = excluded.updated_at,
+            error_code = excluded.error_code,
+            error_message = excluded.error_message
         """)
+    }
+
+    public func enqueueIfAbsent(_ item: MemoryOSQueueItem) throws -> MemoryOSQueueEnqueueResult {
+        if let existing = try queueItem(idempotencyKey: item.idempotencyKey) {
+            return .existing(existing)
+        }
+        if let existing = try queueItem(id: item.id) {
+            return .existing(existing)
+        }
+        try enqueue(item)
+        guard let inserted = try queueItem(id: item.id) else {
+            throw SQLiteMemoryOSStoreError.executeFailed("Inserted queue item could not be loaded: \(item.id)")
+        }
+        return .inserted(inserted)
     }
 
     public func saveQueueAttempt(queueItemID: String, attemptNumber: Int, status: MemoryOSQueueStatus, startedAt: Date, finishedAt: Date? = nil, errorCode: String? = nil, errorMessage: String? = nil, metadata: [String: String] = [:]) throws {
@@ -283,6 +313,13 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try query(sql: """
         SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
         FROM memory_l1_processing_queue WHERE id = \(quote(id)) LIMIT 1
+        """).map(decodeQueueItem).first
+    }
+
+    public func queueItem(idempotencyKey: String) throws -> MemoryOSQueueItem? {
+        try query(sql: """
+        SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
+        FROM memory_l1_processing_queue WHERE idempotency_key = \(quote(idempotencyKey)) LIMIT 1
         """).map(decodeQueueItem).first
     }
 
@@ -501,6 +538,20 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         (id, metric_name, metric_value, dimensions_json, created_at)
         VALUES (\(quote(metric.id)), \(quote(metric.name)), \(metric.value), \(quote(json(metric.dimensions))), \(quote(iso(metric.createdAt))))
         """)
+    }
+
+    public func recentMetricSums(names: [String]) throws -> [String: Double] {
+        guard !names.isEmpty else { return [:] }
+        let nameList = names.map(quote).joined(separator: ", ")
+        return try query(sql: """
+        SELECT metric_name, COALESCE(SUM(metric_value), 0)
+        FROM memory_processing_metrics
+        WHERE metric_name IN (\(nameList))
+        GROUP BY metric_name
+        """).reduce(into: [:]) { partial, row in
+            guard row.count >= 2 else { return }
+            partial[row[0]] = Double(row[1]) ?? 0
+        }
     }
 
     public func save(backgroundRun run: MemoryOSBackgroundRunRecord) throws {
