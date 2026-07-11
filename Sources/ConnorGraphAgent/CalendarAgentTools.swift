@@ -173,7 +173,15 @@ public struct CalendarReadTool: AgentTool {
         switch operation {
         case "list_calendars":
             let calendars = try await runtime.listCalendars(runID: context.runID, sessionID: context.sessionID)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(calendars.count) calendars", contentJSON: try ContactJSON.encode(calendars))
+            let writable = calendars.filter { !$0.isReadOnly && $0.capabilities.canCreateEvents }
+            let summary: String
+            if writable.isEmpty {
+                summary = "Listed \(calendars.count) calendars. No writable calendars are available for event creation."
+            } else {
+                let choices = writable.map { "\($0.displayName) [exact id: \($0.id.rawValue)]" }.joined(separator: "; ")
+                summary = "Listed \(calendars.count) calendars; \(writable.count) writable for event creation: \(choices)"
+            }
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summary, contentJSON: try ContactJSON.encode(calendars))
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })

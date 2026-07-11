@@ -26,6 +26,27 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("overlapSeconds") == true)
     }
 
+    @Test func calendarReadToolSummarizesExactWritableCalendarIDs() async throws {
+        let writable = CalendarCollection(id: .init(rawValue: "calendar-exact-write-id"), accountID: .init(rawValue: "account"), displayName: "Work")
+        let readOnly = CalendarCollection(id: .init(rawValue: "calendar-holidays"), accountID: .init(rawValue: "account"), displayName: "Holidays", isReadOnly: true, capabilities: .init(canCreateEvents: false, canUpdateEvents: false, canDeleteEvents: false, supportsScheduling: false, readOnlyReason: "subscription"))
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(calendars: [writable, readOnly]))
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"list_calendars\"}"), context: Self.context(toolCallID: "call-list-calendars"))
+
+        #expect(result.contentText.contains("1 writable"))
+        #expect(result.contentText.contains("Work"))
+        #expect(result.contentText.contains("calendar-exact-write-id"))
+        #expect(!result.contentText.contains("calendar-holidays"))
+        #expect(result.contentJSON?.contains("calendar-holidays") == true)
+    }
+
+    @Test func calendarReadToolReportsWhenNoWritableCalendarExists() async throws {
+        let readOnly = CalendarCollection(id: .init(rawValue: "calendar-holidays"), accountID: .init(rawValue: "account"), displayName: "Holidays", isReadOnly: true)
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(calendars: [readOnly]))
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"list_calendars\"}"), context: Self.context(toolCallID: "call-list-read-only-calendars"))
+
+        #expect(result.contentText.contains("No writable calendars"))
+    }
+
     @Test func calendarReadToolListsEventsFromRuntime() async throws {
         let runtime = InMemoryAgentCalendarRuntime(events: [Self.sampleEvent])
         let tool = CalendarReadTool(runtime: runtime)
