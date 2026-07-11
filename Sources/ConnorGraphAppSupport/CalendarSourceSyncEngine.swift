@@ -151,11 +151,8 @@ public struct CalendarSourceSyncEngine: Sendable {
 
     public func sync(request: CalendarSourceSyncRequest) async throws -> CalendarSourceSyncResult {
         let attemptedAt = Date()
-        guard request.account.configuration.syncMode == .readOnly else {
-            let error = CalendarSourceSyncError.writeNotSupported(request.account.sourceKind)
-            try await recordFailureIfNeeded(account: request.account, code: "writeNotSupported", message: "Calendar source \(request.account.sourceKind.rawValue) is not configured for read-only sync", error: error, attemptedAt: attemptedAt)
-            throw error
-        }
+        // Pull synchronization is shared by read-only and bidirectional accounts.
+        // All pushes remain isolated behind CalendarMutationService.
         guard let connector = connectors[request.account.sourceKind] else {
             let error = CalendarSourceSyncError.unsupportedSourceKind(request.account.sourceKind)
             try await recordFailureIfNeeded(account: request.account, code: "unsupportedSourceKind", message: "No calendar connector is registered for \(request.account.sourceKind.rawValue)", error: error, attemptedAt: attemptedAt)
