@@ -130,10 +130,48 @@ public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
     public var predicate: MemoryOSL4RelationPredicate
     public var objectName: String
     public var text: String?
+    public var metadata: [String: String]
 
-    public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String? = nil) {
-        self.subjectName = subjectName; self.predicate = predicate; self.objectName = objectName; self.text = text
+    public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String? = nil, metadata: [String: String] = [:]) {
+        self.subjectName = subjectName; self.predicate = predicate; self.objectName = objectName; self.text = text; self.metadata = metadata
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case subjectName
+        case predicate
+        case objectName
+        case text
+        case metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let subjectName = try container.decode(String.self, forKey: .subjectName)
+        let predicateRaw = try container.decode(String.self, forKey: .predicate)
+        let objectName = try container.decode(String.self, forKey: .objectName)
+        let text = try container.decodeIfPresent(String.self, forKey: .text)
+        let inputMetadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        let normalized = MemoryOSCanonicalizer.canonicalizeL4Predicate(predicateRaw)
+        self.init(
+            subjectName: subjectName,
+            predicate: normalized.value.predicate,
+            objectName: objectName,
+            text: text,
+            metadata: inputMetadata.merging(normalized.value.metadata) { current, _ in current }
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(subjectName, forKey: .subjectName)
+        try container.encode(predicate.rawValue, forKey: .predicate)
+        try container.encode(objectName, forKey: .objectName)
+        try container.encodeIfPresent(text, forKey: .text)
+        if !metadata.isEmpty {
+            try container.encode(metadata, forKey: .metadata)
+        }
+    }
+
 }
 
 public struct MemoryOSL4WriteResult: Codable, Sendable, Equatable {
@@ -502,14 +540,25 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 eventType: "memory_os.projection.rejected",
                 actor: "memory-os",
                 subjectID: envelope.id,
-                payload: ["issue_count": String(build.validation.issues.count), "model_id": modelID],
+                payload: [
+                    "issue_count": String(build.validation.issues.count),
+                    "model_id": modelID,
+                    "acceptance_mode": build.validation.acceptanceMode,
+                    "repaired_record_count": String(build.validation.repairedRecordCount),
+                    "degraded_record_count": String(build.validation.degradedRecordCount),
+                    "dropped_record_count": String(build.validation.droppedRecordCount)
+                ],
                 createdAt: now
             ))
             try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 0, dimensions: ["model_id": modelID], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.rejected", value: 1, dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.repaired", value: Double(build.validation.repairedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.degraded", value: Double(build.validation.degradedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.dropped", value: Double(build.validation.droppedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
             if let queueItem {
                 _ = try recordQueueFailure(queueItem, errorCode: "projection_validation_failed", errorMessage: build.validation.issues.map(\.message).joined(separator: "; "), now: now)
             }
-            return MemoryOSProjectionRunSummary(artifactID: envelope.id, accepted: false, issues: build.validation.issues)
+            return MemoryOSProjectionRunSummary(artifactID: envelope.id, accepted: false, acceptanceMode: build.validation.acceptanceMode, repairedRecordCount: build.validation.repairedRecordCount, degradedRecordCount: build.validation.degradedRecordCount, droppedRecordCount: build.validation.droppedRecordCount, issues: build.validation.issues)
         }
         try store.saveProjectionBatch(batch)
         if let queueItem {
@@ -524,26 +573,42 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 "statement_count": String(batch.statements.count),
                 "entity_count": String(batch.entities.count),
                 "entity_statement_count": String(batch.entityStatements.count),
-                "belief_count": String(batch.beliefs.count)
+                "belief_count": String(batch.beliefs.count),
+                "acceptance_mode": build.validation.acceptanceMode,
+                "repaired_record_count": String(build.validation.repairedRecordCount),
+                "degraded_record_count": String(build.validation.degradedRecordCount),
+                "dropped_record_count": String(build.validation.droppedRecordCount)
             ],
             createdAt: now
         ))
-        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 1, dimensions: ["model_id": modelID], createdAt: now))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 1, dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+        if build.validation.acceptanceModeKind == .degradedAccepted {
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.degraded_accepted", value: 1, dimensions: ["model_id": modelID], createdAt: now))
+        }
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.repaired", value: Double(build.validation.repairedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.degraded", value: Double(build.validation.degradedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.records.dropped", value: Double(build.validation.droppedRecordCount), dimensions: ["model_id": modelID, "acceptance_mode": build.validation.acceptanceMode], createdAt: now))
         return MemoryOSProjectionRunSummary(
             artifactID: envelope.id,
             accepted: true,
+            acceptanceMode: build.validation.acceptanceMode,
             nodeCount: batch.nodes.count,
             statementCount: batch.statements.count,
             entityCount: batch.entities.count,
             entityStatementCount: batch.entityStatements.count,
-            beliefCount: batch.beliefs.count
+            beliefCount: batch.beliefs.count,
+            repairedRecordCount: build.validation.repairedRecordCount,
+            degradedRecordCount: build.validation.degradedRecordCount,
+            droppedRecordCount: build.validation.droppedRecordCount,
+            issues: build.validation.issues
         )
     }
 
     public func enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
         let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
         let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(from: events, now: now)
-        return try drafts.map { draft in
+        var inserted: [MemoryOSQueueItem] = []
+        for draft in drafts {
             let payload = store.json(draft)
             let item = MemoryOSQueueItem(
                 kind: draft.kind,
@@ -555,9 +620,14 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 createdAt: now,
                 updatedAt: now
             )
-            try store.enqueue(item)
-            return item
+            switch try store.enqueueIfAbsent(item) {
+            case .inserted(let item):
+                inserted.append(item)
+            case .existing:
+                continue
+            }
         }
+        return inserted
     }
 
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) throws -> [MemoryOSProjectionRunSummary] {
@@ -632,6 +702,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     private func deleteL1CaptureEvents(ids: [String]) throws {
         guard !ids.isEmpty else { return }
         let quoted = ids.map { store.quote($0) }.joined(separator: ",")
+        try store.execute("DELETE FROM memory_l1_time_block_events WHERE capture_event_id IN (\(quoted));")
         try store.execute("DELETE FROM memory_l1_capture_events WHERE id IN (\(quoted));")
     }
 
@@ -649,14 +720,16 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
-        try store.query(sql: """
+        let referencedIDs = try captureEventIDsReferencedByActiveL1QueueItems()
+        return try store.query(sql: """
         SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
         FROM memory_l1_capture_events
         WHERE processing_state = 'pending'
         ORDER BY occurred_at ASC
         LIMIT \(limit)
-        """).map { row in
-            MemoryOSCaptureEvent(
+        """).compactMap { row in
+            guard !referencedIDs.contains(row[0]) else { return nil }
+            return MemoryOSCaptureEvent(
                 id: row[0],
                 provenanceObjectID: row[1],
                 eventType: row[2],
@@ -666,6 +739,30 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 metadata: (try? store.decode([String: String].self, row[6])) ?? [:]
             )
         }
+    }
+
+    private func captureEventIDsReferencedByActiveL1QueueItems() throws -> Set<String> {
+        let kinds = MemoryOSBackgroundJobKind.l1ExecutableRawValues.map { store.quote($0) }.joined(separator: ",")
+        let statuses = [
+            MemoryOSQueueStatus.pending,
+            .leased,
+            .processing,
+            .retryScheduled,
+            .succeeded,
+            .deadLetter
+        ].map { store.quote($0.rawValue) }.joined(separator: ",")
+        let payloads = try store.queryStrings(sql: """
+        SELECT payload_json
+        FROM memory_l1_processing_queue
+        WHERE kind IN (\(kinds))
+          AND status IN (\(statuses))
+        """)
+        var ids = Set<String>()
+        for payload in payloads {
+            guard let draft = try? store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, payload) else { continue }
+            ids.formUnion(draft.captureEventIDs)
+        }
+        return ids
     }
 
     private func statements(for ids: [String]) throws -> [MemoryOSStatement] {

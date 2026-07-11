@@ -334,6 +334,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmBaseURLString: String = ""
     @Published var llmModel: String = ""
     @Published var llmSelectedModel: String = ""
+    @Published var llmShouldFetchModelsList: Bool = true
     @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
@@ -344,7 +345,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
-    @Published var showWelcomePlaceholder: Bool = false
+    @Published var showWelcomePlaceholder: Bool = true
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
@@ -537,6 +538,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
+    private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
@@ -2266,7 +2268,8 @@ final class AppViewModel: NSObject, ObservableObject {
         governanceConfig: AppSessionGovernanceConfig = .default,
         productOSRegistry: ProductOSRegistrySnapshot = .default,
         automationConfig: ProductOSAutomationConfig = .default,
-        llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
+        llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
+        llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
     ) {
         self.entities = entities
         self.statements = statements
@@ -2279,6 +2282,7 @@ final class AppViewModel: NSObject, ObservableObject {
         self.automationConfig = automationConfig
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
+        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory
         if let storagePaths {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
@@ -4280,13 +4284,14 @@ final class AppViewModel: NSObject, ObservableObject {
             let connection = settings.defaultConnection
             llmConnectionConfigs = settings.connections
             llmDefaultConnectionID = settings.defaultConnectionID
-            llmConnectionName = connection.name
-            llmProviderMode = connection.providerMode
-            llmBaseURLString = connection.baseURLString
-            llmModel = connection.model
-            llmSelectedModel = connection.effectiveModel
+            llmConnectionName = connection?.name ?? ""
+            llmProviderMode = connection?.providerMode ?? .openAICompatible
+            llmBaseURLString = connection?.baseURLString ?? ""
+            llmModel = connection?.model ?? ""
+            llmSelectedModel = connection?.effectiveModel ?? ""
+            llmShouldFetchModelsList = connection?.shouldFetchModelsList ?? true
             llmThinkingLevel = settings.defaultThinkingLevel
-            llmHasAPIKey = connection.hasAPIKey
+            llmHasAPIKey = connection?.hasAPIKey ?? false
             llmAPIKeyInput = ""
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
@@ -4303,8 +4308,17 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
-        // 有连接配置就不显示欢迎页，不管连接是否可用
-        showWelcomePlaceholder = llmConnectionConfigs.isEmpty
+        do {
+            let settings = try llmSettingsRepository.loadSettings()
+            showWelcomePlaceholder = settings.connections.isEmpty
+        } catch {
+            showWelcomePlaceholder = llmConnectionConfigs.isEmpty
+        }
+    }
+
+    func handleSuccessfulLLMSetup() {
+        loadLLMSettings()
+        showWelcomePlaceholder = false
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
@@ -4343,6 +4357,7 @@ final class AppViewModel: NSObject, ObservableObject {
         llmBaseURLString = connection.baseURLString
         llmModel = connection.model
         llmSelectedModel = connection.effectiveModel
+        llmShouldFetchModelsList = connection.shouldFetchModelsList
         llmHasAPIKey = connection.hasAPIKey
         llmAPIKeyInput = ""
         persistLLMSettings(rebuildRuntime: true)
@@ -4446,12 +4461,11 @@ final class AppViewModel: NSObject, ObservableObject {
     func setupLLMConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
         isAddingLLMConnection = true
         defer { isAddingLLMConnection = false }
-        let service = AppLLMConnectionSetupService(settingsRepository: llmSettingsRepository)
+        let service = llmConnectionSetupServiceFactory(llmSettingsRepository)
         let result = try await service.setupConnection(input)
         loadLLMSettings()
-        if llmConnectionConfigs.count == 1, let firstConnection = llmConnectionConfigs.first {
-            selectDefaultLLMConnection(firstConnection.id)
-        }
+        syncActiveSessionLLMOverride(to: result.connection)
+        updateWelcomeState()
         rebuildNativeSessionManagerForActiveSession()
         await reloadLLMModelConnections()
         llmSettingsMessage = result.message
@@ -4468,7 +4482,8 @@ final class AppViewModel: NSObject, ObservableObject {
         baseURLString: String? = nil,
         model: String? = nil,
         selectedModel: String? = nil,
-        hasAPIKey: Bool
+        hasAPIKey: Bool,
+        shouldFetchModelsList: Bool = true
     ) -> AppLLMConnectionConfig {
         let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
         let defaultBaseURL = providerMode == .openAICompatible ? "https://api.openai.com/v1" : ""
@@ -4482,7 +4497,8 @@ final class AppViewModel: NSObject, ObservableObject {
             baseURLString: baseURLString ?? defaultBaseURL,
             model: normalizedModel,
             selectedModel: normalizedSelectedModel,
-            hasAPIKey: hasAPIKey
+            hasAPIKey: hasAPIKey,
+            shouldFetchModelsList: shouldFetchModelsList
         )
         llmConnectionConfigs.removeAll { $0.id == connection.id }
         llmConnectionConfigs.append(connection)
@@ -4539,7 +4555,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 selectedModel: llmSelectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                hasAPIKey: llmHasAPIKey
+                hasAPIKey: llmHasAPIKey,
+                shouldFetchModelsList: llmShouldFetchModelsList
             )
             if let index = connections.firstIndex(where: { $0.id == targetID }) {
                 connections[index] = updatedConnection
@@ -4552,6 +4569,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
+            updateWelcomeState()
             if rebuildRuntime {
                 let session = activeChatSession
                 fallbackChatSession = session
@@ -4572,6 +4590,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             try llmSettingsRepository.clearAPIKey()
             loadLLMSettings()
+            updateWelcomeState()
             let session = activeChatSession
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
@@ -4644,8 +4663,8 @@ final class AppViewModel: NSObject, ObservableObject {
             sessionStateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
             return existing
         }
-        guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
-        let connection = settings.defaultConnection
+        guard let settings = try? llmSettingsRepository.loadSettings(),
+              let connection = settings.defaultConnection else { return nil }
         let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return nil }
         var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -4695,11 +4714,34 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
-            llmSelectedModel = settings?.defaultConnection.effectiveModel ?? llmSelectedModel
+            llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? ""
             llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-            llmProviderMode = settings?.defaultConnection.providerMode ?? llmProviderMode
-            llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
+            llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
+            llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
         }
+    }
+
+    private func syncActiveSessionLLMOverride(to connection: AppLLMConnectionConfig) {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let settings = try? llmSettingsRepository.loadSettings()
+        let thinkingLevel = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride?.thinkingLevel
+            ?? settings?.defaultThinkingLevel.rawValue
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+            ?? (try? chatSessionRepository?.loadSessionState(sessionID: sessionID))
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.llmOverride = SessionLLMOverride(
+            providerMode: connection.providerMode.rawValue,
+            model: connection.effectiveModel,
+            baseURLString: nil,
+            connectionID: connection.id,
+            thinkingLevel: thinkingLevel
+        )
+        state.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        llmProviderMode = connection.providerMode
+        llmSelectedModel = connection.effectiveModel
+        llmDefaultConnectionID = connection.id
     }
 
     var sessionHasLLMOverride: Bool {
@@ -4718,10 +4760,10 @@ final class AppViewModel: NSObject, ObservableObject {
 
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
-        llmSelectedModel = settings?.defaultConnection.effectiveModel ?? llmSelectedModel
+        llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? ""
         llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-        llmProviderMode = settings?.defaultConnection.providerMode ?? llmProviderMode
-        llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
+        llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
+        llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
 
         rebuildNativeSessionManagerForActiveSession()
         Task { await reloadLLMModelConnections() }

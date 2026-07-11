@@ -62,11 +62,7 @@ public struct MemoryOSL2UpdateEntitiesTool: AgentTool {
             "type": .string(description: "Entity type such as entity, person_object, work_object, life_object, event, place, artifact, document, concept, metric, or time_expression. Defaults to entity if omitted."),
             "aliases": .string(description: "Optional aliases separated by comma, Chinese comma, dunhao, semicolon, or newline."),
             "summary": .string(description: "Optional concise summary."),
-            "statements": .array(items: .object(properties: [
-                "text": .string(description: "Complete natural-language L2 statement. Preserve important original wording and negation."),
-                "relation": .string(description: "Optional GraphPredicate raw value. Defaults to RELATED_TO. Lowercase snake_case is normalized, e.g. related_to -> RELATED_TO; invalid values are rejected."),
-                "factType": .string(description: "Optional L2 fact type. Allowed values: profile_preference, project_state, task_commitment, calendar_time, communication, source_document, decision, implementation, environment_config, relationship, other. Leave empty when unknown.")
-            ], required: ["text"]), description: "Statements associated with this entity.")
+            "statements": .array(items: .string(description: "L2 statement entry. Preferred form is an object with text/relation/factType, but plain string shorthand is also accepted and is interpreted as { text: <string> } with default relation RELATED_TO."), description: "Statements associated with this entity. Compatibility note: each array item may be either a plain string shorthand or an object with text/relation/factType.")
         ], required: ["name"]), description: "Entities to update in one batch.")
     ], required: ["entities"])
 

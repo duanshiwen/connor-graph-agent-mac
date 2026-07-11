@@ -12,7 +12,6 @@ public struct AppGraphBootstrapper: Sendable {
         try paths.ensureDirectoryHierarchy(fileManager: .default)
         let store = try SQLiteGraphKernelStore(path: paths.databaseURL.path)
         try store.migrate()
-        try store.seedBaseOntology(graphID: "default")
         return store
     }
 }

@@ -30,7 +30,7 @@ public enum MemoryOSDebugAIRunTranscriptRenderer {
             lines.append("Messages: \(run.messageCount)")
             lines.append("Tool calls: \(run.toolCallCount)")
             if let summary = run.projectionSummary {
-                lines.append("Projection: accepted=\(summary.accepted) artifact=\(summary.artifactID) nodes=\(summary.nodeCount) statements=\(summary.statementCount) entities=\(summary.entityCount) beliefs=\(summary.beliefCount) issues=\(summary.issues.count)")
+                lines.append("Projection: accepted=\(summary.accepted) mode=\(summary.acceptanceMode) artifact=\(summary.artifactID) nodes=\(summary.nodeCount) statements=\(summary.statementCount) entities=\(summary.entityCount) beliefs=\(summary.beliefCount) dropped=\(summary.droppedRecordCount) degraded=\(summary.degradedRecordCount) issues=\(summary.issues.count)")
                 for issue in summary.issues {
                     lines.append("  - issue[\(issue.code)]: \(issue.message)")
                 }

@@ -196,3 +196,63 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     // Manager is created successfully with session override
     #expect(manager.session.id == "test-session")
 }
+
+@Test func factoryReportsPreciseAnthropicOverrideConfigFailure() async throws {
+    let (store, dbURL) = try makeSessionLLMOverrideStore()
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+
+    let settingsStore = SessionLLMOverrideSettingsStore()
+    let credentialStore = SessionLLMOverrideCredentialStore()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: settingsStore,
+        credentialStore: credentialStore
+    )
+
+    let fallbackConnection = AppLLMConnectionConfig(
+        id: "fallback-openai",
+        name: "Fallback OpenAI",
+        providerMode: .openAICompatible,
+        connectionKind: .openAICompatible,
+        baseURLString: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini"
+    )
+    let anthropicConnection = AppLLMConnectionConfig(
+        id: "anthropic-custom",
+        name: "Anthropic Custom",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://anthropic.example.com/v1",
+        model: "claude-sonnet-4-5",
+        selectedModel: "claude-sonnet-4-5"
+    )
+    try settingsRepository.save(
+        settings: AppLLMSettings(
+            connections: [fallbackConnection, anthropicConnection],
+            defaultConnectionID: fallbackConnection.id
+        ),
+        apiKey: "fallback-secret"
+    )
+
+    let factory = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: settingsRepository
+    )
+    let override = SessionLLMOverride(
+        providerMode: AppLLMProviderMode.anthropicMessages.rawValue,
+        model: "claude-sonnet-4-5",
+        connectionID: anthropicConnection.id
+    )
+
+    let provider = factory.makeAgentModelProvider(sessionLLMOverride: override)
+
+    await #expect(throws: AppLLMRuntimeConfigurationError.missingCredentialOrConfiguration(
+        connectionID: "anthropic-custom",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible
+    )) {
+        _ = try await provider.complete(AgentModelRequest(messages: [
+            AgentModelMessage(role: .user, content: "hello")
+        ]))
+    }
+}

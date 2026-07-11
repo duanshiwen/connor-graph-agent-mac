@@ -40,6 +40,30 @@ import ConnorGraphMemory
     #expect(result.matches[0].statements == [MemoryOSL2StatementMemoryView(text: "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。", relation: "RELATED_TO", connectedEntity: "《迟到的青春期》马尼拉一个月阶段")])
 }
 
+@Test func l2EntityMemoryDecodesStatementStringShorthand() throws {
+    let json = #"""
+    {
+      "entities": [
+        {
+          "name": "段福强",
+          "type": "person_object",
+          "aliases": "Oisin",
+          "summary": "段诗闻的弟弟。",
+          "statements": [
+            "段福强's English name is Oisin."
+          ]
+        }
+      ]
+    }
+    """#.data(using: .utf8)!
+
+    let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: json)
+
+    #expect(request.entities.count == 1)
+    #expect(request.entities[0].name == "段福强")
+    #expect(request.entities[0].statements == [MemoryOSL2StatementUpdate(text: "段福强's English name is Oisin.")])
+}
+
 @Test func l2EntityMemoryUpdateDefaultsRelationAndPreservesNegativeDecisionMetadata() throws {
     let repository = InMemoryMemoryOSL2EntityMemoryRepository()
     let service = MemoryOSL2EntityMemoryService(repository: repository)

@@ -117,12 +117,14 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var model: String
     public var selectedModel: String
     public var hasAPIKey: Bool
+    public var shouldFetchModelsList: Bool
     public var extraHTTPHeaders: [String: String]
     /// Explicit override for vision support. When nil, capability is inferred from model name heuristics.
     public var explicitVisionSupport: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
+        case shouldFetchModelsList
         case extraHTTPHeaders
         case explicitVisionSupport
     }
@@ -136,6 +138,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         model: String = "",
         selectedModel: String = "",
         hasAPIKey: Bool = false,
+        shouldFetchModelsList: Bool = true,
         extraHTTPHeaders: [String: String] = [:],
         explicitVisionSupport: Bool? = nil
     ) {
@@ -148,6 +151,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         let normalizedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectedModel = normalizedSelectedModel.isEmpty ? Self.firstModel(in: model) : normalizedSelectedModel
         self.hasAPIKey = hasAPIKey
+        self.shouldFetchModelsList = shouldFetchModelsList
         self.extraHTTPHeaders = extraHTTPHeaders
         self.explicitVisionSupport = explicitVisionSupport
     }
@@ -164,6 +168,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             model: try container.decodeIfPresent(String.self, forKey: .model) ?? "",
             selectedModel: try container.decodeIfPresent(String.self, forKey: .selectedModel) ?? "",
             hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
+            shouldFetchModelsList: try container.decodeIfPresent(Bool.self, forKey: .shouldFetchModelsList) ?? true,
             extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:],
             explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport)
         )
@@ -259,6 +264,19 @@ public struct AppLLMSettings: Sendable, Equatable {
     public var defaultConnectionID: String
     public var defaultThinkingLevel: AppLLMThinkingLevel
 
+    public static func isUsableConnection(_ connection: AppLLMConnectionConfig?) -> Bool {
+        guard let connection else { return false }
+        let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else { return false }
+        switch connection.connectionKind {
+        case .chatGPTCodex, .githubCopilot:
+            return connection.hasAPIKey
+        case .openAIResponses, .openAICompatible, .anthropicCompatible:
+            let baseURL = connection.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            return connection.hasAPIKey && !baseURL.isEmpty
+        }
+    }
+
     public init(
         connections: [AppLLMConnectionConfig],
         defaultConnectionID: String,
@@ -301,17 +319,17 @@ public struct AppLLMSettings: Sendable, Equatable {
         self.init(connections: [connection], defaultConnectionID: id)
     }
 
-    public var defaultConnection: AppLLMConnectionConfig {
-        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first ?? .defaultOpenAICompatible
+    public var defaultConnection: AppLLMConnectionConfig? {
+        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first
     }
 
-    public var baseURLString: String { defaultConnection.baseURLString }
-    public var model: String { defaultConnection.model }
-    public var selectedModel: String { defaultConnection.selectedModel }
-    public var effectiveModel: String { defaultConnection.effectiveModel }
-    public var hasAPIKey: Bool { defaultConnection.hasAPIKey }
-    public var providerMode: AppLLMProviderMode { defaultConnection.providerMode }
-    public var modelOptions: [String] { defaultConnection.modelOptions }
+    public var baseURLString: String { defaultConnection?.baseURLString ?? "" }
+    public var model: String { defaultConnection?.model ?? "" }
+    public var selectedModel: String { defaultConnection?.selectedModel ?? "" }
+    public var effectiveModel: String { defaultConnection?.effectiveModel ?? "" }
+    public var hasAPIKey: Bool { defaultConnection?.hasAPIKey ?? false }
+    public var providerMode: AppLLMProviderMode { defaultConnection?.providerMode ?? .openAICompatible }
+    public var modelOptions: [String] { defaultConnection?.modelOptions ?? [] }
 
     public func connection(id: String?) -> AppLLMConnectionConfig? {
         guard let id, !id.isEmpty else { return defaultConnection }
@@ -319,6 +337,7 @@ public struct AppLLMSettings: Sendable, Equatable {
     }
 
     public var effectiveThinkingLevel: AppLLMThinkingLevel { defaultThinkingLevel }
+    public var hasUsableDefaultConnection: Bool { Self.isUsableConnection(defaultConnection) }
 
     public static func modelOptions(in rawValue: String) -> [String] { AppLLMConnectionConfig.modelOptions(in: rawValue) }
     public static func firstModel(in rawValue: String) -> String { AppLLMConnectionConfig.firstModel(in: rawValue) }
@@ -414,12 +433,42 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     private func loadLegacySettings() throws -> AppLLMSettings {
-        let fallbackProviderMode: AppLLMProviderMode = .openAICompatible
-        let fallbackBaseURL = "https://api.openai.com/v1"
-        let fallbackModel = "gpt-4o-mini"
-        let modeRaw = settingsStore.string(forKey: Keys.providerMode) ?? fallbackProviderMode.rawValue
-        let mode = AppLLMProviderMode(rawValue: modeRaw) ?? fallbackProviderMode
-        let apiKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)
+        let legacyProviderMode = settingsStore.string(forKey: Keys.providerMode)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyBaseURL = settingsStore.string(forKey: Keys.baseURLString)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyModel = settingsStore.string(forKey: Keys.model)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacySelectedModel = settingsStore.string(forKey: Keys.selectedModel)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyAPIKey = try credentialStore.readSecret(service: Self.credentialNamespace, account: Self.apiKeyAccount)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let hasLegacyConnectionShape =
+            legacyProviderMode?.isEmpty == false ||
+            legacyBaseURL?.isEmpty == false ||
+            legacyModel?.isEmpty == false ||
+            legacySelectedModel?.isEmpty == false ||
+            legacyAPIKey?.isEmpty == false
+
+        let thinkingLevel = AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
+        guard hasLegacyConnectionShape else {
+            return AppLLMSettings(
+                connections: [],
+                defaultConnectionID: "",
+                defaultThinkingLevel: thinkingLevel
+            )
+        }
+
+        guard
+            let modeRaw = legacyProviderMode, !modeRaw.isEmpty,
+            let mode = AppLLMProviderMode(rawValue: modeRaw),
+            let baseURL = legacyBaseURL, !baseURL.isEmpty,
+            let model = legacyModel, !model.isEmpty,
+            let apiKey = legacyAPIKey, !apiKey.isEmpty
+        else {
+            return AppLLMSettings(
+                connections: [],
+                defaultConnectionID: "",
+                defaultThinkingLevel: thinkingLevel
+            )
+        }
+
         let id: String
         let name: String
         switch mode {
@@ -437,46 +486,55 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             id: id,
             name: name,
             providerMode: mode,
-            baseURLString: settingsStore.string(forKey: Keys.baseURLString) ?? fallbackBaseURL,
-            model: settingsStore.string(forKey: Keys.model) ?? fallbackModel,
-            selectedModel: settingsStore.string(forKey: Keys.selectedModel) ?? "",
-            hasAPIKey: apiKey?.isEmpty == false,
+            baseURLString: baseURL,
+            model: model,
+            selectedModel: legacySelectedModel ?? "",
+            hasAPIKey: !apiKey.isEmpty,
         )
         return AppLLMSettings(
             connections: [connection],
             defaultConnectionID: id,
-            defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
+            defaultThinkingLevel: thinkingLevel
         )
     }
 
     public func save(settings: AppLLMSettings, apiKey: String?) throws {
-        let effectiveSettings = settings.connections.isEmpty
-            ? AppLLMSettings(connections: [settings.defaultConnection], defaultConnectionID: settings.defaultConnection.id, defaultThinkingLevel: settings.defaultThinkingLevel)
-            : settings
+        let effectiveDefaultConnectionID: String = {
+            if settings.connections.contains(where: { $0.id == settings.defaultConnectionID }) {
+                return settings.defaultConnectionID
+            }
+            return settings.connections.first?.id ?? ""
+        }()
         let sanitized = AppLLMSettings(
-            connections: effectiveSettings.connections.map { connection in
+            connections: settings.connections.map { connection in
                 var copy = connection
                 copy.hasAPIKey = false
                 return copy
             },
-            defaultConnectionID: effectiveSettings.defaultConnectionID,
-            defaultThinkingLevel: effectiveSettings.defaultThinkingLevel
+            defaultConnectionID: effectiveDefaultConnectionID,
+            defaultThinkingLevel: settings.defaultThinkingLevel
         )
         settingsStore.set(sanitized.defaultThinkingLevel.rawValue, forKey: Keys.defaultThinkingLevel)
         let data = try JSONEncoder().encode(sanitized.connections)
         settingsStore.set(String(decoding: data, as: UTF8.self), forKey: Keys.connections)
         settingsStore.set(sanitized.defaultConnectionID, forKey: Keys.defaultConnectionID)
 
-        let defaultConnection = effectiveSettings.defaultConnection
-        settingsStore.set(defaultConnection.providerMode.rawValue, forKey: Keys.providerMode)
-        settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
-        settingsStore.set(defaultConnection.model, forKey: Keys.model)
-        settingsStore.set(defaultConnection.effectiveModel, forKey: Keys.selectedModel)
-        if let apiKey, !apiKey.isEmpty {
-            try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount(for: defaultConnection.id))
-            if defaultConnection.id == "openai-compatible" || defaultConnection.id == "openai-responses" {
-                try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount)
+        if let defaultConnection = sanitized.defaultConnection {
+            settingsStore.set(defaultConnection.providerMode.rawValue, forKey: Keys.providerMode)
+            settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
+            settingsStore.set(defaultConnection.model, forKey: Keys.model)
+            settingsStore.set(defaultConnection.effectiveModel, forKey: Keys.selectedModel)
+            if let apiKey, !apiKey.isEmpty {
+                try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount(for: defaultConnection.id))
+                if defaultConnection.id == "openai-compatible" || defaultConnection.id == "openai-responses" {
+                    try credentialStore.saveSecret(apiKey, service: Self.credentialNamespace, account: Self.apiKeyAccount)
+                }
             }
+        } else {
+            settingsStore.set("", forKey: Keys.providerMode)
+            settingsStore.set("", forKey: Keys.baseURLString)
+            settingsStore.set("", forKey: Keys.model)
+            settingsStore.set("", forKey: Keys.selectedModel)
         }
     }
 
@@ -676,6 +734,16 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
     }
 
     private func openAICompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) async -> AppLLMModelConnection {
+        guard connection.shouldFetchModelsList else {
+            return AppLLMModelConnection(
+                id: connection.id,
+                title: connection.name + (isDefault ? " · 默认" : ""),
+                subtitle: "OpenAI Compatible · 使用手动模型列表",
+                providerMode: .openAICompatible,
+                models: configuredOptions(from: connection),
+                isLiveCatalog: false
+            )
+        }
         guard let baseURL = URL(string: connection.baseURLString) else {
             return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · Base URL 无效", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
         }
@@ -704,7 +772,7 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
 
     private func fallbackConnections(error: Error) -> [AppLLMModelConnection] {
         let settings = (try? settingsRepository.loadSettings()) ?? .default
-        let connection = settings.defaultConnection
+        guard let connection = settings.defaultConnection else { return [] }
         return [AppLLMModelConnection(id: connection.id, title: connection.name, subtitle: "模型目录不可用：\(error.localizedDescription)", providerMode: connection.providerMode, models: configuredOptions(from: connection), isLiveCatalog: false)]
     }
 

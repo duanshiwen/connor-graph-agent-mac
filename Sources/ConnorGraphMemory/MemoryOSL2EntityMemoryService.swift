@@ -87,6 +87,33 @@ public struct MemoryOSL2StatementUpdate: Codable, Sendable, Equatable {
         self.relation = relation
         self.factType = factType
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case relation
+        case factType
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            self.init(text: text)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            text: try container.decode(String.self, forKey: .text),
+            relation: try container.decodeIfPresent(String.self, forKey: .relation),
+            factType: try container.decodeIfPresent(String.self, forKey: .factType)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(relation, forKey: .relation)
+        try container.encodeIfPresent(factType, forKey: .factType)
+    }
 }
 
 public struct MemoryOSL2UpdateEntitiesResult: Codable, Sendable, Equatable {
@@ -182,23 +209,9 @@ public protocol MemoryOSL2EntityMemoryRepository: AnyObject, Sendable {
 }
 
 public final class MemoryOSL2EntityMemoryService: Sendable {
-    public static let allowedFactTypes = [
-        "profile_preference",
-        "project_state",
-        "task_commitment",
-        "calendar_time",
-        "communication",
-        "source_document",
-        "decision",
-        "implementation",
-        "environment_config",
-        "relationship",
-        "other"
-    ]
+    public static let allowedFactTypes = Array(MemoryOSCanonicalizer.allowedL2FactTypes).sorted()
 
     public static let allowedRelations = GraphPredicate.allCases.map(\.rawValue).sorted()
-
-    private static let allowedFactTypeSet = Set(allowedFactTypes)
     private let repository: MemoryOSL2EntityMemoryRepository
 
     public init(repository: MemoryOSL2EntityMemoryRepository) {
@@ -272,17 +285,14 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
 
     private static func normalizeFactType(_ raw: String?) throws -> String? {
         guard let value = raw?.nilIfBlank else { return nil }
-        let normalized = value.lowercased()
-        guard allowedFactTypeSet.contains(normalized) else {
+        guard let normalized = MemoryOSCanonicalizer.canonicalizeL2FactType(value) else {
             throw MemoryOSL2EntityMemoryValidationError.invalidFactType(value: value, allowed: allowedFactTypes)
         }
         return normalized
     }
 
     private static func normalizeRelation(_ raw: String?) -> String {
-        guard let value = raw?.nilIfBlank else { return GraphPredicate.relatedTo.rawValue }
-        let normalized = value.uppercased()
-        return GraphPredicate(rawValue: normalized)?.rawValue ?? GraphPredicate.relatedTo.rawValue
+        MemoryOSCanonicalizer.canonicalizeL2Relation(raw)
     }
 }
 
