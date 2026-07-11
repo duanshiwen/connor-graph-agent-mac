@@ -23,6 +23,22 @@ struct CalDAVCalendarMutationAdapterTests {
         #expect(result.confirmedEvent?.title == "Focus")
     }
 
+    @Test func updatePreservesWeakETagExactly() async throws {
+        let weakETag = "W/\"opaque-v7\""
+        let transport = QueueCalDAVTransport(responses: [
+            .init(statusCode: 200, body: Self.ics(uid: "uid-1", title: "Remote"), headers: ["ETag": weakETag]),
+            .init(statusCode: 204, body: "", headers: ["ETag": weakETag]),
+            .init(statusCode: 200, body: Self.ics(uid: "uid-1", title: "Updated"), headers: ["ETag": weakETag])
+        ])
+        let adapter = CalDAVCalendarMutationAdapter(client: .init(transport: transport), credentialProvider: { _ in nil })
+        let event = CalendarEvent(id: .init(rawValue: "caldav-c-uid-1"), calendarID: Self.collection.id, title: "Remote", start: .init(date: Date(timeIntervalSince1970: 1_782_276_400)), end: .init(date: Date(timeIntervalSince1970: 1_782_280_000)), sourceMetadata: .init(sourceKind: .genericCalDAV, remoteIdentifier: "uid-1", resourceURL: URL(string: "https://cal.example.com/cal/work/e.ics"), etag: weakETag))
+        let result = try await adapter.mutate(.init(operation: .update, eventID: event.id, expectedVersion: .init(value: weakETag), patch: .init(title: .set("Updated"))), account: Self.account, collection: Self.collection, currentEvent: event)
+        let requests = await transport.recordedRequests()
+        #expect(requests[1].headers["If-Match"] == weakETag)
+        #expect(result.remoteVersion?.value == weakETag)
+        #expect(result.confirmedEvent?.id == event.id)
+    }
+
     @Test func updateRejectsStaleRemoteETagWithoutPut() async throws {
         let transport = QueueCalDAVTransport(responses: [.init(statusCode: 200, body: Self.ics(uid: "uid-1", title: "Remote"), headers: ["ETag": "\"v2\""])])
         let adapter = CalDAVCalendarMutationAdapter(client: .init(transport: transport), credentialProvider: { _ in nil })
