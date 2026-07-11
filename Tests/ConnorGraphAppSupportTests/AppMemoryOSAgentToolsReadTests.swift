@@ -66,13 +66,17 @@ import ConnorGraphAppSupport
 
     registry.registerMemoryOSReadTools(facade: facade)
 
-    // Read-only registration should expose exactly 2 tools
-    let contextDefinition = try #require(registry.definition(named: "memory_os_context"))
+    let recentDefinition = try #require(registry.definition(named: "memory_os_recent_context"))
+    let knowledgeDefinition = try #require(registry.definition(named: "memory_os_knowledge_context"))
     let profileDefinition = try #require(registry.definition(named: "memory_os_get_current_user_profile"))
-    #expect(contextDefinition.description.contains("updated_at"))
+    #expect(recentDefinition.description.contains("L1") && recentDefinition.description.contains("L2"))
+    #expect(knowledgeDefinition.description.contains("L3") && knowledgeDefinition.description.contains("L4"))
+    #expect(knowledgeDefinition.description.contains("five"))
     #expect(profileDefinition.description.contains("updated_at"))
-    #expect(registry.permission(named: "memory_os_context") == .readGraph)
+    #expect(registry.permission(named: "memory_os_recent_context") == .readGraph)
+    #expect(registry.permission(named: "memory_os_knowledge_context") == .readGraph)
     #expect(registry.permission(named: "memory_os_get_current_user_profile") == .readGraph)
+    #expect(registry.definition(named: "memory_os_context") == nil)
 
     // Write tools and low-level primitives should NOT be registered
     #expect(registry.definition(named: "memory_os_l2_update_entities") == nil)
