@@ -338,72 +338,71 @@ public struct MemoryOSContextBuilder: Sendable {
         return "\(sanitized)-\(Int(generatedAt.timeIntervalSince1970))"
     }
 
-    /// Build a flat array of natural-language strings from retrieval hits and L4 graph expansions.
-    /// - Parameters:
-    ///   - hits: Merged and sorted retrieval hits from all sub-queries.
-    ///   - expansions: L4 graph expansion results keyed by entity ID.
-    /// - Returns: Deduplicated array of natural-language memory items.
-    public func buildFlatStrings(
+    /// Render only L1/L2 operational memory. These sentences represent recent or mutable state.
+    public func buildRecentContextStrings(hits: [MemoryOSRetrievalHit]) -> [String] {
+        deduplicatedStrings(hits.sorted { $0.score > $1.score }.compactMap { hit in
+            switch hit.layer {
+            case .l1:
+                return appendUpdatedAtSuffix("Recent capture \(hit.title): \(hit.matchedText)", updatedAt: hit.metadata["updated_at"])
+            case .l2:
+                return appendUpdatedAtSuffix(hit.matchedText, updatedAt: hit.metadata["updated_at"])
+            case .l0, .l3, .l4:
+                return nil
+            }
+        })
+    }
+
+    /// Render only L3/L4 durable knowledge. L4 graph edges are already depth-expanded by the
+    /// delivery service, so the consumer receives complete natural-language statements.
+    public func buildKnowledgeContextStrings(
         hits: [MemoryOSRetrievalHit],
         expansions: [String: [MemoryOSL4ExpansionHit]],
         extraEntityNames: [String: String] = [:]
     ) -> [String] {
         let sortedHits = hits.sorted { $0.score > $1.score }
-
-        // Build entityID → name map from L4 entity hits
-        var entityIDToName: [String: String] = [:]
+        var entityIDToName = extraEntityNames
         for hit in sortedHits where hit.layer == .l4 && hit.metadata["entity_type"] != nil {
-            let entityID = hit.entityRefs.first ?? hit.recordID
-            entityIDToName[entityID] = hit.title
+            entityIDToName[hit.entityRefs.first ?? hit.recordID] = hit.title
         }
 
-        var seen: Set<String> = []
-        var result: [String] = []
-
-        func append(_ string: String) {
-            guard !seen.contains(string), !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            seen.insert(string)
-            result.append(string)
-        }
-
-        // Flatten hits
-        for hit in sortedHits {
+        var strings: [String] = sortedHits.compactMap { hit in
             switch hit.layer {
-            case .l0:
-                continue // L0 is not included per design
-            case .l1:
-                append(appendUpdatedAtSuffix("Capture event「\(hit.title)」: \(hit.matchedText)", updatedAt: hit.metadata["updated_at"]))
-            case .l2:
-                append(appendUpdatedAtSuffix(hit.matchedText, updatedAt: hit.metadata["updated_at"]))
             case .l3:
-                append(appendUpdatedAtSuffix(hit.matchedText, updatedAt: hit.metadata["updated_at"]))
-            case .l4:
-                if let entityType = hit.metadata["entity_type"] {
-                    let text = hit.summary.isEmpty ? hit.matchedText : hit.summary
-                    append(appendUpdatedAtSuffix("「\(hit.title)」(\(entityType)): \(text)", updatedAt: hit.metadata["updated_at"]))
-                }
-                // L4 relation hits without entity_type are skipped (relations come from expansions)
+                return appendUpdatedAtSuffix("Reusable knowledge: \(hit.matchedText)", updatedAt: hit.metadata["updated_at"])
+            case .l4 where hit.metadata["entity_type"] != nil:
+                let type = hit.metadata["entity_type"] ?? "entity"
+                let description = hit.summary.isEmpty ? hit.matchedText : hit.summary
+                return appendUpdatedAtSuffix("Stable \(type) \(hit.title): \(description)", updatedAt: hit.metadata["updated_at"])
+            case .l0, .l1, .l2, .l4:
+                return nil
             }
         }
 
-        // Flatten expansion relations
-        for (_, relations) in expansions {
-            for relation in relations {
-                // Skip self-referencing relations (e.g. "X is a subclass of X")
-                guard relation.sourceEntityID != relation.relatedEntityID else { continue }
-                // Skip nil-target relations (renders as "X relates to unknown")
-                guard relation.relatedEntityID != nil else { continue }
-                let sourceName = extraEntityNames[relation.sourceEntityID] ?? entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
-                let targetName = extraEntityNames[relation.relatedEntityID!] ?? entityIDToName[relation.relatedEntityID!] ?? relation.relatedEntityID!
-                let label = predicateLabels.label(for: relation.predicate)
-                let sentence = label.forwardTemplate
-                    .replacingOccurrences(of: "{source}", with: sourceName)
-                    .replacingOccurrences(of: "{target}", with: targetName)
-                append(appendUpdatedAtSuffix(sentence, updatedAt: relation.updatedAt))
-            }
+        let relations = expansions.values.flatMap { $0 }.sorted { lhs, rhs in
+            if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.recordID < rhs.recordID
         }
+        for relation in relations {
+            guard let relatedID = relation.relatedEntityID, relation.sourceEntityID != relatedID else { continue }
+            let sourceName = entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
+            let targetName = entityIDToName[relatedID] ?? relatedID
+            let sentence = renderRelationSentence(
+                source: sourceName,
+                predicate: predicateLabels.label(for: relation.predicate),
+                target: targetName
+            )
+            strings.append(appendUpdatedAtSuffix(sentence, updatedAt: relation.updatedAt))
+        }
+        return deduplicatedStrings(strings)
+    }
 
-        return result
+    private func deduplicatedStrings(_ strings: [String]) -> [String] {
+        var seen = Set<String>()
+        return strings.filter { string in
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty && seen.insert(trimmed).inserted
+        }
     }
 
     private func appendUpdatedAtSuffix(_ text: String, updatedAt: String?) -> String {
