@@ -87,6 +87,51 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("PRIVATE-LONG-NOTES") == true)
     }
 
+    @Test func calendarReadGetEventReturnsMutationReadyIdentityAndVersion() async throws {
+        let event = CalendarEvent(
+            id: .init(rawValue: "event:opaque/id"),
+            calendarID: .init(rawValue: "calendar-work"),
+            title: "产品讨论",
+            start: .init(date: Date(timeIntervalSince1970: 1_000)),
+            end: .init(date: Date(timeIntervalSince1970: 4_600)),
+            sourceMetadata: .init(sourceKind: .genericCalDAV, remoteIdentifier: "remote-event", etag: "W/\"etag-42\"")
+        )
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [event]))
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event:opaque/id\"}"),
+            context: Self.context(toolCallID: "call-calendar-detail")
+        )
+
+        #expect(result.contentText.contains("Loaded mutation-ready calendar event"))
+        #expect(result.contentText.contains("eventID: event:opaque/id"))
+        #expect(result.contentText.contains("calendarID: calendar-work"))
+        #expect(result.contentText.contains("expectedVersion: W/\"etag-42\""))
+        #expect(result.contentText.contains("mutationEligibility: eligible"))
+        #expect(result.contentText.contains("copy eventID and expectedVersion exactly"))
+        #expect(result.contentJSON?.contains("etag-42") == true)
+    }
+
+    @Test func calendarReadGetEventExplainsIneligibleAndMissingEvents() async throws {
+        let recurring = CalendarEvent(
+            id: .init(rawValue: "event-recurring"),
+            calendarID: .init(rawValue: "calendar-work"),
+            title: "Recurring",
+            start: .init(date: Date(timeIntervalSince1970: 1_000)),
+            end: .init(date: Date(timeIntervalSince1970: 4_600)),
+            recurrenceSummary: .init(ruleDescription: "FREQ=WEEKLY"),
+            sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "42", isRecurring: true)
+        )
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [recurring]))
+        let ineligible = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-recurring\"}"), context: Self.context(toolCallID: "call-calendar-recurring"))
+        #expect(ineligible.contentText.contains("mutationEligibility: recurring"))
+        #expect(!ineligible.contentText.contains("Loaded mutation-ready"))
+
+        let missing = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"guessed-id\"}"), context: Self.context(toolCallID: "call-calendar-missing"))
+        #expect(missing.contentText.contains("Calendar event not found for eventID 'guessed-id'"))
+        #expect(missing.contentText.contains("Do not reuse or guess this ID"))
+        #expect(missing.contentText.contains("Do not call calendar_write with this ID"))
+    }
+
     @Test func calendarSearchEventsToolDescribesCandidatesAndSelectedDetailReads() {
         let tool = CalendarSearchEventsTool(runtime: InMemoryAgentCalendarRuntime())
 
