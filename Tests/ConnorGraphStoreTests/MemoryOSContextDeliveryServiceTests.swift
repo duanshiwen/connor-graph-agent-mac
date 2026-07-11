@@ -54,35 +54,44 @@ import ConnorGraphStore
     #expect(package.diagnostics.contains { $0.kind == .expansionSkipped })
 }
 
-@Test func flatContextFallsBackToSQLiteWhenSearchKernelNil() throws {
+@Test func recentContextReturnsOnlyL1AndL2OperationalMemory() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSContextDeliveryDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 42_000)
-    try store.upsert(entity: MemoryOSEntity(id: "entity-fallback", stableKey: "test:fallback", entityType: "system", name: "Fallback Test Entity", summary: "Tests SQLite fallback", confidence: 0.9))
+    try store.upsert(node: MemoryOSNode(id: "project-node", stableKey: "project:atlas", nodeType: "project", name: "Project Atlas"))
+    try store.upsert(statement: MemoryOSStatement(id: "recent-state", subjectID: "project-node", predicate: "status", text: "Project Atlas is preparing its current release.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
+    try store.upsert(belief: MemoryOSBelief(id: "knowledge-state", statement: "Project Atlas demonstrates reusable release governance.", domain: "engineering", relatedObjectNames: "Project Atlas", createdAt: now, updatedAt: now))
+    try store.upsert(entity: MemoryOSEntity(id: "atlas-entity", stableKey: "project:atlas-stable", entityType: "project", name: "Project Atlas", summary: "Stable project knowledge", confidence: 0.9))
 
-    // Without searchKernel → should use SQLite FTS5 and still return results
-    let service = MemoryOSContextDeliveryService(store: store, searchKernel: nil)
-    let results = try service.flatContext(terms: ["Fallback Test Entity"])
-    #expect(!results.isEmpty)
-    #expect(results.contains { $0.contains("Fallback Test Entity") })
+    let results = try MemoryOSContextDeliveryService(store: store).recentContext(terms: ["Project Atlas"])
+
+    #expect(results.contains { $0.contains("preparing its current release") })
+    #expect(!results.contains { $0.contains("reusable release governance") })
+    #expect(!results.contains { $0.contains("Stable project knowledge") })
 }
 
-@Test func flatContextAcceptsSearchKernelParameter() throws {
+@Test func knowledgeContextReturnsL3AndL4AndActuallyTraversesFiveHops() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSContextDeliveryDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 43_000)
-    try store.upsert(entity: MemoryOSEntity(id: "entity-kernel", stableKey: "test:kernel", entityType: "concept", name: "Kernel Integration", summary: "Tests Tantivy search kernel", confidence: 0.95))
+    try store.upsert(node: MemoryOSNode(id: "operational-node", stableKey: "operational:seed", nodeType: "project", name: "Knowledge Seed"))
+    try store.upsert(statement: MemoryOSStatement(id: "operational-state", subjectID: "operational-node", predicate: "status", text: "Knowledge Seed has a transient operational status.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
+    try store.upsert(belief: MemoryOSBelief(id: "knowledge-belief", statement: "Knowledge Seed supports durable graph reasoning.", domain: "knowledge", relatedObjectNames: "Knowledge Seed", createdAt: now, updatedAt: now))
 
-    // Verify that searchKernel parameter is accepted (nil = fallback to SQLite)
-    let serviceWithKernel = MemoryOSContextDeliveryService(store: store, searchKernel: nil)
-    let results = try serviceWithKernel.flatContext(terms: ["Kernel Integration"])
-    #expect(!results.isEmpty)
-    #expect(results.contains { $0.contains("Kernel Integration") })
+    for index in 0...6 {
+        try store.upsert(entity: MemoryOSEntity(id: "hop-\(index)", stableKey: "hop:\(index)", entityType: "concept", name: index == 0 ? "Knowledge Seed" : "Hop \(index)", summary: index == 0 ? "Durable graph seed" : "Entity at hop \(index)", confidence: 0.9))
+    }
+    for index in 0..<6 {
+        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "edge-\(index)", entityID: "hop-\(index)", predicate: .dependsOn, objectEntityID: "hop-\(index + 1)", text: "Hop \(index) depends on Hop \(index + 1).", assertionKind: .summarized, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
+    }
+    let results = try MemoryOSContextDeliveryService(store: store).knowledgeContext(terms: ["Knowledge Seed"])
 
-    // Verify default init still works (backward compatibility)
-    let serviceDefault = MemoryOSContextDeliveryService(store: store)
-    let resultsDefault = try serviceDefault.flatContext(terms: ["Kernel Integration"])
-    #expect(!resultsDefault.isEmpty)
+    #expect(results.contains { $0.contains("durable graph reasoning") })
+    #expect(results.contains { $0.contains("Hop 4") && $0.contains("Hop 5") })
+    #expect(!results.contains { $0.contains("Hop 5") && $0.contains("Hop 6") })
+    #expect(!results.contains { $0.contains("transient operational status") })
+    #expect(results.allSatisfy { !$0.hasPrefix("「") && !$0.hasPrefix("{") })
+    #expect(Set(results).count == results.count)
 }
 
 private func temporaryMemoryOSContextDeliveryDatabaseURL() -> URL {
