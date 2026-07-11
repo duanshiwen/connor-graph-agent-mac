@@ -284,7 +284,39 @@ public struct CalendarWriteTool: AgentTool {
             let result = try await runtime.mutate(request.validated())
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: result.receipt.summary, contentJSON: try ContactJSON.encode(result))
         } catch let error as AgentToolError { throw error }
-        catch { throw AgentToolError.invalidArguments(String(describing: error)) }
+        catch let error as CalendarMutationError { throw mapCalendarMutationError(error) }
+        catch { throw AgentToolError.invalidArguments("Calendar mutation failed: \(error.localizedDescription)") }
+    }
+
+    private func mapCalendarMutationError(_ error: CalendarMutationError) -> AgentToolError {
+        switch error {
+        case .invalidInput(let message):
+            return .invalidArguments(message)
+        case .calendarNotFound(let calendarID):
+            return .invalidArguments("Calendar '\(calendarID.rawValue)' was not found. Do not use 'default', display names, or example IDs as calendarID. Call calendar_read with operation list_calendars, select a calendar whose capabilities.canCreateEvents is true and isReadOnly is false, then retry with its exact id.")
+        case .accountNotFound(let accountID):
+            return .invalidArguments("The account '\(accountID.rawValue)' for the selected calendar was not found. Refresh calendar sources, call calendar_read with operation list_calendars, and retry with an exact current calendar id.")
+        case .eventNotFound:
+            return .invalidArguments("The calendar event was not found. For update_event or delete_event, call calendar_read with operation get_event and retry with the exact current eventID and expectedVersion.")
+        case .readOnlySource:
+            return .permissionDenied("The selected calendar source is read-only or bidirectional writes are disabled.")
+        case .readOnlyCollection(let reason):
+            return .permissionDenied("The selected calendar is read-only\(reason.map { ": \($0)" } ?? ".")")
+        case .recurrenceUnsupported:
+            return .invalidArguments("Recurring calendar events are not supported for mutation. No write was performed.")
+        case .schedulingUnsupported:
+            return .invalidArguments("Events with organizer, attendee, invitation, or scheduling semantics are not supported for mutation. No write was performed.")
+        case .conflict(let expected, let actual):
+            return .invalidArguments("Calendar event version conflict (expected: \(expected ?? "missing"), actual: \(actual ?? "missing")). Read the event again and do not overwrite the conflict automatically.")
+        case .authenticationRequired:
+            return .permissionDenied("Calendar authentication is required. Reconnect the calendar source before retrying.")
+        case .permissionDenied:
+            return .permissionDenied("The calendar provider denied this mutation.")
+        case .remoteFailure(let message):
+            return .invalidArguments("The calendar provider failed the mutation: \(message)")
+        case .verificationFailed:
+            return .invalidArguments("The remote calendar write could not be verified locally. Refresh the calendar before retrying.")
+        }
     }
 
     private func datePatch(_ key: String, arguments: AgentToolArguments, formatter: ISO8601DateFormatter) -> CalendarPatchValue<CalendarEventDateTime> {

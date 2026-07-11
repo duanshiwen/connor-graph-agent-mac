@@ -115,6 +115,16 @@ struct CalendarContactsAgentToolsTests {
         )
     }
 
+    @Test func calendarWriteExplainsHowToRecoverFromUnknownCalendarID() async throws {
+        let tool = CalendarWriteTool(runtime: FailingCalendarRuntime(error: .calendarNotFound(.init(rawValue: "default"))))
+        let context = Self.context(toolCallID: "call-calendar-unknown").approving(.mutateCalendar)
+        let arguments = try AgentToolArguments(json: "{\"operation\":\"create_event\",\"calendarID\":\"default\",\"title\":\"Test\",\"start\":\"2026-07-12T01:30:00Z\",\"end\":\"2026-07-12T02:00:00Z\"}")
+
+        await Self.expectInvalidArguments(containing: "Calendar 'default' was not found", executing: { try await tool.execute(arguments: arguments, context: context) })
+        await Self.expectInvalidArguments(containing: "calendar_read with operation list_calendars", executing: { try await tool.execute(arguments: arguments, context: context) })
+        await Self.expectInvalidArguments(containing: "Do not use 'default', display names, or example IDs", executing: { try await tool.execute(arguments: arguments, context: context) })
+    }
+
     @Test func calendarWriteReportsUpdateAndDeleteRequiredFields() async throws {
         let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
         let context = Self.context(toolCallID: "call-calendar-invalid-mutation").approving(.mutateCalendar)
@@ -276,4 +286,13 @@ struct CalendarContactsAgentToolsTests {
             end: CalendarEventDateTime(date: Date(timeIntervalSince1970: 4_600))
         )
     }
+}
+
+private struct FailingCalendarRuntime: AgentCalendarRuntime {
+    let error: CalendarMutationError
+    func listCalendars(runID: String?, sessionID: String?) async throws -> [CalendarCollection] { [] }
+    func listEvents(calendarID: CalendarID?, runID: String?, sessionID: String?) async throws -> [CalendarEvent] { [] }
+    func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, limit: Int, runID: String?, sessionID: String?) async throws -> [CalendarEvent] { [] }
+    func getEvent(id: CalendarEventID, runID: String?, sessionID: String?) async throws -> CalendarEvent? { nil }
+    func mutate(_ request: CalendarMutationRequest) async throws -> CalendarMutationResult { throw error }
 }
