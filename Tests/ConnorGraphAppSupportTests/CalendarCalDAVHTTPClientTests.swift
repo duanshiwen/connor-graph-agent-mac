@@ -18,6 +18,27 @@ struct CalendarCalDAVHTTPClientTests {
         #expect(transport.lastRequest!.redactedDescription.contains("<redacted>"))
     }
 
+    @Test func putAndDeleteUseOptimisticConcurrencyHeaders() async throws {
+        let transport = RecordingCalDAVTransport(response: CalendarCalDAVHTTPResponse(statusCode: 204, body: "", headers: ["ETag": "\"v2\""]))
+        let client = CalendarCalDAVHTTPClient(transport: transport)
+        _ = try await client.put(url: URL(string: "https://cal.example.com/c/e.ics")!, body: "BEGIN:VCALENDAR", credential: "secret", ifMatch: "\"v1\"")
+        #expect(transport.lastRequest?.method == "PUT")
+        #expect(transport.lastRequest?.headers["If-Match"] == "\"v1\"")
+        #expect(transport.lastRequest?.headers["Content-Type"] == "text/calendar; charset=utf-8")
+        _ = try await client.delete(url: URL(string: "https://cal.example.com/c/e.ics")!, credential: "secret", ifMatch: "\"v2\"")
+        #expect(transport.lastRequest?.method == "DELETE")
+        #expect(transport.lastRequest?.headers["If-Match"] == "\"v2\"")
+    }
+
+    @Test func createUsesIfNoneMatchAndPreconditionFailureMapsConflict() async throws {
+        let transport = RecordingCalDAVTransport(response: CalendarCalDAVHTTPResponse(statusCode: 412, body: "Precondition Failed"))
+        let client = CalendarCalDAVHTTPClient(transport: transport)
+        await #expect(throws: CalendarCalDAVHTTPError.conflict) {
+            try await client.put(url: URL(string: "https://cal.example.com/c/new.ics")!, body: "ics", credential: nil, ifNoneMatch: "*")
+        }
+        #expect(transport.lastRequest?.headers["If-None-Match"] == "*")
+    }
+
     @Test func reportMapsUnauthorizedToTypedError() async throws {
         let transport = RecordingCalDAVTransport(response: CalendarCalDAVHTTPResponse(statusCode: 401, body: "Unauthorized", headers: [:]))
         let client = CalendarCalDAVHTTPClient(transport: transport)

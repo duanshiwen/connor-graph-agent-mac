@@ -36,10 +36,26 @@ public struct CalendarCalDAVEventFetcher: Sendable {
                         )
                     },
                     recurrenceSummary: event.recurrenceRule.map(CalendarRecurrenceSummary.init(ruleDescription:)),
+                    sourceMetadata: CalendarEventSourceMetadata(
+                        sourceKind: .genericCalDAV,
+                        remoteIdentifier: event.uid,
+                        resourceURL: resolvedResourceURL(href: object.href, collectionURL: collectionURL),
+                        etag: object.etag,
+                        isRecurring: event.recurrenceRule != nil,
+                        hasAttendees: !event.attendees.isEmpty
+                    ),
                     updatedAt: event.lastModified ?? Date()
                 )
             }
         }
+    }
+
+    private func resolvedResourceURL(href: String, collectionURL: URL) -> URL? {
+        guard let resolved = URL(string: href, relativeTo: collectionURL)?.absoluteURL,
+              resolved.scheme?.lowercased() == collectionURL.scheme?.lowercased(),
+              resolved.host?.lowercased() == collectionURL.host?.lowercased(),
+              resolved.path.hasPrefix(collectionURL.path) else { return nil }
+        return resolved
     }
 
     private func calendarQueryBody(windowStart: Date, windowEnd: Date) -> String {
