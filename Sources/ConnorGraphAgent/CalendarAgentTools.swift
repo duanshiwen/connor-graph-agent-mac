@@ -148,7 +148,7 @@ public struct CalendarSearchEventsTool: AgentTool {
             sessionID: context.sessionID
         )
         await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: arguments.string("query"), strength: .summaryCandidate, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event candidates; read a selected event detail to persist it into Memory OS", contentJSON: try ContactJSON.encode(events))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Found"), contentJSON: try ContactJSON.encode(events))
     }
 }
 
@@ -188,7 +188,7 @@ public struct CalendarReadTool: AgentTool {
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar event candidates", contentJSON: try ContactJSON.encode(events))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Listed"), contentJSON: try ContactJSON.encode(events))
         case "get_event":
             guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
@@ -338,6 +338,34 @@ public struct CalendarWriteTool: AgentTool {
     private func optionalPatch<Value>(value: Value?, clear: Bool) -> CalendarPatchValue<Value> where Value: Codable & Sendable & Equatable & Hashable {
         if clear { return .clear }
         return value.map(CalendarPatchValue.set) ?? .unchanged
+    }
+}
+
+private enum CalendarEventCandidateTextRenderer {
+    static func render(_ events: [CalendarEvent], verb: String) -> String {
+        guard !events.isEmpty else {
+            return "\(verb) 0 calendar event candidates. Adjust the query or time range and search again; do not guess an eventID."
+        }
+        let formatter = ISO8601DateFormatter()
+        let noun = events.count == 1 ? "candidate" : "candidates"
+        let rows = events.enumerated().map { index, event in
+            """
+            \(index + 1). title: \(event.title)
+               eventID: \(event.id.rawValue)
+               calendarID: \(event.calendarID.rawValue)
+               start: \(formatter.string(from: event.start.date))
+               end: \(formatter.string(from: event.end.date))
+               isAllDay: \(event.isAllDay)
+               mutationEligibility: \(eligibility(event))
+            """
+        }.joined(separator: "\n")
+        return "\(verb) \(events.count) calendar event \(noun).\n\n\(rows)\n\nNext: call calendar_read with operation get_event and copy eventID exactly."
+    }
+
+    private static func eligibility(_ event: CalendarEvent) -> String {
+        if event.sourceMetadata?.isRecurring == true || event.recurrenceSummary != nil { return "recurring" }
+        if event.sourceMetadata?.hasAttendees == true || !event.attendees.isEmpty || event.sourceMetadata?.organizerEmail != nil || event.sourceMetadata?.scheduleTag != nil { return "scheduling" }
+        return "eligible"
     }
 }
 

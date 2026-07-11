@@ -56,8 +56,35 @@ struct CalendarContactsAgentToolsTests {
         )
 
         #expect(result.toolName == "calendar_read")
-        #expect(result.contentText.contains("Listed 1 calendar event candidates"))
+        #expect(result.contentText.contains("Listed 1 calendar event candidate"))
+        #expect(result.contentText.contains("eventID: event-1"))
+        #expect(result.contentText.contains("calendarID: calendar-work"))
+        #expect(result.contentText.contains("title: 产品讨论"))
+        #expect(result.contentText.contains("start: 1970-01-01T00:16:40Z"))
+        #expect(result.contentText.contains("end: 1970-01-01T01:16:40Z"))
+        #expect(result.contentText.contains("Next: call calendar_read with operation get_event"))
         #expect(result.contentJSON?.contains("产品讨论") == true)
+    }
+
+    @Test func calendarAgendaExposesExactOpaqueCandidateIDsWithoutNotes() async throws {
+        let opaqueID = "467EBD97-A2D1-49CC-8EE6-BE7136D0BD70:8BCA05B8/765F-44BD"
+        let event = CalendarEvent(
+            id: .init(rawValue: opaqueID),
+            calendarID: .init(rawValue: "caldav-https://calendar.example.test/users/shiwen/"),
+            title: "训练安排",
+            start: .init(date: Date(timeIntervalSince1970: 1_000)),
+            end: .init(date: Date(timeIntervalSince1970: 4_600)),
+            notes: "PRIVATE-LONG-NOTES-SHOULD-NOT-ENTER-CANDIDATE-TEXT"
+        )
+        let result = try await CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [event])).execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_agenda\"}"),
+            context: Self.context(toolCallID: "call-calendar-agenda")
+        )
+
+        #expect(result.contentText.contains(opaqueID))
+        #expect(result.contentText.contains("caldav-https://calendar.example.test/users/shiwen/"))
+        #expect(!result.contentText.contains("PRIVATE-LONG-NOTES"))
+        #expect(result.contentJSON?.contains("PRIVATE-LONG-NOTES") == true)
     }
 
     @Test func calendarSearchEventsToolDescribesCandidatesAndSelectedDetailReads() {
@@ -89,7 +116,13 @@ struct CalendarContactsAgentToolsTests {
         )
 
         #expect(result.toolName == "calendar_search_events")
-        #expect(result.contentText.contains("calendar event candidates"))
+        #expect(result.contentText.contains("calendar event candidate"))
+        #expect(result.contentText.contains("eventID: event-design-review"))
+        #expect(result.contentText.contains("calendarID: calendar-work"))
+        #expect(result.contentText.contains("title: Memory OS 设计评审"))
+        #expect(result.contentText.contains("mutationEligibility: scheduling"))
+        #expect(!result.contentText.contains("讨论 RSS 和浏览历史工具暴露"))
+        #expect(!result.contentText.contains("shiwen@example.com"))
         #expect(result.contentJSON?.contains("Memory OS 设计评审") == true)
         #expect(result.contentJSON?.contains("会议室 A") == true)
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
