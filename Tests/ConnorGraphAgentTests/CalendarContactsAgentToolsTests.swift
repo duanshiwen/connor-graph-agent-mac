@@ -74,6 +74,61 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
     }
 
+    @Test func calendarWriteSchemaConstrainsOperationAndExtraProperties() throws {
+        let schema = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime()).inputSchema.jsonObject
+        #expect(schema["additionalProperties"] as? Bool == false)
+        #expect(schema["required"] as? [String] == ["operation"])
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let operation = try #require(properties["operation"] as? [String: Any])
+        #expect(operation["enum"] as? [String] == ["create_event", "update_event", "delete_event"])
+    }
+
+    @Test func calendarWriteReportsActionableOperationErrors() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid-operation").approving(.mutateCalendar)
+
+        await Self.expectInvalidArguments(
+            containing: "Missing required calendar_write argument: operation",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"title\":\"新日程\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "Unsupported calendar_write operation 'move_event'",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"move_event\"}"), context: context) }
+        )
+    }
+
+    @Test func calendarWriteReportsCreateFieldAndTimestampErrors() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid-create").approving(.mutateCalendar)
+
+        await Self.expectInvalidArguments(
+            containing: "calendarID, title, start, end",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "Call calendar_read with operation list_calendars",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "Invalid ISO-8601 start timestamp",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"calendarID\":\"c\",\"title\":\"Bad\",\"start\":\"tomorrow\",\"end\":\"2026-06-19T07:00:00Z\"}"), context: context) }
+        )
+    }
+
+    @Test func calendarWriteReportsUpdateAndDeleteRequiredFields() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid-mutation").approving(.mutateCalendar)
+
+        await Self.expectInvalidArguments(
+            containing: "eventID, expectedVersion",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"update_event\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "eventID, expectedVersion",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"delete_event\"}"), context: context) }
+        )
+    }
+
     @Test func calendarWriteRequiresTrustedExecutionApproval() async throws {
         let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
         await #expect(throws: AgentToolError.self) {
@@ -196,6 +251,20 @@ struct CalendarContactsAgentToolsTests {
             toolCallID: toolCallID,
             policyEngine: policy
         )
+    }
+
+    private static func expectInvalidArguments(
+        containing expectedText: String,
+        executing operation: () async throws -> AgentToolResult
+    ) async {
+        do {
+            _ = try await operation()
+            Issue.record("Expected invalid calendar arguments")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains(expectedText))
+        } catch {
+            Issue.record("Expected invalidArguments, got \(error)")
+        }
     }
 
     private static var sampleEvent: CalendarEvent {
