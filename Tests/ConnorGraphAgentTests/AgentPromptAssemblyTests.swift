@@ -92,6 +92,9 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("For create, first call `calendar_read` with `operation: list_calendars`"))
     #expect(prompt.contains("exact writable `calendarID`"))
+    #expect(prompt.contains("`default` is not a special calendar ID"))
+    #expect(prompt.contains("display names or example IDs"))
+    #expect(prompt.contains("copy the exact writable ID returned by that call"))
     #expect(prompt.contains("`operation: create_event`"))
     #expect(prompt.contains("`calendarID`, `title`, `start`, `end`, and `isAllDay`"))
     #expect(prompt.contains("`operation: update_event`"))
