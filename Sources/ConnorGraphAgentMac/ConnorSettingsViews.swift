@@ -913,6 +913,7 @@ struct AIConnectionSetupView: View {
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
+    @State private var shouldFetchModelsList = true
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
     @State private var visionSupportOverride: Bool? = nil // nil = auto-detect, true = force enable, false = force disable
@@ -1451,6 +1452,14 @@ struct AIConnectionSetupView: View {
                             aiConnectionTextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
                         }
                     }
+
+                    if selectedProviderPresetID == "custom" && customProtocol == .openAICompatible {
+                        aiConnectionSettingsRow(title: "模型目录") {
+                            Toggle("请求 Models 列表", isOn: $shouldFetchModelsList)
+                                .toggleStyle(.switch)
+                        }
+                        aiConnectionHelpText("开启后会自动请求兼容接口的 /models 获取远程模型目录；关闭后只使用手动填写的模型列表。")
+                    }
                 }
             }
 
@@ -1809,7 +1818,8 @@ struct AIConnectionSetupView: View {
                     apiKey: apiKey,
                     anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
                     openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft(),
-                    explicitVisionSupport: visionSupportOverride
+                    explicitVisionSupport: visionSupportOverride,
+                    shouldFetchModelsList: selectedProviderPresetID == "custom" && customProtocol == .openAICompatible ? shouldFetchModelsList : true
                 )
                 _ = try await viewModel.setupLLMConnection(input)
                 await MainActor.run {
@@ -1871,6 +1881,7 @@ struct AIConnectionSetupView: View {
             selectedModel = ""
             selectedModelIDs = []
             customProtocol = .openAICompatible
+            shouldFetchModelsList = true
         }
     }
 

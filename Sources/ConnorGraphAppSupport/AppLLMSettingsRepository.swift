@@ -117,12 +117,14 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var model: String
     public var selectedModel: String
     public var hasAPIKey: Bool
+    public var shouldFetchModelsList: Bool
     public var extraHTTPHeaders: [String: String]
     /// Explicit override for vision support. When nil, capability is inferred from model name heuristics.
     public var explicitVisionSupport: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
+        case shouldFetchModelsList
         case extraHTTPHeaders
         case explicitVisionSupport
     }
@@ -136,6 +138,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         model: String = "",
         selectedModel: String = "",
         hasAPIKey: Bool = false,
+        shouldFetchModelsList: Bool = true,
         extraHTTPHeaders: [String: String] = [:],
         explicitVisionSupport: Bool? = nil
     ) {
@@ -148,6 +151,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         let normalizedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectedModel = normalizedSelectedModel.isEmpty ? Self.firstModel(in: model) : normalizedSelectedModel
         self.hasAPIKey = hasAPIKey
+        self.shouldFetchModelsList = shouldFetchModelsList
         self.extraHTTPHeaders = extraHTTPHeaders
         self.explicitVisionSupport = explicitVisionSupport
     }
@@ -164,6 +168,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             model: try container.decodeIfPresent(String.self, forKey: .model) ?? "",
             selectedModel: try container.decodeIfPresent(String.self, forKey: .selectedModel) ?? "",
             hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
+            shouldFetchModelsList: try container.decodeIfPresent(Bool.self, forKey: .shouldFetchModelsList) ?? true,
             extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:],
             explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport)
         )
@@ -729,6 +734,16 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
     }
 
     private func openAICompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) async -> AppLLMModelConnection {
+        guard connection.shouldFetchModelsList else {
+            return AppLLMModelConnection(
+                id: connection.id,
+                title: connection.name + (isDefault ? " · 默认" : ""),
+                subtitle: "OpenAI Compatible · 使用手动模型列表",
+                providerMode: .openAICompatible,
+                models: configuredOptions(from: connection),
+                isLiveCatalog: false
+            )
+        }
         guard let baseURL = URL(string: connection.baseURLString) else {
             return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · Base URL 无效", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
         }
