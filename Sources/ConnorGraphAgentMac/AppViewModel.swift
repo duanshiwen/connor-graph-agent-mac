@@ -537,6 +537,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
+    private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
@@ -2266,7 +2267,8 @@ final class AppViewModel: NSObject, ObservableObject {
         governanceConfig: AppSessionGovernanceConfig = .default,
         productOSRegistry: ProductOSRegistrySnapshot = .default,
         automationConfig: ProductOSAutomationConfig = .default,
-        llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
+        llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
+        llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
     ) {
         self.entities = entities
         self.statements = statements
@@ -2279,6 +2281,7 @@ final class AppViewModel: NSObject, ObservableObject {
         self.automationConfig = automationConfig
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
+        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory
         if let storagePaths {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
@@ -4455,9 +4458,10 @@ final class AppViewModel: NSObject, ObservableObject {
     func setupLLMConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
         isAddingLLMConnection = true
         defer { isAddingLLMConnection = false }
-        let service = AppLLMConnectionSetupService(settingsRepository: llmSettingsRepository)
+        let service = llmConnectionSetupServiceFactory(llmSettingsRepository)
         let result = try await service.setupConnection(input)
         loadLLMSettings()
+        syncActiveSessionLLMOverride(to: result.connection)
         updateWelcomeState()
         rebuildNativeSessionManagerForActiveSession()
         await reloadLLMModelConnections()
@@ -4709,6 +4713,29 @@ final class AppViewModel: NSObject, ObservableObject {
             llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
             llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
         }
+    }
+
+    private func syncActiveSessionLLMOverride(to connection: AppLLMConnectionConfig) {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let settings = try? llmSettingsRepository.loadSettings()
+        let thinkingLevel = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride?.thinkingLevel
+            ?? settings?.defaultThinkingLevel.rawValue
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+            ?? (try? chatSessionRepository?.loadSessionState(sessionID: sessionID))
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.llmOverride = SessionLLMOverride(
+            providerMode: connection.providerMode.rawValue,
+            model: connection.effectiveModel,
+            baseURLString: nil,
+            connectionID: connection.id,
+            thinkingLevel: thinkingLevel
+        )
+        state.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        llmProviderMode = connection.providerMode
+        llmSelectedModel = connection.effectiveModel
+        llmDefaultConnectionID = connection.id
     }
 
     var sessionHasLLMOverride: Bool {

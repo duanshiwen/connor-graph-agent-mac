@@ -32,7 +32,8 @@ private final class WelcomeStateFakeSettingsStore: LLMSettingsStore, @unchecked 
 @MainActor
 private func makeWelcomeStateViewModel(
     settingsStore: WelcomeStateFakeSettingsStore = WelcomeStateFakeSettingsStore(),
-    credentialStore: WelcomeStateFakeCredentialStore = WelcomeStateFakeCredentialStore()
+    credentialStore: WelcomeStateFakeCredentialStore = WelcomeStateFakeCredentialStore(),
+    llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
 ) throws -> AppViewModel {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory
@@ -48,7 +49,8 @@ private func makeWelcomeStateViewModel(
         repository: repository,
         databasePath: paths.databaseURL.path,
         storagePaths: paths,
-        llmSettingsRepository: llmRepository
+        llmSettingsRepository: llmRepository,
+        llmConnectionSetupServiceFactory: llmConnectionSetupServiceFactory
     )
 }
 
@@ -246,4 +248,56 @@ private func makeWelcomeStateViewModel(
     viewModel.handleSuccessfulLLMSetup()
 
     #expect(viewModel.showWelcomePlaceholder == false)
+}
+
+@MainActor
+@Test func setupAnthropicCompatibleConnectionRebindsActiveSessionOverrideToNewConnection() async throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+
+    let legacyConnection = AppLLMConnectionConfig(
+        id: "legacy-openai",
+        name: "Legacy OpenAI",
+        providerMode: .openAICompatible,
+        baseURLString: "https://legacy.example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        hasAPIKey: true
+    )
+    try repository.save(settings: AppLLMSettings(connections: [legacyConnection], defaultConnectionID: legacyConnection.id), apiKey: "legacy-secret")
+
+    let viewModel = try makeWelcomeStateViewModel(
+        settingsStore: settingsStore,
+        credentialStore: credentialStore,
+        llmConnectionSetupServiceFactory: { repo in
+            AppLLMConnectionSetupService(
+                settingsRepository: repo,
+                anthropicCompatibleHealthCheck: { config in
+                    LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+                }
+            )
+        }
+    )
+    viewModel.selectLLMModel("gpt-4o-mini", providerMode: .openAICompatible, connectionID: "legacy-openai")
+    #expect(viewModel.sessionHasLLMOverride == true)
+
+    let activeSessionID = try #require(viewModel.selectedChatSessionID)
+    let before = try #require(viewModel.sessionStateSnapshotsBySessionID[activeSessionID]?.llmOverride)
+    #expect(before.connectionID == "legacy-openai")
+
+    _ = try await viewModel.setupLLMConnection(AppLLMConnectionSetupInput(
+        id: "anthropic-compatible-new",
+        kind: .anthropicCompatible,
+        name: "Anthropic Compatible",
+        baseURLString: "https://anthropic.example.com/v1",
+        model: "claude-sonnet-4-5",
+        selectedModel: "claude-sonnet-4-5",
+        apiKey: "anthropic-secret"
+    ))
+
+    let override = try #require(viewModel.sessionStateSnapshotsBySessionID[activeSessionID]?.llmOverride)
+    #expect(override.connectionID == "anthropic-compatible-new")
+    #expect(override.providerMode == AppLLMProviderMode.anthropicMessages.rawValue)
+    #expect(override.model == "claude-sonnet-4-5")
 }
