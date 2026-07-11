@@ -100,6 +100,11 @@ import ConnorGraphAgent
     #expect(prompt.contains("`operation: update_event`"))
     #expect(prompt.contains("`operation: delete_event`"))
     #expect(prompt.contains("exact `expectedVersion`"))
+    #expect(prompt.contains("copy the exact `eventID` from a search/list candidate"))
+    #expect(prompt.contains("only after `get_event` succeeds"))
+    #expect(prompt.contains("never reuse an ID that `get_event` did not find"))
+    #expect(prompt.contains("`calendarID` is not an `eventID`"))
+    #expect(prompt.contains("always pass `operation` explicitly"))
     #expect(prompt.contains("never guess calendar/event IDs or time zones"))
     #expect(prompt.contains("recurring or contains organizer/attendee scheduling semantics"))
 }
