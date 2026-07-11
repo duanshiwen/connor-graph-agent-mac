@@ -159,10 +159,10 @@ public struct CalendarReadTool: AgentTool {
     public var description: String { "Read Connor-owned calendar data using operations: list_calendars, list_events, get_event, get_agenda, get_free_busy." }
     public var permission: AgentPermissionCapability { .readCalendar }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
-            "operation": .string(description: "list_calendars | list_events | get_event | get_agenda | get_free_busy"),
-            "calendarID": .string(description: "Optional calendar ID"),
-            "eventID": .string(description: "Optional event ID")
+        .closedObject(properties: [
+            "operation": .stringEnumeration(values: ["list_calendars", "list_events", "get_event", "get_agenda", "get_free_busy"], description: "Calendar read operation"),
+            "calendarID": .string(description: "Exact calendar ID returned by list_calendars; optional for list_events, get_agenda, and get_free_busy"),
+            "eventID": .string(description: "Exact event ID returned by calendar_search_events or list_events; required for get_event")
         ], required: ["operation"])
     }
 
@@ -172,7 +172,9 @@ public struct CalendarReadTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let operation = arguments.string("operation") ?? "list_events"
+        guard let operation = arguments.string("operation") else {
+            throw AgentToolError.invalidArguments("Missing required calendar_read argument: operation. Use list_calendars, list_events, get_event, get_agenda, or get_free_busy.")
+        }
         switch operation {
         case "list_calendars":
             let calendars = try await runtime.listCalendars(runID: context.runID, sessionID: context.sessionID)
@@ -190,7 +192,7 @@ public struct CalendarReadTool: AgentTool {
             await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Listed"), contentJSON: try ContactJSON.encode(events))
         case "get_event":
-            guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required") }
+            guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required for calendar_read get_event. Copy an exact eventID returned by calendar_search_events or list_events.") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
             if let event {
                 await recorder?.record([NativeSourceReference.calendarEvent(event, query: nil, strength: .detailRead, toolName: name, context: context)])
