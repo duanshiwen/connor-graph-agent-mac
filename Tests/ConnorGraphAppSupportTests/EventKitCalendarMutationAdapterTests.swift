@@ -15,6 +15,16 @@ struct EventKitCalendarMutationAdapterTests {
         #expect(result.remoteVersion != nil)
     }
 
+    @Test func deletePreservesCompositeEventIdentifierExactly() async throws {
+        let compositeID = "467EBD97-A2D1:8BCA05B8/opaque"
+        let snapshot = EventKitMutationEventSnapshot(identifier: compositeID, calendarIdentifier: "c", title: "Delete", startDate: Date(timeIntervalSince1970: 10), endDate: Date(timeIntervalSince1970: 20), isAllDay: false, lastModifiedDate: Date(timeIntervalSince1970: 30))
+        let client = FakeEventKitMutationClient(calendars: ["c": true], events: [compositeID: snapshot])
+        let event = CalendarEvent(id: .init(rawValue: compositeID), calendarID: .init(rawValue: "c"), title: "Delete", start: .init(date: snapshot.startDate), end: .init(date: snapshot.endDate), sourceMetadata: .init(sourceKind: .macOSEventKit, remoteIdentifier: compositeID, etag: "30.0"))
+        let result = try await EventKitCalendarMutationAdapter(client: client).mutate(.init(operation: .delete, eventID: event.id, expectedVersion: .init(value: "30.0")), account: .init(id: CalendarEventKitAdapter.systemAccountID, provider: .localFixture, displayName: "Local"), collection: .init(id: .init(rawValue: "c"), accountID: CalendarEventKitAdapter.systemAccountID, displayName: "Work"), currentEvent: event)
+        #expect(result.receipt.eventID?.rawValue == compositeID)
+        #expect(await client.event(identifier: compositeID) == nil)
+    }
+
     @Test func updateRejectsStaleVersion() async throws {
         let snapshot = EventKitMutationEventSnapshot(identifier: "e", calendarIdentifier: "c", title: "Old", startDate: Date(timeIntervalSince1970: 10), endDate: Date(timeIntervalSince1970: 20), isAllDay: false, lastModifiedDate: Date(timeIntervalSince1970: 30))
         let client = FakeEventKitMutationClient(calendars: ["c": true], events: ["e": snapshot])
