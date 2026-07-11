@@ -37,6 +37,9 @@ public enum CalendarCalDAVHTTPError: Error, Sendable, Equatable {
     case forbidden
     case notFound
     case rateLimited
+    case conflict
+    case locked
+    case insufficientStorage
     case serverError(Int)
     case unexpectedStatus(Int)
     case invalidResponse
@@ -78,12 +81,33 @@ public struct CalendarCalDAVHTTPClient: Sendable {
         try await send(method: "REPORT", url: url, depth: depth, body: body, credential: credential)
     }
 
+    public func get(url: URL, credential: String?) async throws -> CalendarCalDAVHTTPResponse {
+        try await send(method: "GET", url: url, headers: ["Accept": "text/calendar,*/*"], body: "", credential: credential)
+    }
+
+    public func put(url: URL, body: String, credential: String?, ifMatch: String? = nil, ifNoneMatch: String? = nil) async throws -> CalendarCalDAVHTTPResponse {
+        var headers = ["Content-Type": "text/calendar; charset=utf-8", "Accept": "text/calendar,*/*"]
+        if let ifMatch { headers["If-Match"] = ifMatch }
+        if let ifNoneMatch { headers["If-None-Match"] = ifNoneMatch }
+        return try await send(method: "PUT", url: url, headers: headers, body: body, credential: credential)
+    }
+
+    public func delete(url: URL, credential: String?, ifMatch: String) async throws -> CalendarCalDAVHTTPResponse {
+        try await send(method: "DELETE", url: url, headers: ["If-Match": ifMatch], body: "", credential: credential)
+    }
+
     private func send(method: String, url: URL, depth: String, body: String, credential: String?) async throws -> CalendarCalDAVHTTPResponse {
         var headers: [String: String] = [
             "Depth": depth,
             "Content-Type": "application/xml; charset=utf-8",
             "Accept": "application/xml,text/xml,text/calendar,*/*"
         ]
+        if let credential, !credential.isEmpty { headers["Authorization"] = "Bearer \(credential)" }
+        return try await send(method: method, url: url, headers: headers, body: body, credential: credential)
+    }
+
+    private func send(method: String, url: URL, headers baseHeaders: [String: String], body: String, credential: String?) async throws -> CalendarCalDAVHTTPResponse {
+        var headers = baseHeaders
         if let credential, !credential.isEmpty { headers["Authorization"] = "Bearer \(credential)" }
         let response = try await transport.send(CalendarCalDAVHTTPRequest(method: method, url: url, headers: headers, body: body))
         try validate(response)
@@ -96,7 +120,10 @@ public struct CalendarCalDAVHTTPClient: Sendable {
         case 401: throw CalendarCalDAVHTTPError.unauthorized
         case 403: throw CalendarCalDAVHTTPError.forbidden
         case 404: throw CalendarCalDAVHTTPError.notFound
+        case 409, 412: throw CalendarCalDAVHTTPError.conflict
+        case 423: throw CalendarCalDAVHTTPError.locked
         case 429: throw CalendarCalDAVHTTPError.rateLimited
+        case 507: throw CalendarCalDAVHTTPError.insufficientStorage
         case 500..<600: throw CalendarCalDAVHTTPError.serverError(response.statusCode)
         default: throw CalendarCalDAVHTTPError.unexpectedStatus(response.statusCode)
         }
