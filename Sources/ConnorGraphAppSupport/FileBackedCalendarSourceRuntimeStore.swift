@@ -1,25 +1,55 @@
 import Foundation
 import ConnorGraphCore
 
+public enum CalendarMutationAuditStatus: String, Codable, Sendable, Equatable { case confirmed, failed, conflicted }
+
+public struct CalendarMutationAuditRecord: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var occurredAt: Date
+    public var runID: String?
+    public var sessionID: String?
+    public var accountID: CalendarAccountID
+    public var calendarID: CalendarID
+    public var eventID: CalendarEventID?
+    public var sourceKind: CalendarSourceKind
+    public var operation: CalendarMutationOperation
+    public var status: CalendarMutationAuditStatus
+    public init(id: String = UUID().uuidString, occurredAt: Date = Date(), runID: String?, sessionID: String?, accountID: CalendarAccountID, calendarID: CalendarID, eventID: CalendarEventID?, sourceKind: CalendarSourceKind, operation: CalendarMutationOperation, status: CalendarMutationAuditStatus) { self.id = id; self.occurredAt = occurredAt; self.runID = runID; self.sessionID = sessionID; self.accountID = accountID; self.calendarID = calendarID; self.eventID = eventID; self.sourceKind = sourceKind; self.operation = operation; self.status = status }
+}
+
 public struct CalendarSourceRuntimeSnapshot: Codable, Sendable, Equatable {
     public var accounts: [CalendarAccount]
     public var collections: [CalendarCollection]
     public var events: [CalendarEvent]
     public var syncStates: [CalendarAccountSyncState]
     public var diagnostics: [CalendarSourceSyncDiagnostic]
+    public var mutationAudits: [CalendarMutationAuditRecord]
 
     public init(
         accounts: [CalendarAccount] = [],
         collections: [CalendarCollection] = [],
         events: [CalendarEvent] = [],
         syncStates: [CalendarAccountSyncState] = [],
-        diagnostics: [CalendarSourceSyncDiagnostic] = []
+        diagnostics: [CalendarSourceSyncDiagnostic] = [],
+        mutationAudits: [CalendarMutationAuditRecord] = []
     ) {
         self.accounts = accounts
         self.collections = collections
         self.events = events
         self.syncStates = syncStates
         self.diagnostics = diagnostics
+        self.mutationAudits = mutationAudits
+    }
+
+    private enum CodingKeys: String, CodingKey { case accounts, collections, events, syncStates, diagnostics, mutationAudits }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accounts = try container.decodeIfPresent([CalendarAccount].self, forKey: .accounts) ?? []
+        collections = try container.decodeIfPresent([CalendarCollection].self, forKey: .collections) ?? []
+        events = try container.decodeIfPresent([CalendarEvent].self, forKey: .events) ?? []
+        syncStates = try container.decodeIfPresent([CalendarAccountSyncState].self, forKey: .syncStates) ?? []
+        diagnostics = try container.decodeIfPresent([CalendarSourceSyncDiagnostic].self, forKey: .diagnostics) ?? []
+        mutationAudits = try container.decodeIfPresent([CalendarMutationAuditRecord].self, forKey: .mutationAudits) ?? []
     }
 
     public static let empty = CalendarSourceRuntimeSnapshot()
@@ -72,7 +102,8 @@ public actor FileBackedCalendarSourceRuntimeStore: CalendarSourceRepository {
                 let right = rhs.occurredAt ?? .distantPast
                 if left == right { return lhs.code.localizedStandardCompare(rhs.code) == .orderedAscending }
                 return left < right
-            }
+            },
+            mutationAudits: snapshot.mutationAudits.sorted { $0.occurredAt < $1.occurredAt }
         )
     }
 
@@ -151,6 +182,17 @@ public actor FileBackedCalendarSourceRuntimeStore: CalendarSourceRepository {
             if copy.occurredAt == nil { copy.occurredAt = attemptedAt }
             return copy
         })
+        try save(snapshot)
+    }
+
+    public func applyMutationResult(_ result: CalendarMutationResult, audit: CalendarMutationAuditRecord) async throws {
+        var snapshot = try load()
+        if result.receipt.mutationKind == .deleteEvent, let eventID = result.receipt.eventID { snapshot.events.removeAll { $0.id == eventID } }
+        else if let event = result.confirmedEvent {
+            snapshot.events.removeAll { $0.id == event.id }
+            snapshot.events.append(event)
+        }
+        snapshot.mutationAudits.append(audit)
         try save(snapshot)
     }
 
