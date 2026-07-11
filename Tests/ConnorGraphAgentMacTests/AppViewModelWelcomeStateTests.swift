@@ -59,12 +59,11 @@ private func makeWelcomeStateViewModel(
     viewModel.loadLLMSettings()
     viewModel.updateWelcomeState()
 
-    #expect(viewModel.appEntryState == .welcome)
     #expect(viewModel.showWelcomePlaceholder == true)
 }
 
 @MainActor
-@Test func appViewModelShowsWelcomeWhenOnlyUnusableConnectionShellExists() throws {
+@Test func appViewModelHidesWelcomeWhenAnyConnectionExists() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -83,12 +82,11 @@ private func makeWelcomeStateViewModel(
     viewModel.loadLLMSettings()
     viewModel.updateWelcomeState()
 
-    #expect(viewModel.appEntryState == .welcome)
-    #expect(viewModel.showWelcomePlaceholder == true)
+    #expect(viewModel.showWelcomePlaceholder == false)
 }
 
 @MainActor
-@Test func appViewModelHidesWelcomeWhenUsableDefaultConnectionExists() throws {
+@Test func appViewModelHidesWelcomeWhenConfiguredConnectionExists() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -107,7 +105,6 @@ private func makeWelcomeStateViewModel(
     viewModel.loadLLMSettings()
     viewModel.updateWelcomeState()
 
-    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
@@ -132,12 +129,11 @@ private func makeWelcomeStateViewModel(
     viewModel.updateWelcomeState()
 
     #expect(viewModel.llmConnectionConfigs.first?.hasAPIKey == true)
-    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
 @MainActor
-@Test func appViewModelHidesWelcomeImmediatelyAfterFirstUsableConnectionBecomesDefault() throws {
+@Test func appViewModelHidesWelcomeImmediatelyAfterFirstConnectionBecomesSelected() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -155,12 +151,11 @@ private func makeWelcomeStateViewModel(
     let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
     viewModel.selectDefaultLLMConnection("first")
 
-    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
 @MainActor
-@Test func selectingUsableDefaultConnectionPersistsBeforeWelcomeStateRecalculation() throws {
+@Test func selectingConnectionPersistsBeforeWelcomeStateRecalculation() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -192,7 +187,6 @@ private func makeWelcomeStateViewModel(
 
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "second")
-    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
@@ -226,18 +220,17 @@ private func makeWelcomeStateViewModel(
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "provider-setup")
     #expect(loaded.defaultConnection?.id == "provider-setup")
-    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
 
 @MainActor
-@Test func successfulLLMSetupTransitionsEntryStateDirectlyToMain() throws {
+@Test func successfulLLMSetupDirectlyHidesWelcome() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
 
     let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    #expect(viewModel.appEntryState == .welcome)
+    #expect(viewModel.showWelcomePlaceholder == true)
 
     let connection = AppLLMConnectionConfig(
         id: "usable",
@@ -252,6 +245,5 @@ private func makeWelcomeStateViewModel(
 
     viewModel.handleSuccessfulLLMSetup()
 
-    #expect(viewModel.appEntryState == .main)
     #expect(viewModel.showWelcomePlaceholder == false)
 }
