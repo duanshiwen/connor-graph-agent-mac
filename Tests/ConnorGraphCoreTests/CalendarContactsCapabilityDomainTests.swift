@@ -71,6 +71,17 @@ struct CalendarContactsCapabilityDomainTests {
         #expect(ConnectedAccountProviderKind.genericIMAPSMTP.defaultCapabilities == [.mail])
     }
 
+    @Test func calendarSourceWriteCapabilityMatrixIsFailClosed() {
+        #expect(CalendarSourceKind.macOSEventKit.supportsWrite)
+        #expect(CalendarSourceKind.genericCalDAV.supportsWrite)
+        #expect(CalendarSourceKind.appleICloudCalDAV.supportsWrite)
+        #expect(CalendarSourceKind.fastmailCalDAV.supportsWrite)
+        #expect(CalendarSourceKind.nextcloudCalDAV.supportsWrite)
+        #expect(!CalendarSourceKind.icsSubscription.supportsWrite)
+        #expect(!CalendarSourceKind.googleCalendar.supportsWrite)
+        #expect(!CalendarSourceKind.microsoft365Calendar.supportsWrite)
+    }
+
     @Test func calendarSourceConfigurationCodableRoundTripsReadOnlyCommercialFields() throws {
         let configuration = CalendarSourceConfiguration(
             sourceKind: .genericCalDAV,
