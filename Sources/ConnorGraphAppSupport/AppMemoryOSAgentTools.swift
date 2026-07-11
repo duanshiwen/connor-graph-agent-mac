@@ -114,76 +114,58 @@ private extension SendableJSONValue {
     }
 }
 
-public struct MemoryOSContextTool: AgentTool {
-    public let name = "memory_os_context"
-    public let description = """
-        Search Connor Memory OS across L1-L4 layers and return matching items as natural-language sentences.
-
-        The query parameter accepts one or more search terms separated by semicolons (;).
-        For each term, Memory OS performs full-text search and graph expansion independently, then merges and deduplicates results.
-
-        When to use multiple terms:
-        - The user mentions several distinct entities, projects, or people
-        - The topic has both Chinese and English expressions
-        - The request spans multiple technical concepts
-        - You want to catch synonyms or aliases
-
-        Examples:
-        - Single concept: "Connor Graph Agent"
-        - Multiple concepts: "Connor Graph Agent;记忆系统;L4 relation predicates"
-        - Bilingual: "知识图谱;knowledge graph;entity resolution;实体解析"
-        - Person + project: "诗闻;Connor Graph Agent Mac;agent os architecture"
-
-        Keep each term focused — short keyword phrases work better than long sentences.
-        2-5 terms per call is the sweet spot.
-
-        Returned memory items may include `(updated_at: ...)`; use it to resolve conflicts between contradictory memory records.
-        """
-    public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "query": .string(description: "Search terms separated by semicolons (;). Each term is searched independently. Include entity names, project names, concepts, and technical terms. Use both Chinese and English for bilingual topics. Chinese semicolon (；) is also accepted.")
+private enum MemoryOSContextToolSupport {
+    static let inputSchema = AgentToolInputSchema.object(properties: [
+        "query": .string(description: "Use 2-5 focused search terms separated by semicolons (; or ；). Include aliases and both Chinese and English terms when useful.")
     ], required: ["query"])
 
+    static func terms(from arguments: AgentToolArguments) throws -> [String] {
+        guard let raw = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            throw AgentToolError.invalidArguments("query is required")
+        }
+        let terms = raw.split { $0 == ";" || $0 == "\u{FF1B}" }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !terms.isEmpty else { throw AgentToolError.invalidArguments("query contained no valid search terms") }
+        return terms
+    }
+
+    static func result(name: String, semanticLabel: String, terms: [String], items: [String], context: AgentToolExecutionContext) throws -> AgentToolResult {
+        let jsonData = try JSONEncoder().encode(items)
+        let json = String(data: jsonData, encoding: .utf8) ?? "[]"
+        let header = "Memory OS \(semanticLabel) returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
+        let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: items.isEmpty ? header : "\(header)\n\n\(body)", contentJSON: json, citations: [])
+    }
+}
+
+public struct MemoryOSRecentContextTool: AgentTool {
+    public let name = "memory_os_recent_context"
+    public let description = "Search only Memory OS L1 and L2 for recent captures, current project/task state, recent decisions, and mutable operational facts. Results may change quickly; compare updated_at when records conflict. This tool never returns L3/L4 durable knowledge."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = MemoryOSContextToolSupport.inputSchema
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawQuery = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !rawQuery.isEmpty else {
-            throw AgentToolError.invalidArguments("query is required")
-        }
-        let terms = splitQuery(rawQuery)
-        guard !terms.isEmpty else {
-            throw AgentToolError.invalidArguments("query contained no valid search terms")
-        }
-        let items = try facade.memoryOSFlatContext(terms: terms)
-        let json = try Self.renderJSON(items)
-        let readableText: String
-        if items.isEmpty {
-            readableText = "Memory OS context returned 0 items for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
-        } else {
-            let header = "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
-            let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-            readableText = "\(header)\n\n\(body)"
-        }
-        return AgentToolResult(
-            toolCallID: context.toolCallID,
-            toolName: name,
-            contentText: readableText,
-            contentJSON: json,
-            citations: []
-        )
+        let terms = try MemoryOSContextToolSupport.terms(from: arguments)
+        return try MemoryOSContextToolSupport.result(name: name, semanticLabel: "operational context", terms: terms, items: facade.memoryOSRecentContext(terms: terms), context: context)
     }
+}
 
-    private func splitQuery(_ raw: String) -> [String] {
-        raw.split { $0 == ";" || $0 == "\u{FF1B}" }
-           .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-           .filter { !$0.isEmpty }
-    }
+public struct MemoryOSKnowledgeContextTool: AgentTool {
+    public let name = "memory_os_knowledge_context"
+    public let description = "Search only Memory OS L3 and L4 for reusable knowledge, stable entities, concepts, and durable relationships. Matching L4 entities are expanded through five relationship hops by default and compiled into natural-language statements before return. Treat non-obvious graph connections as hypotheses requiring validation, not current operational state."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = MemoryOSContextToolSupport.inputSchema
+    private let facade: AppMemoryOSFacade
 
-    private static func renderJSON(_ items: [String]) throws -> String {
-        let data = try JSONEncoder().encode(items)
-        return String(data: data, encoding: .utf8) ?? "[]"
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let terms = try MemoryOSContextToolSupport.terms(from: arguments)
+        return try MemoryOSContextToolSupport.result(name: name, semanticLabel: "knowledge context", terms: terms, items: facade.memoryOSKnowledgeContext(terms: terms), context: context)
     }
 }
 
@@ -997,9 +979,10 @@ public struct MemoryOSL3UpdateBeliefsTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    /// Conversation-time read-only tools — only exposes context and user profile retrieval.
+    /// Conversation-time read-only tools expose operational context, durable knowledge, and user profile separately.
     mutating func registerMemoryOSReadTools(facade: AppMemoryOSFacade) {
-        register(MemoryOSContextTool(facade: facade))
+        register(MemoryOSRecentContextTool(facade: facade))
+        register(MemoryOSKnowledgeContextTool(facade: facade))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
     }
 

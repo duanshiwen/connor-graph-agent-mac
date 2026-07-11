@@ -290,8 +290,17 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).context(request, generatedAt: generatedAt)
     }
 
+    public func memoryOSRecentContext(terms: [String]) throws -> [String] {
+        try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).recentContext(terms: terms)
+    }
+
+    public func memoryOSKnowledgeContext(terms: [String]) throws -> [String] {
+        try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).knowledgeContext(terms: terms)
+    }
+
+    @available(*, deprecated, message: "Use memoryOSRecentContext and memoryOSKnowledgeContext separately")
     public func memoryOSFlatContext(terms: [String]) throws -> [String] {
-        try MemoryOSContextDeliveryService(store: store, searchKernel: searchKernel).flatContext(terms: terms)
+        try memoryOSRecentContext(terms: terms) + memoryOSKnowledgeContext(terms: terms)
     }
 
     public func findMemoryOSL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
