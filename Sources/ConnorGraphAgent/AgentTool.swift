@@ -3,16 +3,21 @@ import ConnorGraphCore
 
 public indirect enum AgentToolInputSchema: Sendable, Equatable {
     case string(description: String)
+    case stringEnumeration(values: [String], description: String)
     case integer(description: String)
     case number(description: String)
     case boolean(description: String)
     case array(items: AgentToolInputSchema, description: String)
     case object(properties: [String: AgentToolInputSchema], required: [String])
+    case closedObject(properties: [String: AgentToolInputSchema], required: [String])
+    case nullable(AgentToolInputSchema)
 
     public var jsonObject: [String: Any] {
         switch self {
         case .string(let description):
             return ["type": "string", "description": description]
+        case .stringEnumeration(let values, let description):
+            return ["type": "string", "enum": values, "description": description]
         case .integer(let description):
             return ["type": "integer", "description": description]
         case .number(let description):
@@ -27,6 +32,21 @@ public indirect enum AgentToolInputSchema: Sendable, Equatable {
                 "properties": properties.mapValues { $0.jsonObject },
                 "required": required
             ]
+        case .closedObject(let properties, let required):
+            return [
+                "type": "object",
+                "properties": properties.mapValues { $0.jsonObject },
+                "required": required,
+                "additionalProperties": false
+            ]
+        case .nullable(let wrapped):
+            var object = wrapped.jsonObject
+            if let type = object["type"] as? String {
+                object["type"] = [type, "null"]
+            } else if let types = object["type"] as? [String], !types.contains("null") {
+                object["type"] = types + ["null"]
+            }
+            return object
         }
     }
 }
