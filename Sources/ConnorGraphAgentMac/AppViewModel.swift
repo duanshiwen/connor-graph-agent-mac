@@ -344,7 +344,15 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
-    @Published var showWelcomePlaceholder: Bool = false
+    enum AppEntryState: Equatable {
+        case welcome
+        case main
+    }
+
+    @Published var appEntryState: AppEntryState = .welcome
+    var showWelcomePlaceholder: Bool {
+        appEntryState == .welcome
+    }
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
@@ -4303,12 +4311,16 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateWelcomeState() {
+        appEntryState = resolveAppEntryState()
+    }
+
+    func resolveAppEntryState() -> AppEntryState {
         do {
             let settings = try llmSettingsRepository.loadSettings()
-            showWelcomePlaceholder = !settings.hasUsableDefaultConnection
+            return settings.hasUsableDefaultConnection ? .main : .welcome
         } catch {
             let defaultConnection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID })
-            showWelcomePlaceholder = !AppLLMSettings.isUsableConnection(defaultConnection)
+            return AppLLMSettings.isUsableConnection(defaultConnection) ? .main : .welcome
         }
     }
 
