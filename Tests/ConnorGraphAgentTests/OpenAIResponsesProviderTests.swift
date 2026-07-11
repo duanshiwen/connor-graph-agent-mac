@@ -110,6 +110,33 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(include.contains("reasoning.encrypted_content"))
 }
 
+@Test func openAIResponsesProviderEnablesStrictOnlyForCompatibleSchemas() async throws {
+    let body = #"{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+    let strictTool = AgentToolDefinition(
+        name: "strict_tool",
+        description: "Strict tool",
+        inputSchema: .closedObject(properties: ["query": .string(description: "Query")], required: ["query"])
+    )
+    let flexibleTool = AgentToolDefinition(
+        name: "flexible_tool",
+        description: "Flexible tool",
+        inputSchema: .object(properties: ["query": .string(description: "Query")], required: ["query"])
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "test")], tools: [strictTool, flexibleTool]))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    #expect(tools.first { $0["name"] as? String == "strict_tool" }?["strict"] as? Bool == true)
+    #expect(tools.first { $0["name"] as? String == "flexible_tool" }?["strict"] as? Bool == false)
+}
+
 @Test func openAIResponsesProviderParsesFunctionCallItems() async throws {
     let body = """
     {

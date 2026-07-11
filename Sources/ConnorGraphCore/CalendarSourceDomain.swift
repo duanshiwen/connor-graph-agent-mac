@@ -47,7 +47,14 @@ public enum CalendarSourceKind: String, Codable, Sendable, Equatable, Hashable, 
         }
     }
 
-    public var supportsWrite: Bool { false }
+    public var supportsWrite: Bool {
+        switch self {
+        case .macOSEventKit, .genericCalDAV, .appleICloudCalDAV, .fastmailCalDAV, .nextcloudCalDAV:
+            return true
+        case .googleCalendar, .microsoft365Calendar, .icsSubscription:
+            return false
+        }
+    }
 
     public static func legacyProviderMapping(_ provider: ConnectedAccountProviderKind) -> CalendarSourceKind {
         switch provider {
@@ -94,6 +101,7 @@ public enum CalendarSourceAuthMode: String, Codable, Sendable, Equatable, Hashab
 
 public enum CalendarSourceSyncMode: String, Codable, Sendable, Equatable, Hashable {
     case readOnly
+    case bidirectional
 }
 
 public struct CalendarCredentialBinding: Codable, Sendable, Equatable, Hashable {
@@ -168,6 +176,26 @@ public struct CalendarSourceConfiguration: Codable, Sendable, Equatable, Hashabl
         self.syncWindowFutureDays = max(1, syncWindowFutureDays)
         self.enabledCollectionIDs = enabledCollectionIDs
         self.providerMetadata = providerMetadata
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceKind, authMode, syncMode, serverURL, username, principalURL, calendarHomeSetURL, subscriptionURL, syncWindowPastDays, syncWindowFutureDays, enabledCollectionIDs, providerMetadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceKind = try container.decode(CalendarSourceKind.self, forKey: .sourceKind)
+        authMode = try container.decodeIfPresent(CalendarSourceAuthMode.self, forKey: .authMode) ?? .none
+        syncMode = try container.decodeIfPresent(CalendarSourceSyncMode.self, forKey: .syncMode) ?? .readOnly
+        serverURL = try container.decodeIfPresent(URL.self, forKey: .serverURL)
+        username = try container.decodeIfPresent(String.self, forKey: .username)
+        principalURL = try container.decodeIfPresent(URL.self, forKey: .principalURL)
+        calendarHomeSetURL = try container.decodeIfPresent(URL.self, forKey: .calendarHomeSetURL)
+        subscriptionURL = try container.decodeIfPresent(URL.self, forKey: .subscriptionURL)
+        syncWindowPastDays = max(0, try container.decodeIfPresent(Int.self, forKey: .syncWindowPastDays) ?? 30)
+        syncWindowFutureDays = max(1, try container.decodeIfPresent(Int.self, forKey: .syncWindowFutureDays) ?? 365)
+        enabledCollectionIDs = try container.decodeIfPresent([CalendarID].self, forKey: .enabledCollectionIDs) ?? []
+        providerMetadata = try container.decodeIfPresent([String: String].self, forKey: .providerMetadata) ?? [:]
     }
 
     public static func migrated(from provider: ConnectedAccountProviderKind) -> CalendarSourceConfiguration {
@@ -278,6 +306,25 @@ public struct CalendarAccount: Codable, Sendable, Equatable, Hashable, Identifia
     }
 }
 
+public struct CalendarCollectionCapabilities: Codable, Sendable, Equatable, Hashable {
+    public var canCreateEvents: Bool
+    public var canUpdateEvents: Bool
+    public var canDeleteEvents: Bool
+    public var supportsScheduling: Bool
+    public var readOnlyReason: String?
+
+    public init(canCreateEvents: Bool = false, canUpdateEvents: Bool = false, canDeleteEvents: Bool = false, supportsScheduling: Bool = false, readOnlyReason: String? = nil) {
+        self.canCreateEvents = canCreateEvents
+        self.canUpdateEvents = canUpdateEvents
+        self.canDeleteEvents = canDeleteEvents
+        self.supportsScheduling = supportsScheduling
+        self.readOnlyReason = readOnlyReason
+    }
+
+    public static let readOnly = CalendarCollectionCapabilities(readOnlyReason: "Calendar collection is read-only")
+    public static let eventCRUD = CalendarCollectionCapabilities(canCreateEvents: true, canUpdateEvents: true, canDeleteEvents: true)
+}
+
 public struct CalendarCollection: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var id: CalendarID
     public var accountID: CalendarAccountID
@@ -285,14 +332,29 @@ public struct CalendarCollection: Codable, Sendable, Equatable, Hashable, Identi
     public var colorHex: String?
     public var isReadOnly: Bool
     public var source: String
+    public var capabilities: CalendarCollectionCapabilities
 
-    public init(id: CalendarID, accountID: CalendarAccountID, displayName: String, colorHex: String? = nil, isReadOnly: Bool = false, source: String = "connor-cache") {
+    public init(id: CalendarID, accountID: CalendarAccountID, displayName: String, colorHex: String? = nil, isReadOnly: Bool = false, source: String = "connor-cache", capabilities: CalendarCollectionCapabilities? = nil) {
         self.id = id
         self.accountID = accountID
         self.displayName = displayName
         self.colorHex = colorHex
         self.isReadOnly = isReadOnly
         self.source = source
+        self.capabilities = capabilities ?? (isReadOnly ? .readOnly : .eventCRUD)
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, accountID, displayName, colorHex, isReadOnly, source, capabilities }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(CalendarID.self, forKey: .id)
+        accountID = try container.decode(CalendarAccountID.self, forKey: .accountID)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex)
+        isReadOnly = try container.decodeIfPresent(Bool.self, forKey: .isReadOnly) ?? false
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "connor-cache"
+        capabilities = try container.decodeIfPresent(CalendarCollectionCapabilities.self, forKey: .capabilities) ?? (isReadOnly ? .readOnly : .eventCRUD)
     }
 }
 
@@ -346,6 +408,30 @@ public struct CalendarRecurrenceSummary: Codable, Sendable, Equatable, Hashable 
     }
 }
 
+public struct CalendarEventSourceMetadata: Codable, Sendable, Equatable, Hashable {
+    public var sourceKind: CalendarSourceKind
+    public var remoteIdentifier: String?
+    public var resourceURL: URL?
+    public var etag: String?
+    public var scheduleTag: String?
+    public var recurrenceIdentifier: String?
+    public var isRecurring: Bool
+    public var organizerEmail: String?
+    public var hasAttendees: Bool
+
+    public init(sourceKind: CalendarSourceKind, remoteIdentifier: String? = nil, resourceURL: URL? = nil, etag: String? = nil, scheduleTag: String? = nil, recurrenceIdentifier: String? = nil, isRecurring: Bool = false, organizerEmail: String? = nil, hasAttendees: Bool = false) {
+        self.sourceKind = sourceKind
+        self.remoteIdentifier = remoteIdentifier
+        self.resourceURL = resourceURL
+        self.etag = etag
+        self.scheduleTag = scheduleTag
+        self.recurrenceIdentifier = recurrenceIdentifier
+        self.isRecurring = isRecurring
+        self.organizerEmail = organizerEmail
+        self.hasAttendees = hasAttendees
+    }
+}
+
 public struct CalendarEvent: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var id: CalendarEventID
     public var calendarID: CalendarID
@@ -358,6 +444,7 @@ public struct CalendarEvent: Codable, Sendable, Equatable, Hashable, Identifiabl
     public var notes: String?
     public var attendees: [CalendarAttendee]
     public var recurrenceSummary: CalendarRecurrenceSummary?
+    public var sourceMetadata: CalendarEventSourceMetadata?
     public var updatedAt: Date
 
     public init(
@@ -372,6 +459,7 @@ public struct CalendarEvent: Codable, Sendable, Equatable, Hashable, Identifiabl
         notes: String? = nil,
         attendees: [CalendarAttendee] = [],
         recurrenceSummary: CalendarRecurrenceSummary? = nil,
+        sourceMetadata: CalendarEventSourceMetadata? = nil,
         updatedAt: Date = Date()
     ) {
         self.id = id
@@ -385,6 +473,7 @@ public struct CalendarEvent: Codable, Sendable, Equatable, Hashable, Identifiabl
         self.notes = notes
         self.attendees = attendees
         self.recurrenceSummary = recurrenceSummary
+        self.sourceMetadata = sourceMetadata
         self.updatedAt = updatedAt
     }
 
@@ -496,6 +585,155 @@ public struct CalendarSyncBackoffPolicy: Codable, Sendable, Equatable, Hashable 
         let exponent = max(0, failureCount - 1)
         let delay = initialDelaySeconds * pow(multiplier, Double(exponent))
         return min(delay, maxDelaySeconds)
+    }
+}
+
+public enum CalendarPatchValue<Value: Codable & Sendable & Equatable & Hashable>: Codable, Sendable, Equatable, Hashable {
+    case unchanged
+    case clear
+    case set(Value)
+}
+
+public enum CalendarMutationOperation: String, Codable, Sendable, Equatable, Hashable {
+    case create
+    case update
+    case delete
+}
+
+public struct CalendarEventDraft: Codable, Sendable, Equatable, Hashable {
+    public var calendarID: CalendarID
+    public var title: String
+    public var start: CalendarEventDateTime
+    public var end: CalendarEventDateTime
+    public var isAllDay: Bool
+    public var location: String?
+    public var url: URL?
+    public var notes: String?
+
+    public init(calendarID: CalendarID, title: String, start: CalendarEventDateTime, end: CalendarEventDateTime, isAllDay: Bool = false, location: String? = nil, url: URL? = nil, notes: String? = nil) {
+        self.calendarID = calendarID
+        self.title = title
+        self.start = start
+        self.end = end
+        self.isAllDay = isAllDay
+        self.location = location
+        self.url = url
+        self.notes = notes
+    }
+}
+
+public struct CalendarEventPatch: Codable, Sendable, Equatable, Hashable {
+    public var title: CalendarPatchValue<String>
+    public var start: CalendarPatchValue<CalendarEventDateTime>
+    public var end: CalendarPatchValue<CalendarEventDateTime>
+    public var isAllDay: CalendarPatchValue<Bool>
+    public var location: CalendarPatchValue<String>
+    public var url: CalendarPatchValue<URL>
+    public var notes: CalendarPatchValue<String>
+
+    public init(title: CalendarPatchValue<String> = .unchanged, start: CalendarPatchValue<CalendarEventDateTime> = .unchanged, end: CalendarPatchValue<CalendarEventDateTime> = .unchanged, isAllDay: CalendarPatchValue<Bool> = .unchanged, location: CalendarPatchValue<String> = .unchanged, url: CalendarPatchValue<URL> = .unchanged, notes: CalendarPatchValue<String> = .unchanged) {
+        self.title = title
+        self.start = start
+        self.end = end
+        self.isAllDay = isAllDay
+        self.location = location
+        self.url = url
+        self.notes = notes
+    }
+
+    public var isEmpty: Bool {
+        title == .unchanged && start == .unchanged && end == .unchanged && isAllDay == .unchanged && location == .unchanged && url == .unchanged && notes == .unchanged
+    }
+}
+
+public struct CalendarMutationVersion: Codable, Sendable, Equatable, Hashable {
+    public var value: String
+    public init(value: String) { self.value = value }
+}
+
+public enum CalendarMutationError: Error, Codable, Sendable, Equatable, Hashable {
+    case invalidInput(String)
+    case readOnlySource
+    case readOnlyCollection(String?)
+    case calendarNotFound(CalendarID)
+    case accountNotFound(CalendarAccountID)
+    case eventNotFound
+    case recurrenceUnsupported
+    case schedulingUnsupported
+    case conflict(expected: String?, actual: String?)
+    case authenticationRequired
+    case permissionDenied
+    case remoteFailure(String)
+    case verificationFailed
+}
+
+public struct CalendarMutationRequest: Codable, Sendable, Equatable, Hashable {
+    public var operation: CalendarMutationOperation
+    public var eventID: CalendarEventID?
+    public var expectedVersion: CalendarMutationVersion?
+    public var draft: CalendarEventDraft?
+    public var patch: CalendarEventPatch?
+    public var approvalID: String?
+    public var runID: String?
+    public var sessionID: String?
+
+    public init(operation: CalendarMutationOperation, eventID: CalendarEventID? = nil, expectedVersion: CalendarMutationVersion? = nil, draft: CalendarEventDraft? = nil, patch: CalendarEventPatch? = nil, approvalID: String? = nil, runID: String? = nil, sessionID: String? = nil) {
+        self.operation = operation
+        self.eventID = eventID
+        self.expectedVersion = expectedVersion
+        self.draft = draft
+        self.patch = patch
+        self.approvalID = approvalID
+        self.runID = runID
+        self.sessionID = sessionID
+    }
+
+    public func validated() throws -> CalendarMutationRequest {
+        switch operation {
+        case .create:
+            guard let draft else { throw CalendarMutationError.invalidInput("draft is required") }
+            guard !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CalendarMutationError.invalidInput("title is required") }
+            guard draft.end.date > draft.start.date else { throw CalendarMutationError.invalidInput("end must be after start") }
+        case .update:
+            guard eventID != nil, expectedVersion != nil, let patch, !patch.isEmpty else { throw CalendarMutationError.invalidInput("eventID, expectedVersion, and a non-empty patch are required") }
+        case .delete:
+            guard eventID != nil, expectedVersion != nil else { throw CalendarMutationError.invalidInput("eventID and expectedVersion are required") }
+        }
+        return self
+    }
+}
+
+public enum CalendarMutationSyncStatus: String, Codable, Sendable, Equatable, Hashable {
+    case confirmed
+    case remoteSucceededLocalVerificationPending
+    case remoteAlreadyMissing
+}
+
+public struct CalendarMutationConflict: Codable, Sendable, Equatable, Hashable {
+    public var expectedVersion: CalendarMutationVersion?
+    public var actualVersion: CalendarMutationVersion?
+    public var currentEvent: CalendarEvent?
+    public var retryGuidance: String
+
+    public init(expectedVersion: CalendarMutationVersion?, actualVersion: CalendarMutationVersion?, currentEvent: CalendarEvent? = nil, retryGuidance: String) {
+        self.expectedVersion = expectedVersion
+        self.actualVersion = actualVersion
+        self.currentEvent = currentEvent
+        self.retryGuidance = retryGuidance
+    }
+}
+
+public struct CalendarMutationResult: Codable, Sendable, Equatable, Hashable {
+    public var receipt: CalendarWriteReceipt
+    public var confirmedEvent: CalendarEvent?
+    public var remoteVersion: CalendarMutationVersion?
+    public var syncStatus: CalendarMutationSyncStatus
+
+    public init(receipt: CalendarWriteReceipt, confirmedEvent: CalendarEvent? = nil, remoteVersion: CalendarMutationVersion? = nil, syncStatus: CalendarMutationSyncStatus = .confirmed) {
+        self.receipt = receipt
+        self.confirmedEvent = confirmedEvent
+        self.remoteVersion = remoteVersion
+        self.syncStatus = syncStatus
     }
 }
 

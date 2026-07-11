@@ -732,6 +732,80 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(errorToolMessage.content.contains("Invalid arguments"))
 }
 
+@Test func agentLoopCompletesVerifiedCalendarDeleteProviderNeutrally() async throws {
+    let event = CalendarEvent(id: .init(rawValue: "event:opaque/id"), calendarID: .init(rawValue: "calendar-test"), title: "Connor Test", start: .init(date: Date(timeIntervalSince1970: 1_000)), end: .init(date: Date(timeIntervalSince1970: 4_600)), sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "version-1"))
+    let runtime = InMemoryAgentCalendarRuntime(calendars: [.init(id: .init(rawValue: "calendar-test"), accountID: .init(rawValue: "account"), displayName: "Connor Test")], events: [event])
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "search", name: "calendar_search_events", argumentsJSON: #"{"query":"Connor Test"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "detail", name: "calendar_read", argumentsJSON: #"{"operation":"get_event","eventID":"event:opaque/id"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [.init(id: "delete", name: "calendar_write", argumentsJSON: #"{"operation":"delete_event","eventID":"event:opaque/id","expectedVersion":"version-1"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: "Deleted safely.", usage: .init(promptTokens: 1, completionTokens: 1))
+    ])
+    var registry = AgentToolRegistry(); registry.registerNativeCalendarTools(runtime: runtime)
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: .init(permissionMode: .askToWrite))
+    var events: [AgentEvent] = []
+    for try await output in loop.run(.init(runID: "run-verified-delete", sessionID: "session-verified-delete", userMessage: "Delete Connor Test", permissionMode: .askToWrite)) {
+        events.append(output)
+        if case .permissionRequested(let request) = output { Task { await loop.resolveApproval(.init(requestID: request.id, runID: request.runID, sessionID: request.sessionID, capability: request.capability, toolName: request.toolName, payloadJSON: request.payloadJSON), status: .approved) } }
+    }
+    #expect(events.filter { $0.kind == .permissionRequested }.count == 1)
+    #expect(events.filter { $0.kind == .toolFailed }.isEmpty)
+    #expect(try await runtime.getEvent(id: .init(rawValue: "event:opaque/id"), runID: nil, sessionID: nil) == nil)
+    let detailFollowUp = try #require(await provider.requests.dropFirst(2).first)
+    #expect(detailFollowUp.messages.contains { $0.role == .tool && $0.content.contains("expectedVersion: version-1") })
+}
+
+@Test func agentLoopRejectsUnverifiedCalendarMutationBeforeApproval() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-unverified-delete", name: "calendar_write", argumentsJSON: #"{"operation":"delete_event","eventID":"guessed-event","expectedVersion":"1"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: "Stopped safely.", usage: .init(promptTokens: 1, completionTokens: 1))
+    ])
+    let runtime = InMemoryAgentCalendarRuntime()
+    var registry = AgentToolRegistry()
+    registry.registerNativeCalendarTools(runtime: runtime)
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: .init(permissionMode: .askToWrite))
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(runID: "run-unverified-calendar", sessionID: "session-unverified-calendar", userMessage: "Delete it", permissionMode: .askToWrite)) { events.append(event) }
+
+    #expect(events.map(\.kind).contains(.toolFailed))
+    #expect(!events.map(\.kind).contains(.permissionRequested))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopRecoversCalendarWriteAfterUnknownCalendarID() async throws {
+    let exactID = "calendar-exact-id"
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-bad", name: "calendar_write", argumentsJSON: #"{"operation":"create_event","calendarID":"default","title":"Test","start":"2026-07-12T01:30:00Z","end":"2026-07-12T02:00:00Z"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-list", name: "calendar_read", argumentsJSON: #"{"operation":"list_calendars"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "calendar-good", name: "calendar_write", argumentsJSON: #"{"operation":"create_event","calendarID":"calendar-exact-id","title":"Test","start":"2026-07-12T01:30:00Z","end":"2026-07-12T02:00:00Z"}"#)], usage: .init(promptTokens: 1, completionTokens: 1), finishReason: .toolCalls),
+        AgentModelResponse(text: "Created safely.", usage: .init(promptTokens: 1, completionTokens: 1))
+    ])
+    let runtime = InMemoryAgentCalendarRuntime(calendars: [.init(id: .init(rawValue: exactID), accountID: .init(rawValue: "account"), displayName: "Connor Test")])
+    var registry = AgentToolRegistry()
+    registry.registerNativeCalendarTools(runtime: runtime)
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: .init(permissionMode: .allowAll))
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(.init(runID: "run-calendar-recovery", sessionID: "session-calendar-recovery", userMessage: "Create a test event", permissionMode: .allowAll)) {
+        events.append(event)
+        if case .permissionRequested(let request) = event {
+            Task {
+                await loop.resolveApproval(.init(requestID: request.id, runID: request.runID, sessionID: request.sessionID, capability: request.capability, toolName: request.toolName, payloadJSON: request.payloadJSON), status: .approved)
+            }
+        }
+    }
+
+    #expect(events.map(\.kind).contains(.toolFailed))
+    #expect(events.last?.kind == .runCompleted)
+    let recoveryRequest = try #require(await provider.requests.dropFirst().first)
+    let failure = try #require(recoveryRequest.messages.first { $0.role == .tool && $0.toolCallID == "calendar-bad" })
+    #expect(failure.content.contains("Calendar 'default' was not found"))
+    #expect(failure.content.contains("list_calendars"))
+    let createdEvents = try await runtime.listEvents(calendarID: .init(rawValue: exactID), runID: nil, sessionID: nil)
+    #expect(createdEvents.count == 1)
+}
+
 @Test func agentLoopReturnsUnknownToolAsToolResultAndLetsModelRecover() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

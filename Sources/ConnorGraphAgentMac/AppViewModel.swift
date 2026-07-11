@@ -3536,6 +3536,14 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func setCalendarSyncMode(accountID: CalendarAccountID, mode: CalendarSourceSyncMode) {
+        guard let index = calendarAccounts.firstIndex(where: { $0.id == accountID }) else { return }
+        guard calendarAccounts[index].sourceKind.supportsWrite else { return }
+        calendarAccounts[index].configuration.syncMode = mode
+        calendarAccounts[index].updatedAt = Date()
+        Task { @MainActor in await persistCalendarSnapshot() }
+    }
+
     func deleteCalendarSource(_ account: CalendarAccount) {
         let collectionIDs = Set(calendarCollections.filter { $0.accountID == account.id }.map(\.id))
         let nextAccounts = calendarAccounts.filter { $0.id != account.id }

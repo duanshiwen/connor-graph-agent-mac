@@ -12,8 +12,11 @@ public struct CalendarSystemEventSnapshot: Sendable, Equatable {
     public var isAllDay: Bool
     public var location: String?
     public var notes: String?
+    public var lastModifiedDate: Date?
+    public var isRecurring: Bool
+    public var hasAttendees: Bool
 
-    public init(identifier: String, calendarIdentifier: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool, location: String? = nil, notes: String? = nil) {
+    public init(identifier: String, calendarIdentifier: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool, location: String? = nil, notes: String? = nil, lastModifiedDate: Date? = nil, isRecurring: Bool = false, hasAttendees: Bool = false) {
         self.identifier = identifier
         self.calendarIdentifier = calendarIdentifier
         self.title = title
@@ -22,6 +25,9 @@ public struct CalendarSystemEventSnapshot: Sendable, Equatable {
         self.isAllDay = isAllDay
         self.location = location
         self.notes = notes
+        self.lastModifiedDate = lastModifiedDate
+        self.isRecurring = isRecurring
+        self.hasAttendees = hasAttendees
     }
 }
 
@@ -68,6 +74,7 @@ public struct CalendarEventKitAdapter: Sendable {
             id: systemAccountID,
             provider: .localFixture,
             displayName: "本机日历",
+            configuration: CalendarSourceConfiguration(sourceKind: .macOSEventKit, syncMode: .bidirectional),
             health: CalendarAccountHealth(status: .ready, checkedAt: now, summary: "已同步 macOS Calendar / EventKit"),
             createdAt: now,
             updatedAt: now
@@ -131,7 +138,9 @@ public struct CalendarEventKitAdapter: Sendable {
             end: CalendarEventDateTime(date: snapshot.endDate),
             isAllDay: snapshot.isAllDay,
             location: snapshot.location,
-            notes: snapshot.notes
+            notes: snapshot.notes,
+            sourceMetadata: CalendarEventSourceMetadata(sourceKind: .macOSEventKit, remoteIdentifier: snapshot.identifier, etag: String(snapshot.lastModifiedDate?.timeIntervalSince1970 ?? 0), isRecurring: snapshot.isRecurring, hasAttendees: snapshot.hasAttendees),
+            updatedAt: snapshot.lastModifiedDate ?? Date()
         )
     }
 
@@ -144,7 +153,10 @@ public struct CalendarEventKitAdapter: Sendable {
             endDate: event.endDate,
             isAllDay: event.isAllDay,
             location: event.location,
-            notes: event.notes
+            notes: event.notes,
+            lastModifiedDate: event.lastModifiedDate,
+            isRecurring: event.hasRecurrenceRules,
+            hasAttendees: !(event.attendees?.isEmpty ?? true)
         )
     }
 

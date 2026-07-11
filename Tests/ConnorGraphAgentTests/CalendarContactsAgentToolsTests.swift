@@ -26,6 +26,42 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("overlapSeconds") == true)
     }
 
+    @Test func calendarReadSchemaAndExecutionFailClosed() async throws {
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime())
+        let schema = tool.inputSchema.jsonObject
+        #expect(schema["additionalProperties"] as? Bool == false)
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let operation = try #require(properties["operation"] as? [String: Any])
+        #expect(operation["enum"] as? [String] == ["list_calendars", "list_events", "get_event", "get_agenda", "get_free_busy"])
+        await Self.expectInvalidArguments(containing: "Missing required calendar_read argument: operation") {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{}"), context: Self.context(toolCallID: "call-calendar-read-missing-operation"))
+        }
+        await Self.expectInvalidArguments(containing: "eventID is required for calendar_read get_event") {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\"}"), context: Self.context(toolCallID: "call-calendar-read-missing-event"))
+        }
+    }
+
+    @Test func calendarReadToolSummarizesExactWritableCalendarIDs() async throws {
+        let writable = CalendarCollection(id: .init(rawValue: "calendar-exact-write-id"), accountID: .init(rawValue: "account"), displayName: "Work")
+        let readOnly = CalendarCollection(id: .init(rawValue: "calendar-holidays"), accountID: .init(rawValue: "account"), displayName: "Holidays", isReadOnly: true, capabilities: .init(canCreateEvents: false, canUpdateEvents: false, canDeleteEvents: false, supportsScheduling: false, readOnlyReason: "subscription"))
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(calendars: [writable, readOnly]))
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"list_calendars\"}"), context: Self.context(toolCallID: "call-list-calendars"))
+
+        #expect(result.contentText.contains("1 writable"))
+        #expect(result.contentText.contains("Work"))
+        #expect(result.contentText.contains("calendar-exact-write-id"))
+        #expect(!result.contentText.contains("calendar-holidays"))
+        #expect(result.contentJSON?.contains("calendar-holidays") == true)
+    }
+
+    @Test func calendarReadToolReportsWhenNoWritableCalendarExists() async throws {
+        let readOnly = CalendarCollection(id: .init(rawValue: "calendar-holidays"), accountID: .init(rawValue: "account"), displayName: "Holidays", isReadOnly: true)
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(calendars: [readOnly]))
+        let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"list_calendars\"}"), context: Self.context(toolCallID: "call-list-read-only-calendars"))
+
+        #expect(result.contentText.contains("No writable calendars"))
+    }
+
     @Test func calendarReadToolListsEventsFromRuntime() async throws {
         let runtime = InMemoryAgentCalendarRuntime(events: [Self.sampleEvent])
         let tool = CalendarReadTool(runtime: runtime)
@@ -35,8 +71,95 @@ struct CalendarContactsAgentToolsTests {
         )
 
         #expect(result.toolName == "calendar_read")
-        #expect(result.contentText.contains("Listed 1 calendar event candidates"))
+        #expect(result.contentText.contains("Listed 1 calendar event candidate"))
+        #expect(result.contentText.contains("eventID: event-1"))
+        #expect(result.contentText.contains("calendarID: calendar-work"))
+        #expect(result.contentText.contains("title: 产品讨论"))
+        #expect(result.contentText.contains("start: 1970-01-01T00:16:40Z"))
+        #expect(result.contentText.contains("end: 1970-01-01T01:16:40Z"))
+        #expect(result.contentText.contains("Next: call calendar_read with operation get_event"))
         #expect(result.contentJSON?.contains("产品讨论") == true)
+    }
+
+    @Test func calendarAgendaExposesExactOpaqueCandidateIDsWithoutNotes() async throws {
+        let opaqueID = "467EBD97-A2D1-49CC-8EE6-BE7136D0BD70:8BCA05B8/765F-44BD"
+        let event = CalendarEvent(
+            id: .init(rawValue: opaqueID),
+            calendarID: .init(rawValue: "caldav-https://calendar.example.test/users/shiwen/"),
+            title: "训练安排",
+            start: .init(date: Date(timeIntervalSince1970: 1_000)),
+            end: .init(date: Date(timeIntervalSince1970: 4_600)),
+            notes: "PRIVATE-LONG-NOTES-SHOULD-NOT-ENTER-CANDIDATE-TEXT"
+        )
+        let result = try await CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [event])).execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_agenda\"}"),
+            context: Self.context(toolCallID: "call-calendar-agenda")
+        )
+
+        #expect(result.contentText.contains(opaqueID))
+        #expect(result.contentText.contains("caldav-https://calendar.example.test/users/shiwen/"))
+        #expect(!result.contentText.contains("PRIVATE-LONG-NOTES"))
+        #expect(result.contentJSON?.contains("PRIVATE-LONG-NOTES") == true)
+    }
+
+    @Test func calendarDetailReadEvidenceIsScopedAndContainsNoPrivateBody() async throws {
+        let evidence = CalendarDetailReadEvidenceRegistry()
+        let event = CalendarEvent(id: .init(rawValue: "event-evidence"), calendarID: .init(rawValue: "calendar-work"), title: "Private title", start: .init(date: Date(timeIntervalSince1970: 1_000)), end: .init(date: Date(timeIntervalSince1970: 4_600)), notes: "SECRET NOTES", sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "version-7"))
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [event]), evidenceRegistry: evidence)
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-evidence\"}"), context: Self.context(toolCallID: "call-evidence"))
+
+        #expect(await evidence.matches(runID: "run-calendar-contacts", sessionID: "session-calendar-contacts", eventID: "event-evidence", expectedVersion: "version-7"))
+        #expect(!(await evidence.matches(runID: "other-run", sessionID: "session-calendar-contacts", eventID: "event-evidence", expectedVersion: "version-7")))
+        #expect(!(await evidence.matches(runID: "run-calendar-contacts", sessionID: "session-calendar-contacts", eventID: "event-evidence", expectedVersion: "wrong")))
+        #expect(!(await evidence.debugDescription().contains("SECRET NOTES")))
+
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"missing\"}"), context: Self.context(toolCallID: "call-missing-evidence"))
+        #expect(!(await evidence.matches(runID: "run-calendar-contacts", sessionID: "session-calendar-contacts", eventID: "missing", expectedVersion: "version-7")))
+    }
+
+    @Test func calendarReadGetEventReturnsMutationReadyIdentityAndVersion() async throws {
+        let event = CalendarEvent(
+            id: .init(rawValue: "event:opaque/id"),
+            calendarID: .init(rawValue: "calendar-work"),
+            title: "产品讨论",
+            start: .init(date: Date(timeIntervalSince1970: 1_000)),
+            end: .init(date: Date(timeIntervalSince1970: 4_600)),
+            sourceMetadata: .init(sourceKind: .genericCalDAV, remoteIdentifier: "remote-event", etag: "W/\"etag-42\"")
+        )
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [event]))
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event:opaque/id\"}"),
+            context: Self.context(toolCallID: "call-calendar-detail")
+        )
+
+        #expect(result.contentText.contains("Loaded mutation-ready calendar event"))
+        #expect(result.contentText.contains("eventID: event:opaque/id"))
+        #expect(result.contentText.contains("calendarID: calendar-work"))
+        #expect(result.contentText.contains("expectedVersion: W/\"etag-42\""))
+        #expect(result.contentText.contains("mutationEligibility: eligible"))
+        #expect(result.contentText.contains("copy eventID and expectedVersion exactly"))
+        #expect(result.contentJSON?.contains("etag-42") == true)
+    }
+
+    @Test func calendarReadGetEventExplainsIneligibleAndMissingEvents() async throws {
+        let recurring = CalendarEvent(
+            id: .init(rawValue: "event-recurring"),
+            calendarID: .init(rawValue: "calendar-work"),
+            title: "Recurring",
+            start: .init(date: Date(timeIntervalSince1970: 1_000)),
+            end: .init(date: Date(timeIntervalSince1970: 4_600)),
+            recurrenceSummary: .init(ruleDescription: "FREQ=WEEKLY"),
+            sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "42", isRecurring: true)
+        )
+        let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime(events: [recurring]))
+        let ineligible = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-recurring\"}"), context: Self.context(toolCallID: "call-calendar-recurring"))
+        #expect(ineligible.contentText.contains("mutationEligibility: recurring"))
+        #expect(!ineligible.contentText.contains("Loaded mutation-ready"))
+
+        let missing = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"guessed-id\"}"), context: Self.context(toolCallID: "call-calendar-missing"))
+        #expect(missing.contentText.contains("Calendar event not found for eventID 'guessed-id'"))
+        #expect(missing.contentText.contains("Do not reuse or guess this ID"))
+        #expect(missing.contentText.contains("Do not call calendar_write with this ID"))
     }
 
     @Test func calendarSearchEventsToolDescribesCandidatesAndSelectedDetailReads() {
@@ -68,26 +191,166 @@ struct CalendarContactsAgentToolsTests {
         )
 
         #expect(result.toolName == "calendar_search_events")
-        #expect(result.contentText.contains("calendar event candidates"))
+        #expect(result.contentText.contains("calendar event candidate"))
+        #expect(result.contentText.contains("eventID: event-design-review"))
+        #expect(result.contentText.contains("calendarID: calendar-work"))
+        #expect(result.contentText.contains("title: Memory OS 设计评审"))
+        #expect(result.contentText.contains("mutationEligibility: scheduling"))
+        #expect(!result.contentText.contains("讨论 RSS 和浏览历史工具暴露"))
+        #expect(!result.contentText.contains("shiwen@example.com"))
         #expect(result.contentJSON?.contains("Memory OS 设计评审") == true)
         #expect(result.contentJSON?.contains("会议室 A") == true)
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
     }
 
-    @Test func calendarWriteToolIsCurrentlyDisabledEvenWithApproval() async throws {
-        let runtime = InMemoryAgentCalendarRuntime(events: [])
-        let tool = CalendarWriteTool(runtime: runtime)
+    @Test func calendarWritePreflightRequiresMatchingTrustedDetailRead() async throws {
+        let evidence = CalendarDetailReadEvidenceRegistry()
+        let runtime = InMemoryAgentCalendarRuntime(events: [Self.versionedEvent])
+        let write = CalendarWriteTool(runtime: runtime, evidenceRegistry: evidence)
+        let context = Self.context(toolCallID: "call-calendar-preflight")
+        let guessed = AgentToolCall(id: "guessed", name: "calendar_write", argumentsJSON: "{\"operation\":\"delete_event\",\"eventID\":\"event-versioned\",\"expectedVersion\":\"1\"}")
 
-        var deniedCalendarWrite = false
-        do {
-            _ = try await tool.execute(
-                arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"approved\":true}"),
-                context: Self.context(toolCallID: "call-calendar-write-disabled")
-            )
-        } catch AgentToolError.permissionDenied(let message) {
-            deniedCalendarWrite = message.contains("暂不支持")
+        await Self.expectInvalidArguments(containing: "successful calendar_read get_event") {
+            try await write.preflight(call: guessed, context: context)
+            return AgentToolResult(toolCallID: "unexpected", toolName: "calendar_write", contentText: "unexpected")
         }
-        #expect(deniedCalendarWrite)
+
+        await evidence.record(.init(runID: context.runID, sessionID: context.sessionID, eventID: "event-versioned", calendarID: "calendar-work", expectedVersion: "version-7"))
+        await Self.expectInvalidArguments(containing: "does not match the latest successful detail read") {
+            try await write.preflight(call: guessed, context: context)
+            return AgentToolResult(toolCallID: "unexpected", toolName: "calendar_write", contentText: "unexpected")
+        }
+
+        let exact = AgentToolCall(id: "exact", name: "calendar_write", argumentsJSON: "{\"operation\":\"delete_event\",\"eventID\":\"event-versioned\",\"expectedVersion\":\"version-7\"}")
+        try await write.preflight(call: exact, context: context)
+    }
+
+    @Test func calendarWriteExamplesCannotBeMistakenForRealCalendarIDs() {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        #expect(tool.description.contains("default"))
+        #expect(tool.description.contains("example IDs"))
+        #expect(tool.description.contains("exact"))
+        #expect(tool.inputExamples.first?["calendarID"] == .string("exact-calendar-id-from-list-calendars"))
+        #expect(tool.inputExamples.first?["calendarID"] != .string("calendar-work"))
+        #expect(tool.description.contains("calendarID is only for create_event"))
+        #expect(tool.description.contains("eventID and expectedVersion are only for update_event and delete_event"))
+        #expect(tool.inputExamples.count == 3)
+        #expect(tool.inputExamples[1]["calendarID"] == nil)
+        #expect(tool.inputExamples[2]["calendarID"] == nil)
+    }
+
+    @Test func calendarWritePreflightRejectsMissingOperationBeforeApproval() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime(), evidenceRegistry: .init())
+        await Self.expectInvalidArguments(containing: "Missing required calendar_write argument: operation") {
+            try await tool.preflight(call: .init(name: "calendar_write", argumentsJSON: "{\"calendarID\":\"calendar-work\",\"title\":\"Test\"}"), context: Self.context(toolCallID: "call-missing-write-operation"))
+            return AgentToolResult(toolCallID: "unexpected", toolName: "calendar_write", contentText: "unexpected")
+        }
+    }
+
+    @Test func calendarWriteSchemaConstrainsOperationAndExtraProperties() throws {
+        let schema = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime()).inputSchema.jsonObject
+        #expect(schema["additionalProperties"] as? Bool == false)
+        #expect(schema["required"] as? [String] == ["operation"])
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let operation = try #require(properties["operation"] as? [String: Any])
+        #expect(operation["enum"] as? [String] == ["create_event", "update_event", "delete_event"])
+    }
+
+    @Test func calendarWriteReportsActionableOperationErrors() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid-operation").approving(.mutateCalendar)
+
+        await Self.expectInvalidArguments(
+            containing: "Missing required calendar_write argument: operation",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"title\":\"新日程\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "Unsupported calendar_write operation 'move_event'",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"move_event\"}"), context: context) }
+        )
+    }
+
+    @Test func calendarWriteReportsCreateFieldAndTimestampErrors() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid-create").approving(.mutateCalendar)
+
+        await Self.expectInvalidArguments(
+            containing: "calendarID, title, start, end",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "Call calendar_read with operation list_calendars",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "Invalid ISO-8601 start timestamp",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"calendarID\":\"c\",\"title\":\"Bad\",\"start\":\"tomorrow\",\"end\":\"2026-06-19T07:00:00Z\"}"), context: context) }
+        )
+    }
+
+    @Test func calendarWriteExplainsHowToRecoverFromUnknownCalendarID() async throws {
+        let tool = CalendarWriteTool(runtime: FailingCalendarRuntime(error: .calendarNotFound(.init(rawValue: "default"))))
+        let context = Self.context(toolCallID: "call-calendar-unknown").approving(.mutateCalendar)
+        let arguments = try AgentToolArguments(json: "{\"operation\":\"create_event\",\"calendarID\":\"default\",\"title\":\"Test\",\"start\":\"2026-07-12T01:30:00Z\",\"end\":\"2026-07-12T02:00:00Z\"}")
+
+        await Self.expectInvalidArguments(containing: "Calendar 'default' was not found", executing: { try await tool.execute(arguments: arguments, context: context) })
+        await Self.expectInvalidArguments(containing: "calendar_read with operation list_calendars", executing: { try await tool.execute(arguments: arguments, context: context) })
+        await Self.expectInvalidArguments(containing: "Do not use 'default', display names, or example IDs", executing: { try await tool.execute(arguments: arguments, context: context) })
+    }
+
+    @Test func calendarWriteReportsUpdateAndDeleteRequiredFields() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid-mutation").approving(.mutateCalendar)
+
+        await Self.expectInvalidArguments(
+            containing: "eventID, expectedVersion",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"update_event\"}"), context: context) }
+        )
+        await Self.expectInvalidArguments(
+            containing: "eventID, expectedVersion",
+            executing: { try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"delete_event\"}"), context: context) }
+        )
+    }
+
+    @Test func calendarWriteRequiresTrustedExecutionApproval() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(
+                arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"approved\":true}"),
+                context: Self.context(toolCallID: "call-calendar-untrusted")
+            )
+        }
+    }
+
+    @Test func calendarWriteCreatesUpdatesAndDeletesWithTrustedApproval() async throws {
+        let runtime = InMemoryAgentCalendarRuntime(calendars: [CalendarCollection(id: .init(rawValue: "calendar-work"), accountID: .init(rawValue: "account"), displayName: "Work")])
+        let tool = CalendarWriteTool(runtime: runtime)
+        let context = Self.context(toolCallID: "call-calendar-write").approving(.mutateCalendar)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let created = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"location\":\"杭州\"}"), context: context)
+        let createResult = try #require(created.contentJSON).data(using: .utf8).map { try decoder.decode(CalendarMutationResult.self, from: $0) }
+        let eventID = try #require(createResult?.confirmedEvent?.id.rawValue)
+        let version = try #require(createResult?.remoteVersion?.value)
+        let updated = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"update_event\",\"eventID\":\"\(eventID)\",\"expectedVersion\":\"\(version)\",\"title\":\"调整后的日程\",\"clearLocation\":true}"), context: context)
+        #expect(updated.contentJSON?.contains("调整后的日程") == true)
+        let updatedJSON = try #require(updated.contentJSON)
+        let updateResult = try decoder.decode(CalendarMutationResult.self, from: Data(updatedJSON.utf8))
+        let newVersion = try #require(updateResult.remoteVersion?.value)
+        let deleted = try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"delete_event\",\"eventID\":\"\(eventID)\",\"expectedVersion\":\"\(newVersion)\"}"), context: context)
+        #expect(deleted.contentText.contains("Deleted"))
+        #expect(try await runtime.getEvent(id: .init(rawValue: eventID), runID: nil, sessionID: nil) == nil)
+    }
+
+    @Test func calendarWriteRejectsInvalidTimeRangeAndEmptyPatch() async throws {
+        let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+        let context = Self.context(toolCallID: "call-calendar-invalid").approving(.mutateCalendar)
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"Bad\",\"calendarID\":\"c\",\"start\":\"2026-06-19T08:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\"}"), context: context)
+        }
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"operation\":\"update_event\",\"eventID\":\"e\",\"expectedVersion\":\"v\"}"), context: context)
+        }
     }
 
     @Test func contactsReadAndWriteToolsUseAggregatedOperations() async throws {
@@ -173,6 +436,24 @@ struct CalendarContactsAgentToolsTests {
         )
     }
 
+    private static func expectInvalidArguments(
+        containing expectedText: String,
+        executing operation: () async throws -> AgentToolResult
+    ) async {
+        do {
+            _ = try await operation()
+            Issue.record("Expected invalid calendar arguments")
+        } catch AgentToolError.invalidArguments(let message) {
+            #expect(message.contains(expectedText))
+        } catch {
+            Issue.record("Expected invalidArguments, got \(error)")
+        }
+    }
+
+    private static var versionedEvent: CalendarEvent {
+        CalendarEvent(id: .init(rawValue: "event-versioned"), calendarID: .init(rawValue: "calendar-work"), title: "Versioned", start: .init(date: Date(timeIntervalSince1970: 1_000)), end: .init(date: Date(timeIntervalSince1970: 4_600)), sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "version-7"))
+    }
+
     private static var sampleEvent: CalendarEvent {
         CalendarEvent(
             id: CalendarEventID(rawValue: "event-1"),
@@ -182,4 +463,13 @@ struct CalendarContactsAgentToolsTests {
             end: CalendarEventDateTime(date: Date(timeIntervalSince1970: 4_600))
         )
     }
+}
+
+private struct FailingCalendarRuntime: AgentCalendarRuntime {
+    let error: CalendarMutationError
+    func listCalendars(runID: String?, sessionID: String?) async throws -> [CalendarCollection] { [] }
+    func listEvents(calendarID: CalendarID?, runID: String?, sessionID: String?) async throws -> [CalendarEvent] { [] }
+    func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, limit: Int, runID: String?, sessionID: String?) async throws -> [CalendarEvent] { [] }
+    func getEvent(id: CalendarEventID, runID: String?, sessionID: String?) async throws -> CalendarEvent? { nil }
+    func mutate(_ request: CalendarMutationRequest) async throws -> CalendarMutationResult { throw error }
 }

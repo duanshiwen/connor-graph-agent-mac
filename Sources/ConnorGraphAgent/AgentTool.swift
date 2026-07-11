@@ -3,16 +3,34 @@ import ConnorGraphCore
 
 public indirect enum AgentToolInputSchema: Sendable, Equatable {
     case string(description: String)
+    case stringEnumeration(values: [String], description: String)
     case integer(description: String)
     case number(description: String)
     case boolean(description: String)
     case array(items: AgentToolInputSchema, description: String)
     case object(properties: [String: AgentToolInputSchema], required: [String])
+    case closedObject(properties: [String: AgentToolInputSchema], required: [String])
+    case nullable(AgentToolInputSchema)
+
+    public var isOpenAIStrictCompatible: Bool {
+        switch self {
+        case .string, .stringEnumeration, .integer, .number, .boolean:
+            return true
+        case .array(let items, _), .nullable(let items):
+            return items.isOpenAIStrictCompatible
+        case .object:
+            return false
+        case .closedObject(let properties, let required):
+            return Set(required) == Set(properties.keys) && properties.values.allSatisfy(\.isOpenAIStrictCompatible)
+        }
+    }
 
     public var jsonObject: [String: Any] {
         switch self {
         case .string(let description):
             return ["type": "string", "description": description]
+        case .stringEnumeration(let values, let description):
+            return ["type": "string", "enum": values, "description": description]
         case .integer(let description):
             return ["type": "integer", "description": description]
         case .number(let description):
@@ -27,6 +45,21 @@ public indirect enum AgentToolInputSchema: Sendable, Equatable {
                 "properties": properties.mapValues { $0.jsonObject },
                 "required": required
             ]
+        case .closedObject(let properties, let required):
+            return [
+                "type": "object",
+                "properties": properties.mapValues { $0.jsonObject },
+                "required": required,
+                "additionalProperties": false
+            ]
+        case .nullable(let wrapped):
+            var object = wrapped.jsonObject
+            if let type = object["type"] as? String {
+                object["type"] = [type, "null"]
+            } else if let types = object["type"] as? [String], !types.contains("null") {
+                object["type"] = types + ["null"]
+            }
+            return object
         }
     }
 }
@@ -35,11 +68,13 @@ public struct AgentToolDefinition: Sendable, Equatable {
     public var name: String
     public var description: String
     public var inputSchema: AgentToolInputSchema
+    public var inputExamples: [[String: SendableJSONValue]]
 
-    public init(name: String, description: String, inputSchema: AgentToolInputSchema) {
+    public init(name: String, description: String, inputSchema: AgentToolInputSchema, inputExamples: [[String: SendableJSONValue]] = []) {
         self.name = name
         self.description = description
         self.inputSchema = inputSchema
+        self.inputExamples = inputExamples
     }
 }
 
@@ -81,6 +116,18 @@ public struct AgentToolArguments: Sendable, Equatable {
 }
 
 public extension SendableJSONValue {
+    var jsonCompatibleObject: Any {
+        switch self {
+        case .string(let value): value
+        case .int(let value): value
+        case .double(let value): value
+        case .bool(let value): value
+        case .object(let value): value.mapValues(\.jsonCompatibleObject)
+        case .array(let value): value.map(\.jsonCompatibleObject)
+        case .null: NSNull()
+        }
+    }
+
     var objectValue: [String: SendableJSONValue]? {
         if case .object(let value) = self { return value }
         return nil
@@ -260,12 +307,18 @@ public protocol AgentTool: Sendable {
     var description: String { get }
     var permission: AgentPermissionCapability { get }
     var inputSchema: AgentToolInputSchema { get }
+    var inputExamples: [[String: SendableJSONValue]] { get }
 
+    func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult
 }
 
 public extension AgentTool {
+    var inputExamples: [[String: SendableJSONValue]] { [] }
+
+    func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {}
+
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         call.argumentsJSON
     }
@@ -318,7 +371,7 @@ public struct AgentToolRegistry: Sendable {
 
     public func definition(named name: String) -> AgentToolDefinition? {
         guard let tool = tools[name] else { return nil }
-        return AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema)
+        return AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema, inputExamples: tool.inputExamples)
     }
 
     public func permission(named name: String) -> AgentPermissionCapability? {
@@ -333,6 +386,7 @@ public struct AgentToolRegistry: Sendable {
         guard let tool = tools[call.name] else {
             throw AgentToolError.unknownTool(call.name)
         }
+        try await tool.preflight(call: call, context: context)
         if !context.approvedCapabilities.contains(tool.permission) {
             let approvalPayloadJSON = await tool.approvalPayloadJSON(for: call, context: context)
             let decision = await context.policyEngine.evaluate(

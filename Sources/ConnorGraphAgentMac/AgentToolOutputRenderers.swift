@@ -25,7 +25,7 @@ struct AgentToolInvocationRenderer: View {
                 } else {
                     AgentGenericToolOutputView(title: "File Change Output", text: invocation.outputText ?? invocation.errorText, resultJSON: invocation.resultJSON, severity: invocation.severity)
                 }
-            case .readFile, .listDirectory, .findFiles, .searchFiles, .unknown:
+            case .readFile, .listDirectory, .findFiles, .searchFiles, .calendar, .unknown:
                 AgentGenericToolOutputView(title: "Output", text: invocation.outputText ?? invocation.errorText, resultJSON: invocation.resultJSON, severity: invocation.severity)
             }
         }
