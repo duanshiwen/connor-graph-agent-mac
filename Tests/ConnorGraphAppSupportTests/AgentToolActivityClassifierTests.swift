@@ -128,6 +128,21 @@ import ConnorGraphAgent
     #expect(unknownActivity?.icon == "wrench.and.screwdriver")
 }
 
+@Test func classifiesCalendarMutationRequestsAndFailures() {
+    let call = AgentToolCall(id: "calendar-write", name: "calendar_write", argumentsJSON: "{\"operation\":\"create_event\",\"calendarID\":\"default\"}")
+    let failure = AgentToolFailure(runID: "run", sessionID: "session", toolCallID: call.id, toolName: call.name, message: "Invalid arguments: Calendar 'default' was not found")
+    let classifier = AgentToolActivityClassifier()
+
+    let requested = classifier.activity(forRequestedCall: call)
+    let failed = classifier.activity(forFailure: failure)
+    #expect(requested?.semanticKind == .calendar)
+    #expect(requested?.title == "Calendar: Create Event")
+    #expect(requested?.target == "default")
+    #expect(failed?.semanticKind == .calendar)
+    #expect(failed?.phase == .failed)
+    #expect(failed?.detail?.contains("Calendar 'default' was not found") == true)
+}
+
 @Test func failedResultUsesErrorSeverityAndXmarkIcon() {
     let failure = AgentToolFailure(
         runID: "run",
