@@ -203,6 +203,28 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
     }
 
+    @Test func calendarWritePreflightRequiresMatchingTrustedDetailRead() async throws {
+        let evidence = CalendarDetailReadEvidenceRegistry()
+        let runtime = InMemoryAgentCalendarRuntime(events: [Self.versionedEvent])
+        let write = CalendarWriteTool(runtime: runtime, evidenceRegistry: evidence)
+        let context = Self.context(toolCallID: "call-calendar-preflight")
+        let guessed = AgentToolCall(id: "guessed", name: "calendar_write", argumentsJSON: "{\"operation\":\"delete_event\",\"eventID\":\"event-versioned\",\"expectedVersion\":\"1\"}")
+
+        await Self.expectInvalidArguments(containing: "successful calendar_read get_event") {
+            try await write.preflight(call: guessed, context: context)
+            return AgentToolResult(toolCallID: "unexpected", toolName: "calendar_write", contentText: "unexpected")
+        }
+
+        await evidence.record(.init(runID: context.runID, sessionID: context.sessionID, eventID: "event-versioned", calendarID: "calendar-work", expectedVersion: "version-7"))
+        await Self.expectInvalidArguments(containing: "does not match the latest successful detail read") {
+            try await write.preflight(call: guessed, context: context)
+            return AgentToolResult(toolCallID: "unexpected", toolName: "calendar_write", contentText: "unexpected")
+        }
+
+        let exact = AgentToolCall(id: "exact", name: "calendar_write", argumentsJSON: "{\"operation\":\"delete_event\",\"eventID\":\"event-versioned\",\"expectedVersion\":\"version-7\"}")
+        try await write.preflight(call: exact, context: context)
+    }
+
     @Test func calendarWriteExamplesCannotBeMistakenForRealCalendarIDs() {
         let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
         #expect(tool.description.contains("default"))
@@ -413,6 +435,10 @@ struct CalendarContactsAgentToolsTests {
         } catch {
             Issue.record("Expected invalidArguments, got \(error)")
         }
+    }
+
+    private static var versionedEvent: CalendarEvent {
+        CalendarEvent(id: .init(rawValue: "event-versioned"), calendarID: .init(rawValue: "calendar-work"), title: "Versioned", start: .init(date: Date(timeIntervalSince1970: 1_000)), end: .init(date: Date(timeIntervalSince1970: 4_600)), sourceMetadata: .init(sourceKind: .macOSEventKit, etag: "version-7"))
     }
 
     private static var sampleEvent: CalendarEvent {
