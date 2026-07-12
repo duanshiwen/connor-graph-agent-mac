@@ -91,9 +91,7 @@ struct AppShellView: View {
                         onSubmit: { viewModel.performSelectedGlobalSearchItem() },
                         onMoveUp: { viewModel.moveGlobalSearchSelectionUp() },
                         onMoveDown: { viewModel.moveGlobalSearchSelectionDown() },
-                        onCancel: { viewModel.dismissGlobalSearchOverlay() },
-                        onFocus: { viewModel.activateGlobalSearchField() },
-                        onBlur: { viewModel.deactivateGlobalSearchField() }
+                        onCancel: { viewModel.dismissGlobalSearchOverlay() }
                     )
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
                     if !viewModel.globalSearchQuery.isEmpty {
