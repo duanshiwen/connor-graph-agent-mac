@@ -336,6 +336,17 @@ struct SettingsAppSection: View {
                 SettingsValueRow(title: "当前版本", value: appVersionDisplay)
                 Divider()
                 SettingsValueRow(title: "应用标识", value: bundleIdentifierDisplay)
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("项目帮助").font(SettingsListTypography.rowTitleSelected)
+                        Text("用内置浏览器打开 Connor GitHub 项目页面。")
+                            .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("打开 GitHub") { viewModel.openProjectGitHubHelp() }
+                        .buttonStyle(.bordered)
+                }
             }
         }
     }

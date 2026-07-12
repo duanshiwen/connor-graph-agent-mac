@@ -1,0 +1,47 @@
+import SwiftUI
+import ConnorGraphAppSupport
+
+struct UserIdentityPopoverView: View {
+    @ObservedObject var identityStore: AppUserIdentityStore
+    var openIdentitySettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch identityStore.authenticationState {
+            case let .signedIn(user):
+                HStack(spacing: 12) {
+                    IdentityAvatarView(user: user, size: 44)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(user.displayName).font(.headline)
+                        Text("@\(user.username)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                Button(action: openIdentitySettings) {
+                    Label("用户身份与知识库", systemImage: "person.text.rectangle")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                Divider()
+                Button(role: .destructive) { Task { await identityStore.logout() } } label: {
+                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            case .restoring:
+                ProgressView("正在恢复登录状态…")
+            case .signedOut, .expired:
+                Label("尚未登录 Connor 账号", systemImage: "person.crop.circle.badge.questionmark")
+                    .font(.headline)
+                Text("登录后可查看你的身份、订阅和创建的知识库。")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button(action: openIdentitySettings) {
+                    Text("登录或注册").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .frame(width: 270)
+    }
+}
