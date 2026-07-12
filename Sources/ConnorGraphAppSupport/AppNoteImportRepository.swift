@@ -23,7 +23,7 @@ public enum AppNoteImportRepositoryError: Error, Equatable, CustomStringConverti
 }
 
 public final class AppNoteImportRepository: @unchecked Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
 
     private var db: OpaquePointer?
     private let lock = NSRecursiveLock()
@@ -143,6 +143,17 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         CREATE INDEX IF NOT EXISTS idx_note_import_attempts_item ON note_import_item_attempts(item_id, started_at DESC);
         INSERT OR IGNORE INTO note_import_schema_migrations(version, applied_at) VALUES (1, datetime('now'));
         """)
+        try addColumnIfNeeded(table: "note_import_jobs", name: "pause_requested_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_jobs", name: "cancel_requested_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_jobs", name: "last_heartbeat_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_jobs", name: "resumed_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_jobs", name: "scheduler_version", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_items", name: "next_retry_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_items", name: "last_attempt_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_items", name: "lease_owner", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_items", name: "lease_expires_at", definition: "TEXT")
+        try addColumnIfNeeded(table: "note_import_items", name: "source_revision", definition: "TEXT")
+        try execute("INSERT OR IGNORE INTO note_import_schema_migrations(version, applied_at) VALUES (2, datetime('now'));")
     }
 
     public func saveSource(_ source: NoteImportSourceRecord) throws {
@@ -162,15 +173,18 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     public func saveJob(_ job: NoteImportJobRecord) throws {
         guard try source(id: job.sourceID) != nil else { throw AppNoteImportRepositoryError.sourceNotFound(job.sourceID) }
         let sql = """
-        INSERT INTO note_import_jobs(id, source_id, status, options_json, discovered_count, imported_count, duplicate_count, failed_count, created_at, updated_at, started_at, completed_at, error_code, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO note_import_jobs(id, source_id, status, options_json, discovered_count, imported_count, duplicate_count, failed_count, created_at, updated_at, started_at, completed_at, error_code, error_message, pause_requested_at, cancel_requested_at, last_heartbeat_at, resumed_at, scheduler_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET status=excluded.status, options_json=excluded.options_json,
           discovered_count=excluded.discovered_count, imported_count=excluded.imported_count,
           duplicate_count=excluded.duplicate_count, failed_count=excluded.failed_count,
           updated_at=excluded.updated_at, started_at=excluded.started_at, completed_at=excluded.completed_at,
-          error_code=excluded.error_code, error_message=excluded.error_message;
+          error_code=excluded.error_code, error_message=excluded.error_message,
+          pause_requested_at=excluded.pause_requested_at, cancel_requested_at=excluded.cancel_requested_at,
+          last_heartbeat_at=excluded.last_heartbeat_at, resumed_at=excluded.resumed_at,
+          scheduler_version=excluded.scheduler_version;
         """
-        try run(sql, bindings: [.text(job.id), .text(job.sourceID), .text(job.status.rawValue), .text(try json(job.options)), .int(job.discoveredCount), .int(job.importedCount), .int(job.duplicateCount), .int(job.failedCount), .text(iso(job.createdAt)), .text(iso(job.updatedAt)), .text(job.startedAt.map(iso)), .text(job.completedAt.map(iso)), .text(job.errorCode?.rawValue), .text(job.errorMessage)])
+        try run(sql, bindings: [.text(job.id), .text(job.sourceID), .text(job.status.rawValue), .text(try json(job.options)), .int(job.discoveredCount), .int(job.importedCount), .int(job.duplicateCount), .int(job.failedCount), .text(iso(job.createdAt)), .text(iso(job.updatedAt)), .text(job.startedAt.map(iso)), .text(job.completedAt.map(iso)), .text(job.errorCode?.rawValue), .text(job.errorMessage), .text(job.pauseRequestedAt.map(iso)), .text(job.cancelRequestedAt.map(iso)), .text(job.lastHeartbeatAt.map(iso)), .text(job.resumedAt.map(iso)), .text(job.schedulerVersion)])
     }
 
     public func job(id: String) throws -> NoteImportJobRecord? {
@@ -195,17 +209,19 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     public func saveItem(_ item: NoteImportItemRecord) throws {
         guard try job(id: item.jobID) != nil else { throw AppNoteImportRepositoryError.jobNotFound(item.jobID) }
         let sql = """
-        INSERT INTO note_import_items(id, job_id, source_id, source_identity, external_id, relative_path, title, status, session_id, raw_byte_hash, normalized_text_hash, source_encoding, encoding_confidence, decoder_version, attempt_count, error_code, error_message, created_at, updated_at, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO note_import_items(id, job_id, source_id, source_identity, external_id, relative_path, title, status, session_id, raw_byte_hash, normalized_text_hash, source_encoding, encoding_confidence, decoder_version, attempt_count, next_retry_at, last_attempt_at, lease_owner, lease_expires_at, source_revision, error_code, error_message, created_at, updated_at, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET external_id=excluded.external_id, relative_path=excluded.relative_path,
           title=excluded.title, status=excluded.status, session_id=excluded.session_id,
           raw_byte_hash=excluded.raw_byte_hash, normalized_text_hash=excluded.normalized_text_hash,
           source_encoding=excluded.source_encoding, encoding_confidence=excluded.encoding_confidence,
           decoder_version=excluded.decoder_version, attempt_count=excluded.attempt_count,
-          error_code=excluded.error_code, error_message=excluded.error_message,
-          updated_at=excluded.updated_at, metadata_json=excluded.metadata_json;
+          next_retry_at=excluded.next_retry_at, last_attempt_at=excluded.last_attempt_at,
+          lease_owner=excluded.lease_owner, lease_expires_at=excluded.lease_expires_at,
+          source_revision=excluded.source_revision, error_code=excluded.error_code,
+          error_message=excluded.error_message, updated_at=excluded.updated_at, metadata_json=excluded.metadata_json;
         """
-        try run(sql, bindings: [.text(item.id), .text(item.jobID), .text(item.sourceID), .text(item.sourceIdentity), .text(item.externalID), .text(item.relativePath), .text(item.title), .text(item.status.rawValue), .text(item.sessionID), .text(item.rawByteHash), .text(item.normalizedTextHash), .text(item.sourceEncoding), .double(item.encodingConfidence), .text(item.decoderVersion), .int(item.attemptCount), .text(item.errorCode?.rawValue), .text(item.errorMessage), .text(iso(item.createdAt)), .text(iso(item.updatedAt)), .text(try json(item.metadata))])
+        try run(sql, bindings: [.text(item.id), .text(item.jobID), .text(item.sourceID), .text(item.sourceIdentity), .text(item.externalID), .text(item.relativePath), .text(item.title), .text(item.status.rawValue), .text(item.sessionID), .text(item.rawByteHash), .text(item.normalizedTextHash), .text(item.sourceEncoding), .double(item.encodingConfidence), .text(item.decoderVersion), .int(item.attemptCount), .text(item.nextRetryAt.map(iso)), .text(item.lastAttemptAt.map(iso)), .text(item.leaseOwner), .text(item.leaseExpiresAt.map(iso)), .text(item.sourceRevision), .text(item.errorCode?.rawValue), .text(item.errorMessage), .text(iso(item.createdAt)), .text(iso(item.updatedAt)), .text(try json(item.metadata))])
     }
 
     public func item(id: String) throws -> NoteImportItemRecord? {
@@ -233,19 +249,70 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         return item
     }
 
-    private static let jobSelect = "SELECT id, source_id, status, options_json, discovered_count, imported_count, duplicate_count, failed_count, created_at, updated_at, started_at, completed_at, error_code, error_message FROM note_import_jobs"
-    private static let itemSelect = "SELECT id, job_id, source_id, source_identity, external_id, relative_path, title, status, session_id, raw_byte_hash, normalized_text_hash, source_encoding, encoding_confidence, decoder_version, attempt_count, error_code, error_message, created_at, updated_at, metadata_json FROM note_import_items"
+    public func requestPause(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
+        guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+        job.pauseRequestedAt = now; job.updatedAt = now
+        try saveJob(job); return job
+    }
+
+    public func requestCancel(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
+        guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+        job.cancelRequestedAt = now; job.updatedAt = now
+        try saveJob(job); return job
+    }
+
+    public func heartbeat(jobID: String, schedulerVersion: String, now: Date = Date()) throws -> NoteImportJobRecord {
+        guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+        job.lastHeartbeatAt = now; job.schedulerVersion = schedulerVersion; job.updatedAt = now
+        try saveJob(job); return job
+    }
+
+    public func claimItem(id: String, owner: String, leaseDuration: TimeInterval, now: Date = Date()) throws -> NoteImportItemRecord? {
+        guard var item = try item(id: id) else { throw AppNoteImportRepositoryError.itemNotFound(id) }
+        if let expiry = item.leaseExpiresAt, expiry > now, item.leaseOwner != owner { return nil }
+        item.leaseOwner = owner; item.leaseExpiresAt = now.addingTimeInterval(leaseDuration); item.lastAttemptAt = now; item.attemptCount += 1; item.updatedAt = now
+        try saveItem(item); return item
+    }
+
+    public func releaseItemLease(id: String, nextRetryAt: Date? = nil, now: Date = Date()) throws -> NoteImportItemRecord {
+        guard var item = try item(id: id) else { throw AppNoteImportRepositoryError.itemNotFound(id) }
+        item.leaseOwner = nil; item.leaseExpiresAt = nil; item.nextRetryAt = nextRetryAt; item.updatedAt = now
+        try saveItem(item); return item
+    }
+
+    @discardableResult
+    public func reconcileInterruptedItems(jobID: String, now: Date = Date()) throws -> [NoteImportItemRecord] {
+        var reconciled: [NoteImportItemRecord] = []
+        for var item in try items(jobID: jobID) {
+            switch item.status {
+            case .creatingSession where item.sessionID != nil:
+                item.status = .imported
+            case .creatingSession:
+                item.status = .ready
+            case .runningLLM:
+                item.status = .queuedForLLM
+            default:
+                continue
+            }
+            item.leaseOwner = nil; item.leaseExpiresAt = nil; item.updatedAt = now
+            try saveItem(item); reconciled.append(item)
+        }
+        return reconciled
+    }
+
+    private static let jobSelect = "SELECT id, source_id, status, options_json, discovered_count, imported_count, duplicate_count, failed_count, created_at, updated_at, started_at, completed_at, error_code, error_message, pause_requested_at, cancel_requested_at, last_heartbeat_at, resumed_at, scheduler_version FROM note_import_jobs"
+    private static let itemSelect = "SELECT id, job_id, source_id, source_identity, external_id, relative_path, title, status, session_id, raw_byte_hash, normalized_text_hash, source_encoding, encoding_confidence, decoder_version, attempt_count, next_retry_at, last_attempt_at, lease_owner, lease_expires_at, source_revision, error_code, error_message, created_at, updated_at, metadata_json FROM note_import_items"
 
     private func decodeSource(_ row: [SQLiteValue]) throws -> NoteImportSourceRecord {
         NoteImportSourceRecord(id: row[0].string, kind: NoteImportSourceKind(rawValue: row[1].string) ?? .markdownFolder, displayName: row[2].string, locationBookmark: row[3].data, createdAt: try date(row[4].string), metadata: try decode([String: String].self, row[5].string))
     }
 
     private func decodeJob(_ row: [SQLiteValue]) throws -> NoteImportJobRecord {
-        NoteImportJobRecord(id: row[0].string, sourceID: row[1].string, status: NoteImportJobStatus(rawValue: row[2].string) ?? .failed, options: try decode(NoteImportOptions.self, row[3].string), discoveredCount: row[4].integer, importedCount: row[5].integer, duplicateCount: row[6].integer, failedCount: row[7].integer, createdAt: try date(row[8].string), updatedAt: try date(row[9].string), startedAt: try optionalDate(row[10].optionalString), completedAt: try optionalDate(row[11].optionalString), errorCode: row[12].optionalString.flatMap(NoteImportErrorCode.init(rawValue:)), errorMessage: row[13].optionalString)
+        NoteImportJobRecord(id: row[0].string, sourceID: row[1].string, status: NoteImportJobStatus(rawValue: row[2].string) ?? .failed, options: try decode(NoteImportOptions.self, row[3].string), discoveredCount: row[4].integer, importedCount: row[5].integer, duplicateCount: row[6].integer, failedCount: row[7].integer, createdAt: try date(row[8].string), updatedAt: try date(row[9].string), startedAt: try optionalDate(row[10].optionalString), completedAt: try optionalDate(row[11].optionalString), errorCode: row[12].optionalString.flatMap(NoteImportErrorCode.init(rawValue:)), errorMessage: row[13].optionalString, pauseRequestedAt: try optionalDate(row[14].optionalString), cancelRequestedAt: try optionalDate(row[15].optionalString), lastHeartbeatAt: try optionalDate(row[16].optionalString), resumedAt: try optionalDate(row[17].optionalString), schedulerVersion: row[18].optionalString)
     }
 
     private func decodeItem(_ row: [SQLiteValue]) throws -> NoteImportItemRecord {
-        NoteImportItemRecord(id: row[0].string, jobID: row[1].string, sourceID: row[2].string, sourceIdentity: row[3].string, externalID: row[4].optionalString, relativePath: row[5].optionalString, title: row[6].string, status: NoteImportItemStatus(rawValue: row[7].string) ?? .parseFailed, sessionID: row[8].optionalString, rawByteHash: row[9].string, normalizedTextHash: row[10].string, sourceEncoding: row[11].optionalString, encodingConfidence: row[12].optionalDouble, decoderVersion: row[13].optionalString, attemptCount: row[14].integer, errorCode: row[15].optionalString.flatMap(NoteImportErrorCode.init(rawValue:)), errorMessage: row[16].optionalString, createdAt: try date(row[17].string), updatedAt: try date(row[18].string), metadata: try decode([String: String].self, row[19].string))
+        NoteImportItemRecord(id: row[0].string, jobID: row[1].string, sourceID: row[2].string, sourceIdentity: row[3].string, externalID: row[4].optionalString, relativePath: row[5].optionalString, title: row[6].string, status: NoteImportItemStatus(rawValue: row[7].string) ?? .parseFailed, sessionID: row[8].optionalString, rawByteHash: row[9].string, normalizedTextHash: row[10].string, sourceEncoding: row[11].optionalString, encodingConfidence: row[12].optionalDouble, decoderVersion: row[13].optionalString, attemptCount: row[14].integer, nextRetryAt: try optionalDate(row[15].optionalString), lastAttemptAt: try optionalDate(row[16].optionalString), leaseOwner: row[17].optionalString, leaseExpiresAt: try optionalDate(row[18].optionalString), sourceRevision: row[19].optionalString, errorCode: row[20].optionalString.flatMap(NoteImportErrorCode.init(rawValue:)), errorMessage: row[21].optionalString, createdAt: try date(row[22].string), updatedAt: try date(row[23].string), metadata: try decode([String: String].self, row[24].string))
     }
 
     private enum Binding { case text(String?), int(Int), double(Double?), blob(Data?) }
@@ -254,6 +321,12 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         var optionalString: String? { isNull ? nil : string }
         var integer: Int { Int(string) ?? 0 }
         var optionalDouble: Double? { isNull ? nil : Double(string) }
+    }
+
+    private func addColumnIfNeeded(table: String, name: String, definition: String) throws {
+        let columns = try rows("PRAGMA table_info(\(table))")
+        guard !columns.contains(where: { $0[1].string == name }) else { return }
+        try execute("ALTER TABLE \(table) ADD COLUMN \(name) \(definition);")
     }
 
     private func execute(_ sql: String) throws { try lock.withLock { guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw AppNoteImportRepositoryError.sqliteFailed(Self.message(db)) } } }
