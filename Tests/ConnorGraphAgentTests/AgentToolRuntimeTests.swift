@@ -62,6 +62,34 @@ private struct EchoTool: AgentTool {
     #expect(await audit.events.count == 1)
 }
 
+@Test func externalNetworkPermissionMatchesMandatoryWebResearchFallbackContract() async {
+    let readOnlyDecision = await AgentPolicyEngine(permissionMode: .readOnly).evaluate(
+        capability: .externalNetwork,
+        runID: "run-web-read-only",
+        sessionID: "session-web",
+        toolName: "web_search",
+        payloadJSON: #"{"query":"current information"}"#
+    )
+    let askToWriteDecision = await AgentPolicyEngine(permissionMode: .askToWrite).evaluate(
+        capability: .externalNetwork,
+        runID: "run-web-ask",
+        sessionID: "session-web",
+        toolName: "web_search",
+        payloadJSON: #"{"query":"current information"}"#
+    )
+    let trustedDecision = await AgentPolicyEngine(permissionMode: .trustedWrite).evaluate(
+        capability: .externalNetwork,
+        runID: "run-web-trusted",
+        sessionID: "session-web",
+        toolName: "web_fetch",
+        payloadJSON: #"{"url":"https://example.com"}"#
+    )
+
+    #expect(readOnlyDecision.outcome == .denied)
+    #expect(askToWriteDecision.outcome == .approved)
+    #expect(trustedDecision.outcome == .approved)
+}
+
 @Test func getCurrentTimeToolReturnsDeterministicTimeForRequestedTimeZone() async throws {
     let fixedDate = Date(timeIntervalSince1970: 1_781_976_000)
     let tool = GetCurrentTimeTool(now: fixedDate, defaultTimeZone: TimeZone(identifier: "UTC")!)

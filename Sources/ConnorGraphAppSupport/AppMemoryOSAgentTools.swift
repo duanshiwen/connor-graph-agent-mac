@@ -156,7 +156,7 @@ public struct MemoryOSRecentContextTool: AgentTool {
 
 public struct MemoryOSKnowledgeContextTool: AgentTool {
     public let name = "memory_os_knowledge_context"
-    public let description = "Search only Memory OS L3 and L4 for reusable knowledge, stable entities, concepts, and durable relationships. Matching L4 entities are expanded through five relationship hops by default and compiled into natural-language statements before return. Treat non-obvious graph connections as hypotheses requiring validation, not current operational state."
+    public let description = "Search only Memory OS L3 and L4 for reusable knowledge, stable entities, concepts, and durable relationships. Matching L4 entities are expanded through five relationship hops by default and compiled into natural-language statements before return. Analyze and use the returned information as appropriate for the request while treating uncertain or non-obvious connections as hypotheses requiring validation, not current operational state."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = MemoryOSLayeredContextSupport.inputSchema
     private let facade: AppMemoryOSFacade
@@ -241,7 +241,7 @@ public struct MemoryOSSearchTool: AgentTool {
 
 public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
     public let name = "memory_os_get_current_user_profile"
-    public let description = "Retrieve all current-user personalization context from Connor Memory OS. Returns a flat list of natural-language facts about preferences, habits, traits, projects, constraints, and interaction guidance. Returned facts may include `(updated_at: ...)`; use it to resolve conflicts between contradictory profile records."
+    public let description = "Retrieve all current-user personalization context from Connor Memory OS. Returns a flat list of natural-language facts about preferences, habits, traits, constraints, and interaction guidance. Returned facts may include `(updated_at: ...)`; use it to resolve conflicts between contradictory profile records."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
 

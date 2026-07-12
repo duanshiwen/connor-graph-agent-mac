@@ -26,15 +26,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         dataSetID.namespacedElementID("commercial-chat-viewport-bottom-sentinel")
     }
 
-    private var hasLaidOutInitialItems: Bool {
-        !items.isEmpty && viewportHeight > 0 && contentHeight > 0
-    }
-
-    private var initialLatestAnchorTaskID: String {
-        let phase = items.isEmpty ? "empty" : (hasLaidOutInitialItems ? "ready" : "pending")
-        return "\(dataSetID.description)::\(phase)"
-    }
-
     init(
         dataSetID: ChatViewportDataSetID = ChatViewportDataSetID(namespace: "commercial-chat-viewport", rawID: "default"),
         items: [Item],
@@ -59,36 +50,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: configuration.spacing) {
-                        Color.clear
-                            .frame(height: 1)
-                            .id(topSentinelID)
-                            .background(
-                                GeometryReader { geometry in
-                                    Color.clear.preference(
-                                        key: ChatViewportTopSentinelMinYKey.self,
-                                        value: geometry.frame(in: .named(coordinateSpaceName)).minY
-                                    )
-                                }
-                            )
-
-                        ForEach(items) { item in
-                            rowContent(item)
-                                .id(rowID(for: item))
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomSentinelID)
-                            .background(
-                                GeometryReader { geometry in
-                                    Color.clear.preference(
-                                        key: ChatViewportBottomSentinelMaxYKey.self,
-                                        value: geometry.frame(in: .named(coordinateSpaceName)).maxY
-                                    )
-                                }
-                            )
-                    }
+                    contentStack
                     .frame(
                         maxWidth: .infinity,
                         minHeight: configuration.preservesBottomAnchorForUnderfilledContent ? viewportHeight : nil,
@@ -102,7 +64,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
-                .id(dataSetID)
                 .background(
                     GeometryReader { geometry in
                         Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
@@ -129,7 +90,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
                 .onChange(of: dataSetID) { _, newDataSetID in
-                    didRequestOlderItemsForCurrentTopReach = false
+                    resetMeasurementsForDataSetReplacement()
                     controller.replaceDataSet(id: newDataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
                 .onChange(of: items.count) { _, newCount in
@@ -140,10 +101,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .task(id: controller.pendingScrollCommand?.id) {
                     consumePendingScrollCommandIfAvailable(proxy: proxy)
-                }
-                .task(id: initialLatestAnchorTaskID) {
-                    guard hasLaidOutInitialItems else { return }
-                    scheduleInitialLatestAnchorRetries(proxy: proxy)
                 }
 
                 if configuration.showsJumpToLatestButton,
@@ -158,6 +115,52 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var contentStack: some View {
+        switch configuration.contentLayout {
+        case .eager:
+            VStack(alignment: .leading, spacing: configuration.spacing) {
+                viewportContent
+            }
+        case .lazy:
+            LazyVStack(alignment: .leading, spacing: configuration.spacing) {
+                viewportContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var viewportContent: some View {
+        Color.clear
+            .frame(height: 1)
+            .id(topSentinelID)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ChatViewportTopSentinelMinYKey.self,
+                        value: geometry.frame(in: .named(coordinateSpaceName)).minY
+                    )
+                }
+            )
+
+        ForEach(items) { item in
+            rowContent(item)
+                .id(rowID(for: item))
+        }
+
+        Color.clear
+            .frame(height: 1)
+            .id(bottomSentinelID)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ChatViewportBottomSentinelMaxYKey.self,
+                        value: geometry.frame(in: .named(coordinateSpaceName)).maxY
+                    )
+                }
+            )
     }
 
     private func rowID(for item: Item) -> String {
@@ -209,47 +212,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         }
     }
 
-    private func scheduleInitialLatestAnchorRetries(proxy: ScrollViewProxy) {
-        let scheduledDataSetID = dataSetID
-        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard dataSetID == scheduledDataSetID else { return }
-                switch initialLatestAnchorDecision() {
-                case .scrollToLatest:
-                    scrollToLatestRenderedItem(proxy: proxy, animated: false)
-                case .wait, .settleWithoutScroll, .stop:
-                    return
-                }
-            }
-        }
-    }
-
-    private func initialLatestAnchorDecision() -> ChatViewportInitialAnchorDecision {
-        ChatViewportInitialAnchorPolicy.decision(
-            itemCount: items.count,
-            viewportHeight: viewportHeight,
-            contentHeight: contentHeight,
-            distanceToBottom: measuredDistanceToBottom,
-            bottomPinThreshold: configuration.bottomPinThreshold,
-            isLoadingOlderItems: isLoadingOlderItems,
-            isPrependingOlderItems: isPrependingOlderItems,
-            isResolvingInitialAnchor: controller.isResolvingInitialAnchor,
-            isPinnedToBottom: controller.isPinnedToBottom
-        )
-    }
-
-    private var measuredDistanceToBottom: CGFloat {
-        if bottomSentinelMaxY > 0 {
-            return max(0, bottomSentinelMaxY - viewportHeight)
-        }
-        return max(0, contentHeight - viewportHeight)
-    }
-
-    private var isPrependingOlderItems: Bool {
-        if case .correctingAfterDataChange(.prepend) = controller.snapshot.mode {
-            return true
-        }
-        return false
+    private func resetMeasurementsForDataSetReplacement() {
+        viewportHeight = 0
+        contentHeight = 0
+        topSentinelMinY = 0
+        bottomSentinelMaxY = 0
+        didRequestOlderItemsForCurrentTopReach = false
     }
 
     private func scrollToLatestRenderedItem(proxy: ScrollViewProxy, animated: Bool) {

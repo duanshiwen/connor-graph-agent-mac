@@ -289,7 +289,10 @@ final class AppViewModel: NSObject, ObservableObject {
 #endif
     private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
+    private let chatSessionDetailLoadCoordinator = ChatSessionDetailLoadCoordinator()
     private let chatSessionTitleGenerationWorker = ChatSessionTitleGenerationWorker()
+    private var chatSessionSelectionTask: Task<Void, Never>?
+    private var chatSessionSelectionGeneration = 0
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -6336,13 +6339,20 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
 
+        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
+        if !cachedTimeline.isEmpty {
+            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
+            agentEventTimeline = cachedTimeline
+            return
+        }
+
         let runs = try chatSessionRepository.loadRuns(
             sessionID: sessionID,
             statuses: [.completed, .failed, .cancelled],
-            limit: 10
+            limit: 3
         )
         for run in runs {
-            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil))
+            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: 200))
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
                 scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
@@ -6351,14 +6361,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
 
-        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
-        if !cachedTimeline.isEmpty {
-            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
-            agentEventTimeline = cachedTimeline
-            return
-        }
-
-        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: nil)
+        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 400)
         var seenRunIDs: [String] = []
         for event in recentEvents where !seenRunIDs.contains(event.runID) {
             seenRunIDs.append(event.runID)
@@ -6399,9 +6402,48 @@ final class AppViewModel: NSObject, ObservableObject {
             _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         }
         rememberCurrentWorkspaceMode()
+        chatSessionSelectionTask?.cancel()
+        chatSessionSelectionGeneration += 1
+        let generation = chatSessionSelectionGeneration
+        let coordinator = chatSessionDetailLoadCoordinator
+        let startedAt = ContinuousClock.now
+
+        selectedChatSessionID = sessionID
+        replaceSelectedChatTranscript([])
+        agentEventTimeline = agentEventTimelinesBySessionID[sessionID] ?? []
+        latestChatSummary = nil
+        selectedSessionArtifactDirectories = nil
+        refreshSelectedSubmittingState()
+        errorMessage = nil
+
+        chatSessionSelectionTask = Task(priority: .userInitiated) { [weak self] in
+            do {
+                guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else { return }
+                try Task.checkCancellation()
+                guard let self,
+                      self.chatSessionSelectionGeneration == generation,
+                      self.selectedChatSessionID == sessionID
+                else { return }
+                self.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      self.chatSessionSelectionGeneration == generation,
+                      self.selectedChatSessionID == sessionID
+                else { return }
+                self.errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func applySelectedChatSessionSnapshot(
+        _ snapshot: ChatSessionDetailLoadSnapshot,
+        generation: Int,
+        startedAt: ContinuousClock.Instant
+    ) {
+        let session = snapshot.session
         do {
-            guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
-            selectedChatSessionID = session.id
             markSessionRead(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
@@ -6412,19 +6454,19 @@ final class AppViewModel: NSObject, ObservableObject {
             replaceSelectedChatTranscript(session.messages)
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
-            if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
-                agentEventTimeline = cachedTimeline
-            } else {
-                try restoreLatestAgentEventTimeline(sessionID: session.id)
-            }
-            latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            agentEventTimelinesBySessionID[session.id] = snapshot.timeline
+            agentEventTimeline = snapshot.timeline
+            latestChatSummary = snapshot.latestSummary
+            selectedSessionArtifactDirectories = snapshot.artifactDirectories
             restoreWorkspaceMode(for: session.id)
-            syncLLMModelDisplayFromSession(sessionID)
+            syncLLMModelDisplayFromSession(session.id)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
             errorMessage = nil
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             errorMessage = String(describing: error)
         }
@@ -6965,13 +7007,11 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
-            let noteAugmentedPrompt: String = {
-                guard manager.session.governance.kind == .note,
-                      manager.session.messages.isEmpty,
-                      !prompt.isEmpty
-                else { return prompt }
-                return prompt + NoteSessionPromptBuilder.noteInstructionSuffix
-            }()
+            let noteAugmentedPrompt = NoteSessionPromptBuilder.augmentedPrompt(
+                prompt,
+                sessionKind: manager.session.governance.kind,
+                hasExistingMessages: !manager.session.messages.isEmpty
+            )
             let skillAugmentation = buildSkillChatPromptAugmentation(prompt: noteAugmentedPrompt, sessionID: submittingSessionID)
             let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
             if resolvedSkillInstructions != nil {
@@ -7171,11 +7211,31 @@ private enum LocationPreferenceError: LocalizedError {
 
 /// 笔记会话首条消息的系统指令构建器
 struct NoteSessionPromptBuilder {
+    static func augmentedPrompt(
+        _ prompt: String,
+        sessionKind: AgentSessionKind,
+        hasExistingMessages: Bool
+    ) -> String {
+        guard sessionKind == .note, !hasExistingMessages, !prompt.isEmpty else {
+            return prompt
+        }
+        return prompt + noteInstructionSuffix
+    }
+
     static let noteInstructionSuffix = """
 
 ## 系统笔记指令
 
-用户正在创建一个笔记。请对用户的输入进行以下处理：
+### 当前输入上下文
+- session_kind: note
+- note_phase: initial_capture
+- persistence: session_backed
+
+用户通过笔记界面提交了这个 Note Session 的第一条内容。这条用户消息已经由 Session OS 保存，并会通过既有后台摄取链路自动进入 Memory OS L0/L1；保存笔记不是一个需要你执行的工具动作。
+
+不要为了保存这条笔记调用 `Write`、`Edit`、shell、知识库写入或 Memory 写入工具，也不要生成文件名、创建 Markdown 文件或选择保存路径。只有当用户在笔记内容中明确要求创建文件、导出到路径或修改现有文件时，才按普通工具权限规则执行相应操作。
+
+完成本轮强制上下文与搜索 Bootstrap 后，请对用户的输入进行以下处理：
 
 1. **总结核心内容**：用一段话概括用户输入的核心思想
 2. **领域识别**：指出这段内容涉及的知识领域

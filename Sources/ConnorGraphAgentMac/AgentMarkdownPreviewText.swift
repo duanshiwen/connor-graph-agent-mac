@@ -31,32 +31,13 @@ struct AgentMarkdownPreviewText: View {
         static let shared = RenderCache()
         private let documentCache = AgentMarkdownCompiledDocumentCache(limit: 600)
 
-        func document(_ markdown: String, context: AgentMarkdownPersistentCacheContext?) -> AgentMarkdownCompiledDocument {
-            documentCache.document(
-                for: markdown,
-                loadBlocks: { source in
-                    guard let context else { return nil }
-                    return try? context.store.loadBlocks(
-                        sessionID: context.sessionID,
-                        messageID: context.messageID,
-                        content: source
-                    )
-                },
-                persistBlocks: { source, blocks in
-                    guard let context else { return }
-                    try? context.store.saveBlocks(
-                        sessionID: context.sessionID,
-                        messageID: context.messageID,
-                        content: source,
-                        blocks: blocks
-                    )
-                }
-            )
+        func document(_ markdown: String) -> AgentMarkdownCompiledDocument {
+            documentCache.document(for: markdown)
         }
     }
 
     private var compiledDocument: AgentMarkdownCompiledDocument {
-        RenderCache.shared.document(markdown, context: persistentCacheContext)
+        RenderCache.shared.document(markdown)
     }
 
     private var renderWindow: AgentMarkdownCompiledRenderWindow {
