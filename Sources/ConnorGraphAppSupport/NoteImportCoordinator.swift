@@ -13,10 +13,18 @@ public struct NoteImportProgress: Sendable, Equatable {
 public actor NoteImportCoordinator {
     private let ledger: AppNoteImportRepository
     private let sessionService: HeadlessNoteSessionService
-    private let schedulerVersion = "1"
+    private let attachmentImporter: NoteImportAttachmentImporter?
+    private let schedulerVersion = "2"
+    private static let payloadMetadataKey = "imported_note_payload"
 
-    public init(ledger: AppNoteImportRepository, sessionService: HeadlessNoteSessionService) {
-        self.ledger = ledger; self.sessionService = sessionService
+    public init(
+        ledger: AppNoteImportRepository,
+        sessionService: HeadlessNoteSessionService,
+        attachmentImporter: NoteImportAttachmentImporter? = nil
+    ) {
+        self.ledger = ledger
+        self.sessionService = sessionService
+        self.attachmentImporter = attachmentImporter
     }
 
     public func scan(jobID: String, adapter: any NoteImportSourceAdapter, request: NoteImportScanRequest) async throws -> NoteImportJobRecord {
@@ -25,8 +33,9 @@ public actor NoteImportCoordinator {
         for try await note in adapter.scan(request) {
             try Task.checkCancellation()
             if try requireJob(jobID).cancelRequestedAt != nil { break }
-            let status: NoteImportItemStatus = note.diagnostics.contains { $0.code == .decodingAmbiguous } ? .needsEncodingReview : .ready
-            let item = NoteImportItemRecord(jobID: jobID, sourceID: request.sourceID, sourceIdentity: note.sourceIdentity, externalID: note.externalID, relativePath: note.relativePath, title: note.title, status: status, rawByteHash: note.rawByteHash, normalizedTextHash: note.normalizedTextHash, sourceEncoding: note.sourceMetadata["encoding"], encodingConfidence: confidence(note.sourceMetadata["encoding_confidence"]), decoderVersion: note.sourceMetadata["decoder_version"], metadata: ["content": note.markdownContent])
+            let status: NoteImportItemStatus = note.diagnostics.contains { $0.code == .decodingAmbiguous || $0.code == .decodingFailed } ? .needsEncodingReview : .ready
+            let payload = try Self.encodePayload(note)
+            let item = NoteImportItemRecord(jobID: jobID, sourceID: request.sourceID, sourceIdentity: note.sourceIdentity, externalID: note.externalID, relativePath: note.relativePath, title: note.title, status: status, rawByteHash: note.rawByteHash, normalizedTextHash: note.normalizedTextHash, sourceEncoding: note.sourceMetadata["encoding"], encodingConfidence: confidence(note.sourceMetadata["encoding_confidence"]), decoderVersion: note.sourceMetadata["decoder_version"], metadata: [Self.payloadMetadataKey: payload])
             do { try ledger.saveItem(item); job.discoveredCount += 1 } catch { job.duplicateCount += 1 }
             job.updatedAt = Date(); try ledger.saveJob(job)
         }
@@ -43,18 +52,40 @@ public actor NoteImportCoordinator {
         let scheduler = NoteImportExecutionScheduler(configuration: .init(concurrency: job.options.llmConcurrency))
         let llmMode = job.options.llmMode
         let pending = try ledger.items(jobID: jobID, statuses: [.ready, .duplicateChanged])
-        let results = await scheduler.run(elements: pending) { [ledger, sessionService, llmMode] item in
+        let options = job.options
+        let results = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, llmMode, options] item in
             let control = try ledger.job(id: jobID)
             if control?.cancelRequestedAt != nil { throw CancellationError() }
             while try ledger.job(id: jobID)?.pauseRequestedAt != nil { try await Task.sleep(for: .milliseconds(200)) }
             do {
                 _ = try ledger.transitionItem(id: item.id, to: .creatingSession)
+                let note = try Self.decodePayload(item)
                 let session = try await sessionService.createNoteSession(title: item.title)
-                guard var imported = try ledger.item(id: item.id) else { throw AppNoteImportRepositoryError.itemNotFound(item.id) }; imported.sessionID = session.id; imported.status = .imported; imported.updatedAt = Date(); try ledger.saveItem(imported)
+                var attachmentRefs: [AgentMessageAttachmentRef] = []
+                if options.importAttachments, let attachmentImporter {
+                    attachmentRefs = try await attachmentImporter.importAttachments(note.attachments, sessionID: session.id).map(\.messageRef)
+                }
+                guard var imported = try ledger.item(id: item.id) else { throw AppNoteImportRepositoryError.itemNotFound(item.id) }
+                imported.sessionID = session.id
+                imported.status = .imported
+                imported.updatedAt = Date()
+                try ledger.saveItem(imported)
                 if llmMode == .automatic {
                     _ = try ledger.transitionItem(id: item.id, to: .queuedForLLM)
                     _ = try ledger.transitionItem(id: item.id, to: .runningLLM)
-                    _ = try await sessionService.run(.init(sessionID: session.id, prompt: item.metadata["content"] ?? ""))
+                    _ = try await sessionService.run(.init(
+                        sessionID: session.id,
+                        prompt: note.markdownContent,
+                        attachmentIDs: attachmentRefs.map(\.id),
+                        allowNetworkReadTools: options.allowNetworkReadTools
+                    ))
+                } else {
+                    _ = try await sessionService.saveImportedNote(
+                        sessionID: session.id,
+                        content: note.markdownContent,
+                        attachments: attachmentRefs,
+                        createdAt: note.createdAt ?? Date()
+                    )
                 }
                 _ = try ledger.transitionItem(id: item.id, to: .completed)
                 return true
@@ -80,4 +111,19 @@ public actor NoteImportCoordinator {
     private func requireJob(_ id: String) throws -> NoteImportJobRecord { guard let value = try ledger.job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }; return value }
     private func requireItem(_ id: String) throws -> NoteImportItemRecord { guard let value = try ledger.item(id: id) else { throw AppNoteImportRepositoryError.itemNotFound(id) }; return value }
     private func confidence(_ value: String?) -> Double? { switch value { case "certain": 1; case "high": 0.9; case "medium": 0.7; case "low": 0.4; case "ambiguous": 0.2; default: nil } }
+
+    private static func encodePayload(_ note: ImportedNote) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(note).base64EncodedString()
+    }
+
+    private static func decodePayload(_ item: NoteImportItemRecord) throws -> ImportedNote {
+        guard let encoded = item.metadata[payloadMetadataKey], let data = Data(base64Encoded: encoded) else {
+            throw NoteImportErrorCode.internalInvariantViolation
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ImportedNote.self, from: data)
+    }
 }

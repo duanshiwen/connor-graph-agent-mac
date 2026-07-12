@@ -170,6 +170,10 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         try rows("SELECT id, source_kind, display_name, location_bookmark, created_at, metadata_json FROM note_import_sources WHERE id = ?", bindings: [.text(id)]).first.map(decodeSource)
     }
 
+    public func sources() throws -> [NoteImportSourceRecord] {
+        try rows("SELECT id, source_kind, display_name, location_bookmark, created_at, metadata_json FROM note_import_sources ORDER BY created_at DESC").map(decodeSource)
+    }
+
     public func saveJob(_ job: NoteImportJobRecord) throws {
         guard try source(id: job.sourceID) != nil else { throw AppNoteImportRepositoryError.sourceNotFound(job.sourceID) }
         let sql = """
@@ -189,6 +193,10 @@ public final class AppNoteImportRepository: @unchecked Sendable {
 
     public func job(id: String) throws -> NoteImportJobRecord? {
         try rows(Self.jobSelect + " WHERE id = ?", bindings: [.text(id)]).first.map(decodeJob)
+    }
+
+    public func jobs(limit: Int = 200) throws -> [NoteImportJobRecord] {
+        try rows(Self.jobSelect + " ORDER BY updated_at DESC LIMIT ?", bindings: [.int(max(1, limit))]).map(decodeJob)
     }
 
     public func recoverableJobs() throws -> [NoteImportJobRecord] {

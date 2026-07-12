@@ -30,4 +30,35 @@ struct NoteImportCoordinatorTests {
         let sessions = try chat.loadRecentSessions(limit: 10)
         #expect(sessions.count == 2); #expect(sessions.allSatisfy { $0.governance.kind == .note && $0.messages.count == 2 })
     }
+
+    @Test("Imports original note content without requiring LLM processing")
+    func importsWithoutLLM() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("# 原始笔记\n不会因为关闭 AI 而丢失。".utf8).write(to: root.appendingPathComponent("note.md"))
+        let store = try SQLiteGraphKernelStore(path: root.appendingPathComponent("db.sqlite").path)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: root.appendingPathComponent("db.sqlite").path)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(id: "job", sourceID: source.id, options: .init(llmMode: .disabled))
+        try ledger.saveJob(job)
+        let sessionService = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: sessionService)
+        let request = NoteImportScanRequest(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
+
+        _ = try await coordinator.scan(jobID: job.id, adapter: MarkdownFolderNoteImportAdapter(), request: request)
+        _ = try await coordinator.execute(jobID: job.id)
+
+        let sessions = try chat.loadRecentSessions(limit: 10)
+        #expect(sessions.count == 1)
+        #expect(sessions[0].messages.count == 1)
+        #expect(sessions[0].messages[0].content.contains("不会因为关闭 AI 而丢失"))
+        #expect(try ledger.jobs().map(\.id) == [job.id])
+        #expect(try ledger.sources().map(\.id) == [source.id])
+    }
 }

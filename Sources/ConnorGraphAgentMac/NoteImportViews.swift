@@ -4,11 +4,43 @@ import ConnorGraphAppSupport
 
 @MainActor final class NoteImportViewModel: ObservableObject {
     enum Step: Int, CaseIterable { case source, preview, encoding, options, confirm }
-    @Published var step: Step = .source; @Published var sourceKind: NoteImportSourceKind = .markdownFolder; @Published var sourceURL: URL?; @Published var options = NoteImportOptions(); @Published var notes: [ImportedNote] = []; @Published var jobs: [NoteImportJobRecord] = []; @Published var error: String?
+    @Published var step: Step = .source
+    @Published var sourceKind: NoteImportSourceKind = .markdownFolder
+    @Published var sourceURL: URL?
+    @Published var options = NoteImportOptions()
+    @Published var notes: [ImportedNote] = []
+    @Published var jobs: [NoteImportJobRecord] = []
+    @Published var error: String?
+
+    let ledger: AppNoteImportRepository?
+    let coordinator: NoteImportCoordinator?
+    let sourceAccessService: NoteImportSourceAccessService
+
+    init(
+        ledger: AppNoteImportRepository? = nil,
+        coordinator: NoteImportCoordinator? = nil,
+        sourceAccessService: NoteImportSourceAccessService = .init(),
+        configurationError: String? = nil
+    ) {
+        self.ledger = ledger
+        self.coordinator = coordinator
+        self.sourceAccessService = sourceAccessService
+        self.error = configurationError
+        reloadJobs()
+    }
+
+    convenience init(configurationError: String) {
+        self.init(configurationError: Optional(configurationError))
+    }
+
     var encodingReview: [ImportedNote] { notes.filter { $0.diagnostics.contains { $0.code == .decodingAmbiguous || $0.code == .decodingFailed } } }
     var canAdvance: Bool { step != .source || sourceURL != nil }
     func advance() { if let next = Step(rawValue: step.rawValue + 1) { step = next } }
     func back() { if let previous = Step(rawValue: step.rawValue - 1) { step = previous } }
+    func reloadJobs() {
+        guard let ledger else { return }
+        do { jobs = try ledger.jobs() } catch { self.error = error.localizedDescription }
+    }
 }
 
 struct NoteImportWizardView: View {
