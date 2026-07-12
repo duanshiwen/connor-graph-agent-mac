@@ -26,15 +26,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         dataSetID.namespacedElementID("commercial-chat-viewport-bottom-sentinel")
     }
 
-    private var hasLaidOutInitialItems: Bool {
-        !items.isEmpty && viewportHeight > 0 && contentHeight > 0
-    }
-
-    private var initialLatestAnchorTaskID: String {
-        let phase = items.isEmpty ? "empty" : (hasLaidOutInitialItems ? "ready" : "pending")
-        return "\(dataSetID.description)::\(controller.replacementGeneration)::\(phase)"
-    }
-
     init(
         dataSetID: ChatViewportDataSetID = ChatViewportDataSetID(namespace: "commercial-chat-viewport", rawID: "default"),
         items: [Item],
@@ -110,10 +101,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .task(id: controller.pendingScrollCommand?.id) {
                     consumePendingScrollCommandIfAvailable(proxy: proxy)
-                }
-                .task(id: initialLatestAnchorTaskID) {
-                    guard hasLaidOutInitialItems else { return }
-                    scheduleInitialLatestAnchorRetries(proxy: proxy)
                 }
 
                 if configuration.showsJumpToLatestButton,
@@ -225,58 +212,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         }
     }
 
-    private func scheduleInitialLatestAnchorRetries(proxy: ScrollViewProxy) {
-        let scheduledDataSetID = dataSetID
-        let scheduledGeneration = controller.replacementGeneration
-        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard dataSetID == scheduledDataSetID,
-                      controller.replacementGeneration == scheduledGeneration
-                else { return }
-                switch initialLatestAnchorDecision() {
-                case .scrollToLatest:
-                    scrollToLatestRenderedItem(proxy: proxy, animated: false)
-                case .wait, .settleWithoutScroll, .stop:
-                    return
-                }
-            }
-        }
-    }
-
     private func resetMeasurementsForDataSetReplacement() {
         viewportHeight = 0
         contentHeight = 0
         topSentinelMinY = 0
         bottomSentinelMaxY = 0
         didRequestOlderItemsForCurrentTopReach = false
-    }
-
-    private func initialLatestAnchorDecision() -> ChatViewportInitialAnchorDecision {
-        ChatViewportInitialAnchorPolicy.decision(
-            itemCount: items.count,
-            viewportHeight: viewportHeight,
-            contentHeight: contentHeight,
-            distanceToBottom: measuredDistanceToBottom,
-            bottomPinThreshold: configuration.bottomPinThreshold,
-            isLoadingOlderItems: isLoadingOlderItems,
-            isPrependingOlderItems: isPrependingOlderItems,
-            isResolvingInitialAnchor: controller.isResolvingInitialAnchor,
-            isPinnedToBottom: controller.isPinnedToBottom
-        )
-    }
-
-    private var measuredDistanceToBottom: CGFloat {
-        if bottomSentinelMaxY > 0 {
-            return max(0, bottomSentinelMaxY - viewportHeight)
-        }
-        return max(0, contentHeight - viewportHeight)
-    }
-
-    private var isPrependingOlderItems: Bool {
-        if case .correctingAfterDataChange(.prepend) = controller.snapshot.mode {
-            return true
-        }
-        return false
     }
 
     private func scrollToLatestRenderedItem(proxy: ScrollViewProxy, animated: Bool) {
