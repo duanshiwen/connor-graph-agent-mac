@@ -498,8 +498,6 @@ struct SettingsAISection: View {
     @State private var setupOption: AIConnectionOnboardingOption?
     @State private var renamingConnection: AppLLMConnectionConfig?
     @State private var renameDraft = ""
-    @State private var isConfirmingImageCapabilityProbe = false
-    @State private var imageCapabilityProbeConnectionID: String?
 
     var body: some View {
         Group {
@@ -536,16 +534,6 @@ struct SettingsAISection: View {
         } message: {
             Text("只会更改连接在列表中显示的名称，不会读取或修改已保存的 API Key。")
         }
-        .confirmationDialog("验证图片生成能力？", isPresented: $isConfirmingImageCapabilityProbe) {
-            Button("验证图片生成（可能产生少量费用）") {
-                guard let connectionID = imageCapabilityProbeConnectionID else { return }
-                Task { await viewModel.verifyLLMImageGeneration(connectionID: connectionID) }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            let name = viewModel.llmConnectionConfigs.first { $0.id == imageCapabilityProbeConnectionID }?.name ?? "所选连接"
-            Text("Connor 将使用“\(name)”发送一次最小图片生成请求。该请求可能由服务商计费，测试图片不会保存到会话。")
-        }
     }
 
     private var connectionList: some View {
@@ -564,7 +552,6 @@ struct SettingsAISection: View {
                         connection: connection,
                         isDefault: connection.id == viewModel.llmDefaultConnectionID,
                         canDelete: viewModel.llmConnectionConfigs.count > 1,
-                        select: { viewModel.selectLLMConnectionDetail(connection.id) },
                         makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
                         rename: { beginConnectionRename(connection) },
                         delete: {
@@ -586,10 +573,6 @@ struct SettingsAISection: View {
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-            if let connection = selectedDetailConnection {
-                connectionCapabilityDetail(connection)
-            }
-
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
                 Button(action: { isShowingAddConnectionGuide = true }) {
                     Label("添加连接", systemImage: "plus")
@@ -601,109 +584,12 @@ struct SettingsAISection: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
 
-                Label("为保护 API Key 安全，我们暂时不支持编辑一个连接；如需更改，请删除后重建。", systemImage: "lock.shield")
+                Label("连接能力会在添加时一次性验证并保存。为保护 API Key 安全，我们暂时不支持编辑连接；如需更改，请删除后重建。", systemImage: "lock.shield")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    private var selectedDetailConnection: AppLLMConnectionConfig? {
-        guard let id = viewModel.selectedLLMConnectionDetailID else { return nil }
-        return viewModel.llmConnectionConfigs.first { $0.id == id }
-    }
-
-    private func connectionCapabilityDetail(_ connection: AppLLMConnectionConfig) -> some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
-            HStack {
-                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                    Text("\(connection.name) 的连接能力")
-                        .font(SettingsListTypography.header)
-                    Text("\(AppLLMEndpointDisplayName.host(from: connection.baseURLString)) · \(connection.effectiveModel)")
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                    Text("能力属于此连接，并基于当前 URL、模型和凭据验证；查看详情不会更改默认连接。")
-                        .font(SettingsListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    Task { await viewModel.discoverLLMCapabilities(connectionID: connection.id) }
-                } label: {
-                    if viewModel.isDiscoveringLLMCapabilities { ProgressView().controlSize(.small) }
-                    else { Text("重新验证") }
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration)
-            }
-            ForEach(applicableCapabilities(for: connection), id: \.self) { capability in
-                let evidence = viewModel.llmCapabilityEvidence.first { $0.capability == capability }
-                HStack {
-                    Text(capabilityDisplayName(capability))
-                    Spacer()
-                    Text(capabilityStatusText(evidence?.status))
-                        .foregroundStyle(capabilityStatusColor(evidence?.status))
-                }
-                .font(SettingsListTypography.rowTitle)
-            }
-            if connection.providerMode == .openAICompatible || connection.providerMode == .openAIResponses {
-                HStack {
-                    Button("验证图片生成") {
-                        imageCapabilityProbeConnectionID = connection.id
-                        isConfirmingImageCapabilityProbe = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration || viewModel.llmCapabilityEvidence.first { $0.capability == .responses }?.status != .verified)
-                    if viewModel.isVerifyingImageGeneration { ProgressView().controlSize(.small) }
-                    Text("可能产生少量服务商费用；测试图片不会保存。")
-                        .font(SettingsListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let message = viewModel.llmHealthCheckMessage, !message.isEmpty {
-                Text(message).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
-            }
-        }
-        .padding(SettingsListLayout.spaceL)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
-    }
-
-    private func applicableCapabilities(for connection: AppLLMConnectionConfig) -> [AppProviderCapabilityID] {
-        switch connection.providerMode {
-        case .openAICompatible: [.chatCompletions, .functionCalling, .responses, .hostedImageGeneration]
-        case .openAIResponses: [.responses, .hostedImageGeneration]
-        case .anthropicMessages: []
-        }
-    }
-
-    private func capabilityDisplayName(_ capability: AppProviderCapabilityID) -> String {
-        switch capability {
-        case .chatCompletions: "Chat Completions"
-        case .functionCalling: "Function Calling"
-        case .responses: "OpenAI Responses"
-        case .hostedImageGeneration: "Image Generation"
-        }
-    }
-
-    private func capabilityStatusText(_ status: AppProviderCapabilityStatus?) -> String {
-        switch status {
-        case .verified: "已验证"
-        case .unsupported: "不支持"
-        case .unknown: "暂时无法判断"
-        case .expired: "已过期"
-        case nil: "未验证"
-        }
-    }
-
-    private func capabilityStatusColor(_ status: AppProviderCapabilityStatus?) -> Color {
-        switch status {
-        case .verified: .green
-        case .unsupported: .red
-        case .unknown, .expired: .orange
-        case nil: .secondary
         }
     }
 
@@ -2311,14 +2197,12 @@ struct AIConnectionEntryRow: View {
     var connection: AppLLMConnectionConfig
     var isDefault: Bool
     var canDelete: Bool
-    var select: () -> Void
     var makeDefault: () -> Void
     var rename: () -> Void
     var delete: () -> Void
 
     var body: some View {
-        Button(action: select) {
-            HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
                 Image(systemName: providerSystemImage)
                     .font(SettingsListTypography.icon)
                     .foregroundStyle(providerTint)
@@ -2371,10 +2255,8 @@ struct AIConnectionEntryRow: View {
                 .buttonStyle(.plain)
                 .help("更多")
             }
-            .contentShape(Rectangle())
-            .frame(minHeight: 58)
-        }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .frame(minHeight: 58)
     }
 
     private var subtitle: String {
