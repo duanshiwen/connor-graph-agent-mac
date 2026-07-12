@@ -23,6 +23,7 @@ public enum AppLLMRuntimeConfigurationError: Error, LocalizedError, Equatable, S
 public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
+    public var generatedMediaSettingsRepository: AppGeneratedMediaSettingsRepository
     public var groupID: String
     public var storagePaths: AppStoragePaths?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
@@ -32,6 +33,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public init(
         store: SQLiteGraphKernelStore,
         settingsRepository: AppLLMSettingsRepository,
+        generatedMediaSettingsRepository: AppGeneratedMediaSettingsRepository = AppGeneratedMediaSettingsRepository(),
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
@@ -40,6 +42,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) {
         self.store = store
         self.settingsRepository = settingsRepository
+        self.generatedMediaSettingsRepository = generatedMediaSettingsRepository
         self.groupID = groupID
         self.storagePaths = storagePaths
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
@@ -205,6 +208,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(SkillListTool(packages: snapshot.packages))
         }
         let generatedMediaProvider = generatedMediaProviderResolver?(modelProvider)
+            ?? makeConfiguredGeneratedMediaProvider(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
             ?? (modelProvider.supportsGeneratedMediaExecution ? modelProvider : nil)
         let generatedImageToolIsAvailable = storagePaths != nil
             && generatedMediaProvider?.supportsGeneratedMediaExecution == true
@@ -235,6 +239,39 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             eventRecorder: AgentEventRecorder(repository: store),
             contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID)
         )
+    }
+
+    private func makeConfiguredGeneratedMediaProvider(connectionID: String?) -> AnyAgentModelProvider? {
+        guard let settings = try? generatedMediaSettingsRepository.loadSettings() else { return nil }
+        let connection: AppGeneratedMediaConnectionConfig?
+        if let connectionID, !connectionID.isEmpty {
+            connection = settings.connections.first { $0.id == connectionID }
+        } else {
+            connection = settings.defaultImageConnection
+        }
+        guard let connection, connection.isConfigured,
+              let baseURL = URL(string: connection.baseURLString),
+              let apiKey = try? generatedMediaSettingsRepository.apiKey(for: connection.id),
+              !apiKey.isEmpty else { return nil }
+        switch connection.providerKind {
+        case .geminiImage:
+            return AnyAgentModelProvider(generatedMediaProvider: GeminiImageGeneratedMediaProvider(
+                config: GeminiImageGeneratedMediaConfig(baseURL: baseURL, apiKey: apiKey, model: connection.model),
+                httpClient: URLSessionAgentHTTPClient()
+            ))
+        case .blackForestLabs:
+            return AnyAgentModelProvider(generatedMediaProvider: FluxImageGeneratedMediaProvider(
+                config: FluxImageGeneratedMediaConfig(baseURL: baseURL, apiKey: apiKey, model: connection.model),
+                httpClient: URLSessionAgentHTTPClient()
+            ))
+        case .stabilityAI:
+            return AnyAgentModelProvider(generatedMediaProvider: StabilityImageGeneratedMediaProvider(
+                config: StabilityImageGeneratedMediaConfig(baseURL: baseURL, apiKey: apiKey, model: connection.model),
+                httpClient: URLSessionAgentHTTPClient()
+            ))
+        case .openAIResponses, .openAIImages:
+            return nil
+        }
     }
 
     public func makeAgentModelProvider(

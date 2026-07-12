@@ -37,6 +37,15 @@ public struct AnyAgentModelProvider: StreamingAgentModelProvider, AgentGenerated
         }
     }
 
+    public init<Provider: AgentGeneratedMediaProvider>(generatedMediaProvider provider: Provider) {
+        self.modelID = provider.modelID
+        self.capabilities = provider.capabilities
+        self.supportsGeneratedMediaExecution = true
+        self.completeHandler = { _ in throw AnyAgentModelProviderError.generatedMediaUnavailable(modelID: provider.modelID) }
+        self.streamHandler = nil
+        self.generateMediaHandler = { request in provider.generateMedia(request) }
+    }
+
     public init(
         modelID: String,
         capabilities: AgentModelCapabilities = AgentModelCapabilities(
