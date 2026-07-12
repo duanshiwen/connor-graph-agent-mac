@@ -86,6 +86,73 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.agentEventTimeline.isEmpty)
     }
 
+    @Test func selectingExistingSessionTracksLoadingUntilDetailIsApplied() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        var session = try fixture.repository.createSession(title: "Existing", now: Date(timeIntervalSince1970: 2_000))
+        session.messages = [AgentMessage(role: .user, content: "Loaded transcript")]
+        session = try fixture.repository.saveSession(session)
+
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.selectChatSession(session.id)
+
+        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(fixture.viewModel.loadingChatSessionDetailID == session.id)
+        #expect(fixture.viewModel.isLoadingSelectedChatSessionDetail)
+        #expect(fixture.viewModel.transcript.isEmpty)
+
+        try await waitForLoadingToFinish(fixture.viewModel)
+
+        #expect(fixture.viewModel.loadingChatSessionDetailID == nil)
+        #expect(!fixture.viewModel.isLoadingSelectedChatSessionDetail)
+        #expect(fixture.viewModel.transcript.map(\.content) == ["Loaded transcript"])
+    }
+
+    @Test func selectingPersistedEmptySessionFinishesLoadingWithEmptyTranscript() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = try fixture.repository.createSession(title: "Persisted empty", now: Date(timeIntervalSince1970: 2_000))
+
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.selectChatSession(session.id)
+
+        #expect(fixture.viewModel.loadingChatSessionDetailID == session.id)
+        try await waitForLoadingToFinish(fixture.viewModel)
+
+        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(fixture.viewModel.transcript.isEmpty)
+        #expect(fixture.viewModel.loadingChatSessionDetailID == nil)
+    }
+
+    @Test func creatingNewSessionDoesNotEnterDetailLoadingState() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.newChatSession()
+
+        #expect(fixture.viewModel.selectedChatSessionID != nil)
+        #expect(fixture.viewModel.transcript.isEmpty)
+        #expect(fixture.viewModel.loadingChatSessionDetailID == nil)
+        #expect(!fixture.viewModel.isLoadingSelectedChatSessionDetail)
+    }
+
+    @Test func selectingMissingSessionDoesNotLeaveLoadingStuck() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.selectChatSession("missing-session")
+
+        #expect(fixture.viewModel.loadingChatSessionDetailID == "missing-session")
+        try await waitForLoadingToFinish(fixture.viewModel)
+
+        #expect(fixture.viewModel.loadingChatSessionDetailID == nil)
+        #expect(fixture.viewModel.errorMessage == "无法加载所选会话。")
+    }
+
     @Test func selectingDifferentChatSessionsKeepsSelectedIDAndTranscriptInSync() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -133,6 +200,14 @@ struct AppViewModelSessionFilterSelectionTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("Timed out waiting for transcript: \(expectedContents)")
+    }
+
+    private func waitForLoadingToFinish(_ viewModel: AppViewModel) async throws {
+        for _ in 0..<100 {
+            if viewModel.loadingChatSessionDetailID == nil { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for session detail loading to finish")
     }
 
     private func makeFixture() throws -> Fixture {

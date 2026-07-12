@@ -354,6 +354,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published private(set) var loadingChatSessionDetailID: String?
     @Published private(set) var sessionReadStates: [String: SessionReadState] = [:]
     @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
@@ -617,6 +618,11 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var activeChatTranscript: [AgentMessage] {
         nativeSessionManager?.session.messages ?? fallbackChatSession.messages
+    }
+
+    var isLoadingSelectedChatSessionDetail: Bool {
+        guard let selectedChatSessionID else { return false }
+        return loadingChatSessionDetailID == selectedChatSessionID
     }
 
     var runtimeSettingsAutosaveSignature: String {
@@ -5593,6 +5599,9 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func clearSelectedChatSessionDetail() {
+        chatSessionSelectionTask?.cancel()
+        chatSessionSelectionGeneration += 1
+        loadingChatSessionDetailID = nil
         selectedChatSessionID = nil
         nativeSessionManager = nil
         replaceSelectedChatTranscript([])
@@ -5609,6 +5618,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func newChatSession() {
         guard let chatSessionRepository else { return }
+        chatSessionSelectionTask?.cancel()
+        chatSessionSelectionGeneration += 1
+        loadingChatSessionDetailID = nil
         _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         rememberCurrentWorkspaceMode()
         do {
@@ -5640,6 +5652,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func newNoteSession() {
         guard let chatSessionRepository else { return }
+        chatSessionSelectionTask?.cancel()
+        chatSessionSelectionGeneration += 1
+        loadingChatSessionDetailID = nil
         _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         rememberCurrentWorkspaceMode()
         do {
@@ -6485,6 +6500,11 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
+        if selectedChatSessionID == sessionID,
+           loadingChatSessionDetailID == nil,
+           activeChatSession.id == sessionID {
+            return
+        }
         if selectedChatSessionID != sessionID {
             _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         }
@@ -6496,6 +6516,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let startedAt = ContinuousClock.now
 
         selectedChatSessionID = sessionID
+        loadingChatSessionDetailID = sessionID
         replaceSelectedChatTranscript([])
         agentEventTimeline = agentEventTimelinesBySessionID[sessionID] ?? []
         latestChatSummary = nil
@@ -6505,23 +6526,35 @@ final class AppViewModel: NSObject, ObservableObject {
 
         chatSessionSelectionTask = Task(priority: .userInitiated) { [weak self] in
             do {
-                guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else { return }
+                guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else {
+                    guard let self,
+                          self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
+                    else { return }
+                    self.errorMessage = "无法加载所选会话。"
+                    self.loadingChatSessionDetailID = nil
+                    return
+                }
                 try Task.checkCancellation()
                 guard let self,
-                      self.chatSessionSelectionGeneration == generation,
-                      self.selectedChatSessionID == sessionID
+                      self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
                 else { return }
                 self.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
             } catch is CancellationError {
                 return
             } catch {
                 guard let self,
-                      self.chatSessionSelectionGeneration == generation,
-                      self.selectedChatSessionID == sessionID
+                      self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
                 else { return }
                 self.errorMessage = String(describing: error)
+                self.loadingChatSessionDetailID = nil
             }
         }
+    }
+
+    private func isCurrentChatSessionSelection(sessionID: String, generation: Int) -> Bool {
+        chatSessionSelectionGeneration == generation
+            && selectedChatSessionID == sessionID
+            && loadingChatSessionDetailID == sessionID
     }
 
     private func applySelectedChatSessionSnapshot(
@@ -6550,12 +6583,14 @@ final class AppViewModel: NSObject, ObservableObject {
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
+            loadingChatSessionDetailID = nil
             errorMessage = nil
             let elapsed = startedAt.duration(to: ContinuousClock.now)
             let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
             AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             errorMessage = String(describing: error)
+            loadingChatSessionDetailID = nil
         }
     }
 
@@ -7027,11 +7062,13 @@ final class AppViewModel: NSObject, ObservableObject {
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachmentsForSubmission = explicitAttachments ?? pendingAttachmentRefs
         guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
+        guard !isLoadingSelectedChatSessionDetail else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
         let submittingSessionID = manager.session.id
+        guard selectedChatSessionID == nil || selectedChatSessionID == submittingSessionID else { return nil }
         guard !submittingChatSessionIDs.contains(submittingSessionID) else { return nil }
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[submittingSessionID] = liveBackend
