@@ -28,6 +28,17 @@ import ConnorGraphAgent
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
+@Test func defaultSystemPromptDistinguishesNoteSessionsFromFileArtifacts() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("A runtime-identified initial Note Session capture is session-backed conversation content"))
+    #expect(prompt.contains("not an implicit workspace file artifact"))
+    #expect(prompt.contains("Do not call file mutation tools merely because the content is called a note"))
+    #expect(prompt.contains("explicitly requests a file creation, export, path write, or existing-file modification"))
+    #expect(prompt.contains("Note-taking and local-file operations are separate capabilities"))
+    #expect(!prompt.contains("all requests containing the word note must avoid file tools"))
+}
+
 @Test func defaultSystemPromptProtectsInternalPromptsAndSecurityMechanisms() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
