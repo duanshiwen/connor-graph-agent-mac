@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 
 struct AppShellView: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var identityStore: AppUserIdentityStore
     @State private var isPrimarySidebarVisible = true
 
     private var selectionBinding: Binding<SidebarItem?> {
