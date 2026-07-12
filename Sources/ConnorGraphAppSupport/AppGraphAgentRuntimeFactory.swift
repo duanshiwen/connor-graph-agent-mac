@@ -27,6 +27,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var storagePaths: AppStoragePaths?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
+    public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
 
     public init(
         store: SQLiteGraphKernelStore,
@@ -34,7 +35,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
-        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil
+        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
+        generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
     ) {
         self.store = store
         self.settingsRepository = settingsRepository
@@ -42,6 +44,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.storagePaths = storagePaths
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
+        self.generatedMediaProviderResolver = generatedMediaProviderResolver
     }
 
     public func makeAgentLoopChatController(
@@ -201,12 +204,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(SkillActivateTool(packages: snapshot.packages))
             registry.register(SkillListTool(packages: snapshot.packages))
         }
+        let generatedMediaProvider = generatedMediaProviderResolver?(modelProvider)
+            ?? (modelProvider.supportsGeneratedMediaExecution ? modelProvider : nil)
         let generatedImageToolIsAvailable = storagePaths != nil
-            && modelProvider.supportsGeneratedMediaExecution
-            && modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration)
-        if generatedImageToolIsAvailable, let storagePaths {
+            && generatedMediaProvider?.supportsGeneratedMediaExecution == true
+            && generatedMediaProvider?.capabilities.generatedMediaCapabilities.contains(.imageGeneration) == true
+        if generatedImageToolIsAvailable, let storagePaths, let generatedMediaProvider {
             registry.register(GeneratedImageAgentTool(
-                provider: modelProvider,
+                provider: generatedMediaProvider,
                 ingestionService: GeneratedMediaIngestionService(store: AppSessionAttachmentStore(paths: storagePaths))
             ))
         }
