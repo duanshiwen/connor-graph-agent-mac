@@ -28,10 +28,11 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
     private let repository: AppChatSessionRepository
     private let managerFactory: ManagerFactory
     private let promptPolicy: NoteSessionPromptPolicy
+    private let attachmentStore: AppSessionAttachmentStore?
     private var activeManagers: [String: NativeSessionManager] = [:]
 
-    public init(repository: AppChatSessionRepository, managerFactory: @escaping ManagerFactory, promptPolicy: NoteSessionPromptPolicy = .init()) {
-        self.repository = repository; self.managerFactory = managerFactory; self.promptPolicy = promptPolicy
+    public init(repository: AppChatSessionRepository, managerFactory: @escaping ManagerFactory, promptPolicy: NoteSessionPromptPolicy = .init(), attachmentStore: AppSessionAttachmentStore? = nil) {
+        self.repository = repository; self.managerFactory = managerFactory; self.promptPolicy = promptPolicy; self.attachmentStore = attachmentStore
     }
 
     public func createNoteSession(title: String, now: Date = Date()) throws -> AgentSession {
@@ -47,7 +48,11 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         activeManagers[request.sessionID] = manager
         defer { activeManagers.removeValue(forKey: request.sessionID) }
         let augmented = promptPolicy.augment(request.prompt, kind: session.governance.kind, hasExistingMessages: !session.messages.isEmpty)
-        let response = try await manager.submit(augmented, sessionSummary: nil, displayPrompt: request.displayPrompt ?? request.prompt)
+        let attachmentRefs = try request.attachmentIDs.map { id -> AgentMessageAttachmentRef in
+            guard let attachmentStore else { throw HeadlessNoteSessionServiceError.managerUnavailable("Attachment store unavailable") }
+            return try attachmentStore.loadManifest(sessionID: request.sessionID, attachmentID: id).messageRef
+        }
+        let response = try await manager.submit(augmented, sessionSummary: nil, displayPrompt: request.displayPrompt ?? request.prompt, attachments: attachmentRefs)
         let runID = response.events.compactMap { event -> String? in
             if case .runStarted(let payload) = event { return payload.run.id }
             return nil
