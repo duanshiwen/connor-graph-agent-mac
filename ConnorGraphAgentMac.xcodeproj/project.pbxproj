@@ -427,10 +427,10 @@
 			};
 			buildConfigurationList = A00000000000000000000019 /* Build configuration list for PBXProject "ConnorGraphAgentMac" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = A00000000000000000000013;
