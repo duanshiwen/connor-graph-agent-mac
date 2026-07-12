@@ -31,8 +31,9 @@ struct ConnorGraphAgentMacApp: App {
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
-        _viewModel = StateObject(wrappedValue: AppViewModel.live())
-        _noteImportModel = StateObject(wrappedValue: NoteImportViewModel())
+        let liveViewModel = AppViewModel.live()
+        _viewModel = StateObject(wrappedValue: liveViewModel)
+        _noteImportModel = StateObject(wrappedValue: liveViewModel.makeNoteImportViewModel())
         featureFlags = AppFeatureFlags.load()
     }
 

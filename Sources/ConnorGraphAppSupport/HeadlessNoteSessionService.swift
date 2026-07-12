@@ -41,6 +41,27 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         return try repository.saveSession(session)
     }
 
+    @discardableResult
+    public func saveImportedNote(
+        sessionID: String,
+        content: String,
+        attachments: [AgentMessageAttachmentRef] = [],
+        createdAt: Date = Date()
+    ) throws -> AgentSession {
+        guard var session = try repository.loadSession(id: sessionID) else {
+            throw HeadlessNoteSessionServiceError.sessionNotFound(sessionID)
+        }
+        let previousMessageCount = session.messages.count
+        session.messages.append(AgentMessage(
+            role: .user,
+            content: content,
+            createdAt: createdAt,
+            attachments: attachments
+        ))
+        session.updatedAt = createdAt
+        return try repository.saveSession(session, previousMessageCount: previousMessageCount)
+    }
+
     public func run(_ request: HeadlessNoteSessionRunRequest) async throws -> HeadlessNoteSessionRunResult {
         guard let session = try repository.loadSession(id: request.sessionID) else { throw HeadlessNoteSessionServiceError.sessionNotFound(request.sessionID) }
         guard var manager = managerFactory(session) else { throw HeadlessNoteSessionServiceError.managerUnavailable(request.sessionID) }
