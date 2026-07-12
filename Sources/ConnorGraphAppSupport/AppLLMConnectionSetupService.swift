@@ -167,7 +167,7 @@ public struct AppLLMConnectionSetupService: Sendable {
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
             explicitVisionSupport: input.explicitVisionSupport
         )
-        let discovery = await capabilityDiscoveryService?.probeProtocolCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: suppliedAPIKey))
+        let discovery = await capabilityDiscoveryService?.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: suppliedAPIKey))
             ?? AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
         try settingsRepository.saveConnection(connection, apiKey: suppliedAPIKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         capabilityDiscoveryService?.persist(discovery)
@@ -201,7 +201,7 @@ public struct AppLLMConnectionSetupService: Sendable {
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
             explicitVisionSupport: input.explicitVisionSupport
         )
-        let discovery = await capabilityDiscoveryService?.probeProtocolCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: apiKey))
+        let discovery = await capabilityDiscoveryService?.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: apiKey))
             ?? AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         capabilityDiscoveryService?.persist(discovery)

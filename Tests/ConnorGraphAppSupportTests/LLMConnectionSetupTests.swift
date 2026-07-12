@@ -9,6 +9,13 @@ private final class MemoryLLMSettingsStore: LLMSettingsStore, @unchecked Sendabl
     func set(_ value: String, forKey key: String) { values[key] = value }
 }
 
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
+}
+
 private final class MemoryCredentialStore: CredentialStore, @unchecked Sendable {
     var values: [String: String] = [:]
     func saveSecret(_ secret: String, service: String, account: String) throws { values["\(service):\(account)"] = secret }
@@ -69,7 +76,11 @@ struct LLMConnectionSetupTests {
             evidenceRepository: evidenceRepository,
             openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
             openAIResponsesProbe: { _ in throw OpenAICompatibleProviderError.httpStatus(404, message: "not found") },
-            functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+            functionCallingProbe: { _ in AgentModelResponse(text: "OK") },
+            hostedImageGenerationProbe: { _ in
+                Issue.record("Image probe must not run when Responses is unsupported")
+                return true
+            }
         )
         let service = AppLLMConnectionSetupService(
             settingsRepository: repository,
@@ -90,7 +101,47 @@ struct LLMConnectionSetupTests {
         #expect(result.capabilityEvidence.first { $0.capability == .functionCalling }?.status == .verified)
         #expect(result.capabilityEvidence.first { $0.capability == .responses }?.status == .unsupported)
         #expect(try evidenceRepository.effectiveEvidence(for: .chatCompletions, connection: result.connection)?.status == .verified)
+        #expect(result.capabilityEvidence.contains { $0.capability == .hostedImageGeneration } == false)
         #expect(try repository.apiKey(for: result.connection.id) == "secret")
+    }
+
+    @Test func openAICompatibleSetupPersistsHostedImageEvidenceWhenResponsesAreVerified() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials)
+        let imageProbeCount = LockedCounter()
+        let discovery = AppProviderCapabilityDiscoveryService(
+            settingsRepository: repository,
+            evidenceRepository: evidenceRepository,
+            openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+            openAIResponsesProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+            functionCallingProbe: { _ in AgentModelResponse(text: "OK") },
+            hostedImageGenerationProbe: { config in
+                imageProbeCount.increment()
+                #expect(config.model == "gpt-test")
+                return true
+            }
+        )
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            capabilityDiscoveryService: discovery,
+            openAICompatibleHealthCheck: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "image-provider",
+            kind: .openAICompatible,
+            name: "Image Provider",
+            baseURLString: "https://api.example.com/v1",
+            model: "gpt-test",
+            apiKey: "secret"
+        ))
+
+        #expect(imageProbeCount.value == 1)
+        #expect(result.capabilityEvidence.count == 4)
+        #expect(result.capabilityEvidence.first { $0.capability == .hostedImageGeneration }?.status == .verified)
+        #expect(try evidenceRepository.effectiveEvidence(for: .hostedImageGeneration, connection: result.connection)?.status == .verified)
     }
 
     @Test func openAICompatibleSuccessSavesMetadataAndSecretSeparately() async throws {
