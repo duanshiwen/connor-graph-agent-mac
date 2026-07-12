@@ -6528,7 +6528,8 @@ final class AppViewModel: NSObject, ObservableObject {
             do {
                 guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else {
                     guard let self,
-                          self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
+                          self.chatSessionSelectionGeneration == generation,
+                          self.selectedChatSessionID == sessionID
                     else { return }
                     self.errorMessage = "无法加载所选会话。"
                     self.loadingChatSessionDetailID = nil
