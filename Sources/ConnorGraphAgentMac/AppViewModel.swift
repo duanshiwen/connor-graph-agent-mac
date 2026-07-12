@@ -289,7 +289,10 @@ final class AppViewModel: NSObject, ObservableObject {
 #endif
     private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
+    private let chatSessionDetailLoadCoordinator = ChatSessionDetailLoadCoordinator()
     private let chatSessionTitleGenerationWorker = ChatSessionTitleGenerationWorker()
+    private var chatSessionSelectionTask: Task<Void, Never>?
+    private var chatSessionSelectionGeneration = 0
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -6399,9 +6402,48 @@ final class AppViewModel: NSObject, ObservableObject {
             _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         }
         rememberCurrentWorkspaceMode()
+        chatSessionSelectionTask?.cancel()
+        chatSessionSelectionGeneration += 1
+        let generation = chatSessionSelectionGeneration
+        let coordinator = chatSessionDetailLoadCoordinator
+        let startedAt = ContinuousClock.now
+
+        selectedChatSessionID = sessionID
+        replaceSelectedChatTranscript([])
+        agentEventTimeline = agentEventTimelinesBySessionID[sessionID] ?? []
+        latestChatSummary = nil
+        selectedSessionArtifactDirectories = nil
+        refreshSelectedSubmittingState()
+        errorMessage = nil
+
+        chatSessionSelectionTask = Task(priority: .userInitiated) { [weak self] in
+            do {
+                guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else { return }
+                try Task.checkCancellation()
+                guard let self,
+                      self.chatSessionSelectionGeneration == generation,
+                      self.selectedChatSessionID == sessionID
+                else { return }
+                self.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      self.chatSessionSelectionGeneration == generation,
+                      self.selectedChatSessionID == sessionID
+                else { return }
+                self.errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func applySelectedChatSessionSnapshot(
+        _ snapshot: ChatSessionDetailLoadSnapshot,
+        generation: Int,
+        startedAt: ContinuousClock.Instant
+    ) {
+        let session = snapshot.session
         do {
-            guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
-            selectedChatSessionID = session.id
             markSessionRead(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
@@ -6412,19 +6454,19 @@ final class AppViewModel: NSObject, ObservableObject {
             replaceSelectedChatTranscript(session.messages)
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
-            if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
-                agentEventTimeline = cachedTimeline
-            } else {
-                try restoreLatestAgentEventTimeline(sessionID: session.id)
-            }
-            latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            agentEventTimelinesBySessionID[session.id] = snapshot.timeline
+            agentEventTimeline = snapshot.timeline
+            latestChatSummary = snapshot.latestSummary
+            selectedSessionArtifactDirectories = snapshot.artifactDirectories
             restoreWorkspaceMode(for: session.id)
-            syncLLMModelDisplayFromSession(sessionID)
+            syncLLMModelDisplayFromSession(session.id)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
             errorMessage = nil
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             errorMessage = String(describing: error)
         }
