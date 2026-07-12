@@ -159,6 +159,31 @@ struct ChatViewportControllerTests {
         #expect(controller.snapshot.mode == .programmaticScroll(.bottom(animated: false)))
     }
 
+    @Test func rapidLongShortLongReplacementAnchorsOnlyLatestDataSet() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        let longA = ChatViewportDataSetID.agentChatSession(sessionID: "long-a", revision: 1)
+        let shortB = ChatViewportDataSetID.agentChatSession(sessionID: "short-b", revision: 1)
+        let longC = ChatViewportDataSetID.agentChatSession(sessionID: "long-c", revision: 1)
+
+        controller.replaceDataSet(id: longA, itemCount: 80, initialAnchor: .bottom)
+        controller.replaceDataSet(id: shortB, itemCount: 3, initialAnchor: .bottom)
+        controller.replaceDataSet(id: longC, itemCount: 80, initialAnchor: .bottom)
+
+        #expect(controller.replacementGeneration == 3)
+        #expect(controller.currentDataSetID == longC)
+        #expect(controller.pendingScrollCommand == nil)
+
+        controller.updateMetrics(.init(
+            viewportHeight: 600,
+            contentHeight: 4_800,
+            distanceToBottom: 4_200,
+            distanceToTop: 0
+        ))
+
+        #expect(controller.pendingScrollCommand?.target == .bottom(animated: false))
+        #expect(controller.currentDataSetID == longC)
+    }
+
     @Test func replaceDataSetIfNeededDoesNotIncrementGenerationForSameDataSet() {
         let controller = ChatViewportController(configuration: .init())
         let dataSet = ChatViewportDataSetID.agentChatSession(sessionID: "session", revision: 1)
