@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import Testing
 import ConnorGraphAgent
 
@@ -61,6 +62,67 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     let requestText = String(data: captured, encoding: .utf8) ?? ""
     #expect(requestText.contains("tools"))
     #expect(requestText.contains("graph_search"))
+}
+
+@Test func openAICompatibleProviderPreservesClosedObjectBooleanOnWire() async throws {
+    let body = #"""
+    {
+      "choices": [
+        {
+          "message": { "role": "assistant", "content": "Done." },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": { "prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10 }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Read calendar")],
+        tools: [AgentToolDefinition(
+            name: "calendar_read",
+            description: "Read calendar data",
+            inputSchema: .closedObject(properties: [
+                "operation": .stringEnumeration(values: ["list_calendars", "list_events"], description: "Read operation"),
+                "calendarID": .nullable(.string(description: "Calendar identifier")),
+                "limit": .integer(description: "Maximum results"),
+                "confidence": .number(description: "Confidence threshold"),
+                "includeDeclined": .boolean(description: "Include declined events"),
+                "tags": .array(items: .string(description: "Tag"), description: "Event tags"),
+                "filter": .closedObject(properties: [
+                    "query": .string(description: "Filter query")
+                ], required: ["query"])
+            ], required: ["operation"])
+        )]
+    ))
+
+    let captured = try #require(client.storage.capturedBody)
+    let requestText = try #require(String(data: captured, encoding: .utf8))
+    #expect(!requestText.contains(#""additionalProperties":0"#))
+
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    let function = try #require(tools.first?["function"] as? [String: Any])
+    let parameters = try #require(function["parameters"] as? [String: Any])
+    let additionalProperties = try #require(parameters["additionalProperties"])
+    #expect(CFGetTypeID(additionalProperties as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(additionalProperties as? Bool == false)
+    let properties = try #require(parameters["properties"] as? [String: Any])
+    #expect((properties["limit"] as? [String: Any])?["type"] as? String == "integer")
+    #expect((properties["confidence"] as? [String: Any])?["type"] as? String == "number")
+    #expect((properties["includeDeclined"] as? [String: Any])?["type"] as? String == "boolean")
+    #expect((properties["calendarID"] as? [String: Any])?["type"] as? [String] == ["string", "null"])
+    let tags = try #require(properties["tags"] as? [String: Any])
+    #expect((tags["items"] as? [String: Any])?["type"] as? String == "string")
+    let filter = try #require(properties["filter"] as? [String: Any])
+    let nestedAdditionalProperties = try #require(filter["additionalProperties"])
+    #expect(CFGetTypeID(nestedAdditionalProperties as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(nestedAdditionalProperties as? Bool == false)
 }
 
 @Test func openAICompatibleProviderSerializesDeveloperInstructionPlacement() async throws {

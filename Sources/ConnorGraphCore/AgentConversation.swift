@@ -313,13 +313,15 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         _ content: String,
         citations: [String] = [],
         contextSnapshot: String? = nil,
-        promptInspection: AgentPromptInspectionSnapshot? = nil
+        promptInspection: AgentPromptInspectionSnapshot? = nil,
+        attachments: [AgentMessageAttachmentRef] = []
     ) -> AgentMessage {
         let message = AgentMessage(
             role: .assistant,
             content: content,
             citations: citations,
             contextSnapshot: contextSnapshot,
+            attachments: attachments,
             promptInspection: promptInspection
         )
         messages.append(message)

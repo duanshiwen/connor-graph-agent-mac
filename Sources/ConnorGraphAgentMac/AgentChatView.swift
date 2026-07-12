@@ -64,6 +64,7 @@ struct AgentChatView: View {
             if let model = viewModel.attachmentPreviewModel {
                 AgentAttachmentPreviewOverlay(
                     model: model,
+                    onDownloadImage: { viewModel.downloadPreviewImage(model) },
                     onRetryExtraction: { viewModel.retryAttachmentExtraction(attachmentID: model.attachment.id) },
                     onClose: { viewModel.attachmentPreviewModel = nil }
                 )
@@ -132,6 +133,7 @@ private struct AgentChatToastView: View {
 
 private struct AgentAttachmentPreviewOverlay: View {
     var model: AttachmentPreviewModel
+    var onDownloadImage: (() -> Void)? = nil
     var onRetryExtraction: (() -> Void)? = nil
     var onClose: () -> Void
 
@@ -170,7 +172,11 @@ private struct AgentAttachmentPreviewOverlay: View {
                 }
                 .padding(AgentChatLayout.spaceM)
 
-                AgentAttachmentPreviewSheetView(model: model, onRetryExtraction: onRetryExtraction)
+                AgentAttachmentPreviewSheetView(
+                    model: model,
+                    onDownloadImage: onDownloadImage,
+                    onRetryExtraction: onRetryExtraction
+                )
                     .frame(maxWidth: 900, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, AgentChatLayout.spaceXL)
                     .padding(.bottom, AgentChatLayout.spaceXL)

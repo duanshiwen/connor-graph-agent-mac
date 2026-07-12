@@ -345,6 +345,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
+    @Published private(set) var lastAddedLLMConnectionID: String?
+    @Published private(set) var lastAddedLLMCapabilityEvidence: [AppProviderCapabilityEvidence] = []
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
@@ -541,6 +543,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
+    private var providerCapabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
+    private var providerCapabilityDiscoveryService: AppProviderCapabilityDiscoveryService
     private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
@@ -833,6 +837,48 @@ final class AppViewModel: NSObject, ObservableObject {
             showAttachmentToast(
                 title: "导出回复失败",
                 message: String(describing: error),
+                systemImage: "xmark.circle"
+            )
+        }
+    }
+
+    func downloadPreviewImage(_ model: AttachmentPreviewModel) {
+        let service = AttachmentImageExportService()
+        guard let filename = service.defaultFilename(for: model), let sourceURL = model.sourceFileURL else {
+            showAttachmentToast(
+                title: "图片下载失败",
+                message: AttachmentImageExportError.sourceUnavailable.localizedDescription,
+                systemImage: "xmark.circle"
+            )
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.title = "下载图片"
+        panel.message = "选择图片保存位置和文件名。"
+        panel.prompt = "下载"
+        panel.nameFieldLabel = "文件名："
+        panel.nameFieldStringValue = filename
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        if let contentType = UTType(filenameExtension: sourceURL.pathExtension) {
+            panel.allowedContentTypes = [contentType]
+        }
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        do {
+            try service.export(model: model, to: destinationURL)
+            showAttachmentToast(
+                title: "图片已下载",
+                message: destinationURL.path,
+                systemImage: "square.and.arrow.down"
+            )
+        } catch {
+            showAttachmentToast(
+                title: "图片下载失败",
+                message: error.localizedDescription,
                 systemImage: "xmark.circle"
             )
         }
@@ -2279,7 +2325,7 @@ final class AppViewModel: NSObject, ObservableObject {
         productOSRegistry: ProductOSRegistrySnapshot = .default,
         automationConfig: ProductOSAutomationConfig = .default,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
-        llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
+        llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
         self.entities = entities
         self.statements = statements
@@ -2292,7 +2338,24 @@ final class AppViewModel: NSObject, ObservableObject {
         self.automationConfig = automationConfig
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
-        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory
+        let capabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(
+            settingsStore: llmSettingsRepository.settingsStore,
+            credentialStore: llmSettingsRepository.credentialStore
+        )
+        self.providerCapabilityEvidenceRepository = capabilityEvidenceRepository
+        self.providerCapabilityDiscoveryService = AppProviderCapabilityDiscoveryService(
+            settingsRepository: llmSettingsRepository,
+            evidenceRepository: capabilityEvidenceRepository
+        )
+        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory ?? { repository in
+            AppLLMConnectionSetupService(
+                settingsRepository: repository,
+                capabilityDiscoveryService: AppProviderCapabilityDiscoveryService(
+                    settingsRepository: repository,
+                    evidenceRepository: capabilityEvidenceRepository
+                )
+            )
+        }
         if let storagePaths {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
@@ -4481,13 +4544,17 @@ final class AppViewModel: NSObject, ObservableObject {
         defer { isAddingLLMConnection = false }
         let service = llmConnectionSetupServiceFactory(llmSettingsRepository)
         let result = try await service.setupConnection(input)
+        lastAddedLLMConnectionID = result.connection.id
+        lastAddedLLMCapabilityEvidence = result.capabilityEvidence
         loadLLMSettings()
         syncActiveSessionLLMOverride(to: result.connection)
         updateWelcomeState()
         rebuildNativeSessionManagerForActiveSession()
         await reloadLLMModelConnections()
-        llmSettingsMessage = result.message
-        llmHealthCheckMessage = result.message
+        let verifiedCount = result.capabilityEvidence.filter { $0.status == .verified }.count
+        let capabilitySuffix = result.capabilityEvidence.isEmpty ? "" : "；已发现 \(verifiedCount)/\(result.capabilityEvidence.count) 项可用能力。"
+        llmSettingsMessage = result.message + capabilitySuffix
+        llmHealthCheckMessage = result.message + capabilitySuffix
         errorMessage = nil
         return result.connection
     }
@@ -4526,15 +4593,28 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func deleteSelectedLLMConnection() {
+        deleteLLMConnection(llmDefaultConnectionID)
+    }
+
+    func deleteLLMConnection(_ connectionID: String) {
         guard llmConnectionConfigs.count > 1 else {
             llmSettingsMessage = "至少需要保留一个 AI 连接。"
             return
         }
-        let deletingID = llmDefaultConnectionID
-        llmConnectionConfigs.removeAll { $0.id == deletingID }
-        try? llmSettingsRepository.clearAPIKey(connectionID: deletingID)
-        llmDefaultConnectionID = llmConnectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
-        selectDefaultLLMConnection(llmDefaultConnectionID)
+        guard llmConnectionConfigs.contains(where: { $0.id == connectionID }) else { return }
+        let wasDefault = connectionID == llmDefaultConnectionID
+        llmConnectionConfigs.removeAll { $0.id == connectionID }
+        try? llmSettingsRepository.clearAPIKey(connectionID: connectionID)
+        try? providerCapabilityEvidenceRepository.invalidate(connectionID: connectionID)
+        if wasDefault {
+            llmDefaultConnectionID = llmConnectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
+        }
+        persistLLMSettings(rebuildRuntime: true)
+    }
+
+    func capabilityDetailPresentation(for connectionID: String) -> AppProviderCapabilityDetailPresentation? {
+        guard let connection = llmConnectionConfigs.first(where: { $0.id == connectionID }) else { return nil }
+        return providerCapabilityEvidenceRepository.detailPresentation(for: connection)
     }
 
     func renameLLMConnection(_ connectionID: String, name: String) {

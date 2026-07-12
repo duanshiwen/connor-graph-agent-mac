@@ -57,10 +57,12 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
 public struct AppLLMConnectionSetupResult: Sendable, Equatable {
     public var connection: AppLLMConnectionConfig
     public var message: String
+    public var capabilityEvidence: [AppProviderCapabilityEvidence]
 
-    public init(connection: AppLLMConnectionConfig, message: String) {
+    public init(connection: AppLLMConnectionConfig, message: String, capabilityEvidence: [AppProviderCapabilityEvidence] = []) {
         self.connection = connection
         self.message = message
+        self.capabilityEvidence = capabilityEvidence
     }
 }
 
@@ -92,6 +94,7 @@ public enum AppLLMConnectionSetupError: Error, Sendable, Equatable, LocalizedErr
 
 public struct AppLLMConnectionSetupService: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
+    public var capabilityDiscoveryService: AppProviderCapabilityDiscoveryService?
     public var openAIResponsesHealthCheck: OpenAIResponsesHealthCheck
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
     public var anthropicCompatibleHealthCheck: AnthropicCompatibleHealthCheck
@@ -99,6 +102,7 @@ public struct AppLLMConnectionSetupService: Sendable {
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
+        capabilityDiscoveryService: AppProviderCapabilityDiscoveryService? = nil,
         openAIResponsesHealthCheck: @escaping OpenAIResponsesHealthCheck = { config in
             try await OpenAIResponsesProvider(config: config).healthCheck()
         },
@@ -113,6 +117,7 @@ public struct AppLLMConnectionSetupService: Sendable {
         }
     ) {
         self.settingsRepository = settingsRepository
+        self.capabilityDiscoveryService = capabilityDiscoveryService
         self.openAIResponsesHealthCheck = openAIResponsesHealthCheck
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
         self.anthropicCompatibleHealthCheck = anthropicCompatibleHealthCheck
@@ -162,8 +167,11 @@ public struct AppLLMConnectionSetupService: Sendable {
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
             explicitVisionSupport: input.explicitVisionSupport
         )
+        let discovery = await capabilityDiscoveryService?.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: suppliedAPIKey))
+            ?? AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
         try settingsRepository.saveConnection(connection, apiKey: suppliedAPIKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
-        return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Responses 连接验证成功：\(health.model)")
+        capabilityDiscoveryService?.persist(discovery)
+        return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Responses 连接验证成功：\(health.model)", capabilityEvidence: discovery.evidence)
     }
 
     private func setupOpenAICompatible(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {
@@ -193,8 +201,11 @@ public struct AppLLMConnectionSetupService: Sendable {
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
             explicitVisionSupport: input.explicitVisionSupport
         )
+        let discovery = await capabilityDiscoveryService?.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: apiKey))
+            ?? AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
-        return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Compatible 连接验证成功：\(health.model)")
+        capabilityDiscoveryService?.persist(discovery)
+        return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Compatible 连接验证成功：\(health.model)", capabilityEvidence: discovery.evidence)
     }
 
     private func setupChatGPTCodex(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {

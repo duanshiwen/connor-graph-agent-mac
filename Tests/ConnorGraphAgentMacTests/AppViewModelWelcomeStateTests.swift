@@ -157,6 +157,56 @@ private func makeWelcomeStateViewModel(
 }
 
 @MainActor
+@Test func deletingViewedNonDefaultConnectionPreservesDefaultRoute() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let first = AppLLMConnectionConfig(id: "first", name: "First", providerMode: .openAICompatible, baseURLString: "https://first.example/v1", model: "model-a", selectedModel: "model-a", hasAPIKey: true)
+    let second = AppLLMConnectionConfig(id: "second", name: "Second", providerMode: .openAICompatible, baseURLString: "https://second.example/v1", model: "model-b", selectedModel: "model-b", hasAPIKey: true)
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "first-key")
+    try repository.saveAPIKey("second-key", connectionID: second.id)
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+
+    viewModel.deleteLLMConnection(second.id)
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.defaultConnectionID == first.id)
+    #expect(loaded.connections.map(\.id) == [first.id])
+    #expect(try repository.apiKey(for: second.id) == nil)
+}
+
+@MainActor
+@Test func capabilityDetailIsReadonlyAcrossRenameAndUnavailableAfterDelete() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let first = AppLLMConnectionConfig(id: "first", name: "First", providerMode: .openAICompatible, baseURLString: "https://first.example/v1", model: "model-a", selectedModel: "model-a", hasAPIKey: true)
+    let second = AppLLMConnectionConfig(id: "second", name: "Second", providerMode: .openAICompatible, baseURLString: "https://second.example/v1", model: "model-b", selectedModel: "model-b", hasAPIKey: true)
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "first-key")
+    try repository.saveAPIKey("second-key", connectionID: second.id)
+    let binding = AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: second, credential: "second-key")
+    try evidenceRepository.save(AppProviderCapabilitySnapshot(connectionID: second.id, evidence: [
+        AppProviderCapabilityEvidence(capability: .responses, status: .verified, endpointFamily: "openai_responses", modelID: "model-b", bindingFingerprint: binding)
+    ]))
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+
+    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
+
+    viewModel.renameLLMConnection(second.id, name: "Renamed")
+
+    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.connectionName == "Renamed")
+    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
+
+    viewModel.deleteLLMConnection(second.id)
+
+    #expect(viewModel.capabilityDetailPresentation(for: second.id) == nil)
+    #expect(evidenceRepository.loadAll().first { $0.connectionID == second.id }?.evidence.isEmpty == true)
+}
+
+@MainActor
 @Test func selectingConnectionPersistsBeforeWelcomeStateRecalculation() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
@@ -190,6 +240,38 @@ private func makeWelcomeStateViewModel(
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "second")
     #expect(viewModel.showWelcomePlaceholder == false)
+}
+
+@MainActor
+@Test func setupLLMConnectionPublishesNewConnectionAndCapabilitySummary() async throws {
+    let store = WelcomeStateFakeSettingsStore()
+    let credentials = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+    let service = AppLLMConnectionSetupService(
+        settingsRepository: repository,
+        capabilityDiscoveryService: AppProviderCapabilityDiscoveryService(
+            settingsRepository: repository,
+            evidenceRepository: AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials),
+            openAICompatibleProbe: { _ in LLMProviderHealthCheckResult(ok: true, model: "model-a", message: "OK") },
+            openAIResponsesProbe: { _ in throw OpenAICompatibleProviderError.httpStatus(404, message: "not found") },
+            functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+        ),
+        openAICompatibleHealthCheck: { _ in LLMProviderHealthCheckResult(ok: true, model: "model-a", message: "OK") }
+    )
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: store, credentialStore: credentials, llmConnectionSetupServiceFactory: { _ in service })
+
+    let result = try await viewModel.setupLLMConnection(AppLLMConnectionSetupInput(
+        id: "new-connection",
+        kind: .openAICompatible,
+        name: "New",
+        baseURLString: "https://example.com/v1",
+        model: "model-a",
+        apiKey: "secret"
+    ))
+
+    #expect(viewModel.lastAddedLLMConnectionID == result.id)
+    #expect(viewModel.lastAddedLLMCapabilityEvidence.count == 3)
+    #expect(viewModel.llmSettingsMessage?.contains("已发现") == true)
 }
 
 @MainActor

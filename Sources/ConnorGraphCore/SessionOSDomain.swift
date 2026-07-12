@@ -91,19 +91,22 @@ public struct SessionLLMOverride: Codable, Sendable, Equatable {
     public var baseURLString: String?
     public var connectionID: String?
     public var thinkingLevel: String?
+    public var generatedMediaConnectionID: String?
 
     public init(
         providerMode: String,
         model: String,
         baseURLString: String? = nil,
         connectionID: String? = nil,
-        thinkingLevel: String? = nil
+        thinkingLevel: String? = nil,
+        generatedMediaConnectionID: String? = nil
     ) {
         self.providerMode = providerMode
         self.model = model
         self.baseURLString = baseURLString
         self.connectionID = connectionID
         self.thinkingLevel = thinkingLevel
+        self.generatedMediaConnectionID = generatedMediaConnectionID
     }
 }
 

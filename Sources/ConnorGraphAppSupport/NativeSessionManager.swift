@@ -265,6 +265,7 @@ public struct NativeSessionManager: Sendable {
         var collectedEvents: [AgentEvent] = []
         var collectedPresentations: [AgentEventPresentation] = []
         var assistantMessage: AgentMessage?
+        var generatedAttachmentRefs: [AgentMessageAttachmentRef] = []
         var promptInspectionSnapshot: AgentPromptInspectionSnapshot?
 
         do {
@@ -310,12 +311,19 @@ public struct NativeSessionManager: Sendable {
                     )
                 }
 
+                if case .toolFinished(let result) = event,
+                   let attachment = generatedImageAttachment(from: result, runID: run.id, sessionID: session.id),
+                   !generatedAttachmentRefs.contains(where: { $0.id == attachment.id }) {
+                    generatedAttachmentRefs.append(attachment)
+                }
+
                 if case .textComplete(let payload) = event {
                     assistantMessage = session.appendAssistantMessage(
                         payload.text,
                         citations: payload.citations,
                         contextSnapshot: payload.contextSnapshot,
-                        promptInspection: promptInspectionSnapshot
+                        promptInspection: promptInspectionSnapshot,
+                        attachments: generatedAttachmentRefs
                     )
                     try persistSession()
                     if let assistantMessage {
@@ -553,6 +561,20 @@ public struct NativeSessionManager: Sendable {
             break
         }
         try eventRecorder.record(event, sequence: sequence)
+    }
+
+    private func generatedImageAttachment(from result: AgentToolResult, runID: String, sessionID: String) -> AgentMessageAttachmentRef? {
+        guard result.toolName == "generate_image",
+              result.runID == runID,
+              result.sessionID == sessionID,
+              result.error == nil,
+              let contentJSON = result.contentJSON,
+              let data = contentJSON.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: data),
+              payload.attachment.kind == .image else {
+            return nil
+        }
+        return payload.attachment
     }
 
     private func recordPendingApprovalIfNeeded(_ event: AgentEvent) throws {
