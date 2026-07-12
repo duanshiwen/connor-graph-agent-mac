@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import Testing
 import ConnorGraphAgent
 
@@ -61,6 +62,49 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     let requestText = String(data: captured, encoding: .utf8) ?? ""
     #expect(requestText.contains("tools"))
     #expect(requestText.contains("graph_search"))
+}
+
+@Test func openAICompatibleProviderPreservesClosedObjectBooleanOnWire() async throws {
+    let body = #"""
+    {
+      "choices": [
+        {
+          "message": { "role": "assistant", "content": "Done." },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": { "prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10 }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Read calendar")],
+        tools: [AgentToolDefinition(
+            name: "calendar_read",
+            description: "Read calendar data",
+            inputSchema: .closedObject(properties: [
+                "operation": .stringEnumeration(values: ["list_calendars", "list_events"], description: "Read operation"),
+                "calendarID": .nullable(.string(description: "Calendar identifier"))
+            ], required: ["operation"])
+        )]
+    ))
+
+    let captured = try #require(client.storage.capturedBody)
+    let requestText = try #require(String(data: captured, encoding: .utf8))
+    #expect(!requestText.contains(#""additionalProperties":0"#))
+
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    let function = try #require(tools.first?["function"] as? [String: Any])
+    let parameters = try #require(function["parameters"] as? [String: Any])
+    let additionalProperties = try #require(parameters["additionalProperties"])
+    #expect(CFGetTypeID(additionalProperties as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(additionalProperties as? Bool == false)
 }
 
 @Test func openAICompatibleProviderSerializesDeveloperInstructionPlacement() async throws {
