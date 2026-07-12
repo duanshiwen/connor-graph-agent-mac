@@ -61,6 +61,21 @@ struct AgentEventTimelineView: View {
     }
 }
 
+struct AgentChatSessionLoadingView: View {
+    var body: some View {
+        VStack(spacing: AgentChatLayout.spaceM) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("正在加载会话…")
+                .font(AgentChatTypography.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("正在加载会话")
+    }
+}
+
 struct AgentChatEmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
