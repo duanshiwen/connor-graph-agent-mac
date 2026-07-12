@@ -177,6 +177,36 @@ private func makeWelcomeStateViewModel(
 }
 
 @MainActor
+@Test func capabilityDetailIsReadonlyAcrossRenameAndUnavailableAfterDelete() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let first = AppLLMConnectionConfig(id: "first", name: "First", providerMode: .openAICompatible, baseURLString: "https://first.example/v1", model: "model-a", selectedModel: "model-a", hasAPIKey: true)
+    let second = AppLLMConnectionConfig(id: "second", name: "Second", providerMode: .openAICompatible, baseURLString: "https://second.example/v1", model: "model-b", selectedModel: "model-b", hasAPIKey: true)
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "first-key")
+    try repository.saveAPIKey("second-key", connectionID: second.id)
+    let binding = AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: second, credential: "second-key")
+    try evidenceRepository.save(AppProviderCapabilitySnapshot(connectionID: second.id, evidence: [
+        AppProviderCapabilityEvidence(capability: .responses, status: .verified, endpointFamily: "openai_responses", modelID: "model-b", bindingFingerprint: binding)
+    ]))
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+
+    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
+
+    viewModel.renameLLMConnection(second.id, name: "Renamed")
+
+    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.connectionName == "Renamed")
+    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
+
+    viewModel.deleteLLMConnection(second.id)
+
+    #expect(viewModel.capabilityDetailPresentation(for: second.id) == nil)
+    #expect(evidenceRepository.loadAll().first { $0.connectionID == second.id }?.evidence.isEmpty == true)
+}
+
+@MainActor
 @Test func selectingConnectionPersistsBeforeWelcomeStateRecalculation() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
