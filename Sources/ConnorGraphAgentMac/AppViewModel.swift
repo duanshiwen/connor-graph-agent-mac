@@ -559,6 +559,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var mailStore: FileBackedMailSourceStore?
     private var mailPreferencesStore: (any MailPreferencesStore)?
     private var mailCacheChangeObserver: NSObjectProtocol?
+    private var applicationDidFinishLaunchingObserver: NSObjectProtocol?
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -2433,6 +2434,15 @@ final class AppViewModel: NSObject, ObservableObject {
                 await self?.reloadMailBrowserPresentation()
             }
         }
+        applicationDidFinishLaunchingObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshDockBadge()
+            }
+        }
         if let repository {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
                 store: repository.store,
@@ -2504,6 +2514,10 @@ final class AppViewModel: NSObject, ObservableObject {
         if let mailCacheChangeObserver {
             NotificationCenter.default.removeObserver(mailCacheChangeObserver)
             self.mailCacheChangeObserver = nil
+        }
+        if let applicationDidFinishLaunchingObserver {
+            NotificationCenter.default.removeObserver(applicationDidFinishLaunchingObserver)
+            self.applicationDidFinishLaunchingObserver = nil
         }
         stopTaskSchedulerTimer()
         globalSearchPreviewTask?.cancel()
@@ -5241,7 +5255,12 @@ final class AppViewModel: NSObject, ObservableObject {
             guard state.highestLevel.shouldCountInDockBadge else { return partial }
             return partial + max(state.unreadCount, 1)
         }
-        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+        Self.applyDockBadge(count: count, application: NSApp)
+    }
+
+    static func applyDockBadge(count: Int, application: NSApplication?) {
+        guard let application else { return }
+        application.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
     }
 
     private var canUseUserNotifications: Bool {
