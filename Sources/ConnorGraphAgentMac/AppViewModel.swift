@@ -4570,6 +4570,11 @@ final class AppViewModel: NSObject, ObservableObject {
         persistLLMSettings(rebuildRuntime: true)
     }
 
+    func capabilityDetailPresentation(for connectionID: String) -> AppProviderCapabilityDetailPresentation? {
+        guard let connection = llmConnectionConfigs.first(where: { $0.id == connectionID }) else { return nil }
+        return providerCapabilityEvidenceRepository.detailPresentation(for: connection)
+    }
+
     func renameLLMConnection(_ connectionID: String, name: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty,
