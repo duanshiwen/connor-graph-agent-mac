@@ -498,6 +498,7 @@ struct SettingsAISection: View {
     @State private var setupOption: AIConnectionOnboardingOption?
     @State private var renamingConnection: AppLLMConnectionConfig?
     @State private var renameDraft = ""
+    @State private var isConfirmingImageCapabilityProbe = false
 
     var body: some View {
         Group {
@@ -533,6 +534,14 @@ struct SettingsAISection: View {
             .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
             Text("只会更改连接在列表中显示的名称，不会读取或修改已保存的 API Key。")
+        }
+        .confirmationDialog("验证图片生成能力？", isPresented: $isConfirmingImageCapabilityProbe) {
+            Button("验证图片生成（可能产生少量费用）") {
+                Task { await viewModel.verifyLLMImageGeneration() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("Connor 将使用当前连接发送一次最小图片生成请求。该请求可能由服务商计费，测试图片不会保存到会话。")
         }
     }
 
@@ -575,6 +584,8 @@ struct SettingsAISection: View {
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
+            capabilityDiscoveryCard
+
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
                 Button(action: { isShowingAddConnectionGuide = true }) {
                     Label("添加连接", systemImage: "plus")
@@ -592,6 +603,82 @@ struct SettingsAISection: View {
                     .labelStyle(.titleAndIcon)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private var capabilityDiscoveryCard: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                    Text("连接能力")
+                        .font(SettingsListTypography.header)
+                    Text("能力来自对当前 URL、模型和凭据的真实协议验证，而不是模型名称推断。")
+                        .font(SettingsListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    Task { await viewModel.discoverLLMCapabilities() }
+                } label: {
+                    if viewModel.isDiscoveringLLMCapabilities { ProgressView().controlSize(.small) }
+                    else { Text("测试并发现能力") }
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration)
+            }
+            ForEach(AppProviderCapabilityID.allCases, id: \.self) { capability in
+                let evidence = viewModel.llmCapabilityEvidence.first { $0.capability == capability }
+                HStack {
+                    Text(capabilityDisplayName(capability))
+                    Spacer()
+                    Text(capabilityStatusText(evidence?.status))
+                        .foregroundStyle(capabilityStatusColor(evidence?.status))
+                }
+                .font(SettingsListTypography.rowTitle)
+            }
+            HStack {
+                Button("验证图片生成") { isConfirmingImageCapabilityProbe = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration || viewModel.llmCapabilityEvidence.first { $0.capability == .responses }?.status != .verified)
+                if viewModel.isVerifyingImageGeneration { ProgressView().controlSize(.small) }
+                Text("可能产生少量服务商费用；测试图片不会保存。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+            }
+            if let message = viewModel.llmHealthCheckMessage, !message.isEmpty {
+                Text(message).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
+            }
+        }
+        .padding(SettingsListLayout.spaceL)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
+    }
+
+    private func capabilityDisplayName(_ capability: AppProviderCapabilityID) -> String {
+        switch capability {
+        case .chatCompletions: "Chat Completions"
+        case .functionCalling: "Function Calling"
+        case .responses: "OpenAI Responses"
+        case .hostedImageGeneration: "Image Generation"
+        }
+    }
+
+    private func capabilityStatusText(_ status: AppProviderCapabilityStatus?) -> String {
+        switch status {
+        case .verified: "已验证"
+        case .unsupported: "不支持"
+        case .unknown: "暂时无法判断"
+        case .expired: "已过期"
+        case nil: "未验证"
+        }
+    }
+
+    private func capabilityStatusColor(_ status: AppProviderCapabilityStatus?) -> Color {
+        switch status {
+        case .verified: .green
+        case .unsupported: .red
+        case .unknown, .expired: .orange
+        case nil: .secondary
         }
     }
 
