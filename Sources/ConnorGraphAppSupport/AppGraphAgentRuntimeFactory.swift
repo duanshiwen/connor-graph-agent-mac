@@ -24,6 +24,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
     public var generatedMediaSettingsRepository: AppGeneratedMediaSettingsRepository
+    public var capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
     public var groupID: String
     public var storagePaths: AppStoragePaths?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
@@ -34,6 +35,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         store: SQLiteGraphKernelStore,
         settingsRepository: AppLLMSettingsRepository,
         generatedMediaSettingsRepository: AppGeneratedMediaSettingsRepository = AppGeneratedMediaSettingsRepository(),
+        capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(),
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
@@ -43,6 +45,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.store = store
         self.settingsRepository = settingsRepository
         self.generatedMediaSettingsRepository = generatedMediaSettingsRepository
+        self.capabilityEvidenceRepository = capabilityEvidenceRepository
         self.groupID = groupID
         self.storagePaths = storagePaths
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
@@ -209,6 +212,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
         let generatedMediaProvider = generatedMediaProviderResolver?(modelProvider)
             ?? makeConfiguredGeneratedMediaProvider(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
+            ?? makeVerifiedConversationMediaProvider(sessionLLMOverride: sessionLLMOverride)
             ?? (modelProvider.supportsGeneratedMediaExecution ? modelProvider : nil)
         let generatedImageToolIsAvailable = storagePaths != nil
             && generatedMediaProvider?.supportsGeneratedMediaExecution == true
@@ -239,6 +243,34 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             eventRecorder: AgentEventRecorder(repository: store),
             contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID)
         )
+    }
+
+    private func makeVerifiedConversationMediaProvider(sessionLLMOverride: SessionLLMOverride?) -> AnyAgentModelProvider? {
+        guard let settings = try? settingsRepository.loadSettings(),
+              let connection = settings.connection(id: sessionLLMOverride?.connectionID),
+              let evidence = try? capabilityEvidenceRepository.effectiveEvidence(for: .hostedImageGeneration, connection: connection),
+              evidence.status == .verified,
+              let apiKey = (try? settingsRepository.apiKey(for: connection.id)) ?? nil,
+              !apiKey.isEmpty,
+              let baseURL = URL(string: sessionLLMOverride?.baseURLString ?? connection.baseURLString)
+        else { return nil }
+        let model = sessionLLMOverride?.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveModel = model?.isEmpty == false ? model! : connection.effectiveModel
+        let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+        var extraHeaders = connection.extraHTTPHeaders
+        extraHeaders.removeValue(forKey: AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey)
+        return AnyAgentModelProvider(OpenAIResponsesProvider(
+            config: OpenAIResponsesConfig(
+                baseURL: baseURL,
+                apiKey: apiKey,
+                model: effectiveModel,
+                extraHeaders: extraHeaders,
+                apiKeyHeaderKind: apiKeyHeaderKind,
+                explicitVisionSupport: connection.explicitVisionSupport
+            ),
+            httpClient: URLSessionAgentHTTPClient(),
+            sseClient: URLSessionAgentSSEHTTPClient()
+        ))
     }
 
     private func makeConfiguredGeneratedMediaProvider(connectionID: String?) -> AnyAgentModelProvider? {

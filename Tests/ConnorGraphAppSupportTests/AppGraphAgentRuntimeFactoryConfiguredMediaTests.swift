@@ -45,6 +45,51 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
+@Test func runtimeFactoryDerivesResponsesMediaProviderFromVerifiedConversationConnection() throws {
+    let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
+    let llmStore = ConfiguredMediaStore(); let credentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: credentials)
+    let relay = AppLLMConnectionConfig(id: "relay", name: "Any Relay", providerMode: .openAICompatible, baseURLString: "https://any-provider.example/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [relay], defaultConnectionID: relay.id), apiKey: "relay-key")
+    let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: llmStore, credentialStore: credentials)
+    try evidenceRepository.replaceEvidence(AppProviderCapabilityEvidence(
+        capability: .hostedImageGeneration,
+        status: .verified,
+        endpointFamily: "openai_responses",
+        modelID: relay.effectiveModel,
+        bindingFingerprint: AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: relay, credential: "relay-key")
+    ), connectionID: relay.id)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, capabilityEvidenceRepository: evidenceRepository, storagePaths: paths)
+
+    let controller = factory.makeAgentLoopController()
+
+    #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
+    #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+}
+
+@Test func runtimeFactoryRejectsExpiredVerifiedMediaEvidence() throws {
+    let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
+    let llmStore = ConfiguredMediaStore(); let credentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: credentials)
+    let relay = AppLLMConnectionConfig(id: "relay", name: "Any Relay", providerMode: .openAICompatible, baseURLString: "https://any-provider.example/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [relay], defaultConnectionID: relay.id), apiKey: "new-key")
+    let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: llmStore, credentialStore: credentials)
+    try evidenceRepository.replaceEvidence(AppProviderCapabilityEvidence(
+        capability: .hostedImageGeneration,
+        status: .verified,
+        endpointFamily: "openai_responses",
+        modelID: relay.effectiveModel,
+        bindingFingerprint: AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: relay, credential: "old-key")
+    ), connectionID: relay.id)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, capabilityEvidenceRepository: evidenceRepository, storagePaths: paths)
+
+    let controller = factory.makeAgentLoopController()
+
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+}
+
 @Test func runtimeFactoryDoesNotInferImageGenerationFromRelayGPTModelName() throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
