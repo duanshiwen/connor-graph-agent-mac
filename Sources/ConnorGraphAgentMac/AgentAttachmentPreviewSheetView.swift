@@ -7,6 +7,7 @@ import ConnorGraphCore
 
 struct AgentAttachmentPreviewSheetView: View {
     var model: AttachmentPreviewModel
+    var onDownloadImage: (() -> Void)? = nil
     var onRetryExtraction: (() -> Void)? = nil
 
     var body: some View {
@@ -39,6 +40,14 @@ struct AgentAttachmentPreviewSheetView: View {
                 }
             }
             Spacer()
+            if canDownloadImage, let onDownloadImage {
+                Button(action: onDownloadImage) {
+                    Label("下载", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("下载这张图片")
+                .help("将图片原件保存到你选择的位置")
+            }
             if canRetryExtraction, let onRetryExtraction {
                 Button(action: onRetryExtraction) {
                     Label("重新解析", systemImage: "arrow.clockwise")
@@ -47,6 +56,11 @@ struct AgentAttachmentPreviewSheetView: View {
                 .help("重新排队解析这个附件")
             }
         }
+    }
+
+    private var canDownloadImage: Bool {
+        guard model.attachment.kind == .image, let sourceFileURL = model.sourceFileURL else { return false }
+        return FileManager.default.fileExists(atPath: sourceFileURL.path)
     }
 
     private var canRetryExtraction: Bool {

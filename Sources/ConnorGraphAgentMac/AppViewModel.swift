@@ -842,6 +842,48 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func downloadPreviewImage(_ model: AttachmentPreviewModel) {
+        let service = AttachmentImageExportService()
+        guard let filename = service.defaultFilename(for: model), let sourceURL = model.sourceFileURL else {
+            showAttachmentToast(
+                title: "图片下载失败",
+                message: AttachmentImageExportError.sourceUnavailable.localizedDescription,
+                systemImage: "xmark.circle"
+            )
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.title = "下载图片"
+        panel.message = "选择图片保存位置和文件名。"
+        panel.prompt = "下载"
+        panel.nameFieldLabel = "文件名："
+        panel.nameFieldStringValue = filename
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        if let contentType = UTType(filenameExtension: sourceURL.pathExtension) {
+            panel.allowedContentTypes = [contentType]
+        }
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        do {
+            try service.export(model: model, to: destinationURL)
+            showAttachmentToast(
+                title: "图片已下载",
+                message: destinationURL.path,
+                systemImage: "square.and.arrow.down"
+            )
+        } catch {
+            showAttachmentToast(
+                title: "图片下载失败",
+                message: error.localizedDescription,
+                systemImage: "xmark.circle"
+            )
+        }
+    }
+
     @discardableResult
     func importAttachments(urls: [URL]) async -> AttachmentImportBatchResult {
         guard let selectedChatSessionID, let storagePaths else { return AttachmentImportBatchResult() }
