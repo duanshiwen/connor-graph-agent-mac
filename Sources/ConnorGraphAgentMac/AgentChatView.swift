@@ -672,6 +672,9 @@ private struct AgentChatConversationView: View {
                         .frame(maxWidth: .infinity, maxHeight: 0)
                         .clipped()
                         .allowsHitTesting(false)
+                } else if viewModel.isLoadingSelectedChatSessionDetail {
+                    AgentChatSessionLoadingView()
+                        .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
                 } else if chatItems.isEmpty {
                     AgentChatEmptyStateView()
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)

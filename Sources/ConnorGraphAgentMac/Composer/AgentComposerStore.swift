@@ -19,7 +19,7 @@ struct AgentComposerStore {
             pendingAttachments: viewModel.pendingAttachmentRefs,
             activeSkillSlug: viewModel.activeSkillSlug,
             activeSkillDisplayName: viewModel.activeSkillDisplayName,
-            canSubmit: canSubmit,
+            canSubmit: canSubmit && !viewModel.isLoadingSelectedChatSessionDetail,
             isSubmitting: viewModel.isSubmittingChat,
             displayMode: isNoteBeforeFirstMessage ? .note : .normal,
             selectedModel: viewModel.llmSelectedModel,
