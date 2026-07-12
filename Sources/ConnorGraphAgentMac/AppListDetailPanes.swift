@@ -2096,6 +2096,7 @@ private struct RSSItemListRow: View {
 
 struct CraftDetailPaneView: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var identityStore: AppUserIdentityStore
     var selection: SidebarItem
 
     var body: some View {
@@ -2136,7 +2137,7 @@ struct CraftDetailPaneView: View {
             case .skills:
                 SkillRuntimePanelView(viewModel: viewModel)
             case .llmSettings:
-                ConnorSettingsDetailView(viewModel: viewModel)
+                ConnorSettingsDetailView(viewModel: viewModel, identityStore: identityStore)
             }
         }
     }

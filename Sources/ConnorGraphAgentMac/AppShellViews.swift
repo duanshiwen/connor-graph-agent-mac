@@ -9,7 +9,9 @@ import ConnorGraphAppSupport
 
 struct AppShellView: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var identityStore: AppUserIdentityStore
     @State private var isPrimarySidebarVisible = true
+    @State private var isIdentityPopoverPresented = false
 
     private var selectionBinding: Binding<SidebarItem?> {
         Binding(
@@ -47,7 +49,7 @@ struct AppShellView: View {
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
                 .controlSize(.small)
 
-            CraftDetailPaneView(viewModel: viewModel, selection: viewModel.selection ?? .agentChat)
+            CraftDetailPaneView(viewModel: viewModel, identityStore: identityStore, selection: viewModel.selection ?? .agentChat)
                 .id(viewModel.selection ?? .agentChat)
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
@@ -110,10 +112,23 @@ struct AppShellView: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                Button(action: { viewModel.openProjectGitHubHelp() }) {
-                    Label("帮助", systemImage: "questionmark.circle")
+                Button { isIdentityPopoverPresented.toggle() } label: {
+                    if let user = identityStore.currentUser {
+                        IdentityAvatarView(user: user, size: 24)
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                            .font(.system(size: 20))
+                    }
                 }
-                .help("用内置浏览器打开项目 GitHub 页面")
+                .buttonStyle(.plain)
+                .help(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
+                .accessibilityLabel(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
+                .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
+                    UserIdentityPopoverView(identityStore: identityStore) {
+                        isIdentityPopoverPresented = false
+                        viewModel.selectSettingsSection(.identity)
+                    }
+                }
             }
         }
         .overlay(alignment: .topLeading) {
