@@ -48,6 +48,30 @@ public struct AppProviderCapabilityEvidence: Codable, Sendable, Equatable, Ident
     }
 }
 
+public struct AppProviderCapabilityDiagnostic: Sendable, Equatable {
+    public var connectionID: String
+    public var providerMode: String
+    public var apiFamily: String
+    public var host: String
+    public var modelID: String
+    public var capability: AppProviderCapabilityID
+    public var status: AppProviderCapabilityStatus
+    public var verifiedAt: Date
+    public var evidenceAgeSeconds: TimeInterval
+
+    public init(connection: AppLLMConnectionConfig, evidence: AppProviderCapabilityEvidence, now: Date = Date()) {
+        connectionID = connection.id
+        providerMode = connection.providerMode.rawValue
+        apiFamily = evidence.endpointFamily
+        host = URL(string: connection.baseURLString)?.host ?? "invalid-host"
+        modelID = evidence.modelID
+        capability = evidence.capability
+        status = evidence.status
+        verifiedAt = evidence.verifiedAt
+        evidenceAgeSeconds = max(0, now.timeIntervalSince(evidence.verifiedAt))
+    }
+}
+
 public struct AppProviderCapabilitySnapshot: Codable, Sendable, Equatable {
     public var connectionID: String
     public var evidence: [AppProviderCapabilityEvidence]

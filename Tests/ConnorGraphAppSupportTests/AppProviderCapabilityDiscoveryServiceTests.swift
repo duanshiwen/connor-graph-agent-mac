@@ -110,6 +110,20 @@ private func discoveryRepositories() throws -> (AppLLMSettingsRepository, AppPro
     #expect(result?.status == .unsupported)
 }
 
+@Test func capabilityDiagnosticExcludesSecretsAndContent() throws {
+    let connection = AppLLMConnectionConfig(id: "relay", name: "Relay", providerMode: .openAICompatible, baseURLString: "https://user:password@example.com/v1?api_key=secret", model: "model-a")
+    let evidence = AppProviderCapabilityEvidence(capability: .responses, status: .verified, verifiedAt: Date(timeIntervalSince1970: 100), endpointFamily: "openai_responses", modelID: "model-a", bindingFingerprint: "fingerprint", sanitizedDiagnostic: "HTTP 200")
+
+    let diagnostic = AppProviderCapabilityDiagnostic(connection: connection, evidence: evidence, now: Date(timeIntervalSince1970: 130))
+    let rendered = String(describing: diagnostic)
+
+    #expect(diagnostic.host == "example.com")
+    #expect(diagnostic.evidenceAgeSeconds == 30)
+    #expect(rendered.contains("password") == false)
+    #expect(rendered.contains("api_key") == false)
+    #expect(rendered.contains("secret") == false)
+}
+
 @Test func discoveryKeepsResponsesUnknownWhenServiceIsTemporarilyUnavailable() async throws {
     let (settings, evidence, connection) = try discoveryRepositories()
     let service = AppProviderCapabilityDiscoveryService(
