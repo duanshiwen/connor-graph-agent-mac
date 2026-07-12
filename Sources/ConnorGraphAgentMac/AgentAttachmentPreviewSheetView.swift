@@ -59,8 +59,7 @@ struct AgentAttachmentPreviewSheetView: View {
     }
 
     private var canDownloadImage: Bool {
-        guard model.attachment.kind == .image, let sourceFileURL = model.sourceFileURL else { return false }
-        return FileManager.default.fileExists(atPath: sourceFileURL.path)
+        AttachmentImageExportService().canExport(model)
     }
 
     private var canRetryExtraction: Bool {
