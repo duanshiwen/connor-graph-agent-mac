@@ -115,6 +115,32 @@ import ConnorGraphAgent
     #expect(request.imageInputCount == 1)
 }
 
+// MARK: - Generated media capability catalog
+
+@Test(arguments: ["gpt-5.6", "gpt-5.4-mini", "gpt-5", "gpt-4.1-mini", "gpt-4o-mini", "o3"])
+func openAIResponsesImageCatalogAdvertisesOfficialModelFamilies(modelID: String) {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: modelID)
+    #expect(profile.generatedMediaCapabilities.contains(.imageGeneration))
+    #expect(profile.confidence == .high)
+    #expect(profile.signals.contains(.providerPreset))
+}
+
+@Test func openAIResponsesImageCatalogRejectsPrefixLookalikes() {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: "gpt-50-unsupported")
+    #expect(profile.generatedMediaCapabilities.contains(.imageGeneration) == false)
+}
+
+@Test func explicitGeneratedMediaCapabilityOverridesCatalogWithExplicitConfidence() {
+    let profile = AgentModelCapabilityKernel.profile(
+        providerKind: .unknown,
+        modelID: "private-image-model",
+        explicitGeneratedMediaCapabilities: [.imageGeneration]
+    )
+    #expect(profile.generatedMediaCapabilities == [.imageGeneration])
+    #expect(profile.confidence == .explicit)
+    #expect(profile.signals.contains(.explicitConfig))
+}
+
 // MARK: - stripImageContent tests
 
 @Test func currentModelMediaGateAllowsDeclaredImageGeneration() throws {

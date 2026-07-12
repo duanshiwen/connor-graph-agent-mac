@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import Testing
 import ConnorGraphAgent
 
@@ -86,6 +87,22 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(input[1]["role"] as? String == "user")
 }
 
+@Test func openAIResponsesProviderPreservesSanitizedHTTPErrorMessage() async throws {
+    let body = #"{"error":{"message":"Invalid schema for function 'calendar_read': 0 is not of type 'object', 'boolean'"}}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 400)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://relay.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    do {
+        _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "test")]))
+        Issue.record("Expected HTTP error")
+    } catch let error as OpenAICompatibleProviderError {
+        #expect(error == .httpStatus(400, message: "Invalid schema for function 'calendar_read': 0 is not of type 'object', 'boolean'"))
+    }
+}
+
 @Test func openAIResponsesProviderMapsReasoningEffortAndIncludeEncryptedReasoning() async throws {
     let body = #"{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}"#.data(using: .utf8)!
     let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)
@@ -133,8 +150,18 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     let requestBody = try #require(client.captured?.body)
     let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
     let tools = try #require(object["tools"] as? [[String: Any]])
-    #expect(tools.first { $0["name"] as? String == "strict_tool" }?["strict"] as? Bool == true)
-    #expect(tools.first { $0["name"] as? String == "flexible_tool" }?["strict"] as? Bool == false)
+    let strict = try #require(tools.first { $0["name"] as? String == "strict_tool" })
+    let flexible = try #require(tools.first { $0["name"] as? String == "flexible_tool" })
+    let strictFlag = try #require(strict["strict"])
+    let flexibleFlag = try #require(flexible["strict"])
+    #expect(CFGetTypeID(strictFlag as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(CFGetTypeID(flexibleFlag as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(strictFlag as? Bool == true)
+    #expect(flexibleFlag as? Bool == false)
+    let strictParameters = try #require(strict["parameters"] as? [String: Any])
+    let additionalProperties = try #require(strictParameters["additionalProperties"])
+    #expect(CFGetTypeID(additionalProperties as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(additionalProperties as? Bool == false)
 }
 
 @Test func openAIResponsesProviderParsesFunctionCallItems() async throws {

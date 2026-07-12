@@ -497,6 +497,7 @@ struct SettingsAISection: View {
     @State private var isShowingAddConnectionGuide = false
     @State private var setupOption: AIConnectionOnboardingOption?
     @State private var renamingConnection: AppLLMConnectionConfig?
+    @State private var capabilityDetail: AppProviderCapabilityDetailPresentation?
     @State private var renameDraft = ""
 
     var body: some View {
@@ -519,6 +520,11 @@ struct SettingsAISection: View {
                 )
             } else {
                 connectionList
+            }
+        }
+        .sheet(item: $capabilityDetail) { detail in
+            AIConnectionCapabilityDetailView(detail: detail) {
+                capabilityDetail = nil
             }
         }
         .alert("更改连接名称", isPresented: renameAlertBinding) {
@@ -552,12 +558,13 @@ struct SettingsAISection: View {
                         connection: connection,
                         isDefault: connection.id == viewModel.llmDefaultConnectionID,
                         canDelete: viewModel.llmConnectionConfigs.count > 1,
-                        select: { viewModel.selectDefaultLLMConnection(connection.id) },
                         makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
                         rename: { beginConnectionRename(connection) },
+                        viewCapabilities: {
+                            capabilityDetail = viewModel.capabilityDetailPresentation(for: connection.id)
+                        },
                         delete: {
-                            viewModel.selectDefaultLLMConnection(connection.id)
-                            viewModel.deleteSelectedLLMConnection()
+                            viewModel.deleteLLMConnection(connection.id)
                         }
                     )
                     if connection.id != viewModel.llmConnectionConfigs.last?.id {
@@ -586,7 +593,7 @@ struct SettingsAISection: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
 
-                Label("为保护 API Key 安全，我们暂时不支持编辑一个连接；如需更改，请删除后重建。", systemImage: "lock.shield")
+                Label("连接能力会在添加时一次性验证并保存。为保护 API Key 安全，我们暂时不支持编辑连接；如需更改，请删除后重建。", systemImage: "lock.shield")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
@@ -938,6 +945,11 @@ struct AIConnectionSetupView: View {
                 setupContent
                     .frame(maxWidth: SettingsListLayout.formMaxWidth)
 
+                if option.authenticationKind == .direct {
+                    setupValidationNotice
+                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                }
+
                 setupFeedback
 
                 setupActionBar
@@ -976,6 +988,30 @@ struct AIConnectionSetupView: View {
             }
         }
         .frame(maxWidth: SettingsListLayout.formMaxWidth)
+    }
+
+    private var setupValidationNotice: some View {
+        Label {
+            Text(setupValidationNoticeText)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "checkmark.shield")
+        }
+        .font(SettingsListTypography.rowCaption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, SettingsListLayout.spaceL)
+        .padding(.vertical, SettingsListLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+    }
+
+    private var setupValidationNoticeText: String {
+        let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
+        let usesAnthropic = option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible)
+        if usesAnthropic {
+            return "添加时将一次性验证连接及其适用的协议能力，并随连接保存验证结果。"
+        }
+        return "添加时将一次性验证连接及其支持的协议能力；若 Responses 可用，还会发送一次最小图片请求验证图片生成，可能产生少量费用。测试图片不会保存。"
     }
 
     @ViewBuilder
@@ -1815,7 +1851,7 @@ struct AIConnectionSetupView: View {
 
     private func setupDirectOpenAICompatibleConnection() {
         isAuthenticating = true
-        statusMessage = "正在验证连接…"
+        statusMessage = "正在验证连接并建立完整能力档案…"
         errorMessage = nil
         Task {
             do {
@@ -2166,18 +2202,145 @@ struct AIConnectionOnboardingOptionRow: View {
     }
 }
 
+struct AIConnectionCapabilityDetailView: View {
+    var detail: AppProviderCapabilityDetailPresentation
+    var close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("支持能力")
+                        .font(.title2.weight(.semibold))
+                    Text(detail.connectionName)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("完成", action: close)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(24)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    connectionSummary
+                    if detail.hasSnapshot {
+                        capabilityList
+                    } else {
+                        emptyState
+                    }
+                    Label("查看此页面不会连接到服务商、不会重新验证，也不会产生费用。", systemImage: "lock.shield")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(24)
+            }
+        }
+        .frame(minWidth: 560, idealWidth: 620, minHeight: 460, idealHeight: 560)
+    }
+
+    private var connectionSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("连接信息")
+                .font(.headline)
+            detailRow("提供商", detail.providerName)
+            detailRow("地址", detail.endpoint)
+            detailRow("模型", detail.modelID)
+            Text("以下结果来自添加连接时保存的验证快照。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var capabilityList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("能力快照")
+                .font(.headline)
+            ForEach(detail.capabilities) { capability in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(capability.title)
+                            .font(.body.weight(.medium))
+                        Spacer()
+                        Label(capability.statusTitle, systemImage: statusIcon(capability.status))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(statusColor(capability.status))
+                    }
+                    Text("\(capability.apiFamily) · \(capability.modelID)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(capability.verifiedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    if let note = capability.note {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(14)
+                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("暂无能力快照", systemImage: "doc.text.magnifyingglass")
+        } description: {
+            Text("此连接可能创建于完整能力建档功能启用之前。基础对话仍可使用；可选能力不会被推测或自动启用。如需建立新快照，请删除并重新添加连接。")
+        }
+        .frame(maxWidth: .infinity, minHeight: 180)
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .frame(width: 54, alignment: .leading)
+            Text(value)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .font(.subheadline)
+    }
+
+    private func statusIcon(_ status: AppProviderCapabilityStatus) -> String {
+        switch status {
+        case .verified: "checkmark.seal.fill"
+        case .unsupported: "xmark.circle.fill"
+        case .unknown: "questionmark.circle.fill"
+        case .expired: "clock.badge.exclamationmark.fill"
+        }
+    }
+
+    private func statusColor(_ status: AppProviderCapabilityStatus) -> Color {
+        switch status {
+        case .verified: .green
+        case .unsupported: .red
+        case .unknown, .expired: .orange
+        }
+    }
+}
+
 struct AIConnectionEntryRow: View {
     var connection: AppLLMConnectionConfig
     var isDefault: Bool
     var canDelete: Bool
-    var select: () -> Void
     var makeDefault: () -> Void
     var rename: () -> Void
+    var viewCapabilities: () -> Void
     var delete: () -> Void
 
     var body: some View {
-        Button(action: select) {
-            HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
                 Image(systemName: providerSystemImage)
                     .font(SettingsListTypography.icon)
                     .foregroundStyle(providerTint)
@@ -2215,6 +2378,9 @@ struct AIConnectionEntryRow: View {
                     Button(action: rename) {
                         Label("更改名称", systemImage: "pencil")
                     }
+                    Button(action: viewCapabilities) {
+                        Label("查看支持能力…", systemImage: "checklist")
+                    }
                     Divider()
                     Button(role: .destructive, action: delete) {
                         Label("删除连接", systemImage: "trash")
@@ -2230,10 +2396,8 @@ struct AIConnectionEntryRow: View {
                 .buttonStyle(.plain)
                 .help("更多")
             }
-            .contentShape(Rectangle())
-            .frame(minHeight: 58)
-        }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .frame(minHeight: 58)
     }
 
     private var subtitle: String {
