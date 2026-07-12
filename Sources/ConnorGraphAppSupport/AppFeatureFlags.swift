@@ -6,7 +6,7 @@ public struct AppFeatureFlags: Sendable, Equatable {
 
     public var noteImportEnabled: Bool
 
-    public init(noteImportEnabled: Bool = false) {
+    public init(noteImportEnabled: Bool = true) {
         self.noteImportEnabled = noteImportEnabled
     }
 
@@ -18,7 +18,10 @@ public struct AppFeatureFlags: Sendable, Equatable {
            let value = parseBoolean(rawValue) {
             return AppFeatureFlags(noteImportEnabled: value)
         }
-        return AppFeatureFlags(noteImportEnabled: userDefaults.bool(forKey: noteImportDefaultsKey))
+        if userDefaults.object(forKey: noteImportDefaultsKey) != nil {
+            return AppFeatureFlags(noteImportEnabled: userDefaults.bool(forKey: noteImportDefaultsKey))
+        }
+        return AppFeatureFlags(noteImportEnabled: true)
     }
 
     private static func parseBoolean(_ value: String) -> Bool? {
