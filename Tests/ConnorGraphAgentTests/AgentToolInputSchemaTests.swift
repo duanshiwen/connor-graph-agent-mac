@@ -43,6 +43,55 @@ import ConnorGraphAgent
     #expect(!openObject.isOpenAIStrictCompatible)
 }
 
+@Test func agentToolInputSchemaValidationReportsPrecisePaths() {
+    let valid = AgentToolInputSchema.closedObject(
+        properties: [
+            "operation": .stringEnumeration(values: ["read"], description: "Operation"),
+            "filters": .array(items: .closedObject(
+                properties: ["query": .string(description: "Query")],
+                required: ["query"]
+            ), description: "Filters")
+        ],
+        required: ["operation"]
+    )
+    #expect(valid.validationIssues(toolName: "valid_tool").isEmpty)
+
+    let invalid = AgentToolInputSchema.object(
+        properties: [
+            "operation": .stringEnumeration(values: [], description: "Operation")
+        ],
+        required: ["operation", "missing", "missing"]
+    )
+    #expect(invalid.validationIssues(toolName: "invalid_tool") == [
+        AgentToolSchemaValidationIssue(toolName: "invalid_tool", path: "$.required", message: "contains duplicate property missing"),
+        AgentToolSchemaValidationIssue(toolName: "invalid_tool", path: "$.required", message: "references missing property missing"),
+        AgentToolSchemaValidationIssue(toolName: "invalid_tool", path: "$.properties.operation.enum", message: "must contain at least one value")
+    ])
+}
+
+@Test func agentToolRegistryAggregatesSchemaValidationIssues() {
+    var registry = AgentToolRegistry()
+    registry.register(InvalidSchemaTestTool())
+
+    #expect(registry.schemaValidationIssues == [
+        AgentToolSchemaValidationIssue(toolName: "invalid_schema_test", path: "$.required", message: "references missing property absent")
+    ])
+}
+
+private struct InvalidSchemaTestTool: AgentTool {
+    let name = "invalid_schema_test"
+    let description = "Invalid schema test tool"
+    let inputSchema = AgentToolInputSchema.object(
+        properties: [:],
+        required: ["absent"]
+    )
+    let permission = AgentPermissionCapability.readSession
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "unused")
+    }
+}
+
 @Test func agentToolInputSchemaSerializesClosedObject() throws {
     let schema = AgentToolInputSchema.closedObject(
         properties: ["operation": .string(description: "Operation")],

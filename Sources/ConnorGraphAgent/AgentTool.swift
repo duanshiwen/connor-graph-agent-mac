@@ -64,6 +64,61 @@ public indirect enum AgentToolInputSchema: Sendable, Equatable {
     }
 }
 
+public struct AgentToolSchemaValidationIssue: Sendable, Equatable, CustomStringConvertible {
+    public var toolName: String
+    public var path: String
+    public var message: String
+
+    public init(toolName: String, path: String, message: String) {
+        self.toolName = toolName
+        self.path = path
+        self.message = message
+    }
+
+    public var description: String { "\(toolName) \(path): \(message)" }
+}
+
+public extension AgentToolInputSchema {
+    func validationIssues(toolName: String, path: String = "$") -> [AgentToolSchemaValidationIssue] {
+        switch self {
+        case .string, .integer, .number, .boolean:
+            return []
+        case .stringEnumeration(let values, _):
+            return values.isEmpty
+                ? [AgentToolSchemaValidationIssue(toolName: toolName, path: "\(path).enum", message: "must contain at least one value")]
+                : []
+        case .array(let items, _):
+            return items.validationIssues(toolName: toolName, path: "\(path).items")
+        case .nullable(let wrapped):
+            return wrapped.validationIssues(toolName: toolName, path: path)
+        case let .object(properties, required), let .closedObject(properties, required):
+            var issues: [AgentToolSchemaValidationIssue] = []
+            let duplicateRequired = Dictionary(grouping: required, by: { $0 }).filter { $0.value.count > 1 }.keys.sorted()
+            for name in duplicateRequired {
+                issues.append(AgentToolSchemaValidationIssue(
+                    toolName: toolName,
+                    path: "\(path).required",
+                    message: "contains duplicate property \(name)"
+                ))
+            }
+            for name in Set(required).subtracting(properties.keys).sorted() {
+                issues.append(AgentToolSchemaValidationIssue(
+                    toolName: toolName,
+                    path: "\(path).required",
+                    message: "references missing property \(name)"
+                ))
+            }
+            for name in properties.keys.sorted() {
+                issues.append(contentsOf: properties[name]!.validationIssues(
+                    toolName: toolName,
+                    path: "\(path).properties.\(name)"
+                ))
+            }
+            return issues
+        }
+    }
+}
+
 public struct AgentToolDefinition: Sendable, Equatable {
     public var name: String
     public var description: String
@@ -380,6 +435,12 @@ public struct AgentToolRegistry: Sendable {
 
     public var definitions: [AgentToolDefinition] {
         tools.keys.sorted().compactMap { definition(named: $0) }
+    }
+
+    public var schemaValidationIssues: [AgentToolSchemaValidationIssue] {
+        definitions.flatMap { definition in
+            definition.inputSchema.validationIssues(toolName: definition.name)
+        }
     }
 
     public func execute(_ call: AgentToolCall, context: AgentToolExecutionContext) async throws -> AgentToolResult {
