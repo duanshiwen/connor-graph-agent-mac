@@ -87,6 +87,22 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(input[1]["role"] as? String == "user")
 }
 
+@Test func openAIResponsesProviderPreservesSanitizedHTTPErrorMessage() async throws {
+    let body = #"{"error":{"message":"Invalid schema for function 'calendar_read': 0 is not of type 'object', 'boolean'"}}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 400)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://relay.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    do {
+        _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "test")]))
+        Issue.record("Expected HTTP error")
+    } catch let error as OpenAICompatibleProviderError {
+        #expect(error == .httpStatus(400, message: "Invalid schema for function 'calendar_read': 0 is not of type 'object', 'boolean'"))
+    }
+}
+
 @Test func openAIResponsesProviderMapsReasoningEffortAndIncludeEncryptedReasoning() async throws {
     let body = #"{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}"#.data(using: .utf8)!
     let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)

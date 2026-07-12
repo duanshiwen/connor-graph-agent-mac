@@ -453,7 +453,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         )
     }
 
-    private static func errorMessage(from data: Data) -> String? {
+    static func errorMessage(from data: Data) -> String? {
         guard !data.isEmpty else { return nil }
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if let error = object["error"] as? [String: Any] {

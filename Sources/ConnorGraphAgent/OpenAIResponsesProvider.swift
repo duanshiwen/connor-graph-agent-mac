@@ -86,7 +86,10 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
             let httpRequest = try makeRequest(request, stream: false)
             let response = try await client.send(httpRequest)
             if response.statusCode < 200 || response.statusCode >= 300 {
-                throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: nil)
+                throw OpenAICompatibleProviderError.httpStatus(
+                    response.statusCode,
+                    message: OpenAICompatibleProvider<Client>.errorMessage(from: response.body)
+                )
             }
             return try OpenAIResponsesParser.parseResponse(response.body)
         } catch OpenAICompatibleProviderError.unsupportedVisionInput {
@@ -95,7 +98,10 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
             let httpRequest = try makeRequest(stripped, stream: false)
             let response = try await client.send(httpRequest)
             if response.statusCode < 200 || response.statusCode >= 300 {
-                throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: nil)
+                throw OpenAICompatibleProviderError.httpStatus(
+                    response.statusCode,
+                    message: OpenAICompatibleProvider<Client>.errorMessage(from: response.body)
+                )
             }
             var result = try OpenAIResponsesParser.parseResponse(response.body)
             result.warnings.append(Self.visionDegradationWarning)
