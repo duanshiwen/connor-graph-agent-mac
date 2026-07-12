@@ -26,10 +26,14 @@ enum AppMenuPresentation {
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorApplicationDelegate.self) private var applicationDelegate
     @StateObject private var viewModel: AppViewModel
+    @StateObject private var noteImportModel: NoteImportViewModel
+    private let featureFlags: AppFeatureFlags
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
         _viewModel = StateObject(wrappedValue: AppViewModel.live())
+        _noteImportModel = StateObject(wrappedValue: NoteImportViewModel())
+        featureFlags = AppFeatureFlags.load()
     }
 
     var body: some Scene {
@@ -44,17 +48,7 @@ struct ConnorGraphAgentMacApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button(AppMenuPresentation.newSessionTitle) {
-                    viewModel.performShortcutAction(.newSession)
-                }
-                .keyboardShortcut("n", modifiers: .command)
-
-                Button(AppMenuPresentation.newNoteTitle) {
-                    viewModel.newNoteSession()
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-            }
+            NoteImportFileCommands(viewModel: viewModel)
 
             CommandGroup(replacing: .undoRedo) {
                 Button("撤销") {
@@ -129,6 +123,49 @@ struct ConnorGraphAgentMacApp: App {
                     viewModel.performShortcutAction(.openSettings)
                 }
                 .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+
+        WindowGroup("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
+            NoteImportWizardView(
+                model: noteImportModel,
+                importExecutionEnabled: featureFlags.noteImportEnabled
+            )
+        }
+        .defaultSize(width: 720, height: 560)
+
+        WindowGroup("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
+            NoteImportCenterView(model: noteImportModel)
+        }
+        .defaultSize(width: 900, height: 620)
+    }
+}
+
+private struct NoteImportFileCommands: Commands {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button(AppMenuPresentation.newSessionTitle) {
+                viewModel.performShortcutAction(.newSession)
+            }
+            .keyboardShortcut("n", modifiers: .command)
+
+            Button(AppMenuPresentation.newNoteTitle) {
+                viewModel.newNoteSession()
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button(AppMenuPresentation.importNotesTitle) {
+                openWindow(id: AppMenuPresentation.noteImportWizardWindowID)
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+
+            Button(AppMenuPresentation.importCenterTitle) {
+                openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
             }
         }
     }
