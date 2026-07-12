@@ -142,17 +142,25 @@ economic_entity, award, unknown
 
 ---
 
-## 三、LLM工具接口（17个工具）
+## 三、LLM 工具接口
 
-### 3.1 读取工具（13个）
+### 3.1 主会话 Agent 只读工具（3个）
+
+主会话不暴露 Memory OS 写工具或低层图谱原语。每个新 user run 都调用以下三个工具，其中 recent 与 knowledge 必须同时调用，但保持语义隔离：
 
 | 工具名 | 层级 | 描述 |
 |--------|------|------|
-| `memory_os_context` | 全部 | 多词搜索L1-L4，返回自然语言记忆项列表 |
+| `memory_os_recent_context` | L1/L2 | 搜索近期事件、当前任务/项目状态和其他可变操作上下文 |
+| `memory_os_knowledge_context` | L3/L4 | 搜索可复用知识、稳定实体和持久关系；L4 默认五跳展开并返回自然语言陈述，LLM 自主决定如何分析和使用结果 |
+| `memory_os_get_current_user_profile` | L2 | 获取 preferences、habits、traits、constraints 与 interaction guidance |
+
+### 3.2 后台作业额外读取工具（11个）
+
+| 工具名 | 层级 | 描述 |
+|--------|------|------|
 | `memory_os_search` | 全部 | 全文搜索L0-L4，返回排序的命中结果 |
 | `memory_os_read_record` | 全部 | 按层和ID读取单条记录 |
 | `memory_os_read_provenance` | L0 | 读取L0证据对象（可选跨度详情） |
-| `memory_os_get_current_user_profile` | L2 | 获取当前用户个性化事实 |
 | `memory_os_l2_find_entities` | L2 | 按名称或别名查找L2实体 |
 | `memory_os_l2_find_statements` | L2 | 查找L2语句边 |
 | `memory_os_l3_expand_belief` | L3 | 按ID、领域或文本扩展L3信念 |
@@ -162,7 +170,7 @@ economic_entity, award, unknown
 | `memory_os_l4_instances` | L4 | 查询一个或多个类实体的实例（INSTANCE_OF） |
 | `memory_os_expand_l4` | L4 | 深度限制的L4实体邻域扩展 |
 
-### 3.2 写入工具（4个）
+### 3.3 后台作业写入工具（4个）
 
 | 工具名 | 层级 | 描述 |
 |--------|------|------|

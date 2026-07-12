@@ -222,15 +222,18 @@ graph/evaluations/reports/*.json
 
 ### 5.4 Agent 运行时约定
 
-每个用户任务应按以下顺序建立上下文：
+每条新的用户消息启动一个 user run；每个 run 只执行一次固定 bootstrap，工具结果返回后的内部模型 turn 不重复执行：
 
-1. 获取当前时间。
-2. 在相关时检索内部上下文和当前用户画像。
-3. 当任务依赖新鲜事实或外部信息时，搜索/抓取当前网页信息。
-4. 考虑已安装技能。
-5. 再决定回答、计划、编辑、调试、研究或提出澄清问题。
+1. 调用 `get_current_time` 获取当前时间。
+2. 同时调用 `memory_os_recent_context` 与 `memory_os_knowledge_context`；前者提供 L1/L2 可变操作状态，后者提供 L3/L4 持久知识和默认五跳关系上下文。
+3. 调用 `memory_os_get_current_user_profile` 获取 preferences、habits、traits、constraints 与 interaction guidance。
+4. 无条件调用一次 `web_search`。当外部资料会实质支持回答时，使用 `web_fetch` 读取原始页面；若遇到 HTTP 403、认证态、JavaScript 渲染、反爬或其他不可用内容，改用 `browser_fetch` 通过系统浏览器态读取，但不得绕过授权。
+5. 考虑已安装技能。
+6. 再决定回答、计划、编辑、调试、研究或提出澄清问题。
 
-System prompt 故意保持最小：只注入上下文检索和用户画像工具。Memory OS 写工具不注入 system prompt；LLM 需要时通过普通 tool definition 访问。
+工具不可用、权限拒绝、无结果或失败时，Agent 应透明说明并使用最佳可用证据继续，不能无限重试。`web_search`、`web_fetch` 和 `browser_fetch` 均受 `.externalNetwork` Policy Engine 边界约束；`readOnly` 模式不会绕过该边界。
+
+System prompt 只引用对话时需要的三个 Memory OS 只读工具。Memory OS 写工具与低层图谱原语不注册到主会话 Agent，只用于受治理的后台作业。
 
 ### 5.5 MCP Source Platform
 

@@ -81,6 +81,36 @@ struct BrowserAssistedWebToolTests {
         )
     }
 
+    @Test func browserFetchUsesSystemBrowserHandlerWhenAvailable() async throws {
+        let tool = BrowserFetchTool(browserAssistedWebFetchHandler: { request in
+            #expect(request.urlString == "https://example.com/protected")
+            #expect(request.extractMode == "text")
+            return BrowserAssistedWebFetchResult(
+                status: .fetched,
+                urlString: request.urlString,
+                finalURLString: request.urlString,
+                title: "Protected page",
+                contentText: "Authenticated browser content",
+                taskID: "task-browser-fetch",
+                sessionID: "session-browser-fetch",
+                tabID: "tab-browser-fetch",
+                errorMessage: nil,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 29
+            )
+        })
+
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"url":"https://example.com/protected"}"#),
+            context: Self.context()
+        )
+
+        #expect(result.contentText == "Authenticated browser content")
+        #expect(result.contentJSON?.contains(#""engine":"wkwebview""#) == true)
+        #expect(result.contentJSON?.contains(#""browserAssisted":true"#) == true)
+    }
+
     @Test func browserFetchDecodesGBKMetaCharsetChineseText() throws {
         let html = """
         <html><head><meta charset=\"gbk\"></head><body>科技新闻</body></html>
