@@ -1902,7 +1902,7 @@ struct AIConnectionSetupView: View {
 
     private func setupDirectOpenAICompatibleConnection() {
         isAuthenticating = true
-        statusMessage = "正在验证连接…"
+        statusMessage = "正在验证连接并发现非付费协议能力…"
         errorMessage = nil
         Task {
             do {
