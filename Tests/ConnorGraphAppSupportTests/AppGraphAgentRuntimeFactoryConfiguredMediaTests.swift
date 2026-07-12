@@ -105,8 +105,8 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
         functionCallingProbe: { _ in AgentModelResponse(text: "OK") },
         hostedImageGenerationProbe: { _ in true }
     )
-    _ = await discovery.discoverProtocolCapabilities(connectionID: relay.id)
-    _ = await discovery.discoverHostedImageGeneration(connectionID: relay.id, authorization: .userInitiated)
+    let discovered = await discovery.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: relay, credential: "relay-key"))
+    discovery.persist(discovered)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
     let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, capabilityEvidenceRepository: evidenceRepository, storagePaths: paths)
 
