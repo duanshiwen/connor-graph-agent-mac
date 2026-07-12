@@ -602,6 +602,9 @@ private struct AgentChatConversationView: View {
             AgentChatMessageRow(
                 row: message,
                 persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
+                localAttachmentFileURL: { attachment in
+                    viewModel.localAttachmentFileURL(attachment)
+                },
                 onPreviewAttachment: { attachment in
                     viewModel.previewAttachment(attachment)
                 },
