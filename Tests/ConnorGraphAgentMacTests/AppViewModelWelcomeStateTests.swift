@@ -193,6 +193,38 @@ private func makeWelcomeStateViewModel(
 }
 
 @MainActor
+@Test func setupLLMConnectionPublishesNewConnectionAndCapabilitySummary() async throws {
+    let store = WelcomeStateFakeSettingsStore()
+    let credentials = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+    let service = AppLLMConnectionSetupService(
+        settingsRepository: repository,
+        capabilityDiscoveryService: AppProviderCapabilityDiscoveryService(
+            settingsRepository: repository,
+            evidenceRepository: AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials),
+            openAICompatibleProbe: { _ in LLMProviderHealthCheckResult(ok: true, model: "model-a", message: "OK") },
+            openAIResponsesProbe: { _ in throw OpenAICompatibleProviderError.httpStatus(404, message: "not found") },
+            functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+        ),
+        openAICompatibleHealthCheck: { _ in LLMProviderHealthCheckResult(ok: true, model: "model-a", message: "OK") }
+    )
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: store, credentialStore: credentials, llmConnectionSetupServiceFactory: { _ in service })
+
+    let result = try await viewModel.setupLLMConnection(AppLLMConnectionSetupInput(
+        id: "new-connection",
+        kind: .openAICompatible,
+        name: "New",
+        baseURLString: "https://example.com/v1",
+        model: "model-a",
+        apiKey: "secret"
+    ))
+
+    #expect(viewModel.lastAddedLLMConnectionID == result.id)
+    #expect(viewModel.lastAddedLLMCapabilityEvidence.count == 3)
+    #expect(viewModel.llmSettingsMessage?.contains("已发现") == true)
+}
+
+@MainActor
 @Test func setupLLMConnectionUsesServicePersistenceAsSingleSourceOfTruth() async throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()

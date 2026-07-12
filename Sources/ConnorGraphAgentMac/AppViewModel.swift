@@ -348,6 +348,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isDiscoveringLLMCapabilities: Bool = false
     @Published var isVerifyingImageGeneration: Bool = false
     @Published var llmCapabilityEvidence: [AppProviderCapabilityEvidence] = []
+    @Published private(set) var lastAddedLLMConnectionID: String?
+    @Published private(set) var lastAddedLLMCapabilityEvidence: [AppProviderCapabilityEvidence] = []
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
@@ -4504,13 +4506,17 @@ final class AppViewModel: NSObject, ObservableObject {
         defer { isAddingLLMConnection = false }
         let service = llmConnectionSetupServiceFactory(llmSettingsRepository)
         let result = try await service.setupConnection(input)
+        lastAddedLLMConnectionID = result.connection.id
+        lastAddedLLMCapabilityEvidence = result.capabilityEvidence
         loadLLMSettings()
         syncActiveSessionLLMOverride(to: result.connection)
         updateWelcomeState()
         rebuildNativeSessionManagerForActiveSession()
         await reloadLLMModelConnections()
-        llmSettingsMessage = result.message
-        llmHealthCheckMessage = result.message
+        let verifiedCount = result.capabilityEvidence.filter { $0.status == .verified }.count
+        let capabilitySuffix = result.capabilityEvidence.isEmpty ? "" : "；已发现 \(verifiedCount)/\(result.capabilityEvidence.count) 项可用能力。"
+        llmSettingsMessage = result.message + capabilitySuffix
+        llmHealthCheckMessage = result.message + capabilitySuffix
         errorMessage = nil
         return result.connection
     }
