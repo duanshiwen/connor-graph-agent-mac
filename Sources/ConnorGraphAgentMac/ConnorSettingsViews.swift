@@ -1050,6 +1050,11 @@ struct AIConnectionSetupView: View {
                 setupContent
                     .frame(maxWidth: SettingsListLayout.formMaxWidth)
 
+                if option.authenticationKind == .direct {
+                    setupValidationNotice
+                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                }
+
                 setupFeedback
 
                 setupActionBar
@@ -1088,6 +1093,30 @@ struct AIConnectionSetupView: View {
             }
         }
         .frame(maxWidth: SettingsListLayout.formMaxWidth)
+    }
+
+    private var setupValidationNotice: some View {
+        Label {
+            Text(setupValidationNoticeText)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "checkmark.shield")
+        }
+        .font(SettingsListTypography.rowCaption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, SettingsListLayout.spaceL)
+        .padding(.vertical, SettingsListLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+    }
+
+    private var setupValidationNoticeText: String {
+        let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
+        let usesAnthropic = option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible)
+        if usesAnthropic {
+            return "添加时将一次性验证连接及其适用的协议能力，并随连接保存验证结果。"
+        }
+        return "添加时将一次性验证连接及其支持的协议能力；若 Responses 可用，还会发送一次最小图片请求验证图片生成，可能产生少量费用。测试图片不会保存。"
     }
 
     @ViewBuilder
@@ -1927,7 +1956,7 @@ struct AIConnectionSetupView: View {
 
     private func setupDirectOpenAICompatibleConnection() {
         isAuthenticating = true
-        statusMessage = "正在验证连接并发现非付费协议能力…"
+        statusMessage = "正在验证连接并建立完整能力档案…"
         errorMessage = nil
         Task {
             do {
