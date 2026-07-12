@@ -18,6 +18,60 @@ public enum AgentAttachmentKind: String, Codable, Sendable, Equatable {
     case unknown
 }
 
+public enum AgentAttachmentOrigin: String, Codable, Sendable, Equatable {
+    case userImported
+    case modelGenerated
+    case toolGenerated
+    case derived
+}
+
+public struct AgentAttachmentGenerationMetadata: Codable, Sendable, Equatable {
+    public var providerID: String
+    public var modelID: String
+    public var responseID: String?
+    public var toolCallID: String?
+    public var revisedPrompt: String?
+    public var parameters: [String: String]
+
+    public init(
+        providerID: String,
+        modelID: String,
+        responseID: String? = nil,
+        toolCallID: String? = nil,
+        revisedPrompt: String? = nil,
+        parameters: [String: String] = [:]
+    ) {
+        self.providerID = providerID
+        self.modelID = modelID
+        self.responseID = responseID
+        self.toolCallID = toolCallID
+        self.revisedPrompt = revisedPrompt
+        self.parameters = parameters
+    }
+}
+
+public struct AgentAttachmentMediaMetadata: Codable, Sendable, Equatable {
+    public var pixelWidth: Int?
+    public var pixelHeight: Int?
+    public var durationSeconds: Double?
+    public var sampleRate: Double?
+    public var channelCount: Int?
+
+    public init(
+        pixelWidth: Int? = nil,
+        pixelHeight: Int? = nil,
+        durationSeconds: Double? = nil,
+        sampleRate: Double? = nil,
+        channelCount: Int? = nil
+    ) {
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.durationSeconds = durationSeconds
+        self.sampleRate = sampleRate
+        self.channelCount = channelCount
+    }
+}
+
 public enum AgentAttachmentLifecycleStatus: String, Codable, Sendable, Equatable {
     case draft
     case importing
@@ -375,6 +429,9 @@ public struct AgentAttachmentManifest: Codable, Sendable, Equatable, Identifiabl
     public var createdAt: Date
     public var updatedAt: Date
     public var sourceDisplayPath: String?
+    public var origin: AgentAttachmentOrigin
+    public var generationMetadata: AgentAttachmentGenerationMetadata?
+    public var mediaMetadata: AgentAttachmentMediaMetadata?
 
     public init(
         id: String,
@@ -397,7 +454,10 @@ public struct AgentAttachmentManifest: Codable, Sendable, Equatable, Identifiabl
         remoteFileRefs: [AgentAttachmentRemoteFileRef] = [],
         createdAt: Date,
         updatedAt: Date,
-        sourceDisplayPath: String? = nil
+        sourceDisplayPath: String? = nil,
+        origin: AgentAttachmentOrigin = .userImported,
+        generationMetadata: AgentAttachmentGenerationMetadata? = nil,
+        mediaMetadata: AgentAttachmentMediaMetadata? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -420,6 +480,9 @@ public struct AgentAttachmentManifest: Codable, Sendable, Equatable, Identifiabl
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.sourceDisplayPath = sourceDisplayPath
+        self.origin = origin
+        self.generationMetadata = generationMetadata
+        self.mediaMetadata = mediaMetadata
     }
 
     public var messageRef: AgentMessageAttachmentRef {
@@ -439,6 +502,7 @@ public struct AgentAttachmentManifest: Codable, Sendable, Equatable, Identifiabl
         case id, displayName, originalFilename, normalizedFilename, kind, mimeType, fileExtension, byteCount, sha256
         case lifecycleStatus, extractionStatus, storedRelativePath, manifestRelativePath, extractedTextRelativePath, previewText
         case derivativeRefs, extractionReports, remoteFileRefs, createdAt, updatedAt, sourceDisplayPath
+        case origin, generationMetadata, mediaMetadata
     }
 
     public init(from decoder: Decoder) throws {
@@ -464,5 +528,8 @@ public struct AgentAttachmentManifest: Codable, Sendable, Equatable, Identifiabl
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         sourceDisplayPath = try container.decodeIfPresent(String.self, forKey: .sourceDisplayPath)
+        origin = try container.decodeIfPresent(AgentAttachmentOrigin.self, forKey: .origin) ?? .userImported
+        generationMetadata = try container.decodeIfPresent(AgentAttachmentGenerationMetadata.self, forKey: .generationMetadata)
+        mediaMetadata = try container.decodeIfPresent(AgentAttachmentMediaMetadata.self, forKey: .mediaMetadata)
     }
 }
