@@ -1185,7 +1185,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let wasInteracting = isGlobalSearchOverlayPresented || isGlobalSearchFieldFocused
         globalSearchPreviewTask?.cancel()
         globalSearchPreviewTask = nil
-        if clearQuery { globalSearchQuery = "" }
+        if clearQuery { globalSearchQuery = "" }    
         isGlobalSearchFieldFocused = false
         isGlobalSearchOverlayPresented = false
         return wasInteracting
@@ -4750,6 +4750,35 @@ final class AppViewModel: NSObject, ObservableObject {
         )
     }
 
+    func makeNoteImportViewModel() -> NoteImportViewModel {
+        guard let databasePath, let chatSessionRepository, let agentRuntimeFactory, let storagePaths else {
+            return NoteImportViewModel(configurationError: "导入运行时不可用，请重新启动应用。")
+        }
+        do {
+            let ledger = try AppNoteImportRepository(databasePath: databasePath)
+            let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
+            let sessionService = HeadlessNoteSessionService(
+                repository: chatSessionRepository,
+                managerFactory: { session in
+                    agentRuntimeFactory.makeNativeSessionManager(session: session, permissionMode: .readOnly)
+                },
+                attachmentStore: attachmentStore
+            )
+            let coordinator = NoteImportCoordinator(
+                ledger: ledger,
+                sessionService: sessionService,
+                attachmentImporter: NoteImportAttachmentImporter(store: attachmentStore)
+            )
+            return NoteImportViewModel(
+                ledger: ledger,
+                coordinator: coordinator,
+                sourceAccessService: NoteImportSourceAccessService()
+            )
+        } catch {
+            return NoteImportViewModel(configurationError: "无法初始化导入功能：\(error.localizedDescription)")
+        }
+    }
+
     private func rebuildNativeSessionManagerForActiveSession() {
         let session = activeChatSession
         _ = ensureSessionLLMOverride(sessionID: session.id)
@@ -6528,7 +6557,8 @@ final class AppViewModel: NSObject, ObservableObject {
             do {
                 guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else {
                     guard let self,
-                          self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
+                          self.chatSessionSelectionGeneration == generation,
+                          self.selectedChatSessionID == sessionID
                     else { return }
                     self.errorMessage = "无法加载所选会话。"
                     self.loadingChatSessionDetailID = nil
