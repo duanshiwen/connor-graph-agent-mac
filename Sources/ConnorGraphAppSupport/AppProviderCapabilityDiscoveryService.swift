@@ -151,6 +151,23 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
         return result
     }
 
+    /// Probes every capability that belongs to connection setup without writing
+    /// settings, credentials, or capability evidence. Hosted image generation runs
+    /// once only when the same draft has verified Responses support.
+    public func probeSetupCapabilities(context: AppProviderCapabilityProbeContext) async -> AppProviderCapabilityDiscoveryResult {
+        var result = await probeProtocolCapabilities(context: context)
+        let policy = AppProviderCapabilityValidationPolicy.forConnection(context.connection)
+        guard policy.probesHostedImageGenerationWhenResponsesVerified,
+              result.evidence.first(where: { $0.capability == .responses })?.status == .verified
+        else { return result }
+
+        if let imageEvidence = await probeHostedImageGeneration(context: context) {
+            result.evidence.removeAll { $0.capability == .hostedImageGeneration }
+            result.evidence.append(imageEvidence)
+        }
+        return result
+    }
+
     /// Probes a draft or persisted connection without writing settings, credentials,
     /// or capability evidence. Call `persist(_:)` only after the connection itself
     /// has been saved successfully.
@@ -200,8 +217,22 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
     }
 
     public func persist(_ result: AppProviderCapabilityDiscoveryResult) {
-        for item in result.evidence {
-            try? evidenceRepository.replaceEvidence(item, connectionID: result.connectionID)
+        try? evidenceRepository.save(AppProviderCapabilitySnapshot(connectionID: result.connectionID, evidence: result.evidence))
+    }
+
+    private func probeHostedImageGeneration(context: AppProviderCapabilityProbeContext) async -> AppProviderCapabilityEvidence? {
+        let connection = context.connection
+        let credential = context.credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !credential.isEmpty, let baseURL = URL(string: connection.baseURLString) else { return nil }
+        let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+        var headers = connection.extraHTTPHeaders
+        headers.removeValue(forKey: AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey)
+        let config = OpenAIResponsesConfig(baseURL: baseURL, apiKey: credential, model: connection.effectiveModel, extraHeaders: headers, apiKeyHeaderKind: apiKeyHeaderKind)
+        let binding = AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: connection, credential: credential)
+        return await evidence(.hostedImageGeneration, family: "openai_responses", connection: connection, binding: binding) {
+            guard try await hostedImageGenerationProbe(config) else {
+                throw OpenAICompatibleProviderError.invalidResponse
+            }
         }
     }
 
