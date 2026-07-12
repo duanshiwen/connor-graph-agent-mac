@@ -6965,13 +6965,11 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
-            let noteAugmentedPrompt: String = {
-                guard manager.session.governance.kind == .note,
-                      manager.session.messages.isEmpty,
-                      !prompt.isEmpty
-                else { return prompt }
-                return prompt + NoteSessionPromptBuilder.noteInstructionSuffix
-            }()
+            let noteAugmentedPrompt = NoteSessionPromptBuilder.augmentedPrompt(
+                prompt,
+                sessionKind: manager.session.governance.kind,
+                hasExistingMessages: !manager.session.messages.isEmpty
+            )
             let skillAugmentation = buildSkillChatPromptAugmentation(prompt: noteAugmentedPrompt, sessionID: submittingSessionID)
             let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
             if resolvedSkillInstructions != nil {
@@ -7171,6 +7169,17 @@ private enum LocationPreferenceError: LocalizedError {
 
 /// 笔记会话首条消息的系统指令构建器
 struct NoteSessionPromptBuilder {
+    static func augmentedPrompt(
+        _ prompt: String,
+        sessionKind: AgentSessionKind,
+        hasExistingMessages: Bool
+    ) -> String {
+        guard sessionKind == .note, !hasExistingMessages, !prompt.isEmpty else {
+            return prompt
+        }
+        return prompt + noteInstructionSuffix
+    }
+
     static let noteInstructionSuffix = """
 
 ## 系统笔记指令

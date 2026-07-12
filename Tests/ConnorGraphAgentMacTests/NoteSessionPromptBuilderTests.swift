@@ -1,4 +1,5 @@
 import Testing
+import ConnorGraphCore
 @testable import ConnorGraphAgentMac
 
 @Test func initialNoteInstructionDefinesSessionBackedCaptureWithoutImplicitFileWrite() {
@@ -12,6 +13,36 @@ import Testing
     #expect(suffix.contains("不要为了保存这条笔记调用 `Write`、`Edit`、shell、知识库写入或 Memory 写入工具"))
     #expect(suffix.contains("明确要求创建文件、导出到路径或修改现有文件"))
     #expect(suffix.contains("# 📝 笔记已保存"))
+}
+
+@Test func noteInstructionIsAppendedOnlyToInitialNoteCapture() {
+    let prompt = "记录今天的想法"
+
+    let initialNote = NoteSessionPromptBuilder.augmentedPrompt(
+        prompt,
+        sessionKind: .note,
+        hasExistingMessages: false
+    )
+    let continuingNote = NoteSessionPromptBuilder.augmentedPrompt(
+        prompt,
+        sessionKind: .note,
+        hasExistingMessages: true
+    )
+    let ordinaryChat = NoteSessionPromptBuilder.augmentedPrompt(
+        prompt,
+        sessionKind: .chat,
+        hasExistingMessages: false
+    )
+    let emptyNote = NoteSessionPromptBuilder.augmentedPrompt(
+        "",
+        sessionKind: .note,
+        hasExistingMessages: false
+    )
+
+    #expect(initialNote == prompt + NoteSessionPromptBuilder.noteInstructionSuffix)
+    #expect(continuingNote == prompt)
+    #expect(ordinaryChat == prompt)
+    #expect(emptyNote.isEmpty)
 }
 
 @Test func noteInstructionDoesNotConvertCaptureIntoAFileArtifact() {
