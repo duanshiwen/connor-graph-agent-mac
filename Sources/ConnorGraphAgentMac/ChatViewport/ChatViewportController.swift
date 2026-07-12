@@ -70,6 +70,7 @@ final class ChatViewportController: ObservableObject {
         replacementGeneration += 1
         latestMetrics = nil
         pendingInitialAnchor = itemCount > 0 ? initialAnchor : nil
+        pendingScrollCommand = nil
         Self.logger.info("Chat viewport dataset replaced dataset=\(id.description, privacy: .public) generation=\(self.replacementGeneration, privacy: .public) itemCount=\(itemCount, privacy: .public) initialAnchor=\(String(describing: initialAnchor), privacy: .public)")
         setSnapshot(.initial)
     }

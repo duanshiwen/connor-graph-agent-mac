@@ -32,7 +32,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
     private var initialLatestAnchorTaskID: String {
         let phase = items.isEmpty ? "empty" : (hasLaidOutInitialItems ? "ready" : "pending")
-        return "\(dataSetID.description)::\(phase)"
+        return "\(dataSetID.description)::\(controller.replacementGeneration)::\(phase)"
     }
 
     init(
@@ -102,7 +102,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
-                .id(dataSetID)
                 .background(
                     GeometryReader { geometry in
                         Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
@@ -129,7 +128,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
                 .onChange(of: dataSetID) { _, newDataSetID in
-                    didRequestOlderItemsForCurrentTopReach = false
+                    resetMeasurementsForDataSetReplacement()
                     controller.replaceDataSet(id: newDataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
                 .onChange(of: items.count) { _, newCount in
@@ -211,9 +210,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
     private func scheduleInitialLatestAnchorRetries(proxy: ScrollViewProxy) {
         let scheduledDataSetID = dataSetID
+        let scheduledGeneration = controller.replacementGeneration
         for delay in AgentChatCollapseScrollSchedule.decisionDelays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard dataSetID == scheduledDataSetID else { return }
+                guard dataSetID == scheduledDataSetID,
+                      controller.replacementGeneration == scheduledGeneration
+                else { return }
                 switch initialLatestAnchorDecision() {
                 case .scrollToLatest:
                     scrollToLatestRenderedItem(proxy: proxy, animated: false)
@@ -222,6 +224,14 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
             }
         }
+    }
+
+    private func resetMeasurementsForDataSetReplacement() {
+        viewportHeight = 0
+        contentHeight = 0
+        topSentinelMinY = 0
+        bottomSentinelMaxY = 0
+        didRequestOlderItemsForCurrentTopReach = false
     }
 
     private func initialLatestAnchorDecision() -> ChatViewportInitialAnchorDecision {
