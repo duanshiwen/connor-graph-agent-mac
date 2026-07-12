@@ -59,36 +59,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: configuration.spacing) {
-                        Color.clear
-                            .frame(height: 1)
-                            .id(topSentinelID)
-                            .background(
-                                GeometryReader { geometry in
-                                    Color.clear.preference(
-                                        key: ChatViewportTopSentinelMinYKey.self,
-                                        value: geometry.frame(in: .named(coordinateSpaceName)).minY
-                                    )
-                                }
-                            )
-
-                        ForEach(items) { item in
-                            rowContent(item)
-                                .id(rowID(for: item))
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomSentinelID)
-                            .background(
-                                GeometryReader { geometry in
-                                    Color.clear.preference(
-                                        key: ChatViewportBottomSentinelMaxYKey.self,
-                                        value: geometry.frame(in: .named(coordinateSpaceName)).maxY
-                                    )
-                                }
-                            )
-                    }
+                    contentStack
                     .frame(
                         maxWidth: .infinity,
                         minHeight: configuration.preservesBottomAnchorForUnderfilledContent ? viewportHeight : nil,
@@ -157,6 +128,52 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var contentStack: some View {
+        switch configuration.contentLayout {
+        case .eager:
+            VStack(alignment: .leading, spacing: configuration.spacing) {
+                viewportContent
+            }
+        case .lazy:
+            LazyVStack(alignment: .leading, spacing: configuration.spacing) {
+                viewportContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var viewportContent: some View {
+        Color.clear
+            .frame(height: 1)
+            .id(topSentinelID)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ChatViewportTopSentinelMinYKey.self,
+                        value: geometry.frame(in: .named(coordinateSpaceName)).minY
+                    )
+                }
+            )
+
+        ForEach(items) { item in
+            rowContent(item)
+                .id(rowID(for: item))
+        }
+
+        Color.clear
+            .frame(height: 1)
+            .id(bottomSentinelID)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ChatViewportBottomSentinelMaxYKey.self,
+                        value: geometry.frame(in: .named(coordinateSpaceName)).maxY
+                    )
+                }
+            )
     }
 
     private func rowID(for item: Item) -> String {
