@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac 工程说明
 
-文档更新时间：2026-07-08 GMT+8  
+文档更新时间：2026-07-12 GMT+8  
 定位：本文件记录 Connor Graph Agent Mac 的工程架构、边界、运行布局、Memory OS、开发命令和质量约束。普通用户使用说明请看 [README.md](README.md)。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -245,13 +245,18 @@ System prompt 只引用对话时需要的三个 Memory OS 只读工具。Memory 
 - Credential materialization 不允许 query-string secrets。
 - Readiness 和 release-gate checks。
 
-### 5.6 Attachment OS
+### 5.6 Attachment OS 与生成媒体
 
-- 附件 local-first 导入 Session Capsule。
-- 支持 text/code/markdown/json/csv/xml/yaml/log/image/document allowlist。
-- 对可选择文本的 PDF 使用 PDFKit extraction。
-- Office/iWork/presentation/spreadsheet extraction 通过 sidecar best-effort paths。
-- 支持 Quick Look / PDFKit native preview。
+- 附件 local-first 导入 Session Capsule；用户导入、模型生成、工具生成媒体都归一化为 `AgentAttachmentManifest`，禁止平行 `MediaMessage` 存储。
+- 支持 text/code/markdown/json/csv/xml/yaml/log/image/document 以及 MP3/M4A/WAV/AAC 音频 allowlist；音频使用独立大小限制和容器签名校验，视频仍拒绝。
+- manifest 可选保存 origin、provider/model provenance、图片尺寸与音频时长/sample rate/channel count；旧 manifest 默认按 user-imported 兼容解码。
+- 对可选择文本的 PDF 使用 PDFKit extraction；Office/iWork/presentation/spreadsheet extraction 通过 sidecar best-effort paths。
+- 图片在气泡中异步下采样显示；SwiftUI `body` 禁止同步磁盘读取和原图解码。音频使用 Connor 原生播放器。
+- 媒体生成只使用当前会话选中的 provider/model。当前模型 capability 不支持时不发送请求、不创建空附件，只明确提示用户自行切换模型；禁止自动委托或跨 Provider fallback。
+- OpenAI 图片使用 Responses hosted `image_generation` tool；OpenAI 有界 TTS 使用 Speech API HTTP chunk streaming，不以 Responses 文本 delta 冒充音频。
+- 实时音频使用 24 kHz / 16-bit little-endian PCM、完整 sample frame 重分帧、有界 buffer 和 `AVAudioPlayerNode` 调度；chunk 不进入 journal。仅完成后的 WAV artifact 经统一 ingestion service 原子进入 Attachment Store。
+- 中断/取消流清理网络、播放和临时文件，不伪装为完成附件；已完成附件在会话重开后从本地文件重放。
+- 支持 Quick Look / PDFKit native preview，以及 Connor audio player renderer。
 
 ### 5.7 Browser Workspace
 
@@ -484,7 +489,9 @@ find Sources Tests -name '*.swift' | wc -l
 - Provider、sidecar 和 source adapters 必须位于 Connor 自有 policy 和 audit 边界之后。
 - 凭证不得进入 JSON、prompt context、audit payload、README examples 或 source cache records。
 - Memory OS 写入必须经过 provenance capture、artifact validation、audit logging 和 projection gates。
-- 附件 source of truth 必须保留在 Session Capsule / Attachment Store。
+- 附件 source of truth 必须保留在 Session Capsule / Attachment Store；provider base64、remote URL 和实时音频 chunk 不能成为历史消息的长期引用。
+- 媒体生成前必须检查当前模型 capability；unsupported 路径要求零网络请求、零空附件、零自动模型/Provider 切换。
+- 生成媒体临时文件必须有硬上限并在成功、失败、取消路径清理；日志只记录 ID、MIME、字节数、耗时和错误摘要，不记录媒体正文。
 - 原生数据源发生变更后，要更新或显式 invalidation native source search indexes。
 - Mail/RSS/Calendar search results 必须保留 temporal metadata。
 - 邮件发送绝不能信任模型提供的 approval flags；只有 `AgentToolExecutionContext.approvedCapabilities(.sendMail)` 中的人工审批才能授权 SMTP send。
