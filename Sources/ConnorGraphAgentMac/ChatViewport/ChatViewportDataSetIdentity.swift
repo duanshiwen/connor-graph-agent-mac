@@ -21,11 +21,10 @@ struct ChatViewportDataSetID: Hashable, Sendable, CustomStringConvertible {
 }
 
 extension ChatViewportDataSetID {
-    static func agentChatSession(sessionID: String?, revision: Int) -> ChatViewportDataSetID {
+    static func agentChatSession(sessionID: String?, revision _: Int = 0) -> ChatViewportDataSetID {
         ChatViewportDataSetID(
             namespace: "agent-chat-session",
-            rawID: sessionID ?? "none",
-            revision: revision
+            rawID: sessionID ?? "none"
         )
     }
 }
