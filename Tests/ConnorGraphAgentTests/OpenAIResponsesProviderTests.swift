@@ -240,6 +240,54 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(!requestBody.contains("iVBORw0KGgo="))
 }
 
+@Test func openAIResponsesProviderGeneratesImageUsingCurrentModelHostedTool() async throws {
+    let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    let body = """
+    {"id":"resp_image","output":[{"id":"ig_1","type":"image_generation_call","status":"completed","output_format":"png","revised_prompt":"A lake","result":"\(png.base64EncodedString())"}]}
+    """.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-5"),
+        httpClient: client
+    )
+
+    var artifact: AgentGeneratedMediaArtifact?
+    for try await event in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: "A lake", options: ["size": "1024x1024"])) {
+        if case .completed(let value) = event { artifact = value }
+    }
+
+    let generated = try #require(artifact)
+    #expect(try Data(contentsOf: generated.temporaryFileURL) == png)
+    #expect(generated.mimeType == "image/png")
+    #expect(generated.generationMetadata.modelID == "gpt-5")
+    #expect(generated.generationMetadata.responseID == "resp_image")
+    defer { try? FileManager.default.removeItem(at: generated.temporaryFileURL) }
+
+    let request = try #require(client.captured)
+    let object = try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    #expect(tools.first?["type"] as? String == "image_generation")
+    #expect(tools.first?["size"] as? String == "1024x1024")
+    #expect(object["model"] as? String == "gpt-5")
+}
+
+@Test func openAIResponsesProviderDoesNotRequestImageForUnsupportedCurrentModel() async throws {
+    let client = ResponsesCapturingHTTPClient(responseBody: Data())
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "text-only-test"),
+        httpClient: client
+    )
+
+    do {
+        for try await _ in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: "A lake")) {}
+        Issue.record("Expected unsupported current model")
+    } catch let error as OpenAIGeneratedMediaError {
+        if case .unsupportedByCurrentModel(let reason) = error { #expect(reason.contains("请切换")) }
+        else { Issue.record("Unexpected error \(error)") }
+    }
+    #expect(client.captured == nil)
+}
+
 @Test func openAIResponsesProviderStreamsTypedTextEvents() async throws {
     let sseClient = ResponsesCapturingSSEClient(frames: [
         "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n",

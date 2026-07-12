@@ -18,7 +18,9 @@ public struct AppSessionAttachmentStore: Sendable {
     public func importFile(
         at sourceURL: URL,
         sessionID: String,
-        now: Date = Date()
+        now: Date = Date(),
+        origin: AgentAttachmentOrigin = .userImported,
+        generationMetadata: AgentAttachmentGenerationMetadata? = nil
     ) throws -> AgentAttachmentManifest {
         let fileManager = FileManager.default
         let importPolicy = AttachmentImportPolicy(maxAcceptedBytes: maxTextExtractionBytes)
@@ -124,7 +126,9 @@ public struct AppSessionAttachmentStore: Sendable {
             extractionReports: extractionReports,
             createdAt: now,
             updatedAt: now,
-            sourceDisplayPath: sourceURL.path,
+            sourceDisplayPath: origin == .userImported ? sourceURL.path : nil,
+            origin: origin,
+            generationMetadata: generationMetadata,
             mediaMetadata: mediaMetadata
         )
 
