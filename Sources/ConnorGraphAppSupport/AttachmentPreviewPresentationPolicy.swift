@@ -5,6 +5,7 @@ public enum AttachmentNativePreviewRenderer: String, Sendable, Equatable {
     case none
     case pdfKit
     case quickLook
+    case audioPlayer
 }
 
 public enum AttachmentPreviewPresentationPolicy: Sendable {
@@ -18,6 +19,8 @@ public enum AttachmentPreviewPresentationPolicy: Sendable {
             return .pdfKit
         case .image, .document, .spreadsheet, .presentation:
             return .quickLook
+        case .audio:
+            return .audioPlayer
         default:
             return .none
         }

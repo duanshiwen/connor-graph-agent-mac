@@ -57,6 +57,27 @@ struct AppSessionAttachmentStoreImportPolicyTests {
         #expect(FileManager.default.fileExists(atPath: storedURL.path))
     }
 
+    @Test func importsAudioWithMetadataAndReloadsManifest() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let source = root.appendingPathComponent("tone.wav")
+        try Self.makePCM16WAV(sampleRate: 24_000, frameCount: 2_400).write(to: source)
+
+        let store = AppSessionAttachmentStore(paths: paths)
+        let manifest = try store.importFile(at: source, sessionID: "s", now: Date(timeIntervalSince1970: 1))
+        let reloaded = try store.loadManifest(sessionID: "s", attachmentID: manifest.id)
+        let jobs = try AttachmentExtractionJobStore(paths: paths).load(sessionID: "s")
+
+        #expect(reloaded.kind == .audio)
+        #expect(reloaded.mimeType == "audio/wav")
+        #expect(reloaded.extractionStatus == .unsupported)
+        #expect(reloaded.mediaMetadata?.sampleRate == 24_000)
+        #expect(reloaded.mediaMetadata?.channelCount == 1)
+        #expect(abs((reloaded.mediaMetadata?.durationSeconds ?? 0) - 0.1) < 0.001)
+        #expect(jobs.isEmpty)
+    }
+
     @Test func importsCommercialDocumentsAsPendingQueuedAttachments() throws {
         let cases: [(String, AgentAttachmentKind, [String])] = [
             ("paper.pdf", .pdf, ["pdf-selectable-text", "document-to-markdown"]),
@@ -86,18 +107,46 @@ struct AppSessionAttachmentStoreImportPolicyTests {
         }
     }
 
-    @Test func rejectsArchiveAndMediaButAcceptsDocuments() throws {
+    @Test func rejectsArchiveAndVideoButAcceptsDocumentsAndAudio() throws {
         let policy = AttachmentImportPolicy()
         for file in ["report.docx", "paper.pdf", "slides.pptx"] {
             if case .rejected(let reason) = policy.validate(url: URL(fileURLWithPath: "/tmp/\(file)")) {
                 Issue.record("Expected \(file) to be accepted, rejected with \(reason)")
             }
         }
-        for file in ["archive.zip", "meeting.mp3", "movie.mp4"] {
+        for file in ["archive.zip", "movie.mp4"] {
             let result = policy.validate(url: URL(fileURLWithPath: "/tmp/\(file)"))
             if case .accepted = result {
                 Issue.record("Expected \(file) to be rejected")
             }
         }
+    }
+
+    private static func makePCM16WAV(sampleRate: UInt32, frameCount: UInt32) -> Data {
+        let dataSize = frameCount * 2
+        var data = Data()
+        func appendASCII(_ value: String) { data.append(Data(value.utf8)) }
+        func appendUInt16(_ value: UInt16) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        func appendUInt32(_ value: UInt32) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        appendASCII("RIFF")
+        appendUInt32(36 + dataSize)
+        appendASCII("WAVEfmt ")
+        appendUInt32(16)
+        appendUInt16(1)
+        appendUInt16(1)
+        appendUInt32(sampleRate)
+        appendUInt32(sampleRate * 2)
+        appendUInt16(2)
+        appendUInt16(16)
+        appendASCII("data")
+        appendUInt32(dataSize)
+        data.append(Data(repeating: 0, count: Int(dataSize)))
+        return data
     }
 }
