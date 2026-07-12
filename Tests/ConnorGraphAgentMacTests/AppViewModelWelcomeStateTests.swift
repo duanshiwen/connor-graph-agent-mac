@@ -176,6 +176,28 @@ private func makeWelcomeStateViewModel(
 }
 
 @MainActor
+@Test func deletingViewedNonDefaultConnectionPreservesDefaultRoute() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let first = AppLLMConnectionConfig(id: "first", name: "First", providerMode: .openAICompatible, baseURLString: "https://first.example/v1", model: "model-a", selectedModel: "model-a", hasAPIKey: true)
+    let second = AppLLMConnectionConfig(id: "second", name: "Second", providerMode: .openAICompatible, baseURLString: "https://second.example/v1", model: "model-b", selectedModel: "model-b", hasAPIKey: true)
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "first-key")
+    try repository.saveAPIKey("second-key", connectionID: second.id)
+    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
+    viewModel.loadLLMSettings()
+    viewModel.selectLLMConnectionDetail(second.id)
+
+    viewModel.deleteLLMConnection(second.id)
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.defaultConnectionID == first.id)
+    #expect(loaded.connections.map(\.id) == [first.id])
+    #expect(viewModel.selectedLLMConnectionDetailID == first.id)
+    #expect(try repository.apiKey(for: second.id) == nil)
+}
+
+@MainActor
 @Test func selectingConnectionPersistsBeforeWelcomeStateRecalculation() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
