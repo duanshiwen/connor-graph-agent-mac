@@ -115,6 +115,23 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
+@Test func legacyConversationConnectionWithoutCapabilitySnapshotKeepsChatButNotImageTool() throws {
+    let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
+    let llmStore = ConfiguredMediaStore(); let credentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: credentials)
+    let legacy = AppLLMConnectionConfig(id: "legacy", name: "Legacy", providerMode: .openAICompatible, baseURLString: "https://legacy.example/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [legacy], defaultConnectionID: legacy.id), apiKey: "legacy-key")
+    let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: llmStore, credentialStore: credentials)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, capabilityEvidenceRepository: evidenceRepository, storagePaths: paths)
+
+    let controller = factory.makeAgentLoopController()
+
+    #expect(controller.modelProvider.modelID == "gpt-5.6")
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+    #expect(evidenceRepository.loadAll().isEmpty)
+}
+
 @Test func runtimeFactoryDoesNotInferImageGenerationFromRelayGPTModelName() throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()

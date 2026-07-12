@@ -72,6 +72,40 @@ private func capabilityConnection(model: String = "model-a", baseURL: String = "
     #expect(try repository.effectiveEvidence(for: .hostedImageGeneration, connection: original)?.status == .expired)
 }
 
+@Test func legacyConnectionWithoutEvidenceRemainsUnverifiedWithoutMutation() throws {
+    let settings = CapabilityEvidenceSettingsStore()
+    let credentials = CapabilityEvidenceCredentialStore()
+    let repository = AppProviderCapabilityEvidenceRepository(settingsStore: settings, credentialStore: credentials)
+    let connection = capabilityConnection()
+    try credentials.saveSecret("legacy-key", service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount(for: connection.id))
+
+    let effective = try repository.effectiveEvidence(for: .hostedImageGeneration, connection: connection)
+
+    #expect(effective == nil)
+    #expect(repository.loadAll().isEmpty)
+}
+
+@Test func evidenceFromOlderProbeProtocolExpiresLocally() throws {
+    let settings = CapabilityEvidenceSettingsStore()
+    let credentials = CapabilityEvidenceCredentialStore()
+    let repository = AppProviderCapabilityEvidenceRepository(settingsStore: settings, credentialStore: credentials)
+    let connection = capabilityConnection()
+    try credentials.saveSecret("key-a", service: AppLLMSettingsRepository.credentialNamespace, account: AppLLMSettingsRepository.apiKeyAccount(for: connection.id))
+    try repository.replaceEvidence(AppProviderCapabilityEvidence(
+        capability: .hostedImageGeneration,
+        status: .verified,
+        endpointFamily: "openai_responses",
+        modelID: connection.effectiveModel,
+        bindingFingerprint: AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: connection, credential: "key-a"),
+        protocolVersion: AppProviderCapabilityEvidenceRepository.currentProtocolVersion - 1
+    ), connectionID: connection.id)
+
+    let effective = try repository.effectiveEvidence(for: .hostedImageGeneration, connection: connection)
+
+    #expect(effective?.status == .expired)
+    #expect(repository.loadAll().first?.evidence.first?.status == .verified)
+}
+
 @Test func capabilityEvidenceCanBeInvalidatedWithoutDeletingOtherConnections() throws {
     let settings = CapabilityEvidenceSettingsStore()
     let credentials = CapabilityEvidenceCredentialStore()
