@@ -795,12 +795,15 @@ private struct AnyEncodableJSON: Encodable {
             for value in array { try container.encode(AnyEncodableJSON(value)) }
         case let string as String:
             var container = encoder.singleValueContainer(); try container.encode(string)
-        case let int as Int:
-            var container = encoder.singleValueContainer(); try container.encode(int)
-        case let double as Double:
-            var container = encoder.singleValueContainer(); try container.encode(double)
-        case let bool as Bool:
-            var container = encoder.singleValueContainer(); try container.encode(bool)
+        case let number as NSNumber:
+            var container = encoder.singleValueContainer()
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                try container.encode(number.boolValue)
+            } else if CFNumberIsFloatType(number) {
+                try container.encode(number.doubleValue)
+            } else {
+                try container.encode(number.int64Value)
+            }
         case _ as NSNull:
             var container = encoder.singleValueContainer(); try container.encodeNil()
         default:
