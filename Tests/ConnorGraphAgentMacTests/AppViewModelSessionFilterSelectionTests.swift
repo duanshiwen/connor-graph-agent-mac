@@ -8,7 +8,7 @@ import ConnorGraphAppSupport
 
 @MainActor
 struct AppViewModelSessionFilterSelectionTests {
-    @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() throws {
+    @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -22,6 +22,7 @@ struct AppViewModelSessionFilterSelectionTests {
 
         fixture.viewModel.reloadChatSessions()
         fixture.viewModel.selectChatSession(hiddenSession.id)
+        try await waitForTranscript(fixture.viewModel, expectedContents: ["Hidden transcript"])
 
         #expect(fixture.viewModel.selectedChatSessionID == hiddenSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["Hidden transcript"])
@@ -37,7 +38,7 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.selectedSessionArtifactDirectories == nil)
     }
 
-    @Test func statusFilterKeepsDetailWhenSelectedSessionRemainsVisible() throws {
+    @Test func statusFilterKeepsDetailWhenSelectedSessionRemainsVisible() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -51,6 +52,7 @@ struct AppViewModelSessionFilterSelectionTests {
 
         fixture.viewModel.reloadChatSessions()
         fixture.viewModel.selectChatSession(selectedSession.id)
+        try await waitForTranscript(fixture.viewModel, expectedContents: ["Selected transcript"])
 
         fixture.viewModel.setSessionListFilter(.status(.todo))
 
@@ -60,7 +62,7 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.transcript.map(\.content) == ["Selected transcript"])
     }
 
-    @Test func labelFilterClearsDetailWhenSelectedSessionDoesNotHaveLabel() throws {
+    @Test func labelFilterClearsDetailWhenSelectedSessionDoesNotHaveLabel() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -73,6 +75,7 @@ struct AppViewModelSessionFilterSelectionTests {
 
         fixture.viewModel.reloadChatSessions()
         fixture.viewModel.selectChatSession(hiddenSession.id)
+        try await waitForTranscript(fixture.viewModel, expectedContents: ["Unlabelled transcript"])
 
         fixture.viewModel.setSessionListFilter(.label("important"))
 
@@ -83,7 +86,7 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.agentEventTimeline.isEmpty)
     }
 
-    @Test func selectingDifferentChatSessionsKeepsSelectedIDAndTranscriptInSync() throws {
+    @Test func selectingDifferentChatSessionsKeepsSelectedIDAndTranscriptInSync() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -104,21 +107,32 @@ struct AppViewModelSessionFilterSelectionTests {
         let revisionAfterReload = fixture.viewModel.selectedChatTranscriptRevision
 
         fixture.viewModel.selectChatSession(firstSession.id)
+        try await waitForTranscript(fixture.viewModel, expectedContents: ["First transcript"])
         #expect(fixture.viewModel.selectedChatSessionID == firstSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["First transcript"])
         let revisionAfterFirstSelection = fixture.viewModel.selectedChatTranscriptRevision
         #expect(revisionAfterFirstSelection > revisionAfterReload)
 
         fixture.viewModel.selectChatSession(secondSession.id)
+        try await waitForTranscript(fixture.viewModel, expectedContents: ["Second transcript", "Second response"])
         #expect(fixture.viewModel.selectedChatSessionID == secondSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["Second transcript", "Second response"])
         let revisionAfterSecondSelection = fixture.viewModel.selectedChatTranscriptRevision
         #expect(revisionAfterSecondSelection > revisionAfterFirstSelection)
 
         fixture.viewModel.selectChatSession(firstSession.id)
+        try await waitForTranscript(fixture.viewModel, expectedContents: ["First transcript"])
         #expect(fixture.viewModel.selectedChatSessionID == firstSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["First transcript"])
         #expect(fixture.viewModel.selectedChatTranscriptRevision > revisionAfterSecondSelection)
+    }
+
+    private func waitForTranscript(_ viewModel: AppViewModel, expectedContents: [String]) async throws {
+        for _ in 0..<100 {
+            if viewModel.transcript.map(\.content) == expectedContents { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for transcript: \(expectedContents)")
     }
 
     private func makeFixture() throws -> Fixture {
