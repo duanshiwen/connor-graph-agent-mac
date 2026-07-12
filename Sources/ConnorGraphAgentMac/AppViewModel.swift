@@ -776,6 +776,13 @@ final class AppViewModel: NSObject, ObservableObject {
         )
     }
 
+    func localAttachmentFileURL(_ attachment: AgentMessageAttachmentRef) -> URL? {
+        guard let selectedChatSessionID, let storagePaths else { return nil }
+        return AttachmentPreviewLoader(store: AppSessionAttachmentStore(paths: storagePaths))
+            .load(sessionID: selectedChatSessionID, attachment: attachment)
+            .sourceFileURL
+    }
+
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? {
         guard let selectedChatSessionID, let storagePaths else { return nil }
         return AgentMarkdownPersistentCacheContext(

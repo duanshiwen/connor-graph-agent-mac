@@ -122,6 +122,12 @@ struct AgentAttachmentPreviewSheetView: View {
             NativeAttachmentPDFPreview(fileURL: url)
         case .quickLook:
             NativeAttachmentQuickLookPreview(fileURL: url)
+        case .audioPlayer:
+            ContentUnavailableView(
+                "音频播放器即将可用",
+                systemImage: "waveform",
+                description: Text(url.lastPathComponent)
+            )
         case .none:
             EmptyView()
         }

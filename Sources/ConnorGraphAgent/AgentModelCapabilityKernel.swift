@@ -65,6 +65,7 @@ public struct AgentModelCapabilityProfile: Codable, Sendable, Equatable {
     public var supportsParallelToolCalls: Bool
     public var supportsStructuredOutput: Bool
     public var supportsVision: Bool
+    public var generatedMediaCapabilities: Set<AgentGeneratedMediaCapability>
     public var confidence: AgentModelCapabilityConfidence
     public var signals: [AgentModelCapabilitySignal]
 
@@ -74,7 +75,8 @@ public struct AgentModelCapabilityProfile: Codable, Sendable, Equatable {
             supportsToolCalling: supportsToolCalling,
             supportsParallelToolCalls: supportsParallelToolCalls,
             supportsStructuredOutput: supportsStructuredOutput,
-            supportsVision: supportsVision
+            supportsVision: supportsVision,
+            generatedMediaCapabilities: generatedMediaCapabilities
         )
     }
 
@@ -86,6 +88,7 @@ public struct AgentModelCapabilityProfile: Codable, Sendable, Equatable {
         supportsParallelToolCalls: Bool,
         supportsStructuredOutput: Bool,
         supportsVision: Bool,
+        generatedMediaCapabilities: Set<AgentGeneratedMediaCapability> = [],
         confidence: AgentModelCapabilityConfidence,
         signals: [AgentModelCapabilitySignal]
     ) {
@@ -96,6 +99,7 @@ public struct AgentModelCapabilityProfile: Codable, Sendable, Equatable {
         self.supportsParallelToolCalls = supportsParallelToolCalls
         self.supportsStructuredOutput = supportsStructuredOutput
         self.supportsVision = supportsVision
+        self.generatedMediaCapabilities = generatedMediaCapabilities
         self.confidence = confidence
         self.signals = signals
     }
@@ -110,7 +114,8 @@ public enum AgentModelCapabilityKernel {
     public static func profile(
         providerKind: AgentModelProviderKind,
         modelID: String,
-        explicitVisionSupport: Bool? = nil
+        explicitVisionSupport: Bool? = nil,
+        explicitGeneratedMediaCapabilities: Set<AgentGeneratedMediaCapability>? = nil
     ) -> AgentModelCapabilityProfile {
         let base = baseCapabilities(for: providerKind)
         let normalizedModel = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -123,6 +128,7 @@ public enum AgentModelCapabilityKernel {
             supportsParallelToolCalls: base.parallelToolCalls,
             supportsStructuredOutput: base.structuredOutput,
             supportsVision: visionResolution.supportsVision,
+            generatedMediaCapabilities: explicitGeneratedMediaCapabilities ?? resolveGeneratedMediaCapabilities(providerKind: providerKind, modelID: normalizedModel),
             confidence: visionResolution.confidence,
             signals: visionResolution.signals
         )
@@ -175,6 +181,28 @@ public enum AgentModelCapabilityKernel {
             return (true, .high, [.providerPreset])
         }
         return (false, .unknown, [.providerDefault])
+    }
+
+    private static func resolveGeneratedMediaCapabilities(
+        providerKind: AgentModelProviderKind,
+        modelID: String
+    ) -> Set<AgentGeneratedMediaCapability> {
+        let normalized = modelID.lowercased()
+        var result: Set<AgentGeneratedMediaCapability> = []
+        if providerKind == .openAIResponses,
+           normalized.hasPrefix("gpt-5") || normalized.hasPrefix("gpt-4.1") || normalized.hasPrefix("gpt-4o") {
+            result.insert(.imageGeneration)
+        }
+        if normalized.contains("tts") {
+            result.formUnion([.speechGeneration, .streamingAudioOutput])
+        }
+        if normalized.contains("realtime") && providerKind != .anthropicCompatible {
+            result.formUnion([.audioInput, .speechGeneration, .streamingAudioOutput])
+        }
+        if resolveVisionSupport(providerKind: providerKind, modelID: modelID, explicitVisionSupport: nil).supportsVision {
+            result.insert(.imageInput)
+        }
+        return result
     }
 
     private static func containsAny(_ value: String, in markers: [String]) -> Bool {

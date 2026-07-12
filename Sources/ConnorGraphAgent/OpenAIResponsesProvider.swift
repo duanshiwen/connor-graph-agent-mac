@@ -42,7 +42,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
     }
 }
 
-public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvider, StreamingAgentModelProvider, LLMProvider, Sendable {
+public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvider, StreamingAgentModelProvider, AgentGeneratedMediaProvider, LLMProvider, Sendable {
     public var config: OpenAIResponsesConfig
     public var httpClient: Client
     public var sseClient: (any AgentSSEHTTPClient)?
@@ -100,6 +100,52 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
             var result = try OpenAIResponsesParser.parseResponse(response.body)
             result.warnings.append(Self.visionDegradationWarning)
             return result
+        }
+    }
+
+    public func generateMedia(_ request: AgentGeneratedMediaRequest) -> AsyncThrowingStream<AgentGeneratedMediaEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    guard request.kind == .image else {
+                        throw OpenAIGeneratedMediaError.unsupportedRequestKind
+                    }
+                    switch CurrentModelMediaCapabilityGate.decision(modelID: modelID, capabilities: capabilities, requestKind: .image) {
+                    case .supported: break
+                    case .unsupportedByCurrentModel(let reason): throw OpenAIGeneratedMediaError.unsupportedByCurrentModel(reason)
+                    }
+                    continuation.yield(.started)
+                    var client = httpClient
+                    let httpRequest = try makeImageGenerationRequest(request)
+                    let response = try await client.send(httpRequest)
+                    guard (200..<300).contains(response.statusCode) else {
+                        throw OpenAIGeneratedMediaError.providerRejected(statusCode: response.statusCode)
+                    }
+                    let result = try OpenAIImageGenerationParser.parse(response.body)
+                    guard let data = Data(base64Encoded: result.base64, options: [.ignoreUnknownCharacters]), !data.isEmpty else {
+                        throw OpenAIGeneratedMediaError.invalidBase64
+                    }
+                    let temporaryURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("connor-generated-\(UUID().uuidString).\(result.fileExtension)")
+                    try data.write(to: temporaryURL, options: [.atomic])
+                    continuation.yield(.completed(AgentGeneratedMediaArtifact(
+                        temporaryFileURL: temporaryURL,
+                        mimeType: result.mimeType,
+                        byteCount: Int64(data.count),
+                        generationMetadata: AgentAttachmentGenerationMetadata(
+                            providerID: "openai-responses",
+                            modelID: modelID,
+                            responseID: result.responseID,
+                            toolCallID: result.toolCallID,
+                            revisedPrompt: result.revisedPrompt,
+                            parameters: request.options
+                        )
+                    )))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
         }
     }
 
@@ -165,6 +211,28 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         }
         headers["Content-Type"] = "application/json"
         return headers
+    }
+
+    private func makeImageGenerationRequest(_ request: AgentGeneratedMediaRequest) throws -> AgentHTTPRequest {
+        let endpoint = config.baseURL.appendingPathComponent("responses")
+        var tool: [String: Any] = ["type": "image_generation"]
+        for key in ["size", "quality", "format", "background"] {
+            if let value = request.options[key], !value.isEmpty { tool[key] = value }
+        }
+        let body: [String: Any] = [
+            "model": config.requestModel,
+            "input": request.prompt,
+            "tools": [tool],
+            "tool_choice": ["type": "image_generation"],
+            "store": false
+        ]
+        return AgentHTTPRequest(
+            url: endpoint,
+            method: "POST",
+            headers: requestHeaders(),
+            body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]),
+            timeoutInterval: config.requestTimeout
+        )
     }
 
     private func makeRequest(_ request: AgentModelRequest, stream: Bool) throws -> AgentHTTPRequest {
@@ -272,6 +340,46 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
 public extension OpenAIResponsesProvider where Client == URLSessionAgentHTTPClient {
     init(config: OpenAIResponsesConfig) {
         self.init(config: config, httpClient: URLSessionAgentHTTPClient(), sseClient: URLSessionAgentSSEHTTPClient())
+    }
+}
+
+public enum OpenAIGeneratedMediaError: Error, Sendable, Equatable {
+    case unsupportedRequestKind
+    case unsupportedByCurrentModel(String)
+    case providerRejected(statusCode: Int)
+    case missingImageResult
+    case invalidBase64
+}
+
+private enum OpenAIImageGenerationParser {
+    struct Result {
+        var base64: String
+        var mimeType: String
+        var fileExtension: String
+        var responseID: String?
+        var toolCallID: String?
+        var revisedPrompt: String?
+    }
+
+    static func parse(_ data: Data) throws -> Result {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw OpenAIGeneratedMediaError.missingImageResult
+        }
+        let output = object["output"] as? [[String: Any]] ?? []
+        guard let call = output.first(where: { $0["type"] as? String == "image_generation_call" }),
+              let base64 = call["result"] as? String, !base64.isEmpty else {
+            throw OpenAIGeneratedMediaError.missingImageResult
+        }
+        let format = (call["output_format"] as? String ?? "png").lowercased()
+        let mime = format == "jpeg" || format == "jpg" ? "image/jpeg" : format == "webp" ? "image/webp" : "image/png"
+        return Result(
+            base64: base64,
+            mimeType: mime,
+            fileExtension: format == "jpeg" ? "jpg" : format,
+            responseID: object["id"] as? String,
+            toolCallID: call["id"] as? String,
+            revisedPrompt: call["revised_prompt"] as? String
+        )
     }
 }
 
