@@ -543,7 +543,8 @@ struct SettingsAISection: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("Connor 将使用当前连接发送一次最小图片生成请求。该请求可能由服务商计费，测试图片不会保存到会话。")
+            let name = viewModel.llmConnectionConfigs.first { $0.id == imageCapabilityProbeConnectionID }?.name ?? "所选连接"
+            Text("Connor 将使用“\(name)”发送一次最小图片生成请求。该请求可能由服务商计费，测试图片不会保存到会话。")
         }
     }
 
@@ -585,7 +586,9 @@ struct SettingsAISection: View {
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-            capabilityDiscoveryCard
+            if let connection = selectedDetailConnection {
+                connectionCapabilityDetail(connection)
+            }
 
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
                 Button(action: { isShowingAddConnectionGuide = true }) {
@@ -607,28 +610,35 @@ struct SettingsAISection: View {
         }
     }
 
-    private var capabilityDiscoveryCard: some View {
+    private var selectedDetailConnection: AppLLMConnectionConfig? {
+        guard let id = viewModel.selectedLLMConnectionDetailID else { return nil }
+        return viewModel.llmConnectionConfigs.first { $0.id == id }
+    }
+
+    private func connectionCapabilityDetail(_ connection: AppLLMConnectionConfig) -> some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
             HStack {
                 VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                    Text("连接能力")
+                    Text("\(connection.name) 的连接能力")
                         .font(SettingsListTypography.header)
-                    Text("能力来自对当前 URL、模型和凭据的真实协议验证，而不是模型名称推断。")
+                    Text("\(AppLLMEndpointDisplayName.host(from: connection.baseURLString)) · \(connection.effectiveModel)")
                         .font(SettingsListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                    Text("能力属于此连接，并基于当前 URL、模型和凭据验证；查看详情不会更改默认连接。")
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
-                    guard let connectionID = viewModel.selectedLLMConnectionDetailID else { return }
-                    Task { await viewModel.discoverLLMCapabilities(connectionID: connectionID) }
+                    Task { await viewModel.discoverLLMCapabilities(connectionID: connection.id) }
                 } label: {
                     if viewModel.isDiscoveringLLMCapabilities { ProgressView().controlSize(.small) }
-                    else { Text("测试并发现能力") }
+                    else { Text("重新验证") }
                 }
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration)
             }
-            ForEach(AppProviderCapabilityID.allCases, id: \.self) { capability in
+            ForEach(applicableCapabilities(for: connection), id: \.self) { capability in
                 let evidence = viewModel.llmCapabilityEvidence.first { $0.capability == capability }
                 HStack {
                     Text(capabilityDisplayName(capability))
@@ -638,17 +648,19 @@ struct SettingsAISection: View {
                 }
                 .font(SettingsListTypography.rowTitle)
             }
-            HStack {
-                Button("验证图片生成") {
-                    imageCapabilityProbeConnectionID = viewModel.selectedLLMConnectionDetailID
-                    isConfirmingImageCapabilityProbe = true
-                }
+            if connection.providerMode == .openAICompatible || connection.providerMode == .openAIResponses {
+                HStack {
+                    Button("验证图片生成") {
+                        imageCapabilityProbeConnectionID = connection.id
+                        isConfirmingImageCapabilityProbe = true
+                    }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration || viewModel.llmCapabilityEvidence.first { $0.capability == .responses }?.status != .verified)
-                if viewModel.isVerifyingImageGeneration { ProgressView().controlSize(.small) }
-                Text("可能产生少量服务商费用；测试图片不会保存。")
-                    .font(SettingsListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
+                    if viewModel.isVerifyingImageGeneration { ProgressView().controlSize(.small) }
+                    Text("可能产生少量服务商费用；测试图片不会保存。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
             }
             if let message = viewModel.llmHealthCheckMessage, !message.isEmpty {
                 Text(message).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
@@ -657,6 +669,14 @@ struct SettingsAISection: View {
         .padding(SettingsListLayout.spaceL)
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
+    }
+
+    private func applicableCapabilities(for connection: AppLLMConnectionConfig) -> [AppProviderCapabilityID] {
+        switch connection.providerMode {
+        case .openAICompatible: [.chatCompletions, .functionCalling, .responses, .hostedImageGeneration]
+        case .openAIResponses: [.responses, .hostedImageGeneration]
+        case .anthropicMessages: []
+        }
     }
 
     private func capabilityDisplayName(_ capability: AppProviderCapabilityID) -> String {
