@@ -103,9 +103,15 @@ public enum AgentGeneratedMediaKind: String, Codable, Sendable, Equatable {
 public enum AgentGeneratedMediaCapability: String, Codable, Sendable, Equatable, CaseIterable {
     case imageInput
     case imageGeneration
+    case imageEditing
     case audioInput
     case speechGeneration
     case streamingAudioOutput
+}
+
+public enum AgentGeneratedImageAction: String, Codable, Sendable, Equatable {
+    case generate
+    case edit
 }
 
 public struct AgentGeneratedMediaRequest: Sendable, Equatable {
@@ -113,12 +119,20 @@ public struct AgentGeneratedMediaRequest: Sendable, Equatable {
     public var prompt: String
     public var inputAttachments: [AgentMessageAttachmentRef]
     public var options: [String: String]
+    public var imageAction: AgentGeneratedImageAction
 
-    public init(kind: AgentGeneratedMediaKind, prompt: String, inputAttachments: [AgentMessageAttachmentRef] = [], options: [String: String] = [:]) {
+    public init(
+        kind: AgentGeneratedMediaKind,
+        prompt: String,
+        inputAttachments: [AgentMessageAttachmentRef] = [],
+        options: [String: String] = [:],
+        imageAction: AgentGeneratedImageAction = .generate
+    ) {
         self.kind = kind
         self.prompt = prompt
         self.inputAttachments = inputAttachments
         self.options = options
+        self.imageAction = imageAction
     }
 }
 
