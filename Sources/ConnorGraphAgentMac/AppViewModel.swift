@@ -6339,13 +6339,20 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
 
+        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
+        if !cachedTimeline.isEmpty {
+            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
+            agentEventTimeline = cachedTimeline
+            return
+        }
+
         let runs = try chatSessionRepository.loadRuns(
             sessionID: sessionID,
             statuses: [.completed, .failed, .cancelled],
-            limit: 10
+            limit: 3
         )
         for run in runs {
-            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil))
+            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: 200))
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
                 scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
@@ -6354,14 +6361,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
 
-        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
-        if !cachedTimeline.isEmpty {
-            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
-            agentEventTimeline = cachedTimeline
-            return
-        }
-
-        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: nil)
+        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 400)
         var seenRunIDs: [String] = []
         for event in recentEvents where !seenRunIDs.contains(event.runID) {
             seenRunIDs.append(event.runID)

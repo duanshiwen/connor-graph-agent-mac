@@ -203,6 +203,8 @@ graph/evaluations/reports/*.json
 - 支持 per-session model override。
 - JSONL records 支持 best-effort recovery。
 - Browser state 和 approvals 保存在 Session Capsule 内。
+- 会话详情读取通过 `ChatSessionDetailLoadCoordinator` 在 MainActor 外构建 snapshot；选择请求使用 cancellation/generation，旧会话结果不得覆盖最新选择。
+- 首屏 activity timeline 必须 cache-first，并对 run/event/journal fallback 设置上限；禁止在会话切换热路径使用 `limit: nil` 扫描完整历史。
 
 ### 5.2 本地工具与工作区策略
 
@@ -436,7 +438,9 @@ Connor 是原生 macOS app。
 4. 避免 sidebar、detail 和 settings navigation 出现重复 source of truth。
 5. 添加临时颜色或尺寸前，优先使用 `AgentChatDesignSystem` / `AppShellDesignSystem` 中已有 design tokens。
 6. Chat scrolling、pagination、unread markers 和 date sections 应留在 commercial Chat Viewport infrastructure 中；修改前先看 `Sources/ConnorGraphAgentMac/ChatViewport/`。
-7. 避免 nested navigation titles 泄漏到 macOS window/menu state。
+7. Chat detail 与 `ScrollView` 应保持稳定 identity；session 切换由 `ChatViewportDataSetID` 和 namespaced row IDs 隔离，transcript revision 只能触发显式 data-change，不应销毁整个详情视图树。延迟滚动必须绑定当前 replacement generation。
+8. Markdown 持久化 cache 由 session 保存/后台预热路径维护；SwiftUI `body` 只允许访问内存 compiled-document cache，不得同步读写磁盘。
+9. 避免 nested navigation titles 泄漏到 macOS window/menu state。
 8. destructive 或 governance actions 必须打开 review surfaces；快捷键不得绕过 Connor policy/review gates。
 
 用户可见文案应使用“康纳同学”的语气：温暖、准确、本地优先、行动导向。避免在终端用户界面出现泛泛的 `Something went wrong`、`No data` 或只有 raw error code 的文案。
