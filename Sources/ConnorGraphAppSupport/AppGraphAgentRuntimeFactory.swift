@@ -115,6 +115,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         sessionLLMOverride: SessionLLMOverride? = nil
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
+        let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
         var registry = AgentToolRegistry()
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         registry.registerSessionStatusTools(repository: AppChatSessionRepository(store: store, storagePaths: storagePaths), governanceConfig: governanceConfig)
@@ -200,16 +201,29 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(SkillActivateTool(packages: snapshot.packages))
             registry.register(SkillListTool(packages: snapshot.packages))
         }
+        let generatedImageToolIsAvailable = storagePaths != nil
+            && modelProvider.supportsGeneratedMediaExecution
+            && modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration)
+        if generatedImageToolIsAvailable, let storagePaths {
+            registry.register(GeneratedImageAgentTool(
+                provider: modelProvider,
+                ingestionService: GeneratedMediaIngestionService(store: AppSessionAttachmentStore(paths: storagePaths))
+            ))
+        }
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
+        let generatedImageInstruction = generatedImageToolIsAvailable
+            ? "When the user asks to create or generate an image, use `generate_image`. Do not claim that image generation is unavailable before attempting the available tool; if the tool fails, report the actual failure briefly."
+            : ""
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
-            userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines)
+            userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
+            generatedImageInstruction
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
         return AgentLoopController(
-            modelProvider: makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride),
+            modelProvider: modelProvider,
             toolRegistry: registry,
             configuration: effectiveConfiguration,
             auditLog: SQLiteAgentAuditLog(store: store),
