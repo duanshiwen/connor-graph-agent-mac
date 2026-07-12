@@ -17,7 +17,8 @@ import Testing
 @Test func noteInstructionDoesNotConvertCaptureIntoAFileArtifact() {
     let suffix = NoteSessionPromptBuilder.noteInstructionSuffix
 
-    #expect(!suffix.contains("生成文件名"))
-    #expect(!suffix.contains("创建 Markdown 文件"))
-    #expect(!suffix.contains("选择保存路径"))
+    #expect(suffix.contains("不要生成文件名、创建 Markdown 文件或选择保存路径"))
+    #expect(!suffix.contains("请生成文件名"))
+    #expect(!suffix.contains("请创建 Markdown 文件"))
+    #expect(!suffix.contains("请选择保存路径"))
 }
