@@ -25,3 +25,37 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     #expect(controller.modelProvider.modelID == "claude-sonnet-4-5")
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
+
+@Test func runtimeFactoryUsesExplicitOpenAIResponsesMediaConnectionForRelayChat() throws {
+    let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
+    let llmStore = ConfiguredMediaStore(); let llmCredentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: llmCredentials)
+    let relay = AppLLMConnectionConfig(id: "relay", name: "Relay GPT", providerMode: .openAICompatible, connectionKind: .openAICompatible, baseURLString: "https://relay.example.com/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [relay], defaultConnectionID: relay.id), apiKey: "relay-key")
+    let mediaStore = ConfiguredMediaStore(); let mediaCredentials = ConfiguredMediaCredentials(); let mediaRepository = AppGeneratedMediaSettingsRepository(settingsStore: mediaStore, credentialStore: mediaCredentials)
+    let responses = AppGeneratedMediaConnectionConfig(id: "responses", name: "Relay Responses Image", providerKind: .openAIResponses, baseURLString: "https://relay.example.com/v1", model: "gpt-5.6")
+    try mediaRepository.save(settings: AppGeneratedMediaSettings(connections: [responses], defaultImageConnectionID: responses.id)); try mediaRepository.saveAPIKey("responses-key", connectionID: responses.id)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, generatedMediaSettingsRepository: mediaRepository, storagePaths: paths)
+
+    let controller = factory.makeAgentLoopController()
+
+    #expect(controller.modelProvider.modelID == "gpt-5.6")
+    #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
+    #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+}
+
+@Test func runtimeFactoryDoesNotInferImageGenerationFromRelayGPTModelName() throws {
+    let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
+    let llmStore = ConfiguredMediaStore(); let llmCredentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: llmCredentials)
+    let relay = AppLLMConnectionConfig(id: "relay", name: "Relay GPT", providerMode: .openAICompatible, connectionKind: .openAICompatible, baseURLString: "https://relay.example.com/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [relay], defaultConnectionID: relay.id), apiKey: "relay-key")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, storagePaths: paths)
+
+    let controller = factory.makeAgentLoopController()
+
+    #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
+    #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+}
