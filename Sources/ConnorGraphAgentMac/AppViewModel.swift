@@ -2284,7 +2284,7 @@ final class AppViewModel: NSObject, ObservableObject {
         productOSRegistry: ProductOSRegistrySnapshot = .default,
         automationConfig: ProductOSAutomationConfig = .default,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
-        llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
+        llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
         self.entities = entities
         self.statements = statements
@@ -2306,7 +2306,15 @@ final class AppViewModel: NSObject, ObservableObject {
             settingsRepository: llmSettingsRepository,
             evidenceRepository: capabilityEvidenceRepository
         )
-        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory
+        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory ?? { repository in
+            AppLLMConnectionSetupService(
+                settingsRepository: repository,
+                capabilityDiscoveryService: AppProviderCapabilityDiscoveryService(
+                    settingsRepository: repository,
+                    evidenceRepository: capabilityEvidenceRepository
+                )
+            )
+        }
         if let storagePaths {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend

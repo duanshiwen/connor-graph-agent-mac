@@ -59,6 +59,40 @@ struct LLMConnectionSetupTests {
         #expect(credentials.values.isEmpty)
     }
 
+    @Test func openAICompatibleSetupDiscoversCapabilitiesBeforePersistingEvidence() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials)
+        let discovery = AppProviderCapabilityDiscoveryService(
+            settingsRepository: repository,
+            evidenceRepository: evidenceRepository,
+            openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+            openAIResponsesProbe: { _ in throw OpenAICompatibleProviderError.httpStatus(404, message: "not found") },
+            functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+        )
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            capabilityDiscoveryService: discovery,
+            openAICompatibleHealthCheck: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "discovered-provider",
+            kind: .openAICompatible,
+            name: "Discovered",
+            baseURLString: "https://api.example.com/v1",
+            model: "gpt-test",
+            apiKey: "secret"
+        ))
+
+        #expect(result.capabilityEvidence.first { $0.capability == .chatCompletions }?.status == .verified)
+        #expect(result.capabilityEvidence.first { $0.capability == .functionCalling }?.status == .verified)
+        #expect(result.capabilityEvidence.first { $0.capability == .responses }?.status == .unsupported)
+        #expect(try evidenceRepository.effectiveEvidence(for: .chatCompletions, connection: result.connection)?.status == .verified)
+        #expect(try repository.apiKey(for: result.connection.id) == "secret")
+    }
+
     @Test func openAICompatibleSuccessSavesMetadataAndSecretSeparately() async throws {
         let store = MemoryLLMSettingsStore()
         let credentials = MemoryCredentialStore()
