@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import Testing
 import ConnorGraphAgent
 
@@ -133,8 +134,18 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     let requestBody = try #require(client.captured?.body)
     let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
     let tools = try #require(object["tools"] as? [[String: Any]])
-    #expect(tools.first { $0["name"] as? String == "strict_tool" }?["strict"] as? Bool == true)
-    #expect(tools.first { $0["name"] as? String == "flexible_tool" }?["strict"] as? Bool == false)
+    let strict = try #require(tools.first { $0["name"] as? String == "strict_tool" })
+    let flexible = try #require(tools.first { $0["name"] as? String == "flexible_tool" })
+    let strictFlag = try #require(strict["strict"])
+    let flexibleFlag = try #require(flexible["strict"])
+    #expect(CFGetTypeID(strictFlag as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(CFGetTypeID(flexibleFlag as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(strictFlag as? Bool == true)
+    #expect(flexibleFlag as? Bool == false)
+    let strictParameters = try #require(strict["parameters"] as? [String: Any])
+    let additionalProperties = try #require(strictParameters["additionalProperties"])
+    #expect(CFGetTypeID(additionalProperties as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(additionalProperties as? Bool == false)
 }
 
 @Test func openAIResponsesProviderParsesFunctionCallItems() async throws {

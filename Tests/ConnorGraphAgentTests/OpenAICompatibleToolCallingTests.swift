@@ -89,7 +89,14 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
             description: "Read calendar data",
             inputSchema: .closedObject(properties: [
                 "operation": .stringEnumeration(values: ["list_calendars", "list_events"], description: "Read operation"),
-                "calendarID": .nullable(.string(description: "Calendar identifier"))
+                "calendarID": .nullable(.string(description: "Calendar identifier")),
+                "limit": .integer(description: "Maximum results"),
+                "confidence": .number(description: "Confidence threshold"),
+                "includeDeclined": .boolean(description: "Include declined events"),
+                "tags": .array(items: .string(description: "Tag"), description: "Event tags"),
+                "filter": .closedObject(properties: [
+                    "query": .string(description: "Filter query")
+                ], required: ["query"])
             ], required: ["operation"])
         )]
     ))
@@ -105,6 +112,17 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     let additionalProperties = try #require(parameters["additionalProperties"])
     #expect(CFGetTypeID(additionalProperties as CFTypeRef) == CFBooleanGetTypeID())
     #expect(additionalProperties as? Bool == false)
+    let properties = try #require(parameters["properties"] as? [String: Any])
+    #expect((properties["limit"] as? [String: Any])?["type"] as? String == "integer")
+    #expect((properties["confidence"] as? [String: Any])?["type"] as? String == "number")
+    #expect((properties["includeDeclined"] as? [String: Any])?["type"] as? String == "boolean")
+    #expect((properties["calendarID"] as? [String: Any])?["type"] as? [String] == ["string", "null"])
+    let tags = try #require(properties["tags"] as? [String: Any])
+    #expect((tags["items"] as? [String: Any])?["type"] as? String == "string")
+    let filter = try #require(properties["filter"] as? [String: Any])
+    let nestedAdditionalProperties = try #require(filter["additionalProperties"])
+    #expect(CFGetTypeID(nestedAdditionalProperties as CFTypeRef) == CFBooleanGetTypeID())
+    #expect(nestedAdditionalProperties as? Bool == false)
 }
 
 @Test func openAICompatibleProviderSerializesDeveloperInstructionPlacement() async throws {
