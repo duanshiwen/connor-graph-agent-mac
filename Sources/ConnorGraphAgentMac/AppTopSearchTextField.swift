@@ -16,8 +16,6 @@ struct TopSearchTextField: NSViewRepresentable {
     var onMoveUp: (() -> Void)? = nil
     var onMoveDown: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
-    var onFocus: (() -> Void)? = nil
-    var onBlur: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSTextField {
         let textField = TopSearchSelectAllOnFocusTextField()
@@ -64,9 +62,10 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit, onMoveUp: onMoveUp, onMoveDown: onMoveDown, onCancel: onCancel, onFocus: onFocus, onBlur: onBlur)
+        Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit, onMoveUp: onMoveUp, onMoveDown: onMoveDown, onCancel: onCancel)
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding var text: String
         var isFocused: Binding<Bool>
@@ -77,18 +76,14 @@ struct TopSearchTextField: NSViewRepresentable {
         var onMoveUp: (() -> Void)?
         var onMoveDown: (() -> Void)?
         var onCancel: (() -> Void)?
-        var onFocus: (() -> Void)?
-        var onBlur: (() -> Void)?
 
-        init(text: Binding<String>, isFocused: Binding<Bool>, onSubmit: (() -> Void)?, onMoveUp: (() -> Void)?, onMoveDown: (() -> Void)?, onCancel: (() -> Void)?, onFocus: (() -> Void)?, onBlur: (() -> Void)?) {
+        init(text: Binding<String>, isFocused: Binding<Bool>, onSubmit: (() -> Void)?, onMoveUp: (() -> Void)?, onMoveDown: (() -> Void)?, onCancel: (() -> Void)?) {
             _text = text
             self.isFocused = isFocused
             self.onSubmit = onSubmit
             self.onMoveUp = onMoveUp
             self.onMoveDown = onMoveDown
             self.onCancel = onCancel
-            self.onFocus = onFocus
-            self.onBlur = onBlur
         }
 
         @MainActor
@@ -111,24 +106,33 @@ struct TopSearchTextField: NSViewRepresentable {
         }
 
         func activateFromUserInteraction() {
-            lastSyncedFocusState = true
-            isFocused.wrappedValue = true
-            onFocus?()
+            publishFocusIfNeeded(true)
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
-            activateFromUserInteraction()
+            publishFocusIfNeeded(true)
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
-            lastSyncedFocusState = false
-            isFocused.wrappedValue = false
-            onBlur?()
+            publishFocusIfNeeded(false)
         }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
-            text = field.stringValue
+            let updatedText = field.stringValue
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.text != updatedText else { return }
+                self.text = updatedText
+            }
+        }
+
+        private func publishFocusIfNeeded(_ focused: Bool) {
+            guard lastSyncedFocusState != focused else { return }
+            lastSyncedFocusState = focused
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isFocused.wrappedValue != focused else { return }
+                self.isFocused.wrappedValue = focused
+            }
         }
 
         @MainActor func isComposingText(in field: NSTextField) -> Bool {

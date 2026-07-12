@@ -6530,8 +6530,8 @@ final class AppViewModel: NSObject, ObservableObject {
                     guard let self,
                           self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
                     else { return }
-                    self.loadingChatSessionDetailID = nil
                     self.errorMessage = "无法加载所选会话。"
+                    self.loadingChatSessionDetailID = nil
                     return
                 }
                 try Task.checkCancellation()
@@ -6545,8 +6545,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 guard let self,
                       self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
                 else { return }
-                self.loadingChatSessionDetailID = nil
                 self.errorMessage = String(describing: error)
+                self.loadingChatSessionDetailID = nil
             }
         }
     }
@@ -6589,8 +6589,8 @@ final class AppViewModel: NSObject, ObservableObject {
             let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
             AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
-            loadingChatSessionDetailID = nil
             errorMessage = String(describing: error)
+            loadingChatSessionDetailID = nil
         }
     }
 
