@@ -11,6 +11,17 @@ public struct ConnorRemoteUserIdentity: Codable, Sendable, Equatable, Identifiab
     public var createdAt: Date
     public var updatedAt: Date
 
+    public init(id: UInt, username: String, nickname: String?, email: String, avatarURL: String?, role: String, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.username = username
+        self.nickname = nickname
+        self.email = email
+        self.avatarURL = avatarURL
+        self.role = role
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
     public var displayName: String {
         let nickname = nickname?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return nickname.isEmpty ? username : nickname
