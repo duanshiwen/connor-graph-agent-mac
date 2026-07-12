@@ -14,6 +14,10 @@ struct AttachmentPreviewPresentationPolicyTests {
         #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .image, hasOriginalFileURL: true) == .quickLook)
     }
 
+    @Test func audioUsesConnorAudioPlayerRenderer() {
+        #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .audio, hasOriginalFileURL: true) == .audioPlayer)
+    }
+
     @Test func textKindsDoNotUseNativeOriginalFileRenderer() {
         #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .markdown, hasOriginalFileURL: true) == .none)
         #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .text, hasOriginalFileURL: true) == .none)
@@ -23,5 +27,6 @@ struct AttachmentPreviewPresentationPolicyTests {
     @Test func missingOriginalFileDisablesNativeRenderer() {
         #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .pdf, hasOriginalFileURL: false) == .none)
         #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .document, hasOriginalFileURL: false) == .none)
+        #expect(AttachmentPreviewPresentationPolicy.nativeRenderer(for: .audio, hasOriginalFileURL: false) == .none)
     }
 }

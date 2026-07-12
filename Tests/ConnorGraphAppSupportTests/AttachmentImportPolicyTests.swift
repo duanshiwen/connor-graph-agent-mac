@@ -56,12 +56,20 @@ struct AttachmentImportPolicyTests {
         }
     }
 
+    @Test func acceptsSupportedAudioAllowlist() {
+        for ext in ["mp3", "m4a", "wav", "aac"] {
+            #expect(AttachmentImportPolicy.acceptedKind(forExtension: ext) == .audio)
+        }
+        #expect(AttachmentImportPolicy.acceptedKind(forExtension: "flac") == nil)
+        #expect(AttachmentImportPolicy.acceptedKind(forExtension: "ogg") == nil)
+    }
+
     @Test func rejectsUnsupportedAttachmentFamilies() {
         let rejected: [(String, AttachmentImportRejectionReason)] = [
             ("page.html", .unsupportedHTML),
             ("page.htm", .unsupportedHTML),
             ("vector.svg", .unsupportedSVG),
-            ("audio.mp3", .unsupportedAudio),
+            ("audio.flac", .unsupportedAudio),
             ("video.mp4", .unsupportedVideo),
             ("archive.zip", .unsupportedArchive),
             ("archive.tar", .unsupportedArchive),
@@ -99,6 +107,26 @@ struct AttachmentImportPolicyTests {
 
         #expect(policy.validate(url: text) == .rejected(.fileTooLarge(512_000)))
         #expect(policy.validate(url: document) == .accepted(kind: .pdf))
+    }
+
+    @Test func appliesSeparateAudioSizeLimitAndValidatesContainerSignature() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let wav = root.appendingPathComponent("sample.wav")
+        var bytes = Data("RIFF".utf8)
+        bytes.append(contentsOf: [36, 0, 0, 0])
+        bytes.append(Data("WAVE".utf8))
+        bytes.append(Data(repeating: 0, count: 32))
+        try bytes.write(to: wav)
+
+        let accepted = AttachmentImportPolicy(maxAudioBytes: 100)
+        #expect(accepted.validate(url: wav) == .accepted(kind: .audio))
+        let tooSmall = AttachmentImportPolicy(maxAudioBytes: 10)
+        #expect(tooSmall.validate(url: wav) == .rejected(.fileTooLarge(10)))
+
+        let fake = root.appendingPathComponent("fake.mp3")
+        try Data("not audio".utf8).write(to: fake)
+        #expect(accepted.validate(url: fake) == .rejected(.invalidMediaContainer))
     }
 
     @Test func rejectsDocumentsAboveDocumentSizeLimit() throws {

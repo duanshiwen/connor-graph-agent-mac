@@ -119,6 +119,7 @@ struct AgentChatDateSeparatorRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
+    var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
@@ -199,9 +200,11 @@ struct AgentChatMessageRow: View {
                     }
                     messageContent
                     if !row.attachments.isEmpty {
-                        AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
-                            onPreviewAttachment(attachment)
-                        }
+                        AgentMessageAttachmentRefsView(
+                            attachments: row.attachments,
+                            localFileURL: localAttachmentFileURL,
+                            onPreview: onPreviewAttachment
+                        )
                     }
                 }
                 .foregroundStyle(Color.primary)
@@ -334,40 +337,20 @@ private struct AgentAssistantMessageActionsView: View {
 
 struct AgentMessageAttachmentRefsView: View {
     var attachments: [AgentMessageAttachmentRef]
+    var localFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreview: (AgentMessageAttachmentRef) -> Void
 
     var body: some View {
-        HStack(spacing: AgentChatLayout.spaceS) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             ForEach(attachments) { attachment in
-                Button {
-                    onPreview(attachment)
-                } label: {
-                    Text("\(iconPrefix(for: attachment.kind)) \(attachment.displayName)")
-                        .font(AgentChatTypography.meta)
-                        .lineLimit(1)
-                        .padding(.horizontal, AgentChatLayout.spaceS)
-                        .padding(.vertical, 4)
-                        .background(ConnorCraftPalette.accentSubtleFill, in: Capsule())
-                        .overlay(Capsule().stroke(ConnorCraftPalette.accentBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("预览附件 \(attachment.displayName)")
+                AgentInlineAttachmentView(
+                    attachment: attachment,
+                    localFileURL: localFileURL(attachment),
+                    onPreview: { onPreview(attachment) }
+                )
             }
         }
         .accessibilityLabel("消息附件 \(attachments.count) 个")
-    }
-
-    private func iconPrefix(for kind: AgentAttachmentKind) -> String {
-        switch kind {
-        case .image: return "图片"
-        case .pdf: return "PDF"
-        case .csv, .spreadsheet: return "表格"
-        case .code, .json, .html: return "代码"
-        case .archive: return "压缩包"
-        case .audio: return "音频"
-        case .video: return "视频"
-        default: return "附件"
-        }
     }
 }
 

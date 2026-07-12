@@ -117,6 +117,53 @@ import ConnorGraphAgent
 
 // MARK: - stripImageContent tests
 
+@Test func currentModelMediaGateAllowsDeclaredImageGeneration() throws {
+    let profile = AgentModelCapabilityKernel.profile(
+        providerKind: .openAIResponses,
+        modelID: "gpt-5",
+        explicitGeneratedMediaCapabilities: [.imageGeneration]
+    )
+
+    #expect(CurrentModelMediaCapabilityGate.decision(modelID: profile.modelID, capabilities: profile.agentCapabilities, requestKind: .image) == .supported)
+}
+
+@Test func currentModelMediaGateRejectsUnsupportedImageWithoutFallback() throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: "claude-sonnet-4")
+
+    let decision = CurrentModelMediaCapabilityGate.decision(modelID: profile.modelID, capabilities: profile.agentCapabilities, requestKind: .image)
+    if case .unsupportedByCurrentModel(let reason) = decision {
+        #expect(reason.contains("claude-sonnet-4"))
+        #expect(reason.contains("请切换"))
+    } else {
+        Issue.record("Expected current model capability rejection")
+    }
+}
+
+@Test func currentModelMediaGateRequiresBothSpeechAndStreamingCapabilities() throws {
+    let nonStreaming = AgentModelCapabilities(
+        supportsStreaming: true,
+        supportsToolCalling: false,
+        supportsParallelToolCalls: false,
+        supportsStructuredOutput: false,
+        supportsVision: false,
+        generatedMediaCapabilities: [.speechGeneration]
+    )
+    #expect(CurrentModelMediaCapabilityGate.decision(modelID: "speech-file-only", capabilities: nonStreaming, requestKind: .speech, requiresStreaming: false) == .supported)
+    if case .unsupportedByCurrentModel(let reason) = CurrentModelMediaCapabilityGate.decision(modelID: "speech-file-only", capabilities: nonStreaming, requestKind: .speech, requiresStreaming: true) {
+        #expect(reason.contains("streamingAudioOutput"))
+    } else {
+        Issue.record("Expected streaming audio capability rejection")
+    }
+}
+
+@Test func agentModelCapabilitiesLegacyJSONDefaultsGeneratedMediaToEmpty() throws {
+    let json = """
+    {"supportsStreaming":true,"supportsToolCalling":true,"supportsParallelToolCalls":false,"supportsStructuredOutput":false,"supportsVision":true}
+    """.data(using: .utf8)!
+    let decoded = try JSONDecoder().decode(AgentModelCapabilities.self, from: json)
+    #expect(decoded.generatedMediaCapabilities.isEmpty)
+}
+
 @Test func stripImageContent_removesImagePartsPreservesText() throws {
     let request = AgentModelRequest(messages: [
         AgentModelMessage(role: .system, content: "You are helpful."),

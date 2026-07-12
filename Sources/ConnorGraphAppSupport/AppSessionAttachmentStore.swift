@@ -1,3 +1,4 @@
+import AVFoundation
 import CryptoKit
 import Foundation
 import ConnorGraphCore
@@ -17,7 +18,9 @@ public struct AppSessionAttachmentStore: Sendable {
     public func importFile(
         at sourceURL: URL,
         sessionID: String,
-        now: Date = Date()
+        now: Date = Date(),
+        origin: AgentAttachmentOrigin = .userImported,
+        generationMetadata: AgentAttachmentGenerationMetadata? = nil
     ) throws -> AgentAttachmentManifest {
         let fileManager = FileManager.default
         let importPolicy = AttachmentImportPolicy(maxAcceptedBytes: maxTextExtractionBytes)
@@ -61,6 +64,7 @@ public struct AppSessionAttachmentStore: Sendable {
         var extractionStatus: AgentAttachmentExtractionStatus = Self.shouldEnqueueExtraction(kind: kind) ? .pending : .pending
         var derivativeRefs: [AgentAttachmentDerivativeRef] = []
         var extractionReports: [AgentAttachmentExtractionReport] = []
+        let mediaMetadata = Self.mediaMetadata(for: originalURL, kind: kind)
 
         if !Self.shouldEnqueueExtraction(kind: kind) {
             let extraction = try AttachmentTextExtraction.extract(fileURL: originalURL, kind: kind, maxBytes: maxTextExtractionBytes)
@@ -122,7 +126,10 @@ public struct AppSessionAttachmentStore: Sendable {
             extractionReports: extractionReports,
             createdAt: now,
             updatedAt: now,
-            sourceDisplayPath: sourceURL.path
+            sourceDisplayPath: origin == .userImported ? sourceURL.path : nil,
+            origin: origin,
+            generationMetadata: generationMetadata,
+            mediaMetadata: mediaMetadata
         )
 
         let encoder = JSONEncoder()
@@ -284,6 +291,18 @@ public struct AppSessionAttachmentStore: Sendable {
         return "\(timestamp)-\(engine.rawValue)-\(UUID().uuidString.prefix(8))"
     }
 
+    private static func mediaMetadata(for url: URL, kind: AgentAttachmentKind) -> AgentAttachmentMediaMetadata? {
+        guard kind == .audio else { return nil }
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let format = file.processingFormat
+        let duration = format.sampleRate > 0 ? Double(file.length) / format.sampleRate : nil
+        return AgentAttachmentMediaMetadata(
+            durationSeconds: duration,
+            sampleRate: format.sampleRate,
+            channelCount: Int(format.channelCount)
+        )
+    }
+
     private static func mimeType(for kind: AgentAttachmentKind, fileExtension: String?) -> String? {
         switch kind {
         case .text: return "text/plain"
@@ -322,6 +341,14 @@ public struct AppSessionAttachmentStore: Sendable {
             case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             case "ppt": return "application/vnd.ms-powerpoint"
             default: return "application/presentation"
+            }
+        case .audio:
+            switch fileExtension?.lowercased() {
+            case "mp3": return "audio/mpeg"
+            case "wav": return "audio/wav"
+            case "m4a": return "audio/mp4"
+            case "aac": return "audio/aac"
+            default: return "audio/*"
             }
         default: return nil
         }

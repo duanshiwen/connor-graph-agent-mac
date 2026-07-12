@@ -43,6 +43,7 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
     case unsupportedExecutableOrBinary
     case unsupportedUnknownExtension(String)
     case fileTooLarge(Int64)
+    case invalidMediaContainer
 
     public var description: String { userMessage }
 
@@ -62,6 +63,7 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
         case .unsupportedExecutableOrBinary: return "暂不支持可执行、安装包或二进制文件"
         case .unsupportedUnknownExtension(let ext): return "暂不支持 .\(ext) 文件"
         case .fileTooLarge(let maxBytes): return "文件超过当前附件大小限制（\(ByteCountFormatter.string(fromByteCount: maxBytes, countStyle: .file))）"
+        case .invalidMediaContainer: return "文件内容与音频格式不匹配或已损坏"
         }
     }
 }
@@ -70,11 +72,13 @@ public struct AttachmentImportPolicy: Sendable {
     public var maxAcceptedBytes: Int64
     public var maxImageBytes: Int64
     public var maxDocumentBytes: Int64
+    public var maxAudioBytes: Int64
 
-    public init(maxAcceptedBytes: Int64 = 512_000, maxImageBytes: Int64 = 10_000_000, maxDocumentBytes: Int64 = 25_000_000) {
+    public init(maxAcceptedBytes: Int64 = 512_000, maxImageBytes: Int64 = 10_000_000, maxDocumentBytes: Int64 = 25_000_000, maxAudioBytes: Int64 = 50_000_000) {
         self.maxAcceptedBytes = maxAcceptedBytes
         self.maxImageBytes = maxImageBytes
         self.maxDocumentBytes = maxDocumentBytes
+        self.maxAudioBytes = maxAudioBytes
     }
 
     public func validate(url: URL, fileManager: FileManager = .default) -> AttachmentImportValidationResult {
@@ -88,6 +92,9 @@ public struct AttachmentImportPolicy: Sendable {
         let byteLimit = byteLimit(for: kind)
         if let byteCount = try? byteCount(url: url, fileManager: fileManager), byteCount > byteLimit {
             return .rejected(.fileTooLarge(byteLimit))
+        }
+        if kind == .audio, fileManager.fileExists(atPath: url.path), !Self.hasValidAudioSignature(url: url, extension: ext) {
+            return .rejected(.invalidMediaContainer)
         }
 
         return .accepted(kind: kind)
@@ -108,6 +115,7 @@ public struct AttachmentImportPolicy: Sendable {
         case "doc", "docx", "rtf", "pages": return .document
         case "xls", "xlsx", "numbers": return .spreadsheet
         case "ppt", "pptx", "keynote": return .presentation
+        case "mp3", "wav", "m4a", "aac": return .audio
         default:
             return nil
         }
@@ -117,7 +125,7 @@ public struct AttachmentImportPolicy: Sendable {
         switch ext.lowercased() {
         case "html", "htm": return .unsupportedHTML
         case "svg", "avif": return .unsupportedSVG
-        case "mp3", "wav", "m4a", "aac", "flac", "ogg": return .unsupportedAudio
+        case "flac", "ogg": return .unsupportedAudio
         case "mp4", "mov", "mkv", "avi", "webm": return .unsupportedVideo
         case "pages", "numbers", "keynote": return .unsupportedIWork
         case "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz": return .unsupportedArchive
@@ -133,8 +141,29 @@ public struct AttachmentImportPolicy: Sendable {
             return maxImageBytes
         case .pdf, .document, .spreadsheet, .presentation:
             return maxDocumentBytes
+        case .audio:
+            return maxAudioBytes
         default:
             return maxAcceptedBytes
+        }
+    }
+
+    private static func hasValidAudioSignature(url: URL, extension ext: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 16), !data.isEmpty else { return false }
+        let bytes = [UInt8](data)
+        switch ext {
+        case "wav":
+            return bytes.count >= 12 && String(bytes: bytes[0..<4], encoding: .ascii) == "RIFF" && String(bytes: bytes[8..<12], encoding: .ascii) == "WAVE"
+        case "m4a":
+            return bytes.count >= 8 && String(bytes: bytes[4..<8], encoding: .ascii) == "ftyp"
+        case "mp3":
+            return bytes.count >= 3 && (String(bytes: bytes[0..<3], encoding: .ascii) == "ID3" || (bytes[0] == 0xFF && bytes[1] & 0xE0 == 0xE0))
+        case "aac":
+            return bytes.count >= 2 && bytes[0] == 0xFF && bytes[1] & 0xF6 == 0xF0
+        default:
+            return false
         }
     }
 
