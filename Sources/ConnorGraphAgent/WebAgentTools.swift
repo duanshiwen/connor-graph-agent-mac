@@ -37,7 +37,7 @@ public typealias BrowserAssistedSearchHandler = @Sendable (BrowserAssistedSearch
 
 public struct BrowserFetchTool: AgentTool {
     public let name = "browser_fetch"
-    public let description = "Fetch a web page URL and return a lightweight text/HTML snapshot for the agent. Use this when you need to read a known URL directly before reasoning or creating graph evidence."
+    public let description = "Fetch a known web page through Connor's system-browser-assisted path and return a lightweight text/HTML snapshot. Use this as the fallback when web_fetch returns HTTP 403, cannot use a required authenticated browser session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content. Never use it to bypass authorization or access content the user is not permitted to access."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "url": .string(description: "The absolute http/https URL to fetch."),
@@ -448,7 +448,7 @@ public typealias BrowserAssistedWebFetchHandler = @Sendable (BrowserAssistedWebF
 
 public struct NativeWebFetchTool: AgentTool {
     public let name = "web_fetch"
-    public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. Prefer this over browser_fetch when you want cleaned Markdown/text, tables, and optional JavaScript rendering."
+    public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. This is the standard original-page reader and should normally be tried before browser_fetch. If it returns HTTP 403, cannot use a required authenticated session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content, fall back to browser_fetch."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "url": .string(description: "The absolute URL to fetch."),
