@@ -345,6 +345,9 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
+    @Published var isDiscoveringLLMCapabilities: Bool = false
+    @Published var isVerifyingImageGeneration: Bool = false
+    @Published var llmCapabilityEvidence: [AppProviderCapabilityEvidence] = []
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
@@ -541,6 +544,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
+    private var providerCapabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
+    private var providerCapabilityDiscoveryService: AppProviderCapabilityDiscoveryService
     private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
@@ -2292,6 +2297,15 @@ final class AppViewModel: NSObject, ObservableObject {
         self.automationConfig = automationConfig
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
+        let capabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(
+            settingsStore: llmSettingsRepository.settingsStore,
+            credentialStore: llmSettingsRepository.credentialStore
+        )
+        self.providerCapabilityEvidenceRepository = capabilityEvidenceRepository
+        self.providerCapabilityDiscoveryService = AppProviderCapabilityDiscoveryService(
+            settingsRepository: llmSettingsRepository,
+            evidenceRepository: capabilityEvidenceRepository
+        )
         self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory
         if let storagePaths {
             let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
@@ -4313,6 +4327,7 @@ final class AppViewModel: NSObject, ObservableObject {
             llmAPIKeyInput = ""
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
+            refreshLLMCapabilityEvidence()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -4631,6 +4646,43 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
         case .notConfigured, .failed:
             errorMessage = result.message
+        }
+    }
+
+    func discoverLLMCapabilities() async {
+        guard !llmDefaultConnectionID.isEmpty else { return }
+        isDiscoveringLLMCapabilities = true
+        defer { isDiscoveringLLMCapabilities = false }
+        let result = await providerCapabilityDiscoveryService.discoverProtocolCapabilities(connectionID: llmDefaultConnectionID)
+        llmCapabilityEvidence = result.evidence
+        llmHealthCheckMessage = result.evidence.isEmpty ? "无法发现连接能力，请先确认连接和 API Key。" : "能力发现完成。图片生成需要单独授权验证。"
+        rebuildNativeSessionManagerForActiveSession()
+    }
+
+    func verifyLLMImageGeneration() async {
+        guard !llmDefaultConnectionID.isEmpty else { return }
+        isVerifyingImageGeneration = true
+        defer { isVerifyingImageGeneration = false }
+        let evidence = await providerCapabilityDiscoveryService.discoverHostedImageGeneration(
+            connectionID: llmDefaultConnectionID,
+            authorization: .userInitiated
+        )
+        refreshLLMCapabilityEvidence()
+        if let evidence {
+            llmHealthCheckMessage = evidence.status == .verified ? "图片生成已验证，当前会话将启用 generate_image。" : "图片生成验证结果：\(evidence.sanitizedDiagnostic ?? evidence.status.rawValue)"
+        } else {
+            llmHealthCheckMessage = "请先通过“测试并发现能力”验证 Responses API。"
+        }
+        rebuildNativeSessionManagerForActiveSession()
+    }
+
+    func refreshLLMCapabilityEvidence() {
+        guard let connection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID }) else {
+            llmCapabilityEvidence = []
+            return
+        }
+        llmCapabilityEvidence = AppProviderCapabilityID.allCases.compactMap {
+            try? providerCapabilityEvidenceRepository.effectiveEvidence(for: $0, connection: connection)
         }
     }
 
