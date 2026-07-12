@@ -26,6 +26,7 @@ enum AppMenuPresentation {
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorApplicationDelegate.self) private var applicationDelegate
     @StateObject private var viewModel: AppViewModel
+    @StateObject private var identityStore: AppUserIdentityStore
     @StateObject private var noteImportModel: NoteImportViewModel
     private let featureFlags: AppFeatureFlags
 
@@ -33,17 +34,19 @@ struct ConnorGraphAgentMacApp: App {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
         let liveViewModel = AppViewModel.live()
         _viewModel = StateObject(wrappedValue: liveViewModel)
+        _identityStore = StateObject(wrappedValue: AppUserIdentityStore())
         _noteImportModel = StateObject(wrappedValue: liveViewModel.makeNoteImportViewModel())
         featureFlags = AppFeatureFlags.load()
     }
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
-            AppShellView(viewModel: viewModel)
+            AppShellView(viewModel: viewModel, identityStore: identityStore)
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
                     viewModel.startTaskSchedulerTimer()
+                    await identityStore.restoreSession()
                 }
         }
         .windowToolbarStyle(.unifiedCompact)
