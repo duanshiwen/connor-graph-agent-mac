@@ -120,6 +120,7 @@ public enum AgentModelCapabilityKernel {
         let base = baseCapabilities(for: providerKind)
         let normalizedModel = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         let visionResolution = resolveVisionSupport(providerKind: providerKind, modelID: normalizedModel, explicitVisionSupport: explicitVisionSupport)
+        let generatedMediaResolution = resolveGeneratedMediaCapabilities(providerKind: providerKind, modelID: normalizedModel)
         return AgentModelCapabilityProfile(
             providerKind: providerKind,
             modelID: normalizedModel,
@@ -128,9 +129,9 @@ public enum AgentModelCapabilityKernel {
             supportsParallelToolCalls: base.parallelToolCalls,
             supportsStructuredOutput: base.structuredOutput,
             supportsVision: visionResolution.supportsVision,
-            generatedMediaCapabilities: explicitGeneratedMediaCapabilities ?? resolveGeneratedMediaCapabilities(providerKind: providerKind, modelID: normalizedModel),
-            confidence: visionResolution.confidence,
-            signals: visionResolution.signals
+            generatedMediaCapabilities: explicitGeneratedMediaCapabilities ?? generatedMediaResolution.capabilities,
+            confidence: explicitGeneratedMediaCapabilities != nil ? .explicit : maxConfidence(visionResolution.confidence, generatedMediaResolution.confidence),
+            signals: Array(Set(visionResolution.signals + (explicitGeneratedMediaCapabilities != nil ? [.explicitConfig] : generatedMediaResolution.signals)))
         )
     }
 
@@ -186,23 +187,43 @@ public enum AgentModelCapabilityKernel {
     private static func resolveGeneratedMediaCapabilities(
         providerKind: AgentModelProviderKind,
         modelID: String
-    ) -> Set<AgentGeneratedMediaCapability> {
+    ) -> (capabilities: Set<AgentGeneratedMediaCapability>, confidence: AgentModelCapabilityConfidence, signals: [AgentModelCapabilitySignal]) {
         let normalized = modelID.lowercased()
         var result: Set<AgentGeneratedMediaCapability> = []
-        if providerKind == .openAIResponses,
-           normalized.hasPrefix("gpt-5") || normalized.hasPrefix("gpt-4.1") || normalized.hasPrefix("gpt-4o") {
+        var confidence: AgentModelCapabilityConfidence = .unknown
+        var signals: [AgentModelCapabilitySignal] = []
+        if providerKind == .openAIResponses, supportsOpenAIHostedImageTool(normalized) {
             result.insert(.imageGeneration)
+            confidence = .high
+            signals.append(.providerPreset)
         }
         if normalized.contains("tts") {
             result.formUnion([.speechGeneration, .streamingAudioOutput])
+            confidence = .medium
+            signals.append(.modelNameHeuristic)
         }
         if normalized.contains("realtime") && providerKind != .anthropicCompatible {
             result.formUnion([.audioInput, .speechGeneration, .streamingAudioOutput])
+            confidence = .medium
+            signals.append(.modelNameHeuristic)
         }
         if resolveVisionSupport(providerKind: providerKind, modelID: modelID, explicitVisionSupport: nil).supportsVision {
             result.insert(.imageInput)
         }
-        return result
+        return (result, confidence, signals)
+    }
+
+    private static func supportsOpenAIHostedImageTool(_ modelID: String) -> Bool {
+        let exactModels: Set<String> = ["o3"]
+        if exactModels.contains(modelID) { return true }
+        return ["gpt-5", "gpt-4.1", "gpt-4o"].contains { family in
+            modelID == family || modelID.hasPrefix(family + "-") || modelID.hasPrefix(family + ".")
+        }
+    }
+
+    private static func maxConfidence(_ lhs: AgentModelCapabilityConfidence, _ rhs: AgentModelCapabilityConfidence) -> AgentModelCapabilityConfidence {
+        let rank: [AgentModelCapabilityConfidence: Int] = [.unknown: 0, .low: 1, .medium: 2, .high: 3, .explicit: 4]
+        return (rank[lhs] ?? 0) >= (rank[rhs] ?? 0) ? lhs : rhs
     }
 
     private static func containsAny(_ value: String, in markers: [String]) -> Bool {
