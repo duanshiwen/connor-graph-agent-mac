@@ -90,6 +90,31 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     #expect(!controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
 }
 
+@Test func discoveredImageCapabilityRegistersGenerateImageEndToEnd() async throws {
+    let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
+    let llmStore = ConfiguredMediaStore(); let credentials = ConfiguredMediaCredentials(); let llmRepository = AppLLMSettingsRepository(settingsStore: llmStore, credentialStore: credentials)
+    let relay = AppLLMConnectionConfig(id: "relay", name: "Discovered Relay", providerMode: .openAICompatible, baseURLString: "https://discovered.example/v1", model: "gpt-5.6")
+    try llmRepository.save(settings: AppLLMSettings(connections: [relay], defaultConnectionID: relay.id), apiKey: "relay-key")
+    let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: llmStore, credentialStore: credentials)
+    let discovery = AppProviderCapabilityDiscoveryService(
+        settingsRepository: llmRepository,
+        evidenceRepository: evidenceRepository,
+        openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        openAIResponsesProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        functionCallingProbe: { _ in AgentModelResponse(text: "OK") },
+        hostedImageGenerationProbe: { _ in true }
+    )
+    _ = await discovery.discoverProtocolCapabilities(connectionID: relay.id)
+    _ = await discovery.discoverHostedImageGeneration(connectionID: relay.id, authorization: .userInitiated)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); defer { try? FileManager.default.removeItem(at: root) }; let paths = AppStoragePaths(applicationSupportDirectory: root); try paths.ensureDirectoryHierarchy()
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: llmRepository, capabilityEvidenceRepository: evidenceRepository, storagePaths: paths)
+
+    let controller = factory.makeAgentLoopController()
+
+    #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+}
+
 @Test func runtimeFactoryDoesNotInferImageGenerationFromRelayGPTModelName() throws {
     let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite"); defer { try? FileManager.default.removeItem(at: databaseURL) }
     let store = try SQLiteGraphKernelStore(path: databaseURL.path); try store.migrate()
