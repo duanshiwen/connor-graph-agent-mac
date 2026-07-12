@@ -1,11 +1,17 @@
 import CoreGraphics
 
+enum ChatViewportContentLayout: Equatable {
+    case eager
+    case lazy
+}
+
 struct ChatViewportConfiguration: Equatable {
     var spacing: CGFloat = 14
     var bottomPinThreshold: CGFloat = 64
     var topLoadTriggerOffset: CGFloat = 80
     var preservesBottomAnchorForUnderfilledContent: Bool = true
     var showsJumpToLatestButton: Bool = true
+    var contentLayout: ChatViewportContentLayout = .lazy
 }
 
 struct ChatViewportMetrics: Equatable {
