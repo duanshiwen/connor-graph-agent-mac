@@ -7175,7 +7175,16 @@ struct NoteSessionPromptBuilder {
 
 ## 系统笔记指令
 
-用户正在创建一个笔记。请对用户的输入进行以下处理：
+### 当前输入上下文
+- session_kind: note
+- note_phase: initial_capture
+- persistence: session_backed
+
+用户通过笔记界面提交了这个 Note Session 的第一条内容。这条用户消息已经由 Session OS 保存，并会通过既有后台摄取链路自动进入 Memory OS L0/L1；保存笔记不是一个需要你执行的工具动作。
+
+不要为了保存这条笔记调用 `Write`、`Edit`、shell、知识库写入或 Memory 写入工具，也不要生成文件名、创建 Markdown 文件或选择保存路径。只有当用户在笔记内容中明确要求创建文件、导出到路径或修改现有文件时，才按普通工具权限规则执行相应操作。
+
+完成本轮强制上下文与搜索 Bootstrap 后，请对用户的输入进行以下处理：
 
 1. **总结核心内容**：用一段话概括用户输入的核心思想
 2. **领域识别**：指出这段内容涉及的知识领域
