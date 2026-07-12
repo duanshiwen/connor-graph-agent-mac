@@ -166,7 +166,53 @@ struct AgentAttachmentCommercialDomainTests {
         #expect(manifest.derivativeRefs.isEmpty)
         #expect(manifest.extractionReports.isEmpty)
         #expect(manifest.remoteFileRefs.isEmpty)
+        #expect(manifest.origin == .userImported)
+        #expect(manifest.generationMetadata == nil)
+        #expect(manifest.mediaMetadata == nil)
         #expect(manifest.messageRef.previewText == "hello")
+    }
+
+    @Test func generatedMediaMetadataRoundTripsThroughManifest() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_400)
+        let generation = AgentAttachmentGenerationMetadata(
+            providerID: "openai-responses",
+            modelID: "gpt-5",
+            responseID: "response-1",
+            toolCallID: "call-1",
+            revisedPrompt: "A calm lake",
+            parameters: ["size": "1024x1024"]
+        )
+        let media = AgentAttachmentMediaMetadata(pixelWidth: 1024, pixelHeight: 1024)
+        let manifest = AgentAttachmentManifest(
+            id: "generated-image",
+            displayName: "generated.png",
+            originalFilename: "generated.png",
+            normalizedFilename: "generated.png",
+            kind: .image,
+            mimeType: "image/png",
+            fileExtension: "png",
+            byteCount: 128,
+            sha256: "hash",
+            lifecycleStatus: .ready,
+            extractionStatus: .unsupported,
+            storedRelativePath: "attachments/generated-image/original/generated.png",
+            manifestRelativePath: "attachments/generated-image/manifest.json",
+            createdAt: now,
+            updatedAt: now,
+            origin: .modelGenerated,
+            generationMetadata: generation,
+            mediaMetadata: media
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AgentAttachmentManifest.self, from: encoder.encode(manifest))
+
+        #expect(decoded.origin == .modelGenerated)
+        #expect(decoded.generationMetadata == generation)
+        #expect(decoded.mediaMetadata == media)
     }
 
     @Test func auditAndEvidenceRecordsRepresentAttachmentLineage() throws {
