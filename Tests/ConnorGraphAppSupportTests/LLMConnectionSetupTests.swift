@@ -144,6 +144,43 @@ struct LLMConnectionSetupTests {
         #expect(try evidenceRepository.effectiveEvidence(for: .hostedImageGeneration, connection: result.connection)?.status == .verified)
     }
 
+    @Test(arguments: [
+        (OpenAICompatibleProviderError.httpStatus(400, message: "unsupported tool image_generation"), AppProviderCapabilityStatus.unsupported),
+        (OpenAICompatibleProviderError.httpStatus(503, message: "upstream unavailable"), AppProviderCapabilityStatus.unknown)
+    ])
+    func imageProbeFailureDoesNotRejectValidPrimaryConnection(error: OpenAICompatibleProviderError, expectedStatus: AppProviderCapabilityStatus) async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let evidenceRepository = AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials)
+        let discovery = AppProviderCapabilityDiscoveryService(
+            settingsRepository: repository,
+            evidenceRepository: evidenceRepository,
+            openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+            openAIResponsesProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+            functionCallingProbe: { _ in AgentModelResponse(text: "OK") },
+            hostedImageGenerationProbe: { _ in throw error }
+        )
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            capabilityDiscoveryService: discovery,
+            openAICompatibleHealthCheck: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "partial-capability-provider-\(expectedStatus.rawValue)",
+            kind: .openAICompatible,
+            name: "Partial Capability Provider",
+            baseURLString: "https://api.example.com/v1",
+            model: "gpt-test",
+            apiKey: "secret"
+        ))
+
+        #expect(result.capabilityEvidence.first { $0.capability == .hostedImageGeneration }?.status == expectedStatus)
+        #expect(try repository.apiKey(for: result.connection.id) == "secret")
+        #expect(try evidenceRepository.effectiveEvidence(for: .hostedImageGeneration, connection: result.connection)?.status == expectedStatus)
+    }
+
     @Test func openAICompatibleSuccessSavesMetadataAndSecretSeparately() async throws {
         let store = MemoryLLMSettingsStore()
         let credentials = MemoryCredentialStore()
