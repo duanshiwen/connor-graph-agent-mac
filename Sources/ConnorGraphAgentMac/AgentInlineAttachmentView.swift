@@ -62,6 +62,12 @@ struct AgentInlineAttachmentView: View {
                 layout: layout,
                 onPreview: onPreview
             )
+        case .audio:
+            AgentInlineAudioAttachmentView(
+                attachment: attachment,
+                localFileURL: localFileURL,
+                onPreview: onPreview
+            )
         default:
             AgentAttachmentChip(attachment: attachment, onPreview: onPreview)
         }
@@ -116,6 +122,80 @@ private struct AgentInlineImageAttachmentView: View {
         }
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, minHeight: layout.minimumPlaceholderHeight)
+    }
+}
+
+private struct AgentInlineAudioAttachmentView: View {
+    var attachment: AgentMessageAttachmentRef
+    var localFileURL: URL?
+    var onPreview: () -> Void
+    @State private var playback = AgentAudioPlaybackController()
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            Button {
+                playback.togglePlayback()
+            } label: {
+                Image(systemName: playback.state == .playing ? "pause.fill" : "play.fill")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(localFileURL == nil || isUnavailable)
+            .accessibilityLabel(playback.state == .playing ? "暂停音频" : "播放音频")
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(attachment.displayName)
+                    .font(AgentChatTypography.metaEmphasis)
+                    .lineLimit(1)
+                if playback.duration > 0 {
+                    Slider(value: Binding(get: { playback.currentTime }, set: { playback.seek(to: $0) }), in: 0...playback.duration)
+                        .disabled(!playback.state.canSeek)
+                        .accessibilityLabel("音频进度")
+                    Text("\(formatted(playback.currentTime)) / \(formatted(playback.duration))")
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(statusText)
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button(action: onPreview) { Image(systemName: "info.circle") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("查看音频附件信息")
+        }
+        .padding(AgentChatLayout.spaceS)
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
+        .task(id: localFileURL) {
+            if let localFileURL { playback.prepare(source: .file(localFileURL)) }
+        }
+        .onDisappear { playback.stop() }
+    }
+
+    private var isUnavailable: Bool {
+        if case .failed = playback.state { return true }
+        return false
+    }
+
+    private var statusText: String {
+        switch playback.state {
+        case .loading: return "正在载入"
+        case .buffering: return "缓冲中"
+        case .stalled: return "等待更多音频"
+        case .completing: return "正在完成"
+        case .failed(let message): return message
+        case .cancelled: return "已取消"
+        default: return localFileURL == nil ? "音频文件不可用" : "可播放"
+        }
+    }
+
+    private func formatted(_ seconds: TimeInterval) -> String {
+        let total = max(Int(seconds.rounded(.down)), 0)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 
