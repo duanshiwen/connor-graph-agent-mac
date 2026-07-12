@@ -7062,11 +7062,13 @@ final class AppViewModel: NSObject, ObservableObject {
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachmentsForSubmission = explicitAttachments ?? pendingAttachmentRefs
         guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
+        guard !isLoadingSelectedChatSessionDetail else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
         let submittingSessionID = manager.session.id
+        guard selectedChatSessionID == nil || selectedChatSessionID == submittingSessionID else { return nil }
         guard !submittingChatSessionIDs.contains(submittingSessionID) else { return nil }
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[submittingSessionID] = liveBackend
