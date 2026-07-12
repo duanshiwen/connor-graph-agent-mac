@@ -350,6 +350,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmCapabilityEvidence: [AppProviderCapabilityEvidence] = []
     @Published private(set) var lastAddedLLMConnectionID: String?
     @Published private(set) var lastAddedLLMCapabilityEvidence: [AppProviderCapabilityEvidence] = []
+    @Published var selectedLLMConnectionDetailID: String?
     @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
@@ -4337,7 +4338,10 @@ final class AppViewModel: NSObject, ObservableObject {
             llmAPIKeyInput = ""
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
-            refreshLLMCapabilityEvidence()
+            if selectedLLMConnectionDetailID == nil || !settings.connections.contains(where: { $0.id == selectedLLMConnectionDetailID }) {
+                selectedLLMConnectionDetailID = settings.defaultConnectionID
+            }
+            refreshLLMCapabilityEvidence(connectionID: selectedLLMConnectionDetailID)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -4508,6 +4512,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let result = try await service.setupConnection(input)
         lastAddedLLMConnectionID = result.connection.id
         lastAddedLLMCapabilityEvidence = result.capabilityEvidence
+        selectedLLMConnectionDetailID = result.connection.id
         loadLLMSettings()
         syncActiveSessionLLMOverride(to: result.connection)
         updateWelcomeState()
@@ -4555,15 +4560,27 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func deleteSelectedLLMConnection() {
+        deleteLLMConnection(llmDefaultConnectionID)
+    }
+
+    func deleteLLMConnection(_ connectionID: String) {
         guard llmConnectionConfigs.count > 1 else {
             llmSettingsMessage = "至少需要保留一个 AI 连接。"
             return
         }
-        let deletingID = llmDefaultConnectionID
-        llmConnectionConfigs.removeAll { $0.id == deletingID }
-        try? llmSettingsRepository.clearAPIKey(connectionID: deletingID)
-        llmDefaultConnectionID = llmConnectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
-        selectDefaultLLMConnection(llmDefaultConnectionID)
+        guard llmConnectionConfigs.contains(where: { $0.id == connectionID }) else { return }
+        let wasDefault = connectionID == llmDefaultConnectionID
+        llmConnectionConfigs.removeAll { $0.id == connectionID }
+        try? llmSettingsRepository.clearAPIKey(connectionID: connectionID)
+        try? providerCapabilityEvidenceRepository.invalidate(connectionID: connectionID)
+        if selectedLLMConnectionDetailID == connectionID {
+            selectedLLMConnectionDetailID = llmConnectionConfigs.first?.id
+        }
+        if wasDefault {
+            llmDefaultConnectionID = llmConnectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
+        }
+        persistLLMSettings(rebuildRuntime: true)
+        refreshLLMCapabilityEvidence(connectionID: selectedLLMConnectionDetailID)
     }
 
     func renameLLMConnection(_ connectionID: String, name: String) {
@@ -4663,25 +4680,32 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func discoverLLMCapabilities() async {
-        guard !llmDefaultConnectionID.isEmpty else { return }
+    func selectLLMConnectionDetail(_ connectionID: String) {
+        guard llmConnectionConfigs.contains(where: { $0.id == connectionID }) else { return }
+        selectedLLMConnectionDetailID = connectionID
+        refreshLLMCapabilityEvidence(connectionID: connectionID)
+        llmHealthCheckMessage = nil
+    }
+
+    func discoverLLMCapabilities(connectionID: String) async {
+        guard llmConnectionConfigs.contains(where: { $0.id == connectionID }) else { return }
         isDiscoveringLLMCapabilities = true
         defer { isDiscoveringLLMCapabilities = false }
-        let result = await providerCapabilityDiscoveryService.discoverProtocolCapabilities(connectionID: llmDefaultConnectionID)
-        llmCapabilityEvidence = result.evidence
+        let result = await providerCapabilityDiscoveryService.discoverProtocolCapabilities(connectionID: connectionID)
+        if selectedLLMConnectionDetailID == connectionID { llmCapabilityEvidence = result.evidence }
         llmHealthCheckMessage = result.evidence.isEmpty ? "无法发现连接能力，请先确认连接和 API Key。" : "能力发现完成。图片生成需要单独授权验证。"
         rebuildNativeSessionManagerForActiveSession()
     }
 
-    func verifyLLMImageGeneration() async {
-        guard !llmDefaultConnectionID.isEmpty else { return }
+    func verifyLLMImageGeneration(connectionID: String) async {
+        guard llmConnectionConfigs.contains(where: { $0.id == connectionID }) else { return }
         isVerifyingImageGeneration = true
         defer { isVerifyingImageGeneration = false }
         let evidence = await providerCapabilityDiscoveryService.discoverHostedImageGeneration(
-            connectionID: llmDefaultConnectionID,
+            connectionID: connectionID,
             authorization: .userInitiated
         )
-        refreshLLMCapabilityEvidence()
+        refreshLLMCapabilityEvidence(connectionID: connectionID)
         if let evidence {
             llmHealthCheckMessage = evidence.status == .verified ? "图片生成已验证，当前会话将启用 generate_image。" : "图片生成验证结果：\(evidence.sanitizedDiagnostic ?? evidence.status.rawValue)"
         } else {
@@ -4690,8 +4714,9 @@ final class AppViewModel: NSObject, ObservableObject {
         rebuildNativeSessionManagerForActiveSession()
     }
 
-    func refreshLLMCapabilityEvidence() {
-        guard let connection = llmConnectionConfigs.first(where: { $0.id == llmDefaultConnectionID }) else {
+    func refreshLLMCapabilityEvidence(connectionID: String? = nil) {
+        let targetID = connectionID ?? selectedLLMConnectionDetailID
+        guard let targetID, let connection = llmConnectionConfigs.first(where: { $0.id == targetID }) else {
             llmCapabilityEvidence = []
             return
         }

@@ -499,6 +499,7 @@ struct SettingsAISection: View {
     @State private var renamingConnection: AppLLMConnectionConfig?
     @State private var renameDraft = ""
     @State private var isConfirmingImageCapabilityProbe = false
+    @State private var imageCapabilityProbeConnectionID: String?
 
     var body: some View {
         Group {
@@ -537,7 +538,8 @@ struct SettingsAISection: View {
         }
         .confirmationDialog("验证图片生成能力？", isPresented: $isConfirmingImageCapabilityProbe) {
             Button("验证图片生成（可能产生少量费用）") {
-                Task { await viewModel.verifyLLMImageGeneration() }
+                guard let connectionID = imageCapabilityProbeConnectionID else { return }
+                Task { await viewModel.verifyLLMImageGeneration(connectionID: connectionID) }
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -561,12 +563,11 @@ struct SettingsAISection: View {
                         connection: connection,
                         isDefault: connection.id == viewModel.llmDefaultConnectionID,
                         canDelete: viewModel.llmConnectionConfigs.count > 1,
-                        select: { viewModel.selectDefaultLLMConnection(connection.id) },
+                        select: { viewModel.selectLLMConnectionDetail(connection.id) },
                         makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
                         rename: { beginConnectionRename(connection) },
                         delete: {
-                            viewModel.selectDefaultLLMConnection(connection.id)
-                            viewModel.deleteSelectedLLMConnection()
+                            viewModel.deleteLLMConnection(connection.id)
                         }
                     )
                     if connection.id != viewModel.llmConnectionConfigs.last?.id {
@@ -618,7 +619,8 @@ struct SettingsAISection: View {
                 }
                 Spacer()
                 Button {
-                    Task { await viewModel.discoverLLMCapabilities() }
+                    guard let connectionID = viewModel.selectedLLMConnectionDetailID else { return }
+                    Task { await viewModel.discoverLLMCapabilities(connectionID: connectionID) }
                 } label: {
                     if viewModel.isDiscoveringLLMCapabilities { ProgressView().controlSize(.small) }
                     else { Text("测试并发现能力") }
@@ -637,7 +639,10 @@ struct SettingsAISection: View {
                 .font(SettingsListTypography.rowTitle)
             }
             HStack {
-                Button("验证图片生成") { isConfirmingImageCapabilityProbe = true }
+                Button("验证图片生成") {
+                    imageCapabilityProbeConnectionID = viewModel.selectedLLMConnectionDetailID
+                    isConfirmingImageCapabilityProbe = true
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isDiscoveringLLMCapabilities || viewModel.isVerifyingImageGeneration || viewModel.llmCapabilityEvidence.first { $0.capability == .responses }?.status != .verified)
                 if viewModel.isVerifyingImageGeneration { ProgressView().controlSize(.small) }
