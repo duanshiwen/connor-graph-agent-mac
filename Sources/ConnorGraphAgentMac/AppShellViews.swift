@@ -48,7 +48,7 @@ struct AppShellView: View {
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
                 .controlSize(.small)
 
-            CraftDetailPaneView(viewModel: viewModel, selection: viewModel.selection ?? .agentChat)
+            CraftDetailPaneView(viewModel: viewModel, identityStore: identityStore, selection: viewModel.selection ?? .agentChat)
                 .id(viewModel.selection ?? .agentChat)
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))

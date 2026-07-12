@@ -48,6 +48,7 @@ enum SettingsListLayout {
 
 struct ConnorSettingsDetailView: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var identityStore: AppUserIdentityStore
 
     var body: some View {
         ScrollView {
@@ -58,6 +59,8 @@ struct ConnorSettingsDetailView: View {
 
                 Group {
                     switch viewModel.selectedSettingsSection {
+                    case .identity:
+                        UserIdentitySettingsView(identityStore: identityStore)
                     case .app:
                         SettingsAppSection(viewModel: viewModel)
                     case .ai:
