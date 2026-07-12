@@ -12,6 +12,15 @@ struct BrowserAssistedWebToolTests {
         #expect(fetchTool.name == "web_fetch")
         #expect(searchTool.description.contains("native web search client"))
         #expect(fetchTool.description.contains("native HTTP extractor"))
+        #expect(fetchTool.description.contains("normally be tried before browser_fetch"))
+        #expect(fetchTool.description.contains("HTTP 403"))
+        #expect(fetchTool.description.contains("authenticated session"))
+
+        let browserFetchTool = BrowserFetchTool()
+        #expect(browserFetchTool.description.contains("fallback when web_fetch"))
+        #expect(browserFetchTool.description.contains("HTTP 403"))
+        #expect(browserFetchTool.description.contains("authenticated browser session"))
+        #expect(browserFetchTool.description.contains("Never use it to bypass authorization"))
         let legacySourceName = "search-engine" + "-mcp"
         #expect(!searchTool.description.contains(legacySourceName))
         #expect(!fetchTool.description.contains(legacySourceName))
