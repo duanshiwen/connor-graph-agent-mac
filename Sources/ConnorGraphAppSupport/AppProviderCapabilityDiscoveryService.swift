@@ -20,6 +20,11 @@ public struct AppProviderCapabilityDiscoveryResult: Sendable, Equatable {
 public typealias AppOpenAICompatibleProbe = @Sendable (OpenAICompatibleConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppOpenAIResponsesProbe = @Sendable (OpenAIResponsesConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppFunctionCallingProbe = @Sendable (OpenAICompatibleConfig) async throws -> AgentModelResponse
+public typealias AppHostedImageGenerationProbe = @Sendable (OpenAIResponsesConfig) async throws -> Bool
+
+public enum AppHostedImageGenerationProbeAuthorization: Sendable, Equatable {
+    case userInitiated
+}
 
 public struct AppProviderCapabilityDiscoveryService: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
@@ -27,6 +32,7 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
     public var openAICompatibleProbe: AppOpenAICompatibleProbe
     public var openAIResponsesProbe: AppOpenAIResponsesProbe
     public var functionCallingProbe: AppFunctionCallingProbe
+    public var hostedImageGenerationProbe: AppHostedImageGenerationProbe
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
@@ -42,6 +48,19 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
                     inputSchema: .closedObject(properties: ["value": .string(description: "Optional value")], required: [])
                 )]
             ))
+        },
+        hostedImageGenerationProbe: @escaping AppHostedImageGenerationProbe = { config in
+            let provider = OpenAIResponsesProvider(config: config)
+            for try await event in provider.generateMedia(AgentGeneratedMediaRequest(
+                kind: .image,
+                prompt: "Create a minimal solid blue square on a plain white background."
+            )) {
+                if case .completed(let artifact) = event {
+                    defer { try? FileManager.default.removeItem(at: artifact.temporaryFileURL) }
+                    return artifact.byteCount > 0
+                }
+            }
+            return false
         }
     ) {
         self.settingsRepository = settingsRepository
@@ -49,6 +68,34 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
         self.openAICompatibleProbe = openAICompatibleProbe
         self.openAIResponsesProbe = openAIResponsesProbe
         self.functionCallingProbe = functionCallingProbe
+        self.hostedImageGenerationProbe = hostedImageGenerationProbe
+    }
+
+    public func discoverHostedImageGeneration(
+        connectionID: String,
+        authorization: AppHostedImageGenerationProbeAuthorization
+    ) async -> AppProviderCapabilityEvidence? {
+        guard authorization == .userInitiated,
+              let settings = try? settingsRepository.loadSettings(),
+              let connection = settings.connection(id: connectionID),
+              let credential = (try? settingsRepository.apiKey(for: connection.id)) ?? nil,
+              !credential.isEmpty,
+              let baseURL = URL(string: connection.baseURLString)
+        else { return nil }
+        let existingResponses = try? evidenceRepository.effectiveEvidence(for: .responses, connection: connection)
+        guard existingResponses?.status == .verified else { return nil }
+        let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+        var headers = connection.extraHTTPHeaders
+        headers.removeValue(forKey: AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey)
+        let config = OpenAIResponsesConfig(baseURL: baseURL, apiKey: credential, model: connection.effectiveModel, extraHeaders: headers, apiKeyHeaderKind: apiKeyHeaderKind)
+        let binding = AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: connection, credential: credential)
+        let evidence = await evidence(.hostedImageGeneration, family: "openai_responses", connection: connection, binding: binding) {
+            guard try await hostedImageGenerationProbe(config) else {
+                throw OpenAICompatibleProviderError.invalidResponse
+            }
+        }
+        try? evidenceRepository.replaceEvidence(evidence, connectionID: connection.id)
+        return evidence
     }
 
     public func discoverProtocolCapabilities(connectionID: String) async -> AppProviderCapabilityDiscoveryResult {

@@ -57,6 +57,59 @@ private func discoveryRepositories() throws -> (AppLLMSettingsRepository, AppPro
     #expect(timeout == .unknown("Network request did not complete"))
 }
 
+@Test func hostedImageDiscoveryRequiresVerifiedResponsesAndUserAuthorization() async throws {
+    let (settings, evidence, connection) = try discoveryRepositories()
+    let serviceWithoutResponses = AppProviderCapabilityDiscoveryService(
+        settingsRepository: settings,
+        evidenceRepository: evidence,
+        hostedImageGenerationProbe: { _ in Issue.record("Image probe must not run before Responses is verified"); return true }
+    )
+    #expect(await serviceWithoutResponses.discoverHostedImageGeneration(connectionID: connection.id, authorization: .userInitiated) == nil)
+
+    let protocolService = AppProviderCapabilityDiscoveryService(
+        settingsRepository: settings,
+        evidenceRepository: evidence,
+        openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        openAIResponsesProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+    )
+    _ = await protocolService.discoverProtocolCapabilities(connectionID: connection.id)
+    let imageService = AppProviderCapabilityDiscoveryService(
+        settingsRepository: settings,
+        evidenceRepository: evidence,
+        hostedImageGenerationProbe: { config in
+            #expect(config.model == "model-a")
+            return true
+        }
+    )
+
+    let result = await imageService.discoverHostedImageGeneration(connectionID: connection.id, authorization: .userInitiated)
+
+    #expect(result?.status == .verified)
+    #expect(try evidence.effectiveEvidence(for: .hostedImageGeneration, connection: connection)?.status == .verified)
+}
+
+@Test func hostedImageDiscoveryClassifiesExplicitUnsupportedFailure() async throws {
+    let (settings, evidence, connection) = try discoveryRepositories()
+    let protocolService = AppProviderCapabilityDiscoveryService(
+        settingsRepository: settings,
+        evidenceRepository: evidence,
+        openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        openAIResponsesProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+    )
+    _ = await protocolService.discoverProtocolCapabilities(connectionID: connection.id)
+    let imageService = AppProviderCapabilityDiscoveryService(
+        settingsRepository: settings,
+        evidenceRepository: evidence,
+        hostedImageGenerationProbe: { _ in throw OpenAICompatibleProviderError.httpStatus(400, message: "unsupported tool image_generation") }
+    )
+
+    let result = await imageService.discoverHostedImageGeneration(connectionID: connection.id, authorization: .userInitiated)
+
+    #expect(result?.status == .unsupported)
+}
+
 @Test func discoveryKeepsResponsesUnknownWhenServiceIsTemporarilyUnavailable() async throws {
     let (settings, evidence, connection) = try discoveryRepositories()
     let service = AppProviderCapabilityDiscoveryService(
