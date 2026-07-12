@@ -2,10 +2,14 @@
 
 ## Supported sources
 
+The native import wizard is enabled by default. It scans and previews content before creating a persistent background job.
+
 - Recursive Markdown folders
 - Obsidian Vaults: aliases, wikilinks, heading/block anchors, note embeds and file embeds
-- Notion offline exports after validated extraction: Markdown, CSV, HTML and local resources
+- Notion offline export **folders after extraction**: Markdown, CSV, HTML and local resources
 - Evernote/Yinxiang ENEX: streaming notes, ENML, tags, dates and resources
+
+Direct Notion ZIP selection remains intentionally unavailable until the production `SafeArchiveBackend` and its representative-hardware release evidence are complete. The wizard states this boundary instead of accepting a ZIP it cannot safely process.
 
 Each imported note is stored as `AgentSessionKind.note`. Source provenance remains in the import ledger. Original note messages are never silently overwritten.
 
@@ -32,15 +36,14 @@ The ledger is the source of truth for pause, cancel, heartbeat, lease and retry 
 
 ## Import Center actions
 
-Depending on persisted state, the UI may offer:
+The current native Import Center loads persisted jobs and item status from the ledger and offers:
 
-- Pause / resume
-- Cancel remaining
-- Retry failed stage
-- Reauthorize source
-- Review ambiguous encoding
-- Open imported Session
-- Export Markdown or JSON diagnostic report
+- Pause / resume dispatch
+- Cancel remaining work while retaining Sessions already created
+- Refresh persisted job and item status
+- Inspect discovered/imported/duplicate/failed counts and per-item errors
+
+The domain and reporting services also model retry, reauthorization, encoding review, opening imported Sessions, and diagnostic export. These actions must not be advertised as complete until their UI commands are connected and verified.
 
 ## Source-specific limits
 
@@ -50,9 +53,14 @@ Depending on persisted state, the UI may offer:
 - ENEX cannot restore notebook stack or tag hierarchy that is absent from the export.
 - ENEX resources are staged in a dedicated temporary area and must be removed after Session Attachment Store ingestion.
 
-## Release gate
+## Feature flag and release gate
 
-The feature flag remains off by default until all release evidence is available. Current automated evidence includes:
+The feature is enabled by default for the native Markdown-folder, Obsidian-vault, extracted-Notion-folder, and ENEX paths. Operations can disable it without rebuilding:
+
+- environment: `CONNOR_NOTE_IMPORT_ENABLED=false`
+- persisted kill switch: `connor.feature.noteImport.enabled=false`
+
+Current automated evidence includes:
 
 - 10,000 Markdown files scanned without loss
 - 1,000 queued operations with peak concurrency capped at three
@@ -72,4 +80,4 @@ Before default enablement, release engineering must additionally run on represen
 - Disk-full, permission-revocation, process termination and real Provider 429 fault injection
 - Full `swift test` and signed app UI smoke tests
 
-Do not enable `noteImportEnabled` by default if any gate is missing or failing.
+Do not expand the advertised capability to direct Notion ZIP import, automatic failed-stage retry, or unattended large-archive release claims while the corresponding gate is missing or failing. Use the kill switch if a regression affects the enabled import paths.
