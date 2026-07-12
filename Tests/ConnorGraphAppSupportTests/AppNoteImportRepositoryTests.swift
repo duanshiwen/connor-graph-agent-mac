@@ -57,6 +57,49 @@ struct AppNoteImportRepositoryTests {
         }
     }
 
+    @Test("Persists scheduler intent and item leases across reopen")
+    func persistsSchedulerState() throws {
+        let fixture = try Fixture()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id, status: .processing))
+        let item = NoteImportItemRecord(id: "item", jobID: "job", sourceID: source.id, sourceIdentity: "one.md", title: "One", status: .queuedForLLM, rawByteHash: "raw", normalizedTextHash: "text", sourceRevision: "v1")
+        try fixture.repository.saveItem(item)
+        _ = try fixture.repository.requestPause(jobID: "job", now: now)
+        _ = try fixture.repository.heartbeat(jobID: "job", schedulerVersion: "2", now: now)
+        #expect(try fixture.repository.claimItem(id: item.id, owner: "worker-a", leaseDuration: 60, now: now)?.attemptCount == 1)
+        #expect(try fixture.repository.claimItem(id: item.id, owner: "worker-b", leaseDuration: 60, now: now) == nil)
+
+        let reopened = try AppNoteImportRepository(databasePath: fixture.path)
+        #expect(try reopened.job(id: "job")?.pauseRequestedAt == now)
+        #expect(try reopened.job(id: "job")?.schedulerVersion == "2")
+        #expect(try reopened.item(id: item.id)?.leaseOwner == "worker-a")
+        #expect(try reopened.claimItem(id: item.id, owner: "worker-b", leaseDuration: 60, now: now.addingTimeInterval(61))?.leaseOwner == "worker-b")
+    }
+
+    @Test("Reconciles interrupted stages without recreating an existing session")
+    func reconcilesInterruptedStages() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id, status: .processing))
+        let graphStore = try SQLiteGraphKernelStore(path: fixture.path)
+        let sessions = AppChatSessionRepository(store: graphStore)
+        let existingSession = try sessions.createSession(title: "A")
+        let llmSession = try sessions.createSession(title: "C")
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "with-session", jobID: "job", sourceID: source.id, sourceIdentity: "a", title: "A", status: .creatingSession, sessionID: existingSession.id, rawByteHash: "a", normalizedTextHash: "a", leaseOwner: "dead", leaseExpiresAt: .distantPast))
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "without-session", jobID: "job", sourceID: source.id, sourceIdentity: "b", title: "B", status: .creatingSession, rawByteHash: "b", normalizedTextHash: "b"))
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "llm", jobID: "job", sourceID: source.id, sourceIdentity: "c", title: "C", status: .runningLLM, sessionID: llmSession.id, rawByteHash: "c", normalizedTextHash: "c"))
+
+        _ = try fixture.repository.reconcileInterruptedItems(jobID: "job")
+        #expect(try fixture.repository.item(id: "with-session")?.status == .imported)
+        #expect(try fixture.repository.item(id: "with-session")?.sessionID == existingSession.id)
+        #expect(try fixture.repository.item(id: "without-session")?.status == .ready)
+        #expect(try fixture.repository.item(id: "llm")?.status == .queuedForLLM)
+        #expect(try fixture.repository.item(id: "with-session")?.leaseOwner == nil)
+    }
+
     @Test("Repository validates persisted transitions")
     func validatesTransitions() throws {
         let fixture = try Fixture()
