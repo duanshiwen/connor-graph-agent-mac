@@ -28,6 +28,13 @@ public struct AttachmentImageExportService {
         self.fileManager = fileManager
     }
 
+    public func canExport(_ model: AttachmentPreviewModel) -> Bool {
+        guard model.attachment.kind == .image, let sourceURL = model.sourceFileURL else { return false }
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) else { return false }
+        return !isDirectory.boolValue
+    }
+
     public func defaultFilename(for model: AttachmentPreviewModel) -> String? {
         guard model.attachment.kind == .image, let sourceURL = model.sourceFileURL else { return nil }
         let displayName = AppSessionAttachmentStore.sanitizedFilename(model.attachment.displayName)

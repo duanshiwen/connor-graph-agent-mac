@@ -21,6 +21,19 @@ struct AttachmentImageExportServiceTests {
         #expect(try Data(contentsOf: source) == bytes)
     }
 
+    @Test func exportAvailabilityRequiresExistingImageFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("generated.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: source)
+        let service = AttachmentImageExportService()
+
+        #expect(service.canExport(makeModel(kind: .image, displayName: "generated.png", sourceURL: source)))
+        #expect(!service.canExport(makeModel(kind: .text, displayName: "generated.png", sourceURL: source)))
+        #expect(!service.canExport(makeModel(kind: .image, displayName: "missing.png", sourceURL: root.appendingPathComponent("missing.png"))))
+    }
+
     @Test func buildsSanitizedFilenameAndPreservesSourceExtension() throws {
         let source = URL(fileURLWithPath: "/tmp/generated.webp")
         let model = makeModel(kind: .image, displayName: "../公众号/头像", sourceURL: source)
@@ -38,6 +51,46 @@ struct AttachmentImageExportServiceTests {
         #expect(throws: AttachmentImageExportError.notImage) {
             try AttachmentImageExportService().export(model: model, to: destination)
         }
+    }
+
+    @Test func rejectsExistingDestinationWithoutOverwriting() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("generated.png")
+        let destination = root.appendingPathComponent("existing.png")
+        try Data("source".utf8).write(to: source)
+        try Data("existing".utf8).write(to: destination)
+        let model = makeModel(kind: .image, displayName: "generated.png", sourceURL: source)
+
+        #expect(throws: AttachmentImageExportError.destinationAlreadyExists) {
+            try AttachmentImageExportService().export(model: model, to: destination)
+        }
+        #expect(try Data(contentsOf: destination) == Data("existing".utf8))
+    }
+
+    @Test func exportLeavesAttachmentManifestAndOriginalUnchanged() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let importedSource = root.appendingPathComponent("generated.png")
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+        try bytes.write(to: importedSource)
+        let store = AppSessionAttachmentStore(paths: paths)
+        let manifest = try store.importFile(at: importedSource, sessionID: "session")
+        let model = AttachmentPreviewLoader(store: store).load(sessionID: "session", attachment: manifest.messageRef)
+        let manifestURL = paths.sessionArtifactDirectories(sessionID: "session").attachments
+            .appendingPathComponent(manifest.id, isDirectory: true)
+            .appendingPathComponent("manifest.json")
+        let manifestBefore = try Data(contentsOf: manifestURL)
+        let destination = root.appendingPathComponent("download.png")
+
+        try AttachmentImageExportService().export(model: model, to: destination)
+
+        #expect(try Data(contentsOf: manifestURL) == manifestBefore)
+        #expect(try Data(contentsOf: model.sourceFileURL!) == bytes)
+        #expect(try Data(contentsOf: destination) == bytes)
     }
 
     @Test func rejectsMissingImageSource() throws {
