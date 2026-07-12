@@ -23,6 +23,27 @@ private func discoveryRepositories() throws -> (AppLLMSettingsRepository, AppPro
     return (settings, AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials), connection)
 }
 
+@Test func draftProbeDoesNotPersistUntilExplicitlyRequested() async throws {
+    let (settings, evidence, connection) = try discoveryRepositories()
+    try evidence.invalidate(connectionID: connection.id)
+    let service = AppProviderCapabilityDiscoveryService(
+        settingsRepository: settings,
+        evidenceRepository: evidence,
+        openAICompatibleProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        openAIResponsesProbe: { config in LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK") },
+        functionCallingProbe: { _ in AgentModelResponse(text: "OK") }
+    )
+
+    let result = await service.probeProtocolCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: "secret"))
+
+    #expect(result.connectionID == connection.id)
+    #expect(result.evidence.count == 3)
+    #expect(evidence.loadAll().first?.evidence.isEmpty == true)
+
+    service.persist(result)
+    #expect(evidence.loadAll().first?.evidence.count == 3)
+}
+
 @Test func discoveryVerifiesChatFunctionsAndResponsesForCompatibleConnection() async throws {
     let (settings, evidence, connection) = try discoveryRepositories()
     let service = AppProviderCapabilityDiscoveryService(

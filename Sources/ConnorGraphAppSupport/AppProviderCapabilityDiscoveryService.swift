@@ -17,6 +17,18 @@ public struct AppProviderCapabilityDiscoveryResult: Sendable, Equatable {
     }
 }
 
+/// An in-memory capability probe target. The credential is never persisted by the
+/// discovery service and must not be included in diagnostics.
+public struct AppProviderCapabilityProbeContext: Sendable, Equatable {
+    public var connection: AppLLMConnectionConfig
+    public var credential: String
+
+    public init(connection: AppLLMConnectionConfig, credential: String) {
+        self.connection = connection
+        self.credential = credential
+    }
+}
+
 public typealias AppOpenAICompatibleProbe = @Sendable (OpenAICompatibleConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppOpenAIResponsesProbe = @Sendable (OpenAIResponsesConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppFunctionCallingProbe = @Sendable (OpenAICompatibleConfig) async throws -> AgentModelResponse
@@ -104,36 +116,54 @@ public struct AppProviderCapabilityDiscoveryService: Sendable {
               let credential = (try? settingsRepository.apiKey(for: connection.id)) ?? nil,
               !credential.isEmpty
         else { return AppProviderCapabilityDiscoveryResult(connectionID: connectionID, evidence: []) }
+        let result = await probeProtocolCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: credential))
+        persist(result)
+        return result
+    }
+
+    /// Probes a draft or persisted connection without writing settings, credentials,
+    /// or capability evidence. Call `persist(_:)` only after the connection itself
+    /// has been saved successfully.
+    public func probeProtocolCapabilities(context: AppProviderCapabilityProbeContext) async -> AppProviderCapabilityDiscoveryResult {
+        let connection = context.connection
+        let credential = context.credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !credential.isEmpty, let baseURL = URL(string: connection.baseURLString) else {
+            return AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
+        }
         let binding = AppProviderCapabilityEvidenceRepository.bindingFingerprint(connection: connection, credential: credential)
+        let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+        var headers = connection.extraHTTPHeaders
+        headers.removeValue(forKey: AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey)
         var discovered: [AppProviderCapabilityEvidence] = []
 
         switch connection.providerMode {
         case .openAICompatible:
-            if let config = try? settingsRepository.openAICompatibleConfig(connectionID: connection.id) {
-                discovered.append(await evidence(.chatCompletions, family: "chat_completions", connection: connection, binding: binding) {
-                    _ = try await openAICompatibleProbe(config)
-                })
-                discovered.append(await evidence(.functionCalling, family: "chat_completions", connection: connection, binding: binding) {
-                    _ = try await functionCallingProbe(config)
-                })
-                if let url = URL(string: connection.baseURLString) {
-                    let responses = OpenAIResponsesConfig(baseURL: url, apiKey: config.apiKey, model: connection.effectiveModel, extraHeaders: config.extraHeaders, apiKeyHeaderKind: config.apiKeyHeaderKind, requestTimeout: config.requestTimeout, explicitVisionSupport: connection.explicitVisionSupport)
-                    discovered.append(await evidence(.responses, family: "openai_responses", connection: connection, binding: binding) {
-                        _ = try await openAIResponsesProbe(responses)
-                    })
-                }
-            }
+            let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: credential, model: connection.effectiveModel, extraHeaders: headers, apiKeyHeaderKind: apiKeyHeaderKind)
+            discovered.append(await evidence(.chatCompletions, family: "chat_completions", connection: connection, binding: binding) {
+                _ = try await openAICompatibleProbe(config)
+            })
+            discovered.append(await evidence(.functionCalling, family: "chat_completions", connection: connection, binding: binding) {
+                _ = try await functionCallingProbe(config)
+            })
+            let responses = OpenAIResponsesConfig(baseURL: baseURL, apiKey: credential, model: connection.effectiveModel, extraHeaders: headers, apiKeyHeaderKind: apiKeyHeaderKind)
+            discovered.append(await evidence(.responses, family: "openai_responses", connection: connection, binding: binding) {
+                _ = try await openAIResponsesProbe(responses)
+            })
         case .openAIResponses:
-            if let config = try? settingsRepository.openAIResponsesConfig(connectionID: connection.id) {
-                discovered.append(await evidence(.responses, family: "openai_responses", connection: connection, binding: binding) {
-                    _ = try await openAIResponsesProbe(config)
-                })
-            }
+            let config = OpenAIResponsesConfig(baseURL: baseURL, apiKey: credential, model: connection.effectiveModel, extraHeaders: headers, apiKeyHeaderKind: apiKeyHeaderKind)
+            discovered.append(await evidence(.responses, family: "openai_responses", connection: connection, binding: binding) {
+                _ = try await openAIResponsesProbe(config)
+            })
         case .anthropicMessages:
             break
         }
-        for item in discovered { try? evidenceRepository.replaceEvidence(item, connectionID: connection.id) }
         return AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: discovered)
+    }
+
+    public func persist(_ result: AppProviderCapabilityDiscoveryResult) {
+        for item in result.evidence {
+            try? evidenceRepository.replaceEvidence(item, connectionID: result.connectionID)
+        }
     }
 
     private func evidence(
