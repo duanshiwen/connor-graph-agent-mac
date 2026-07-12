@@ -269,7 +269,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 config: StabilityImageGeneratedMediaConfig(baseURL: baseURL, apiKey: apiKey, model: connection.model),
                 httpClient: URLSessionAgentHTTPClient()
             ))
-        case .openAIResponses, .openAIImages:
+        case .openAIResponses:
+            return AnyAgentModelProvider(OpenAIResponsesProvider(
+                config: OpenAIResponsesConfig(
+                    baseURL: baseURL,
+                    apiKey: apiKey,
+                    model: connection.model,
+                    extraHeaders: connection.extraHTTPHeaders
+                ),
+                httpClient: URLSessionAgentHTTPClient(),
+                sseClient: URLSessionAgentSSEHTTPClient()
+            ))
+        case .openAIImages:
             return nil
         }
     }
