@@ -37,23 +37,78 @@ public typealias BrowserAssistedSearchHandler = @Sendable (BrowserAssistedSearch
 
 public struct BrowserFetchTool: AgentTool {
     public let name = "browser_fetch"
-    public let description = "Fetch a web page URL and return a lightweight text/HTML snapshot for the agent. Use this when you need to read a known URL directly before reasoning or creating graph evidence."
+    public let description = "Fetch a known web page through Connor's system-browser-assisted path and return a lightweight text/HTML snapshot. Use this as the fallback when web_fetch returns HTTP 403, cannot use a required authenticated browser session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content. Never use it to bypass authorization or access content the user is not permitted to access."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "url": .string(description: "The absolute http/https URL to fetch."),
         "max_chars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
-        "user_agent": .string(description: "Optional User-Agent header. Defaults to ConnorGraphAgent/1.0.")
+        "user_agent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0.")
     ], required: ["url"])
 
-    public init() {}
+    private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
+
+    public init(browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil) {
+        self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
+    }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let urlString = arguments.string("url"), let url = URL(string: urlString), ["http", "https"].contains(url.scheme?.lowercased()) else {
             throw AgentToolError.invalidArguments("browser_fetch requires an absolute http/https url")
         }
         let maxChars = min(max(arguments.int("max_chars") ?? 12_000, 1_000), 50_000)
-        let userAgent = arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
 
+        if let browserAssistedWebFetchHandler {
+            let browserRequest = BrowserAssistedWebFetchRequest(
+                urlString: urlString,
+                extractMode: "text",
+                waitUntil: "networkidle",
+                timeoutMilliseconds: 720_000,
+                revealImmediately: false
+            )
+            if let result = await browserAssistedWebFetchHandler(browserRequest) {
+                let text = String(result.contentText.prefix(maxChars))
+                let truncated = result.truncated || result.contentText.count > maxChars
+                let json: [String: Any] = [
+                    "url": result.urlString,
+                    "finalURL": result.finalURLString,
+                    "title": result.title,
+                    "engine": "wkwebview",
+                    "browserAssisted": true,
+                    "taskID": result.taskID,
+                    "sessionID": result.sessionID,
+                    "tabID": result.tabID,
+                    "status": result.status.rawValue,
+                    "errorMessage": result.errorMessage as Any,
+                    "interventionReason": result.interventionReason as Any,
+                    "truncated": truncated,
+                    "originalCharacterCount": result.originalCharacterCount,
+                    "text": text
+                ]
+                switch result.status {
+                case .fetched:
+                    return AgentToolResult(
+                        toolCallID: context.toolCallID,
+                        toolName: name,
+                        contentText: text + (truncated ? "\n\n[truncated]" : ""),
+                        contentJSON: Self.encodeJSONObject(json),
+                        citations: [result.finalURLString.isEmpty ? result.urlString : result.finalURLString]
+                    )
+                case .needsUserIntervention:
+                    let reason = result.interventionReason ?? "Browser page requires user intervention."
+                    return AgentToolResult(
+                        toolCallID: context.toolCallID,
+                        toolName: name,
+                        contentText: "Connor opened this page in the built-in browser, but it requires user intervention.\nURL: \(result.urlString)\nReason: \(reason)\nBrowser session ID: \(result.sessionID)\nBrowser tab ID: \(result.tabID)",
+                        contentJSON: Self.encodeJSONObject(json),
+                        citations: [result.urlString]
+                    )
+                case .failed, .timedOut:
+                    throw AgentToolError.invalidArguments(result.errorMessage ?? "Connor WKWebView browser_fetch failed with status \(result.status.rawValue)")
+                }
+            }
+        }
+
+        let userAgent = arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
@@ -448,7 +503,7 @@ public typealias BrowserAssistedWebFetchHandler = @Sendable (BrowserAssistedWebF
 
 public struct NativeWebFetchTool: AgentTool {
     public let name = "web_fetch"
-    public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. Prefer this over browser_fetch when you want cleaned Markdown/text, tables, and optional JavaScript rendering."
+    public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. This is the standard original-page reader and should normally be tried before browser_fetch. If it returns HTTP 403, cannot use a required authenticated session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content, fall back to browser_fetch."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "url": .string(description: "The absolute URL to fetch."),

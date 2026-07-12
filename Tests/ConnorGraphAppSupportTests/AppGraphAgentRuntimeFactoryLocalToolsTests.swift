@@ -434,9 +434,15 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_ingest_observation"))
     #expect(!names.contains("memory_os_project_structured_artifact"))
     // Conversation runtime should only register read-only memory tools
+    #expect(names.contains("get_current_time"))
     #expect(names.contains("memory_os_recent_context"))
     #expect(names.contains("memory_os_knowledge_context"))
     #expect(names.contains("memory_os_get_current_user_profile"))
+    #expect(names.contains("web_search"))
+    #expect(names.contains("web_fetch"))
+    #expect(names.contains("browser_fetch"))
+    #expect(names.contains("connor_skill_list"))
+    #expect(names.contains("connor_skill_activate"))
     #expect(!names.contains("memory_os_context"))
 
     // Write tools and low-level primitives should NOT be in conversation runtime

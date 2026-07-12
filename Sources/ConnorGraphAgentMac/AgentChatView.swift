@@ -437,7 +437,8 @@ private struct AgentChatConversationView: View {
             bottomPinThreshold: AgentChatLayout.chatBottomPinnedThreshold,
             topLoadTriggerOffset: 96,
             preservesBottomAnchorForUnderfilledContent: true,
-            showsJumpToLatestButton: true
+            showsJumpToLatestButton: true,
+            contentLayout: .eager
         )
     )
 

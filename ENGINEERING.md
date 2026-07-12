@@ -203,6 +203,8 @@ graph/evaluations/reports/*.json
 - 支持 per-session model override。
 - JSONL records 支持 best-effort recovery。
 - Browser state 和 approvals 保存在 Session Capsule 内。
+- 会话详情读取通过 `ChatSessionDetailLoadCoordinator` 在 MainActor 外构建 snapshot；选择请求使用 cancellation/generation，旧会话结果不得覆盖最新选择。
+- 首屏 activity timeline 必须 cache-first，并对 run/event/journal fallback 设置上限；禁止在会话切换热路径使用 `limit: nil` 扫描完整历史。
 
 ### 5.2 本地工具与工作区策略
 
@@ -222,15 +224,18 @@ graph/evaluations/reports/*.json
 
 ### 5.4 Agent 运行时约定
 
-每个用户任务应按以下顺序建立上下文：
+每条新的用户消息启动一个 user run；每个 run 只执行一次固定 bootstrap，工具结果返回后的内部模型 turn 不重复执行：
 
-1. 获取当前时间。
-2. 在相关时检索内部上下文和当前用户画像。
-3. 当任务依赖新鲜事实或外部信息时，搜索/抓取当前网页信息。
-4. 考虑已安装技能。
-5. 再决定回答、计划、编辑、调试、研究或提出澄清问题。
+1. 调用 `get_current_time` 获取当前时间。
+2. 同时调用 `memory_os_recent_context` 与 `memory_os_knowledge_context`；前者提供 L1/L2 可变操作状态，后者提供 L3/L4 持久知识和默认五跳关系上下文。
+3. 调用 `memory_os_get_current_user_profile` 获取 preferences、habits、traits、constraints 与 interaction guidance。
+4. 无条件调用一次 `web_search`。当外部资料会实质支持回答时，使用 `web_fetch` 读取原始页面；若遇到 HTTP 403、认证态、JavaScript 渲染、反爬或其他不可用内容，改用 `browser_fetch` 通过系统浏览器态读取，但不得绕过授权。
+5. 考虑已安装技能。
+6. 再决定回答、计划、编辑、调试、研究或提出澄清问题。
 
-System prompt 故意保持最小：只注入上下文检索和用户画像工具。Memory OS 写工具不注入 system prompt；LLM 需要时通过普通 tool definition 访问。
+工具不可用、权限拒绝、无结果或失败时，Agent 应透明说明并使用最佳可用证据继续，不能无限重试。`web_search`、`web_fetch` 和 `browser_fetch` 均受 `.externalNetwork` Policy Engine 边界约束；`readOnly` 模式不会绕过该边界。
+
+System prompt 只引用对话时需要的三个 Memory OS 只读工具。Memory OS 写工具与低层图谱原语不注册到主会话 Agent，只用于受治理的后台作业。
 
 ### 5.5 MCP Source Platform
 
@@ -433,8 +438,11 @@ Connor 是原生 macOS app。
 4. 避免 sidebar、detail 和 settings navigation 出现重复 source of truth。
 5. 添加临时颜色或尺寸前，优先使用 `AgentChatDesignSystem` / `AppShellDesignSystem` 中已有 design tokens。
 6. Chat scrolling、pagination、unread markers 和 date sections 应留在 commercial Chat Viewport infrastructure 中；修改前先看 `Sources/ConnorGraphAgentMac/ChatViewport/`。
-7. 避免 nested navigation titles 泄漏到 macOS window/menu state。
-8. destructive 或 governance actions 必须打开 review surfaces；快捷键不得绕过 Connor policy/review gates。
+7. Agent Chat 的有界消息窗口（初始 80 条、每页 40 条）使用 eager `VStack` 是 correctness 约束：动态高度 `LazyVStack` 在数据集替换后可能保留错误的估算高度/content offset 并显示空白。未经真实压力验证，不得改回 lazy layout。
+8. Chat detail 与 `ScrollView` 应保持稳定 identity；session 切换由 `ChatViewportDataSetID` 和 namespaced row IDs 隔离，transcript revision 只能触发显式 data-change，不应销毁整个详情视图树。初始锚点只由 generation-aware `ChatViewportController` 管理，不得在 View 层叠加延迟 scroll retries。
+9. Markdown 持久化 cache 由 session 保存/后台预热路径维护；SwiftUI `body` 只允许访问内存 compiled-document cache，不得同步读写磁盘。
+10. 避免 nested navigation titles 泄漏到 macOS window/menu state。
+11. destructive 或 governance actions 必须打开 review surfaces；快捷键不得绕过 Connor policy/review gates。
 
 用户可见文案应使用“康纳同学”的语气：温暖、准确、本地优先、行动导向。避免在终端用户界面出现泛泛的 `Something went wrong`、`No data` 或只有 raw error code 的文案。
 

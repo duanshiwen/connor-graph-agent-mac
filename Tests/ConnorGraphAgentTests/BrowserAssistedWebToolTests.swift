@@ -12,6 +12,15 @@ struct BrowserAssistedWebToolTests {
         #expect(fetchTool.name == "web_fetch")
         #expect(searchTool.description.contains("native web search client"))
         #expect(fetchTool.description.contains("native HTTP extractor"))
+        #expect(fetchTool.description.contains("normally be tried before browser_fetch"))
+        #expect(fetchTool.description.contains("HTTP 403"))
+        #expect(fetchTool.description.contains("authenticated session"))
+
+        let browserFetchTool = BrowserFetchTool()
+        #expect(browserFetchTool.description.contains("fallback when web_fetch"))
+        #expect(browserFetchTool.description.contains("HTTP 403"))
+        #expect(browserFetchTool.description.contains("authenticated browser session"))
+        #expect(browserFetchTool.description.contains("Never use it to bypass authorization"))
         let legacySourceName = "search-engine" + "-mcp"
         #expect(!searchTool.description.contains(legacySourceName))
         #expect(!fetchTool.description.contains(legacySourceName))
@@ -70,6 +79,36 @@ struct BrowserAssistedWebToolTests {
             expectedURLPart: "www.baidu.com/s",
             expectedQueryParameter: "wd="
         )
+    }
+
+    @Test func browserFetchUsesSystemBrowserHandlerWhenAvailable() async throws {
+        let tool = BrowserFetchTool(browserAssistedWebFetchHandler: { request in
+            #expect(request.urlString == "https://example.com/protected")
+            #expect(request.extractMode == "text")
+            return BrowserAssistedWebFetchResult(
+                status: .fetched,
+                urlString: request.urlString,
+                finalURLString: request.urlString,
+                title: "Protected page",
+                contentText: "Authenticated browser content",
+                taskID: "task-browser-fetch",
+                sessionID: "session-browser-fetch",
+                tabID: "tab-browser-fetch",
+                errorMessage: nil,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 29
+            )
+        })
+
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"url":"https://example.com/protected"}"#),
+            context: Self.context()
+        )
+
+        #expect(result.contentText == "Authenticated browser content")
+        #expect(result.contentJSON?.contains(#""engine":"wkwebview""#) == true)
+        #expect(result.contentJSON?.contains(#""browserAssisted":true"#) == true)
     }
 
     @Test func browserFetchDecodesGBKMetaCharsetChineseText() throws {

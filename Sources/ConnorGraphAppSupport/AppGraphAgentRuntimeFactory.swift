@@ -190,7 +190,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }
         registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime() ?? InMemoryAgentContactRuntime())
-        registry.register(BrowserFetchTool())
+        registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registerPersistedMCPSourceTools(into: &registry, workingDirectory: resolvedWorkspace.primary.url)
