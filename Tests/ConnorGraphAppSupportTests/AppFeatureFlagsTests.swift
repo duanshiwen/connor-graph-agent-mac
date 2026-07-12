@@ -4,20 +4,28 @@ import Testing
 
 @Suite("App feature flags")
 struct AppFeatureFlagsTests {
-    @Test("Note import remains disabled by default")
-    func noteImportDefaultsOff() {
+    @Test("Note import is enabled by default")
+    func noteImportDefaultsOn() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let flags = AppFeatureFlags.load(environment: [:], userDefaults: defaults)
-        #expect(!flags.noteImportEnabled)
+        #expect(flags.noteImportEnabled)
     }
 
-    @Test("Environment override enables note import")
+    @Test("Environment override can disable note import")
     func environmentOverride() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let flags = AppFeatureFlags.load(
-            environment: [AppFeatureFlags.noteImportEnvironmentKey: "true"],
+            environment: [AppFeatureFlags.noteImportEnvironmentKey: "false"],
             userDefaults: defaults
         )
-        #expect(flags.noteImportEnabled)
+        #expect(!flags.noteImportEnabled)
+    }
+
+    @Test("Persisted kill switch can disable note import")
+    func defaultsOverride() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(false, forKey: AppFeatureFlags.noteImportDefaultsKey)
+        let flags = AppFeatureFlags.load(environment: [:], userDefaults: defaults)
+        #expect(!flags.noteImportEnabled)
     }
 }
