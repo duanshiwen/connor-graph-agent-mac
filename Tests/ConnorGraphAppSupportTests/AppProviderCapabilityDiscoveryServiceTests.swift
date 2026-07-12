@@ -23,6 +23,40 @@ private func discoveryRepositories() throws -> (AppLLMSettingsRepository, AppPro
     return (settings, AppProviderCapabilityEvidenceRepository(settingsStore: store, credentialStore: credentials), connection)
 }
 
+@Test func setupValidationPolicyIsDrivenByProviderMode() {
+    let compatible = AppLLMConnectionConfig(id: "compatible", name: "Compatible", providerMode: .openAICompatible, baseURLString: "https://example.com/v1", model: "model-a")
+    let responses = AppLLMConnectionConfig(id: "responses", name: "Responses", providerMode: .openAIResponses, baseURLString: "https://example.com/v1", model: "model-a")
+    let anthropic = AppLLMConnectionConfig(id: "anthropic", name: "Anthropic", providerMode: .anthropicMessages, baseURLString: "https://example.com/v1", model: "model-a")
+
+    #expect(AppProviderCapabilityValidationPolicy.forConnection(compatible) == .init(
+        protocolCapabilities: [.chatCompletions, .functionCalling, .responses],
+        probesHostedImageGenerationWhenResponsesVerified: true
+    ))
+    #expect(AppProviderCapabilityValidationPolicy.forConnection(responses) == .init(
+        protocolCapabilities: [.responses],
+        probesHostedImageGenerationWhenResponsesVerified: true
+    ))
+    #expect(AppProviderCapabilityValidationPolicy.forConnection(anthropic) == .init(
+        protocolCapabilities: [],
+        probesHostedImageGenerationWhenResponsesVerified: false
+    ))
+}
+
+@Test func setupValidationPolicyDoesNotInferFromModelOrHost() {
+    let misleading = AppLLMConnectionConfig(
+        id: "anthropic",
+        name: "Anthropic",
+        providerMode: .anthropicMessages,
+        baseURLString: "https://api.openai.com/v1",
+        model: "gpt-5.6"
+    )
+
+    let policy = AppProviderCapabilityValidationPolicy.forConnection(misleading)
+
+    #expect(policy.protocolCapabilities.isEmpty)
+    #expect(policy.probesHostedImageGenerationWhenResponsesVerified == false)
+}
+
 @Test func draftProbeDoesNotPersistUntilExplicitlyRequested() async throws {
     let (settings, evidence, connection) = try discoveryRepositories()
     try evidence.invalidate(connectionID: connection.id)
