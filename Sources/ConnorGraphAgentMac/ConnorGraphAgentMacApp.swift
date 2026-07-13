@@ -41,11 +41,17 @@ struct ConnorGraphAgentMacApp: App {
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
-            AppShellView(viewModel: viewModel, identityStore: identityStore)
+            AppShellView(
+                viewModel: viewModel,
+                identityStore: identityStore,
+                noteImportModel: noteImportModel
+            )
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
                     viewModel.startTaskSchedulerTimer()
+                    noteImportModel.reloadJobs(reloadSelectedItems: false)
+                    noteImportModel.startJobMonitoring()
                     await identityStore.restoreSession()
                 }
         }

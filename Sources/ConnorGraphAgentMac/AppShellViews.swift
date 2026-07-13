@@ -10,6 +10,8 @@ import ConnorGraphAppSupport
 struct AppShellView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var identityStore: AppUserIdentityStore
+    @ObservedObject var noteImportModel: NoteImportViewModel
+    @Environment(\.openWindow) private var openWindow
     @State private var isPrimarySidebarVisible = true
     @State private var isIdentityPopoverPresented = false
 
@@ -111,7 +113,13 @@ struct AppShellView: View {
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if noteImportModel.activitySummary.isVisible {
+                    NoteImportToolbarProgressButton(summary: noteImportModel.activitySummary) {
+                        openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
+                    }
+                }
+
                 Button { isIdentityPopoverPresented.toggle() } label: {
                     if let user = identityStore.currentUser {
                         IdentityAvatarView(user: user, size: 24)
