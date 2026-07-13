@@ -41,11 +41,17 @@ struct ConnorGraphAgentMacApp: App {
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
-            AppShellView(viewModel: viewModel, identityStore: identityStore)
+            AppShellView(
+                viewModel: viewModel,
+                identityStore: identityStore,
+                noteImportModel: noteImportModel
+            )
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
                     viewModel.startTaskSchedulerTimer()
+                    noteImportModel.reloadJobs(reloadSelectedItems: false)
+                    noteImportModel.startJobMonitoring()
                     await identityStore.restoreSession()
                 }
         }
@@ -130,7 +136,7 @@ struct ConnorGraphAgentMacApp: App {
             }
         }
 
-        WindowGroup("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
+        Window("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
             NoteImportWizardView(
                 model: noteImportModel,
                 importExecutionEnabled: featureFlags.noteImportEnabled
@@ -138,7 +144,7 @@ struct ConnorGraphAgentMacApp: App {
         }
         .defaultSize(width: 720, height: 560)
 
-        WindowGroup("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
+        Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: noteImportModel)
         }
         .defaultSize(width: 900, height: 620)
