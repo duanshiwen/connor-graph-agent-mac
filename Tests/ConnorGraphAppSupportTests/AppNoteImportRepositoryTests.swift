@@ -100,6 +100,28 @@ struct AppNoteImportRepositoryTests {
         #expect(try fixture.repository.item(id: "with-session")?.leaseOwner == nil)
     }
 
+    @Test("Rebuilds job progress from persisted item state")
+    func rebuildsJobProgress() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id, status: .importing))
+        let graphStore = try SQLiteGraphKernelStore(path: fixture.path)
+        let sessions = AppChatSessionRepository(store: graphStore)
+        let importedSession = try sessions.createSession(title: "Imported")
+        let llmFailedSession = try sessions.createSession(title: "LLM failed")
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "imported", jobID: "job", sourceID: source.id, sourceIdentity: "a", title: "A", status: .runningLLM, sessionID: importedSession.id, rawByteHash: "a", normalizedTextHash: "a"))
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "llm-failed", jobID: "job", sourceID: source.id, sourceIdentity: "b", title: "B", status: .llmFailed, sessionID: llmFailedSession.id, rawByteHash: "b", normalizedTextHash: "b"))
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "failed", jobID: "job", sourceID: source.id, sourceIdentity: "c", title: "C", status: .sessionFailed, rawByteHash: "c", normalizedTextHash: "c"))
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "duplicate", jobID: "job", sourceID: source.id, sourceIdentity: "d", title: "D", status: .duplicateUnchanged, rawByteHash: "d", normalizedTextHash: "d"))
+
+        let job = try fixture.repository.refreshJobProgress(jobID: "job")
+        #expect(job.discoveredCount == 4)
+        #expect(job.importedCount == 2)
+        #expect(job.failedCount == 1)
+        #expect(job.duplicateCount == 1)
+    }
+
     @Test("Repository validates persisted transitions")
     func validatesTransitions() throws {
         let fixture = try Fixture()

@@ -254,7 +254,36 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         try NoteImportStateMachine().validate(itemFrom: item.status, to: status)
         item.status = status; item.updatedAt = now
         try saveItem(item)
+        _ = try refreshJobProgress(jobID: item.jobID, now: now)
         return item
+    }
+
+    /// Rebuilds cached job counters from item state. Items with a persisted Session count as
+    /// imported even while optional LLM processing is still running or has failed.
+    @discardableResult
+    public func refreshJobProgress(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
+        guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+        let progress = try rows("""
+        SELECT
+          COUNT(*),
+          SUM(CASE WHEN session_id IS NOT NULL THEN 1 ELSE 0 END),
+          SUM(CASE WHEN status = ? THEN 1 ELSE 0 END),
+          SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END)
+        FROM note_import_items WHERE job_id = ?
+        """, bindings: [
+            .text(NoteImportItemStatus.duplicateUnchanged.rawValue),
+            .text(NoteImportItemStatus.parseFailed.rawValue),
+            .text(NoteImportItemStatus.sessionFailed.rawValue),
+            .text(NoteImportItemStatus.attachmentFailed.rawValue),
+            .text(jobID)
+        ]).first
+        job.discoveredCount = progress?[0].integer ?? 0
+        job.importedCount = progress?[1].integer ?? 0
+        job.duplicateCount = progress?[2].integer ?? 0
+        job.failedCount = progress?[3].integer ?? 0
+        job.updatedAt = now
+        try saveJob(job)
+        return job
     }
 
     public func requestPause(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {

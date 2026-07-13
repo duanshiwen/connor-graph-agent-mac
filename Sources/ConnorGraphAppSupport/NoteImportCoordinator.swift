@@ -70,6 +70,7 @@ public actor NoteImportCoordinator {
                 imported.status = .imported
                 imported.updatedAt = Date()
                 try ledger.saveItem(imported)
+                _ = try ledger.refreshJobProgress(jobID: jobID)
                 if llmMode == .automatic {
                     _ = try ledger.transitionItem(id: item.id, to: .queuedForLLM)
                     _ = try ledger.transitionItem(id: item.id, to: .runningLLM)
@@ -91,14 +92,18 @@ public actor NoteImportCoordinator {
                 return true
             } catch {
                 guard !(error is CancellationError) else { throw error }
-                guard var failed = try ledger.item(id: item.id) else { throw error }; failed.status = failed.sessionID == nil ? .sessionFailed : .llmFailed; failed.errorMessage = String(describing: error); failed.updatedAt = Date(); try ledger.saveItem(failed); return false
+                guard var failed = try ledger.item(id: item.id) else { throw error }
+                failed.status = failed.sessionID == nil ? .sessionFailed : .llmFailed
+                failed.errorMessage = String(describing: error)
+                failed.updatedAt = Date()
+                try ledger.saveItem(failed)
+                _ = try ledger.refreshJobProgress(jobID: jobID)
+                return false
             }
         }
-        job = try requireJob(jobID)
+        _ = results
+        job = try ledger.refreshJobProgress(jobID: jobID)
         if job.cancelRequestedAt != nil { if job.status != .cancelling { job = try ledger.transitionJob(id: jobID, to: .cancelling) }; return try ledger.transitionJob(id: jobID, to: .cancelled) }
-        job.importedCount += results.reduce(0) { count, result in count + ((try? result.get()) == true ? 1 : 0) }
-        job.failedCount += results.reduce(0) { count, result in count + ((try? result.get()) == false ? 1 : 0) }
-        job.updatedAt = Date(); try ledger.saveJob(job)
         if job.status == .importing && job.options.llmMode == .automatic { job = try ledger.transitionJob(id: jobID, to: .processing) }
         return try ledger.transitionJob(id: jobID, to: job.failedCount > 0 ? .completedWithIssues : .completed)
     }
