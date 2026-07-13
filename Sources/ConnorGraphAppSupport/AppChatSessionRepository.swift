@@ -56,6 +56,30 @@ public struct AppChatSessionRepository: Sendable {
         try makeNewSession(title: title, now: now)
     }
 
+    /// Creates an imported note session in one database write. This avoids the
+    /// previous empty-session insert followed by a load and full messages_json
+    /// rewrite for every imported note.
+    public func createImportedNoteSession(
+        title: String,
+        content: String,
+        attachments: [AgentMessageAttachmentRef] = [],
+        createdAt: Date = Date()
+    ) throws -> AgentSession {
+        var governance = AgentSessionGovernanceMetadata.default
+        governance.kind = .note
+        let session = AgentSession(
+            id: UUID().uuidString,
+            title: title,
+            messages: [AgentMessage(role: .user, content: content, createdAt: createdAt, attachments: attachments)],
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            governance: governance
+        )
+        try store.upsertSession(session)
+        _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+        return session
+    }
+
     @discardableResult
     public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
         try store.upsertSession(session)
