@@ -1,6 +1,49 @@
 import SwiftUI
+import AppKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
+
+struct NoteImportControlPresentation: Equatable {
+    enum Action: Equatable { case pause, resume }
+
+    let action: Action
+    let title: String
+    let systemImage: String
+
+    init?(job: NoteImportJobRecord) {
+        guard !job.status.isTerminal, job.cancelRequestedAt == nil else { return nil }
+        if NoteImportActivitySummary.isPaused(job) {
+            action = .resume
+            title = "继续"
+            systemImage = "play"
+        } else if [.scanning, .importing, .processing].contains(job.status) {
+            action = .pause
+            title = "暂停"
+            systemImage = "pause"
+        } else {
+            return nil
+        }
+    }
+}
+
+struct NoteImportJobPresentation: Equatable {
+    let displayName: String
+    let systemImage: String
+
+    init(job: NoteImportJobRecord) {
+        if NoteImportActivitySummary.isPaused(job) {
+            displayName = NoteImportJobStatus.paused.displayName
+            systemImage = NoteImportJobStatus.paused.systemImage
+        } else {
+            displayName = job.status.displayName
+            systemImage = job.status.systemImage
+        }
+    }
+}
+
+enum NoteImportProgressAppearance {
+    static var accentColor: Color { Color(nsColor: .controlAccentColor) }
+}
 
 extension NoteImportSourceKind {
     var displayName: String { switch self { case .markdownFolder: "Markdown 文件夹"; case .obsidianVault: "Obsidian 仓库"; case .notionExport: "Notion 导出"; case .evernoteENEX: "Evernote / 印象笔记" } }
@@ -12,7 +55,7 @@ extension NoteImportSourceKind {
 extension NoteImportJobStatus {
     var displayName: String { switch self { case .created: "准备中"; case .scanning: "正在扫描"; case .awaitingReview: "等待确认"; case .ready: "即将开始"; case .importing: "正在导入"; case .processing: "AI 正在处理"; case .paused: "已暂停"; case .cancelling: "正在取消"; case .cancelled: "已取消"; case .completedWithIssues: "已完成，有问题"; case .completed: "已完成"; case .failed: "失败" } }
     var systemImage: String { switch self { case .completed: "checkmark.circle.fill"; case .completedWithIssues, .failed: "exclamationmark.triangle.fill"; case .cancelled: "xmark.circle"; case .paused: "pause.circle.fill"; case .scanning: "doc.text.magnifyingglass"; default: "arrow.triangle.2.circlepath" } }
-    var tint: Color { switch self { case .completed: .green; case .completedWithIssues, .failed: .orange; case .cancelled: .secondary; case .paused: .blue; default: .accentColor } }
+    var tint: Color { switch self { case .completed: .green; case .completedWithIssues, .failed: .orange; case .cancelled: .secondary; case .paused: NoteImportProgressAppearance.accentColor; default: NoteImportProgressAppearance.accentColor } }
 }
 
 extension NoteImportItemStatus {

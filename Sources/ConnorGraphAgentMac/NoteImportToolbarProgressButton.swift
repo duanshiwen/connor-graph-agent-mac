@@ -54,17 +54,18 @@ struct NoteImportToolbarProgressButton: View {
                         .stroke(Color.secondary.opacity(0.22), lineWidth: 2.5)
                     Circle()
                         .trim(from: 0, to: progress)
-                        .stroke(ringColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .stroke(NoteImportProgressAppearance.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 } else {
                     ProgressView()
                         .controlSize(.small)
                         .progressViewStyle(.circular)
+                        .tint(NoteImportProgressAppearance.accentColor)
                 }
 
                 statusImage
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(ringColor)
+                    .foregroundStyle(NoteImportProgressAppearance.accentColor)
             }
             .frame(width: 21, height: 21)
             .contentShape(Circle())
@@ -89,11 +90,4 @@ struct NoteImportToolbarProgressButton: View {
         }
     }
 
-    private var ringColor: Color {
-        switch summary.presentationState {
-        case .paused: .blue
-        case .cancelling: .orange
-        case .running: .accentColor
-        }
-    }
 }
