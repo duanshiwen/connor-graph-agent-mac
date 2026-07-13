@@ -88,8 +88,9 @@ public actor NoteImportRuntime {
         do {
             _ = try await coordinator.execute(jobID: jobID)
         } catch is CancellationError {
-            // Cancellation intent is persisted by coordinator.cancel; recovery reconciles any
-            // interrupted item if the process exits before final cancellation is committed.
+            if let job = try? ledger.job(id: jobID), job.status == .cancelling {
+                _ = try? ledger.transitionJob(id: jobID, to: .cancelled)
+            }
         } catch {
             let message = String(describing: error)
             if let job = try? ledger.job(id: jobID), !job.status.isTerminal {

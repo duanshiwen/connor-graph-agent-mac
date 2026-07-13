@@ -108,9 +108,40 @@ public actor NoteImportCoordinator {
         return try ledger.transitionJob(id: jobID, to: job.failedCount > 0 ? .completedWithIssues : .completed)
     }
 
-    public func pause(jobID: String) throws { _ = try ledger.requestPause(jobID: jobID) }
-    public func resume(jobID: String) throws { guard var job = try ledger.job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }; job.pauseRequestedAt = nil; job.resumedAt = Date(); job.updatedAt = Date(); try ledger.saveJob(job) }
-    public func cancel(jobID: String) async throws { _ = try ledger.requestCancel(jobID: jobID); for item in try ledger.items(jobID: jobID, statuses: [.runningLLM]) { if let sessionID = item.sessionID { await sessionService.cancel(sessionID: sessionID) } } }
+    public func pause(jobID: String) throws {
+        var job = try ledger.requestPause(jobID: jobID)
+        if [.scanning, .importing, .processing].contains(job.status) {
+            job = try ledger.transitionJob(id: jobID, to: .paused)
+        }
+        _ = job
+    }
+
+    public func resume(jobID: String) throws {
+        guard var job = try ledger.job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+        job.pauseRequestedAt = nil
+        job.resumedAt = Date()
+        job.updatedAt = Date()
+        try ledger.saveJob(job)
+        if job.status == .paused {
+            let items = try ledger.items(jobID: jobID)
+            let hasImportWork = items.contains { [.ready, .duplicateChanged, .creatingSession].contains($0.status) }
+            _ = try ledger.transitionJob(id: jobID, to: hasImportWork ? .importing : .processing)
+        }
+    }
+
+    public func cancel(jobID: String) async throws {
+        var job = try ledger.requestCancel(jobID: jobID)
+        if !job.status.isTerminal && job.status != .cancelling {
+            if job.status == .awaitingReview || job.status == .ready {
+                _ = try ledger.transitionJob(id: jobID, to: .cancelled)
+            } else {
+                job = try ledger.transitionJob(id: jobID, to: .cancelling)
+            }
+        }
+        for item in try ledger.items(jobID: jobID, statuses: [.runningLLM]) {
+            if let sessionID = item.sessionID { await sessionService.cancel(sessionID: sessionID) }
+        }
+    }
     public func recoverableJobs() throws -> [NoteImportJobRecord] { try ledger.recoverableJobs() }
     public func progress(jobID: String) throws -> NoteImportProgress { let job = try requireJob(jobID); let items = try ledger.items(jobID: jobID); return .init(jobID: jobID, status: job.status, discovered: job.discoveredCount, imported: job.importedCount, completed: items.filter { $0.status == .completed }.count, failed: job.failedCount) }
     private func requireJob(_ id: String) throws -> NoteImportJobRecord { guard let value = try ledger.job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }; return value }

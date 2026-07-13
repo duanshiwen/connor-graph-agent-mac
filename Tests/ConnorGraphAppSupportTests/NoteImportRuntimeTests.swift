@@ -32,6 +32,23 @@ struct NoteImportRuntimeTests {
         #expect(try fixture.chat.loadRecentSessions(limit: 10).count == 1)
     }
 
+    @Test("Persists pause and resume job state")
+    func pauseAndResume() async throws {
+        let fixture = try Fixture()
+        try fixture.saveReadyItem(jobID: "job")
+        _ = try fixture.ledger.transitionJob(id: "job", to: .ready)
+        _ = try fixture.ledger.transitionJob(id: "job", to: .importing)
+        let runtime = fixture.runtime()
+
+        try await runtime.pause(jobID: "job")
+        #expect(try fixture.ledger.job(id: "job")?.status == .paused)
+        #expect(try fixture.ledger.job(id: "job")?.pauseRequestedAt != nil)
+        try await runtime.resume(jobID: "job")
+        #expect(try fixture.ledger.job(id: "job")?.status == .importing)
+        #expect(try fixture.ledger.job(id: "job")?.pauseRequestedAt == nil)
+        try await waitUntil { try fixture.ledger.job(id: "job")?.status == .completed }
+    }
+
     @Test("Recovers approved jobs but preserves paused jobs")
     func recoversApprovedJobs() async throws {
         let fixture = try Fixture()
