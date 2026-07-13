@@ -53,7 +53,7 @@ struct NoteImportCenterView: View {
             runtimeState: model.runtimeSnapshot.state(for: job.id)
         )
         return VStack(alignment: .leading, spacing: 7) {
-            HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer(); Text(job.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary) }
+            HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer() }
             jobProgress(job)
             HStack {
                 Text(presentation.displayName)
