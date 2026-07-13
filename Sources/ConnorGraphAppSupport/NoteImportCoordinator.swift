@@ -28,6 +28,8 @@ public actor NoteImportCoordinator {
     }
 
     public func scan(jobID: String, adapter: any NoteImportSourceAdapter, request: NoteImportScanRequest) async throws -> NoteImportJobRecord {
+        let interval = NoteImportPerformanceLog.begin("Import Scan", jobID: jobID)
+        defer { NoteImportPerformanceLog.end(interval, jobID: jobID) }
         _ = try ledger.transitionJob(id: jobID, to: .scanning)
         var job = try requireJob(jobID)
         for try await note in adapter.scan(request) {
@@ -44,6 +46,8 @@ public actor NoteImportCoordinator {
     }
 
     public func execute(jobID: String) async throws -> NoteImportJobRecord {
+        let interval = NoteImportPerformanceLog.begin("Import Execute", jobID: jobID)
+        defer { NoteImportPerformanceLog.end(interval, jobID: jobID) }
         var job = try requireJob(jobID)
         _ = try ledger.reconcileInterruptedItems(jobID: jobID)
         _ = try ledger.heartbeat(jobID: jobID, schedulerVersion: schedulerVersion)
@@ -54,6 +58,8 @@ public actor NoteImportCoordinator {
         let pending = try ledger.items(jobID: jobID, statuses: [.ready, .duplicateChanged])
         let options = job.options
         let results = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, llmMode, options] item in
+            let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
+            defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
             let control = try ledger.job(id: jobID)
             if control?.cancelRequestedAt != nil { throw CancellationError() }
             while try ledger.job(id: jobID)?.pauseRequestedAt != nil { try await Task.sleep(for: .milliseconds(200)) }
@@ -113,12 +119,16 @@ public actor NoteImportCoordinator {
     private func confidence(_ value: String?) -> Double? { switch value { case "certain": 1; case "high": 0.9; case "medium": 0.7; case "low": 0.4; case "ambiguous": 0.2; default: nil } }
 
     private static func encodePayload(_ note: ImportedNote) throws -> String {
+        let interval = NoteImportPerformanceLog.begin("Payload Encode", jobID: "preview")
+        defer { NoteImportPerformanceLog.end(interval, jobID: "preview") }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(note).base64EncodedString()
     }
 
     private static func decodePayload(_ item: NoteImportItemRecord) throws -> ImportedNote {
+        let interval = NoteImportPerformanceLog.begin("Payload Decode", jobID: item.jobID)
+        defer { NoteImportPerformanceLog.end(interval, jobID: item.jobID) }
         guard let encoded = item.metadata[payloadMetadataKey], let data = Data(base64Encoded: encoded) else {
             throw NoteImportErrorCode.internalInvariantViolation
         }
