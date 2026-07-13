@@ -856,6 +856,80 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(events.last?.kind == .runCompleted)
 }
 
+@Test func agentLoopStopsAtConfiguredConsecutiveToolResultErrorLimit() async throws {
+    let provider = ScriptedModelProvider(responses: (1...3).map { index in
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-limited-error-\(index)", name: "missing_tool_\(index)", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        )
+    })
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(maxToolIterations: 8, maxConsecutiveToolResultErrors: 2)
+    )
+
+    var events: [AgentEvent] = []
+    do {
+        for try await event in loop.run(AgentChatRequest(sessionID: "session-errors-limited", userMessage: "Stop after repeated failures")) {
+            events.append(event)
+        }
+        Issue.record("Expected the configured consecutive tool error limit to stop the run")
+    } catch {
+        #expect(error as? AgentLoopError == .consecutiveToolResultErrorsReached)
+    }
+
+    #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 2)
+    #expect(events.last?.kind == .runFailed)
+    let failureMessages = events.compactMap { event -> String? in
+        if case .runFailed(let failure) = event { return failure.message }
+        return nil
+    }
+    #expect(failureMessages.last?.contains("2 consecutive tool result errors") == true)
+}
+
+@Test func successfulToolResultResetsConsecutiveErrorCount() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-error-before-success", name: "missing_tool_before", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-success-reset", name: "echo_args", argumentsJSON: #"{"value":"reset"}"#)],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-error-after-success", name: "missing_tool_after", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Recovered after reset.", usage: AgentModelUsage(promptTokens: 1, completionTokens: 1))
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxToolIterations: 8, maxConsecutiveToolResultErrors: 2)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-errors-reset", userMessage: "Recover between failures")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 2)
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopParallelToolCallsAppendToolResultsInAssistantSourceOrder() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
