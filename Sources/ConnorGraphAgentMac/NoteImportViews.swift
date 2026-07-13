@@ -24,6 +24,7 @@ final class NoteImportViewModel: ObservableObject {
     let ledger: AppNoteImportRepository?
     let coordinator: NoteImportCoordinator?
     let sourceAccessService: NoteImportSourceAccessService
+    private let activityReader: NoteImportActivityReader?
     private let monitoringInterval: Duration
     private var runningTasks: [String: Task<Void, Never>] = [:]
     private var monitoringTask: Task<Void, Never>?
@@ -38,6 +39,7 @@ final class NoteImportViewModel: ObservableObject {
         self.ledger = ledger
         self.coordinator = coordinator
         self.sourceAccessService = sourceAccessService
+        self.activityReader = ledger.map(NoteImportActivityReader.init(ledger:))
         self.error = configurationError
         self.monitoringInterval = monitoringInterval
         reloadJobs()
@@ -69,8 +71,7 @@ final class NoteImportViewModel: ObservableObject {
                 do { try await Task.sleep(for: self.monitoringInterval) }
                 catch { return }
                 guard !Task.isCancelled else { return }
-                self.reloadJobs(reloadSelectedItems: false)
-                guard self.hasDynamicallyChangingJobs else { return }
+                guard await self.reloadMonitoredJobs() else { return }
             }
         }
     }
@@ -171,6 +172,18 @@ final class NoteImportViewModel: ObservableObject {
             self.error = userFacing(error)
             activity = .idle
             reloadJobs()
+            return false
+        }
+    }
+
+    private func reloadMonitoredJobs() async -> Bool {
+        guard let activityReader else { return false }
+        do {
+            let snapshot = try await activityReader.jobs()
+            if snapshot != jobs { jobs = snapshot }
+            return hasDynamicallyChangingJobs
+        } catch {
+            self.error = userFacing(error)
             return false
         }
     }
