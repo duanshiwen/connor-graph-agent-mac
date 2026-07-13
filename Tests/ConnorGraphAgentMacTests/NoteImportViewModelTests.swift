@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
 import ConnorGraphAppSupport
@@ -70,6 +71,49 @@ struct NoteImportViewModelTests {
         await waitUntil { !model.isMonitoringJobs }
     }
 
+    @Test("Resume replaces a legacy paused snapshot and restarts monitoring")
+    func resumeRestartsMonitoring() async throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        try fixture.repository.saveJob(NoteImportJobRecord(
+            id: "paused",
+            sourceID: "source",
+            status: .paused,
+            discoveredCount: 4,
+            importedCount: 2
+        ))
+        try fixture.repository.saveItem(NoteImportItemRecord(
+            id: "item",
+            jobID: "paused",
+            sourceID: "source",
+            sourceIdentity: "note.md",
+            title: "Note",
+            status: .ready,
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        ))
+        let chat = AppChatSessionRepository(store: fixture.graphStore)
+        let service = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: ResumeTestBackend(), sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(ledger: fixture.repository, sessionService: service)
+        let model = NoteImportViewModel(
+            ledger: fixture.repository,
+            coordinator: coordinator,
+            monitoringInterval: .milliseconds(10)
+        )
+
+        #expect(model.activitySummary.presentationState == .paused)
+        #expect(!model.isMonitoringJobs)
+        await model.resumeSelectedJob()
+
+        #expect(model.selectedJob?.status == .importing)
+        #expect(model.selectedJob?.pauseRequestedAt == nil)
+        #expect(model.activitySummary.presentationState == .running)
+        #expect(model.isMonitoringJobs)
+        model.stopJobMonitoring()
+    }
+
     @Test("Static paused jobs are loaded without high frequency monitoring")
     func pausedJobsDoNotPoll() throws {
         let fixture = try ImportLedgerFixture()
@@ -99,8 +143,15 @@ struct NoteImportViewModelTests {
     }
 }
 
+private struct ResumeTestBackend: AgentBackend {
+    func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
+}
+
 private final class ImportLedgerFixture {
     let directory: URL
+    let graphStore: SQLiteGraphKernelStore
     let repository: AppNoteImportRepository
 
     init() throws {
@@ -108,7 +159,7 @@ private final class ImportLedgerFixture {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let path = directory.appendingPathComponent("graph.sqlite").path
-        let graphStore = try SQLiteGraphKernelStore(path: path)
+        graphStore = try SQLiteGraphKernelStore(path: path)
         try graphStore.migrate()
         repository = try AppNoteImportRepository(databasePath: path)
     }
