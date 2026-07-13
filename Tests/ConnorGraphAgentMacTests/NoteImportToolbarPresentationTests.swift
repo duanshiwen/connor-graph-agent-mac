@@ -58,6 +58,28 @@ struct NoteImportToolbarPresentationTests {
         #expect(presentation.systemImage == "pause.circle.fill")
     }
 
+    @Test("Cancel request overrides a stale processing presentation")
+    func requestedCancellationOverridesProcessing() {
+        var requestedCancellation = job(status: .processing)
+        requestedCancellation.cancelRequestedAt = Date()
+        let jobPresentation = NoteImportJobPresentation(job: requestedCancellation, runtimeState: nil)
+        #expect(jobPresentation.displayName == "正在取消")
+        #expect(NoteImportControlPresentation(job: requestedCancellation, runtimeState: nil) == nil)
+        let toolbar = presentation(for: [requestedCancellation])
+        #expect(toolbar.accessibilityValue.contains("正在取消"))
+    }
+
+    @Test("Missing runner offers one explicit recovery action")
+    func missingRunnerOffersRecovery() throws {
+        let interrupted = job(status: .processing)
+        let jobPresentation = NoteImportJobPresentation(job: interrupted, runtimeState: nil)
+        #expect(jobPresentation.displayName == "导入已中断")
+        let control = try #require(NoteImportControlPresentation(job: interrupted, runtimeState: nil))
+        #expect(control.action == .restart)
+        #expect(control.title == "继续剩余任务")
+        #expect(control.systemImage == "arrow.clockwise")
+    }
+
     @Test("Describes cancellation")
     func cancelling() {
         let presentation = presentation(for: [job(status: .cancelling, discovered: 4, imported: 1)])

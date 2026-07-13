@@ -18,6 +18,7 @@ final class NoteImportViewModel: ObservableObject {
     @Published var selectedJobID: String?
     @Published var selectedJobItems: [NoteImportItemRecord] = []
     @Published var activity: Activity = .idle
+    @Published var runtimeSnapshot = NoteImportRuntimeSnapshot()
     @Published var error: String?
     @Published var searchText = ""
 
@@ -176,6 +177,7 @@ final class NoteImportViewModel: ObservableObject {
         do {
             let snapshot = try await activityReader.jobs()
             if snapshot != jobs { jobs = snapshot }
+            await refreshRuntimeSnapshot()
             return hasDynamicallyChangingJobs
         } catch {
             self.error = userFacing(error)
@@ -207,13 +209,26 @@ final class NoteImportViewModel: ObservableObject {
 
     func recoverPersistedJobs() async {
         await executionSupervisor?.recoverPersistedJobs()
+        await refreshRuntimeSnapshot()
         reloadJobs(reloadSelectedItems: false)
+        startJobMonitoring()
+    }
+
+    func restartSelectedJob() async {
+        guard let executionSupervisor, let id = selectedJobID else { return }
+        await executionSupervisor.ensureRunning(jobID: id)
+        await refreshRuntimeSnapshot()
+        reloadJobs(selecting: id)
         startJobMonitoring()
     }
 
     func pauseSelectedJob() async {
         guard let executionSupervisor, let id = selectedJobID else { return }
-        do { try await executionSupervisor.requestPause(jobID: id); reloadJobs(selecting: id) }
+        do {
+            try await executionSupervisor.requestPause(jobID: id)
+            await refreshRuntimeSnapshot()
+            reloadJobs(selecting: id)
+        }
         catch { self.error = userFacing(error) }
     }
 
@@ -221,6 +236,7 @@ final class NoteImportViewModel: ObservableObject {
         guard let executionSupervisor, let id = selectedJobID else { return }
         do {
             try await executionSupervisor.resume(jobID: id)
+            await refreshRuntimeSnapshot()
             reloadJobs(selecting: id)
             startJobMonitoring()
         } catch { self.error = userFacing(error) }
@@ -228,7 +244,11 @@ final class NoteImportViewModel: ObservableObject {
 
     func cancelSelectedJob() async {
         guard let executionSupervisor, let id = selectedJobID else { return }
-        do { try await executionSupervisor.requestCancel(jobID: id); reloadJobs(selecting: id) }
+        do {
+            try await executionSupervisor.requestCancel(jobID: id)
+            await refreshRuntimeSnapshot()
+            reloadJobs(selecting: id)
+        }
         catch { self.error = userFacing(error) }
     }
 
@@ -240,6 +260,10 @@ final class NoteImportViewModel: ObservableObject {
         searchText = ""
         error = nil
         activity = .idle
+    }
+
+    private func refreshRuntimeSnapshot() async {
+        runtimeSnapshot = await executionSupervisor?.snapshot() ?? .init()
     }
 
     private var hasDynamicallyChangingJobs: Bool {

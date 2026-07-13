@@ -4,18 +4,22 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct NoteImportControlPresentation: Equatable {
-    enum Action: Equatable { case pause, resume }
+    enum Action: Equatable { case pause, resume, restart }
 
     let action: Action
     let title: String
     let systemImage: String
 
-    init?(job: NoteImportJobRecord) {
+    init?(job: NoteImportJobRecord, runtimeState: NoteImportRuntimeState? = .running) {
         guard !job.status.isTerminal, job.cancelRequestedAt == nil else { return nil }
         if NoteImportActivitySummary.isPaused(job) {
             action = .resume
             title = "继续"
             systemImage = "play"
+        } else if [.ready, .importing, .processing].contains(job.status), runtimeState == nil {
+            action = .restart
+            title = "继续剩余任务"
+            systemImage = "arrow.clockwise"
         } else if [.scanning, .importing, .processing].contains(job.status) {
             action = .pause
             title = "暂停"
@@ -30,10 +34,19 @@ struct NoteImportJobPresentation: Equatable {
     let displayName: String
     let systemImage: String
 
-    init(job: NoteImportJobRecord) {
-        if NoteImportActivitySummary.isPaused(job) {
+    init(job: NoteImportJobRecord, runtimeState: NoteImportRuntimeState? = .running) {
+        if job.cancelRequestedAt != nil || job.status == .cancelling {
+            displayName = NoteImportJobStatus.cancelling.displayName
+            systemImage = NoteImportJobStatus.cancelling.systemImage
+        } else if NoteImportActivitySummary.isPaused(job) {
             displayName = NoteImportJobStatus.paused.displayName
             systemImage = NoteImportJobStatus.paused.systemImage
+        } else if [.ready, .importing, .processing].contains(job.status), runtimeState == nil {
+            displayName = "导入已中断"
+            systemImage = "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+        } else if runtimeState == .recovering || runtimeState == .starting {
+            displayName = "正在恢复"
+            systemImage = "arrow.clockwise"
         } else {
             displayName = job.status.displayName
             systemImage = job.status.systemImage

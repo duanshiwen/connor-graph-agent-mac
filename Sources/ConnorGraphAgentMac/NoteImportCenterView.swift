@@ -48,7 +48,10 @@ struct NoteImportCenterView: View {
     }
 
     private func jobRow(_ job: NoteImportJobRecord) -> some View {
-        let presentation = NoteImportJobPresentation(job: job)
+        let presentation = NoteImportJobPresentation(
+            job: job,
+            runtimeState: model.runtimeSnapshot.state(for: job.id)
+        )
         return VStack(alignment: .leading, spacing: 7) {
             HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer(); Text(job.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary) }
             jobProgress(job)
@@ -63,7 +66,10 @@ struct NoteImportCenterView: View {
     }
 
     private func jobDetail(_ job: NoteImportJobRecord) -> some View {
-        let presentation = NoteImportJobPresentation(job: job)
+        let presentation = NoteImportJobPresentation(
+            job: job,
+            runtimeState: model.runtimeSnapshot.state(for: job.id)
+        )
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) { Text(sourceName(job)).font(.title2.bold()); Label(presentation.displayName, systemImage: presentation.systemImage).foregroundStyle(job.status.tint) }
@@ -86,20 +92,26 @@ struct NoteImportCenterView: View {
 
     @ViewBuilder private func controls(_ job: NoteImportJobRecord) -> some View {
         HStack {
-            if let presentation = NoteImportControlPresentation(job: job) {
+            if let presentation = NoteImportControlPresentation(
+                job: job,
+                runtimeState: model.runtimeSnapshot.state(for: job.id)
+            ) {
                 Button(presentation.title, systemImage: presentation.systemImage) {
                     pendingControlJobID = job.id
                     Task {
                         switch presentation.action {
                         case .pause: await model.pauseSelectedJob()
                         case .resume: await model.resumeSelectedJob()
+                        case .restart: await model.restartSelectedJob()
                         }
                         pendingControlJobID = nil
                     }
                 }
                 .disabled(pendingControlJobID == job.id)
             }
-            if !job.status.isTerminal { Button("取消…", role: .destructive) { confirmsCancellation = true } }
+            if !job.status.isTerminal, job.cancelRequestedAt == nil, job.status != .cancelling {
+                Button("取消…", role: .destructive) { confirmsCancellation = true }
+            }
         }
     }
 
