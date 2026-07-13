@@ -332,6 +332,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             ))
                         }
 
+                        let reachedToolErrorLimit = configuration.maxConsecutiveToolResultErrors > 0
+                            && consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors
                         let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded && budgetExceeded
                         yield(.turnCompleted(AgentTurnCompletedEvent(
                             runID: run.id,
@@ -340,8 +342,22 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             assistantText: modelResponse.text,
                             toolCallCount: calls.count,
                             toolResultCount: batchResults.count,
-                            stoppedAfterTurn: shouldStopAfterTurn
+                            stoppedAfterTurn: shouldStopAfterTurn || reachedToolErrorLimit
                         )), to: continuation, recorder: eventRecorder)
+
+                        if reachedToolErrorLimit {
+                            let failure = AgentRunFailure(
+                                runID: run.id,
+                                sessionID: run.sessionID,
+                                message: "Stopped after \(consecutiveToolResultErrors) consecutive tool result errors."
+                            )
+                            run.status = .failed
+                            run.completedAt = Date()
+                            try? eventRecorder.recordRun(run)
+                            yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
+                            continuation.finish(throwing: AgentLoopError.consecutiveToolResultErrorsReached)
+                            return
+                        }
 
                         if shouldStopAfterTurn {
                             run.status = .completed
@@ -667,6 +683,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
 public enum AgentLoopError: Error, Sendable, Equatable {
     case maxToolIterationsReached
+    case consecutiveToolResultErrorsReached
     case budgetExceeded
     case cancelled
 }
@@ -706,12 +723,17 @@ private actor AgentLoopApprovalRegistry {
     }
 
     func waitForResolution(requestID: String) async -> AgentPendingApprovalStatus {
-        if let status = resolvedStatuses[requestID], status != .pending {
-            return status
+        let status: AgentPendingApprovalStatus
+        if let resolvedStatus = resolvedStatuses[requestID], resolvedStatus != .pending {
+            status = resolvedStatus
+        } else {
+            status = await withCheckedContinuation { continuation in
+                continuations[requestID] = continuation
+            }
         }
-        return await withCheckedContinuation { continuation in
-            continuations[requestID] = continuation
-        }
+        resolvedStatuses.removeValue(forKey: requestID)
+        runIDsByRequestID.removeValue(forKey: requestID)
+        return status
     }
 
     func resolve(requestID: String, status: AgentPendingApprovalStatus) {
