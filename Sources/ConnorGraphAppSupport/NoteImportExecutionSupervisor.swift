@@ -37,13 +37,21 @@ public actor NoteImportExecutionSupervisor {
     }
 
     public func recoverPersistedJobs() async {
+        let interval = NoteImportPerformanceLog.begin("Supervisor Recovery", jobID: "startup")
+        defer { NoteImportPerformanceLog.end(interval, jobID: "startup") }
         do {
-            for job in try await coordinator.recoverableJobs() {
+            let jobs = try await coordinator.recoverableJobs()
+            NoteImportPerformanceLog.event("Recoverable Jobs", jobID: "startup", itemCount: jobs.count)
+            for job in jobs {
                 guard shouldRecover(job) else { continue }
+                if job.cancelRequestedAt != nil || job.status == .cancelling {
+                    NoteImportPerformanceLog.event("Cancellation Recovery", jobID: job.id)
+                }
                 ensureRunning(jobID: job.id, recovering: true)
             }
         } catch {
             errors["recovery"] = String(describing: error)
+            NoteImportPerformanceLog.event("Supervisor Recovery Failed", jobID: "startup")
         }
     }
 
@@ -80,10 +88,18 @@ public actor NoteImportExecutionSupervisor {
     }
 
     private func ensureRunning(jobID: String, recovering: Bool) {
-        guard tasks[jobID] == nil else { return }
+        guard tasks[jobID] == nil else {
+            NoteImportPerformanceLog.event("Duplicate Runner Suppressed", jobID: jobID)
+            return
+        }
         errors.removeValue(forKey: jobID)
         states[jobID] = recovering ? .recovering : .starting
         let coordinator = self.coordinator
+        if recovering {
+            NoteImportPerformanceLog.event("Recovery Runner Registered", jobID: jobID)
+        } else {
+            NoteImportPerformanceLog.event("Runner Registered", jobID: jobID)
+        }
         tasks[jobID] = Task(priority: .utility) { [weak self] in
             guard let self else { return }
             await self.markRunning(jobID: jobID)
@@ -107,6 +123,9 @@ public actor NoteImportExecutionSupervisor {
         states.removeValue(forKey: jobID)
         if let error {
             errors[jobID] = String(describing: error)
+            NoteImportPerformanceLog.event("Runner Failed", jobID: jobID)
+        } else {
+            NoteImportPerformanceLog.event("Runner Finished", jobID: jobID)
         }
     }
 }
