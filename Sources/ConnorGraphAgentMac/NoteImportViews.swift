@@ -218,8 +218,11 @@ final class NoteImportViewModel: ObservableObject {
 
     func resumeSelectedJob() async {
         guard let coordinator, let id = selectedJobID else { return }
-        do { try await coordinator.resume(jobID: id); reloadJobs(selecting: id) }
-        catch { self.error = userFacing(error) }
+        do {
+            try await coordinator.resume(jobID: id)
+            reloadJobs(selecting: id)
+            startJobMonitoring()
+        } catch { self.error = userFacing(error) }
     }
 
     func cancelSelectedJob() async {

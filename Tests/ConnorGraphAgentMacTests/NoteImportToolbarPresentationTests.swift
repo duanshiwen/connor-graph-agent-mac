@@ -29,6 +29,35 @@ struct NoteImportToolbarPresentationTests {
         #expect(presentation.accessibilityValue == "1 个任务，已暂停，进度 25%")
     }
 
+    @Test("Uses one pause or resume control for the current job state")
+    func singlePauseResumeControl() throws {
+        let running = try #require(NoteImportControlPresentation(job: job(status: .processing)))
+        #expect(running.action == .pause)
+        #expect(running.title == "暂停")
+        #expect(running.systemImage == "pause")
+
+        var requestedPause = job(status: .processing)
+        requestedPause.pauseRequestedAt = Date()
+        let paused = try #require(NoteImportControlPresentation(job: requestedPause))
+        #expect(paused.action == .resume)
+        #expect(paused.title == "继续")
+        #expect(paused.systemImage == "play")
+
+        let legacyPaused = try #require(NoteImportControlPresentation(job: job(status: .paused)))
+        #expect(legacyPaused.action == .resume)
+        #expect(NoteImportControlPresentation(job: job(status: .awaitingReview)) == nil)
+        #expect(NoteImportControlPresentation(job: job(status: .completed)) == nil)
+    }
+
+    @Test("Requested pause drives the visible job status")
+    func requestedPauseStatus() {
+        var job = job(status: .processing)
+        job.pauseRequestedAt = Date()
+        let presentation = NoteImportJobPresentation(job: job)
+        #expect(presentation.displayName == "已暂停")
+        #expect(presentation.systemImage == "pause.circle.fill")
+    }
+
     @Test("Describes cancellation")
     func cancelling() {
         let presentation = presentation(for: [job(status: .cancelling, discovered: 4, imported: 1)])

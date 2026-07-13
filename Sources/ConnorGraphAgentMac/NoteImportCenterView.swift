@@ -6,6 +6,7 @@ struct NoteImportCenterView: View {
     @ObservedObject var model: NoteImportViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var confirmsCancellation = false
+    @State private var pendingControlJobID: String?
 
     var body: some View {
         NavigationSplitView {
@@ -47,11 +48,12 @@ struct NoteImportCenterView: View {
     }
 
     private func jobRow(_ job: NoteImportJobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack { Image(systemName: job.status.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer(); Text(job.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary) }
+        let presentation = NoteImportJobPresentation(job: job)
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer(); Text(job.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary) }
             jobProgress(job)
             HStack {
-                Text(job.status.displayName)
+                Text(presentation.displayName)
                 Spacer()
                 Text("\(NoteImportActivitySummary.processedCount(for: job))/\(job.discoveredCount)")
             }
@@ -61,9 +63,10 @@ struct NoteImportCenterView: View {
     }
 
     private func jobDetail(_ job: NoteImportJobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let presentation = NoteImportJobPresentation(job: job)
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) { Text(sourceName(job)).font(.title2.bold()); Label(job.status.displayName, systemImage: job.status.systemImage).foregroundStyle(job.status.tint) }
+                VStack(alignment: .leading, spacing: 5) { Text(sourceName(job)).font(.title2.bold()); Label(presentation.displayName, systemImage: presentation.systemImage).foregroundStyle(job.status.tint) }
                 Spacer()
                 controls(job)
             }.padding(24)
@@ -83,8 +86,19 @@ struct NoteImportCenterView: View {
 
     @ViewBuilder private func controls(_ job: NoteImportJobRecord) -> some View {
         HStack {
-            if job.pauseRequestedAt == nil && !job.status.isTerminal { Button("暂停", systemImage: "pause") { Task { await model.pauseSelectedJob() } } }
-            if job.pauseRequestedAt != nil || job.status == .paused { Button("继续", systemImage: "play") { Task { await model.resumeSelectedJob() } } }
+            if let presentation = NoteImportControlPresentation(job: job) {
+                Button(presentation.title, systemImage: presentation.systemImage) {
+                    pendingControlJobID = job.id
+                    Task {
+                        switch presentation.action {
+                        case .pause: await model.pauseSelectedJob()
+                        case .resume: await model.resumeSelectedJob()
+                        }
+                        pendingControlJobID = nil
+                    }
+                }
+                .disabled(pendingControlJobID == job.id)
+            }
             if !job.status.isTerminal { Button("取消…", role: .destructive) { confirmsCancellation = true } }
         }
     }
@@ -96,8 +110,10 @@ struct NoteImportCenterView: View {
                 value: Double(NoteImportActivitySummary.processedCount(for: job)),
                 total: Double(job.discoveredCount)
             )
+            .tint(NoteImportProgressAppearance.accentColor)
         } else {
             ProgressView()
+                .tint(NoteImportProgressAppearance.accentColor)
         }
     }
 

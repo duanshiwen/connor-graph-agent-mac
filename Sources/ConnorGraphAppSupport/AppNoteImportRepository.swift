@@ -9,6 +9,7 @@ public enum AppNoteImportRepositoryError: Error, Equatable, CustomStringConverti
     case sourceNotFound(String)
     case jobNotFound(String)
     case itemNotFound(String)
+    case jobControlUnavailable(String)
 
     public var description: String {
         switch self {
@@ -18,6 +19,7 @@ public enum AppNoteImportRepositoryError: Error, Equatable, CustomStringConverti
         case .sourceNotFound(let id): "sourceNotFound: \(id)"
         case .jobNotFound(let id): "jobNotFound: \(id)"
         case .itemNotFound(let id): "itemNotFound: \(id)"
+        case .jobControlUnavailable(let message): "jobControlUnavailable: \(message)"
         }
     }
 }
@@ -303,9 +305,53 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     }
 
     public func requestPause(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
-        guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
-        job.pauseRequestedAt = now; job.updatedAt = now
-        try saveJob(job); return job
+        try lock.withLock {
+            guard let currentJob = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+            guard [.scanning, .importing, .processing].contains(currentJob.status), currentJob.cancelRequestedAt == nil else {
+                throw AppNoteImportRepositoryError.jobControlUnavailable("Task cannot be paused from \(currentJob.status.rawValue)")
+            }
+            try run(
+                "UPDATE note_import_jobs SET pause_requested_at = ?, updated_at = ? WHERE id = ?",
+                bindings: [.text(iso(now)), .text(iso(now)), .text(jobID)]
+            )
+            guard let updated = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+            return updated
+        }
+    }
+
+    public func resumeJob(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
+        try lock.withLock {
+            guard let currentJob = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+            guard !currentJob.status.isTerminal, currentJob.cancelRequestedAt == nil,
+                  currentJob.pauseRequestedAt != nil || currentJob.status == .paused else {
+                throw AppNoteImportRepositoryError.jobControlUnavailable("Task is not paused")
+            }
+
+            let resumedStatus: NoteImportJobStatus
+            if currentJob.status == .paused {
+                resumedStatus = try legacyResumeStatus(jobID: jobID)
+                try NoteImportStateMachine().validate(jobFrom: .paused, to: resumedStatus)
+            } else {
+                resumedStatus = currentJob.status
+            }
+            try run(
+                "UPDATE note_import_jobs SET status = ?, pause_requested_at = NULL, resumed_at = ?, updated_at = ? WHERE id = ?",
+                bindings: [.text(resumedStatus.rawValue), .text(iso(now)), .text(iso(now)), .text(jobID)]
+            )
+            guard let updated = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+            return updated
+        }
+    }
+
+    private func legacyResumeStatus(jobID: String) throws -> NoteImportJobStatus {
+        let itemStatuses = Set(try items(jobID: jobID).map(\.status))
+        if !itemStatuses.isDisjoint(with: [.queuedForLLM, .runningLLM, .llmFailed]) {
+            return .processing
+        }
+        if !itemStatuses.isEmpty {
+            return .importing
+        }
+        return .scanning
     }
 
     public func requestCancel(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
