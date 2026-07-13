@@ -216,6 +216,48 @@ public final class AppNoteImportRepository: @unchecked Sendable {
 
     public func saveItem(_ item: NoteImportItemRecord) throws {
         guard try job(id: item.jobID) != nil else { throw AppNoteImportRepositoryError.jobNotFound(item.jobID) }
+        try saveItemUnchecked(item)
+    }
+
+    /// Persists a bounded scan batch in one short transaction and updates the
+    /// job counters atomically. Duplicate source identities are counted without
+    /// aborting the remaining items in the batch.
+    @discardableResult
+    public func appendScannedItems(jobID: String, items: [NoteImportItemRecord], now: Date = Date()) throws -> (inserted: Int, duplicates: Int) {
+        guard !items.isEmpty else { return (0, 0) }
+        return try lock.withLock {
+            guard try job(id: jobID) != nil else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+            try execute("BEGIN IMMEDIATE TRANSACTION;")
+            var inserted = 0
+            var duplicates = 0
+            do {
+                for item in items {
+                    do {
+                        try saveItemUnchecked(item)
+                        inserted += 1
+                    } catch AppNoteImportRepositoryError.sqliteFailed(let message)
+                        where message.localizedCaseInsensitiveContains("unique") {
+                        duplicates += 1
+                    }
+                }
+                try run(
+                    """
+                    UPDATE note_import_jobs
+                    SET discovered_count = discovered_count + ?, duplicate_count = duplicate_count + ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    bindings: [.int(inserted), .int(duplicates), .text(iso(now)), .text(jobID)]
+                )
+                try execute("COMMIT;")
+                return (inserted, duplicates)
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
+    private func saveItemUnchecked(_ item: NoteImportItemRecord) throws {
         let sql = """
         INSERT INTO note_import_items(id, job_id, source_id, source_identity, external_id, relative_path, title, status, session_id, raw_byte_hash, normalized_text_hash, source_encoding, encoding_confidence, decoder_version, attempt_count, next_retry_at, last_attempt_at, lease_owner, lease_expires_at, source_revision, error_code, error_message, created_at, updated_at, metadata_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

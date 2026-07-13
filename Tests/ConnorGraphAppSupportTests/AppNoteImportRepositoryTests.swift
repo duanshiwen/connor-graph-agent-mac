@@ -6,6 +6,51 @@ import ConnorGraphStore
 
 @Suite("Note import ledger")
 struct AppNoteImportRepositoryTests {
+    @Test("Batch scan persists items and updates job counters atomically")
+    func batchScanPersistsItemsAndUpdatesCounters() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(kind: .markdownFolder, displayName: "Batch")
+        try fixture.repository.saveSource(source)
+        let job = NoteImportJobRecord(sourceID: source.id)
+        try fixture.repository.saveJob(job)
+        let first = NoteImportItemRecord(
+            jobID: job.id,
+            sourceID: source.id,
+            sourceIdentity: "first.md",
+            title: "First",
+            status: .ready,
+            rawByteHash: "raw-1",
+            normalizedTextHash: "normalized-1"
+        )
+        let duplicate = NoteImportItemRecord(
+            jobID: job.id,
+            sourceID: source.id,
+            sourceIdentity: "first.md",
+            title: "Duplicate",
+            status: .ready,
+            rawByteHash: "raw-2",
+            normalizedTextHash: "normalized-2"
+        )
+        let second = NoteImportItemRecord(
+            jobID: job.id,
+            sourceID: source.id,
+            sourceIdentity: "second.md",
+            title: "Second",
+            status: .ready,
+            rawByteHash: "raw-3",
+            normalizedTextHash: "normalized-3"
+        )
+
+        let result = try fixture.repository.appendScannedItems(jobID: job.id, items: [first, duplicate, second])
+
+        #expect(result.inserted == 2)
+        #expect(result.duplicates == 1)
+        #expect(try fixture.repository.items(jobID: job.id).count == 2)
+        let loadedJob = try fixture.repository.job(id: job.id)
+        let persisted = try #require(loadedJob)
+        #expect(persisted.discoveredCount == 2)
+        #expect(persisted.duplicateCount == 1)
+    }
     @Test("Persists a recoverable job across repository reopen")
     func persistsRecoverableJob() throws {
         let fixture = try Fixture()
