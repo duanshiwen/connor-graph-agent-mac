@@ -21,6 +21,20 @@ struct NoteImportExecutionSupervisorTests {
         #expect(await !supervisor.isRunning(jobID: "job"))
     }
 
+    @Test("Recovers a post-scan job orphaned at awaiting review")
+    func recoversAwaitingReviewJob() async throws {
+        let fixture = try SupervisorFixture(status: .awaitingReview)
+        try fixture.saveReadyItem()
+        let supervisor = NoteImportExecutionSupervisor(coordinator: fixture.coordinator)
+
+        await supervisor.recoverPersistedJobs()
+        await fixture.waitUntilTerminal()
+
+        #expect(try fixture.ledger.job(id: "job")?.status == .completed)
+        #expect(try fixture.ledger.item(id: "item")?.status == .completed)
+        #expect(await !supervisor.isRunning(jobID: "job"))
+    }
+
     @Test("Does not auto-run a persisted paused job")
     func leavesPausedJobStopped() async throws {
         let fixture = try SupervisorFixture(status: .paused)

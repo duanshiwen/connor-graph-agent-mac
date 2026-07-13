@@ -71,6 +71,35 @@ struct NoteImportViewModelTests {
         await waitUntil { !model.isMonitoringJobs }
     }
 
+    @Test("Monitoring follows a post-scan job beyond awaiting review")
+    func monitoringFollowsAwaitingReviewTransition() async throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        try fixture.repository.saveJob(NoteImportJobRecord(
+            id: "job",
+            sourceID: "source",
+            status: .awaitingReview,
+            discoveredCount: 392
+        ))
+        let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+
+        #expect(model.selectedJob?.status == .awaitingReview)
+        #expect(model.isMonitoringJobs)
+
+        let persistedJob = try fixture.repository.job(id: "job")
+        var running = try #require(persistedJob)
+        running.status = .processing
+        running.importedCount = 5
+        try fixture.repository.saveJob(running)
+        await waitUntil { model.selectedJob?.status == .processing }
+        #expect(model.selectedJob?.importedCount == 5)
+
+        running.status = .completed
+        try fixture.repository.saveJob(running)
+        await waitUntil { model.selectedJob?.status == .completed }
+        await waitUntil { !model.isMonitoringJobs }
+    }
+
     @Test("Resume replaces a legacy paused snapshot and executes remaining work")
     func resumeExecutesRemainingWork() async throws {
         let fixture = try ImportLedgerFixture()
