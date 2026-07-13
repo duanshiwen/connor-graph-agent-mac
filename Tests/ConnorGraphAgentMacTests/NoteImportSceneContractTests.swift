@@ -11,10 +11,12 @@ struct NoteImportSceneContractTests {
         #expect(!source.contains("WindowGroup(\"导入中心\", id: AppMenuPresentation.noteImportCenterWindowID)"))
     }
 
-    @Test("Import wizard retains its independent WindowGroup behavior")
-    func importWizardRemainsWindowGroup() throws {
+    @Test("Import wizard uses a singleton Window scene")
+    func importWizardIsSingleton() throws {
         let source = try appSource()
-        #expect(source.contains("WindowGroup(\"导入笔记\", id: AppMenuPresentation.noteImportWizardWindowID)"))
+        #expect(source.contains("Window(\"导入笔记\", id: AppMenuPresentation.noteImportWizardWindowID)"))
+        #expect(!source.contains("WindowGroup(\"导入笔记\", id: AppMenuPresentation.noteImportWizardWindowID)"))
+        #expect(AppMenuPresentation.noteImportWizardWindowID != AppMenuPresentation.noteImportCenterWindowID)
     }
 
     @Test("App creates one shared import model for every scene")
