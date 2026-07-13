@@ -49,6 +49,17 @@ enum SettingsListLayout {
 struct ConnorSettingsDetailView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var identityStore: AppUserIdentityStore
+    @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
+
+    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore) {
+        self.viewModel = viewModel
+        self.identityStore = identityStore
+        let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://127.0.0.1:8080")!
+        _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
+            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: baseURL),
+            publicationAPI: CloudKnowledgeAPIClient(baseURL: baseURL)
+        ))
+    }
 
     var body: some View {
         ScrollView {
@@ -60,7 +71,7 @@ struct ConnorSettingsDetailView: View {
                 Group {
                     switch viewModel.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore)
+                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, sessions: viewModel.allChatSessions)
                     case .app:
                         SettingsAppSection(viewModel: viewModel)
                     case .ai:
