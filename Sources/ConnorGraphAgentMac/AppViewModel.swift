@@ -601,6 +601,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var liveChatInputDraftRevision: UInt64 = 0
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
     private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
+    private var browserAssistedWebFetchTimeoutTasksByID: [UUID: Task<Void, Never>] = [:]
     private var browserHistoryContentFetchTasksByID: [UUID: Task<Void, Never>] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
@@ -2109,31 +2110,38 @@ final class AppViewModel: NSObject, ObservableObject {
         let timeout = max(3_000, min(request.timeoutMilliseconds, 720_000))
         return await withCheckedContinuation { continuation in
             browserAssistedWebFetchContinuationsByTaskID[task.id] = continuation
-            Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000)
-                await MainActor.run {
-                    guard let self, self.browserAssistedWebFetchContinuationsByTaskID[task.id] != nil else { return }
-                    let result = BrowserAssistedWebFetchResult(
-                        status: .timedOut,
-                        urlString: request.urlString,
-                        finalURLString: request.urlString,
-                        title: "",
-                        contentText: "",
-                        taskID: task.id.uuidString,
-                        sessionID: task.sessionID,
-                        tabID: task.tabID.uuidString,
-                        errorMessage: "Connor WKWebView web_fetch(js) timed out after \(timeout)ms",
-                        interventionReason: nil,
-                        truncated: false,
-                        originalCharacterCount: 0
-                    )
-                    if let current = self.browserAssistedTasksByID[task.id] {
-                        self.browserAssistedTasksByID[task.id] = BrowserAssistedTaskPlanner().fail(current, message: result.errorMessage ?? "Timed out")
-                    }
-                    self.browserAssistedWebFetchContinuationsByTaskID[task.id]?.resume(returning: result)
-                    self.browserAssistedWebFetchContinuationsByTaskID[task.id] = nil
-                    self.browserAssistedWebFetchRequestsByTaskID[task.id] = nil
+            browserAssistedWebFetchTimeoutTasksByID[task.id]?.cancel()
+            browserAssistedWebFetchTimeoutTasksByID[task.id] = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000)
+                } catch {
+                    return
                 }
+                guard !Task.isCancelled,
+                      let self,
+                      self.browserAssistedWebFetchContinuationsByTaskID[task.id] != nil
+                else { return }
+                let result = BrowserAssistedWebFetchResult(
+                    status: .timedOut,
+                    urlString: request.urlString,
+                    finalURLString: request.urlString,
+                    title: "",
+                    contentText: "",
+                    taskID: task.id.uuidString,
+                    sessionID: task.sessionID,
+                    tabID: task.tabID.uuidString,
+                    errorMessage: "Connor WKWebView web_fetch(js) timed out after \(timeout)ms",
+                    interventionReason: nil,
+                    truncated: false,
+                    originalCharacterCount: 0
+                )
+                if let current = self.browserAssistedTasksByID[task.id] {
+                    self.browserAssistedTasksByID[task.id] = BrowserAssistedTaskPlanner().fail(current, message: result.errorMessage ?? "Timed out")
+                }
+                self.browserAssistedWebFetchContinuationsByTaskID[task.id]?.resume(returning: result)
+                self.browserAssistedWebFetchContinuationsByTaskID[task.id] = nil
+                self.browserAssistedWebFetchRequestsByTaskID[task.id] = nil
+                self.browserAssistedWebFetchTimeoutTasksByID[task.id] = nil
             }
         }
     }
@@ -2194,6 +2202,7 @@ final class AppViewModel: NSObject, ObservableObject {
             originalCharacterCount: originalCount
         )
         browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: "Fetched rendered page content")
+        browserAssistedWebFetchTimeoutTasksByID.removeValue(forKey: taskID)?.cancel()
         browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
         browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
         browserAssistedWebFetchRequestsByTaskID[taskID] = nil
@@ -2218,6 +2227,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 truncated: false,
                 originalCharacterCount: 0
             )
+            browserAssistedWebFetchTimeoutTasksByID.removeValue(forKey: taskID)?.cancel()
             browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
             browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
             browserAssistedWebFetchRequestsByTaskID[taskID] = nil
@@ -2249,6 +2259,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 truncated: false,
                 originalCharacterCount: 0
             )
+            browserAssistedWebFetchTimeoutTasksByID.removeValue(forKey: taskID)?.cancel()
             browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
             browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
             browserAssistedWebFetchRequestsByTaskID[taskID] = nil
@@ -2580,6 +2591,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func resumePendingBrowserAssistedWebFetchContinuationsForShutdown() {
+        for timeoutTask in browserAssistedWebFetchTimeoutTasksByID.values {
+            timeoutTask.cancel()
+        }
+        browserAssistedWebFetchTimeoutTasksByID.removeAll()
         let pendingContinuations = browserAssistedWebFetchContinuationsByTaskID
         browserAssistedWebFetchContinuationsByTaskID.removeAll()
         for (taskID, continuation) in pendingContinuations {
@@ -3072,7 +3087,6 @@ final class AppViewModel: NSObject, ObservableObject {
            !personProfiles.contains(where: { $0.id == selectedContactID && $0.isActiveForDefaultContext }) {
             self.selectedContactID = nil
         }
-        errorMessage = nil
     }
 
     func reloadCalendarContactsFromStorage() async {
@@ -3094,7 +3108,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 personRelationships = relationships
             }
             await reloadMailBrowserPresentation()
-            errorMessage = nil
         } catch {
             errorMessage = "无法加载日历/联系人/邮件缓存：\(error.localizedDescription)"
         }
@@ -3141,7 +3154,6 @@ final class AppViewModel: NSObject, ObservableObject {
                     selectedMailMessageSummary = mailBrowserPresentation.message(id: selectedMailMessageID)
                 }
             }
-            errorMessage = nil
         } catch {
             errorMessage = "无法加载邮件缓存：\(error.localizedDescription)"
         }
@@ -3735,7 +3747,6 @@ final class AppViewModel: NSObject, ObservableObject {
             } else if selectedRSSItemID == nil {
                 selectedRSSItemID = items.first?.id
             }
-            errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }

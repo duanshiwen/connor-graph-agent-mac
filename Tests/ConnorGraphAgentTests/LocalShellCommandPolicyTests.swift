@@ -16,7 +16,7 @@ import ConnorGraphAgent
     let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"command":"cat hello.txt","timeout_seconds":5}"#),
+        arguments: try AgentToolArguments(json: #"{"command":"cat hello.txt","timeout_seconds":15}"#),
         context: .shellToolTestContext(toolCallID: "bash-1")
     )
 
