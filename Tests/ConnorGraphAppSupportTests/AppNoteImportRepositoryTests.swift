@@ -123,6 +123,63 @@ struct AppNoteImportRepositoryTests {
         #expect(try reopened.claimItem(id: item.id, owner: "worker-b", leaseDuration: 60, now: now.addingTimeInterval(61))?.leaseOwner == "worker-b")
     }
 
+    @Test("Pause and resume preserve an active processing phase")
+    func pauseAndResumeActiveJob() throws {
+        let fixture = try Fixture()
+        let pausedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let resumedAt = pausedAt.addingTimeInterval(5)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id, status: .processing))
+
+        let paused = try fixture.repository.requestPause(jobID: "job", now: pausedAt)
+        #expect(paused.status == .processing)
+        #expect(paused.pauseRequestedAt == pausedAt)
+
+        let resumed = try fixture.repository.resumeJob(jobID: "job", now: resumedAt)
+        #expect(resumed.status == .processing)
+        #expect(resumed.pauseRequestedAt == nil)
+        #expect(resumed.resumedAt == resumedAt)
+    }
+
+    @Test("Resume migrates a legacy paused job to its persisted work phase")
+    func resumesLegacyPausedJob() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id, status: .paused))
+        try fixture.repository.saveItem(NoteImportItemRecord(
+            id: "item",
+            jobID: "job",
+            sourceID: source.id,
+            sourceIdentity: "note.md",
+            title: "Note",
+            status: .runningLLM,
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        ))
+
+        let resumed = try fixture.repository.resumeJob(jobID: "job")
+        #expect(resumed.status == .processing)
+        #expect(resumed.pauseRequestedAt == nil)
+        #expect(resumed.resumedAt != nil)
+    }
+
+    @Test("Terminal jobs reject pause and resume controls")
+    func terminalJobsRejectControls() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "job", sourceID: source.id, status: .completed))
+
+        #expect(throws: AppNoteImportRepositoryError.jobControlUnavailable("Task cannot be paused from completed")) {
+            _ = try fixture.repository.requestPause(jobID: "job")
+        }
+        #expect(throws: AppNoteImportRepositoryError.jobControlUnavailable("Task is not paused")) {
+            _ = try fixture.repository.resumeJob(jobID: "job")
+        }
+    }
+
     @Test("Reconciles interrupted stages without recreating an existing session")
     func reconcilesInterruptedStages() throws {
         let fixture = try Fixture()
