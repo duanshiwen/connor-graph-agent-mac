@@ -337,9 +337,21 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         try execute("ALTER TABLE \(table) ADD COLUMN \(name) \(definition);")
     }
 
-    private func execute(_ sql: String) throws { try lock.withLock { guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw AppNoteImportRepositoryError.sqliteFailed(Self.message(db)) } } }
+    private func execute(_ sql: String) throws {
+        let clock = ContinuousClock()
+        let started = clock.now
+        defer { NoteImportPerformanceLog.slowDatabaseOperation("execute", elapsed: started.duration(to: clock.now)) }
+        try lock.withLock {
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                throw AppNoteImportRepositoryError.sqliteFailed(Self.message(db))
+            }
+        }
+    }
 
     private func run(_ sql: String, bindings: [Binding]) throws {
+        let clock = ContinuousClock()
+        let started = clock.now
+        defer { NoteImportPerformanceLog.slowDatabaseOperation("write", elapsed: started.duration(to: clock.now), rowCount: 1) }
         try lock.withLock {
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw AppNoteImportRepositoryError.sqliteFailed(Self.message(db)) }
@@ -350,7 +362,11 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     }
 
     private func rows(_ sql: String, bindings: [Binding] = []) throws -> [[SQLiteValue]] {
-        try lock.withLock {
+        let clock = ContinuousClock()
+        let started = clock.now
+        var rowCount = 0
+        defer { NoteImportPerformanceLog.slowDatabaseOperation("read", elapsed: started.duration(to: clock.now), rowCount: rowCount) }
+        return try lock.withLock {
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw AppNoteImportRepositoryError.sqliteFailed(Self.message(db)) }
             defer { sqlite3_finalize(statement) }
@@ -366,6 +382,7 @@ public final class AppNoteImportRepository: @unchecked Sendable {
             }
             let code = sqlite3_errcode(db)
             guard code == SQLITE_OK || code == SQLITE_DONE else { throw AppNoteImportRepositoryError.sqliteFailed(Self.message(db)) }
+            rowCount = result.count
             return result
         }
     }
