@@ -144,7 +144,7 @@ struct ConnorGraphAgentMacApp: App {
         }
         .defaultSize(width: 720, height: 560)
 
-        WindowGroup("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
+        Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: noteImportModel)
         }
         .defaultSize(width: 900, height: 620)
