@@ -24,18 +24,22 @@ final class NoteImportViewModel: ObservableObject {
     let ledger: AppNoteImportRepository?
     let coordinator: NoteImportCoordinator?
     let sourceAccessService: NoteImportSourceAccessService
+    private let monitoringInterval: Duration
     private var runningTasks: [String: Task<Void, Never>] = [:]
+    private var monitoringTask: Task<Void, Never>?
 
     init(
         ledger: AppNoteImportRepository? = nil,
         coordinator: NoteImportCoordinator? = nil,
         sourceAccessService: NoteImportSourceAccessService = .init(),
-        configurationError: String? = nil
+        configurationError: String? = nil,
+        monitoringInterval: Duration = .milliseconds(750)
     ) {
         self.ledger = ledger
         self.coordinator = coordinator
         self.sourceAccessService = sourceAccessService
         self.error = configurationError
+        self.monitoringInterval = monitoringInterval
         reloadJobs()
     }
 
@@ -53,6 +57,28 @@ final class NoteImportViewModel: ObservableObject {
         return notes.filter { $0.title.localizedCaseInsensitiveContains(query) || ($0.relativePath?.localizedCaseInsensitiveContains(query) == true) }
     }
     var selectedJob: NoteImportJobRecord? { jobs.first { $0.id == selectedJobID } }
+    var activitySummary: NoteImportActivitySummary { NoteImportActivitySummary(jobs: jobs) }
+    var isMonitoringJobs: Bool { monitoringTask != nil }
+
+    func startJobMonitoring() {
+        guard monitoringTask == nil, hasDynamicallyChangingJobs else { return }
+        monitoringTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.monitoringTask = nil }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: self.monitoringInterval) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                self.reloadJobs(reloadSelectedItems: false)
+                guard self.hasDynamicallyChangingJobs else { return }
+            }
+        }
+    }
+
+    func stopJobMonitoring() {
+        monitoringTask?.cancel()
+        monitoringTask = nil
+    }
 
     func chooseSource() {
         let panel = NSOpenPanel()
@@ -125,6 +151,7 @@ final class NoteImportViewModel: ObservableObject {
             let job = NoteImportJobRecord(sourceID: source.id, options: options)
             try ledger.saveJob(job)
             reloadJobs(selecting: job.id)
+            startJobMonitoring()
             activity = .importing(job.id)
             let adapter = adapterForCurrentSource()
             let request = NoteImportScanRequest(sourceID: source.id, sourceURL: sourceURL, kind: sourceKind, options: options)
@@ -148,13 +175,14 @@ final class NoteImportViewModel: ObservableObject {
         }
     }
 
-    func reloadJobs(selecting jobID: String? = nil) {
+    func reloadJobs(selecting jobID: String? = nil, reloadSelectedItems: Bool = true) {
         guard let ledger else { return }
         do {
             jobs = try ledger.jobs()
             if let jobID { selectedJobID = jobID }
             else if selectedJobID == nil { selectedJobID = jobs.first?.id }
-            reloadSelectedJobItems()
+            if reloadSelectedItems { reloadSelectedJobItems() }
+            if hasDynamicallyChangingJobs { startJobMonitoring() }
         } catch { self.error = userFacing(error) }
     }
 
@@ -195,6 +223,13 @@ final class NoteImportViewModel: ObservableObject {
         searchText = ""
         error = nil
         activity = .idle
+    }
+
+    private var hasDynamicallyChangingJobs: Bool {
+        jobs.contains { job in
+            [.scanning, .importing, .processing, .cancelling].contains(job.status)
+                || job.cancelRequestedAt != nil
+        }
     }
 
     private func adapterForCurrentSource() -> any NoteImportSourceAdapter {
