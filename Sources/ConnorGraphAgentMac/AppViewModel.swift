@@ -790,6 +790,13 @@ final class AppViewModel: NSObject, ObservableObject {
         return autoSaveDraftsEnabled ? (chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput) : chatInput
     }
 
+    func appendToSelectedChatInputDraft(_ addition: String) {
+        let updatedDraft = [currentSelectedChatInputDraftForSpeech(), addition]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+        chatInput = updatedDraft
+    }
+
     private func restoreChatInputDraft(for sessionID: String?) {
         let draft: String
         if let sessionID, liveChatInputDraftSessionID == sessionID {

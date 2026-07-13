@@ -160,6 +160,29 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == "draft in progress")
     }
 
+    @Test(arguments: [true, false])
+    func sessionSwitchRestoresDraftOnlyWhenAutoSaveIsEnabled(autoSaveDraftsEnabled: Bool) async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let firstSessionID = try #require(fixture.viewModel.selectedChatSessionID)
+        let secondSession = try fixture.repository.createSession(title: "Second composer", now: Date(timeIntervalSince1970: 3_000))
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.viewModel.updateSelectedChatInputDraft("first draft")
+
+        fixture.viewModel.selectChatSession(secondSession.id)
+        try await waitForLoadingToFinish(fixture.viewModel)
+        #expect(fixture.viewModel.chatInput == "")
+        fixture.viewModel.updateSelectedChatInputDraft("second draft")
+
+        fixture.viewModel.selectChatSession(firstSessionID)
+        try await waitForLoadingToFinish(fixture.viewModel)
+
+        #expect(fixture.viewModel.chatInput == (autoSaveDraftsEnabled ? "first draft" : ""))
+        #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == (autoSaveDraftsEnabled ? "first draft" : ""))
+    }
+
     @Test func creatingNewSessionDoesNotEnterDetailLoadingState() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

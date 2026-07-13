@@ -683,9 +683,9 @@ struct BrowserWorkspaceView: View {
     }
 
     private func insertSelectionContext(_ context: BrowserSelectionContext) {
-        viewModel.chatInput = [viewModel.chatInput, BrowserLLMContextBuilder().makeContextMarkdown(selection: context)]
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .joined(separator: "\n\n")
+        viewModel.appendToSelectedChatInputDraft(
+            BrowserLLMContextBuilder().makeContextMarkdown(selection: context)
+        )
     }
 
     private func sendSelectionQuestion(_ popover: BrowserSelectionPopoverState, questionOverride: String? = nil) {
