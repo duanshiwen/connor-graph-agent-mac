@@ -47,7 +47,6 @@ struct WorkspaceRootDraft: Identifiable, Equatable {
 }
 
 enum ConnorSettingsSection: String, CaseIterable, Identifiable {
-    case identity
     case app
     case ai
     case calendar
@@ -58,12 +57,13 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case statuses
     case shortcuts
     case preferences
+    case identity
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .identity: "用户身份"
+        case .identity: "康纳账号"
         case .app: "应用"
         case .ai: "AI"
         case .calendar: "日历"
@@ -79,7 +79,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .identity: "账号、资料和知识库"
+        case .identity: "登录、资料与知识库"
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
         case .calendar: "日程、账户能力、轻量管理"
