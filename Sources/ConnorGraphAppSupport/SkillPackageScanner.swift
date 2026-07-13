@@ -109,7 +109,7 @@ public struct SkillPackageScanner {
                 let raw = try String(contentsOf: skillURL, encoding: .utf8)
                 let parsed = try parser.parse(markdown: raw, slug: slug)
                 let supportingFiles = listSupportingFiles(in: entry)
-                var manifest = parsed.manifest
+                let manifest = parsed.manifest
                 let package = SkillPackage(
                     id: SkillPackageID("\(root.tier.rawValue):\(entry.path)"),
                     slug: SkillSlug(slug),
