@@ -18,7 +18,7 @@ struct UserIdentityPopoverView: View {
                 }
                 Divider()
                 Button(action: openIdentitySettings) {
-                    Label("用户身份与知识库", systemImage: "person.text.rectangle")
+                    Label("康纳账号", systemImage: "person.text.rectangle")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
@@ -31,7 +31,7 @@ struct UserIdentityPopoverView: View {
             case .restoring:
                 ProgressView("正在恢复登录状态…")
             case .signedOut, .expired:
-                Label("尚未登录 Connor 账号", systemImage: "person.crop.circle.badge.questionmark")
+                Label("尚未登录康纳账号", systemImage: "person.crop.circle.badge.questionmark")
                     .font(.headline)
                 Text("登录后可查看你的身份、订阅和创建的知识库。")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
