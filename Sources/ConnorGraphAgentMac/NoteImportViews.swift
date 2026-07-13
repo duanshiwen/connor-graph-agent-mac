@@ -25,21 +25,26 @@ final class NoteImportViewModel: ObservableObject {
     let coordinator: NoteImportCoordinator?
     let runtime: NoteImportRuntime?
     let sourceAccessService: NoteImportSourceAccessService
+    private let onImportedSessionsChanged: @MainActor () -> Void
     private var runtimeObservationTask: Task<Void, Never>?
+    private var observedImportedCount = 0
 
     init(
         ledger: AppNoteImportRepository? = nil,
         coordinator: NoteImportCoordinator? = nil,
         runtime: NoteImportRuntime? = nil,
         sourceAccessService: NoteImportSourceAccessService = .init(),
-        configurationError: String? = nil
+        configurationError: String? = nil,
+        onImportedSessionsChanged: @escaping @MainActor () -> Void = {}
     ) {
         self.ledger = ledger
         self.coordinator = coordinator
         self.runtime = runtime
         self.sourceAccessService = sourceAccessService
+        self.onImportedSessionsChanged = onImportedSessionsChanged
         self.error = configurationError
         reloadJobs()
+        observedImportedCount = jobs.reduce(0) { $0 + $1.importedCount }
         observeRuntime()
     }
 
@@ -155,7 +160,11 @@ final class NoteImportViewModel: ObservableObject {
     func reloadJobs(selecting jobID: String? = nil) {
         guard let ledger else { return }
         do {
-            jobs = try ledger.jobs()
+            let latestJobs = try ledger.jobs()
+            let importedCount = latestJobs.reduce(0) { $0 + $1.importedCount }
+            jobs = latestJobs
+            if importedCount > observedImportedCount { onImportedSessionsChanged() }
+            observedImportedCount = importedCount
             if let jobID { selectedJobID = jobID }
             else if selectedJobID == nil { selectedJobID = jobs.first?.id }
             reloadSelectedJobItems()

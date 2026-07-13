@@ -4788,7 +4788,10 @@ final class AppViewModel: NSObject, ObservableObject {
                 ledger: ledger,
                 coordinator: coordinator,
                 runtime: runtime,
-                sourceAccessService: NoteImportSourceAccessService()
+                sourceAccessService: NoteImportSourceAccessService(),
+                onImportedSessionsChanged: { [weak self] in
+                    self?.scheduleChatSessionListRefresh(reason: "noteImportSessionCreated")
+                }
             )
         } catch {
             return NoteImportViewModel(configurationError: "无法初始化导入功能：\(error.localizedDescription)")
