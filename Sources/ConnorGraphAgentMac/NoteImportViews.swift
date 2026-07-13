@@ -23,21 +23,27 @@ final class NoteImportViewModel: ObservableObject {
 
     let ledger: AppNoteImportRepository?
     let coordinator: NoteImportCoordinator?
+    let runtime: NoteImportRuntime?
     let sourceAccessService: NoteImportSourceAccessService
-    private var runningTasks: [String: Task<Void, Never>] = [:]
+    private var runtimeObservationTask: Task<Void, Never>?
 
     init(
         ledger: AppNoteImportRepository? = nil,
         coordinator: NoteImportCoordinator? = nil,
+        runtime: NoteImportRuntime? = nil,
         sourceAccessService: NoteImportSourceAccessService = .init(),
         configurationError: String? = nil
     ) {
         self.ledger = ledger
         self.coordinator = coordinator
+        self.runtime = runtime
         self.sourceAccessService = sourceAccessService
         self.error = configurationError
         reloadJobs()
+        observeRuntime()
     }
+
+    deinit { runtimeObservationTask?.cancel() }
 
     convenience init(configurationError: String) { self.init(configurationError: Optional(configurationError)) }
 
@@ -130,15 +136,13 @@ final class NoteImportViewModel: ObservableObject {
             let request = NoteImportScanRequest(sourceID: source.id, sourceURL: sourceURL, kind: sourceKind, options: options)
             _ = try await coordinator.scan(jobID: job.id, adapter: adapter, request: request)
             reloadJobs(selecting: job.id)
-            let task = Task { @MainActor [weak self] in
-                guard let self else { return }
-                do { _ = try await coordinator.execute(jobID: job.id) }
-                catch { self.error = self.userFacing(error) }
-                self.runningTasks.removeValue(forKey: job.id)
-                self.activity = .idle
-                self.reloadJobs(selecting: job.id)
+            if let runtime {
+                _ = await runtime.submit(jobID: job.id)
+            } else {
+                _ = try await coordinator.execute(jobID: job.id)
+                activity = .idle
+                reloadJobs(selecting: job.id)
             }
-            runningTasks[job.id] = task
             return true
         } catch {
             self.error = userFacing(error)
@@ -170,21 +174,30 @@ final class NoteImportViewModel: ObservableObject {
     }
 
     func pauseSelectedJob() async {
-        guard let coordinator, let id = selectedJobID else { return }
-        do { try await coordinator.pause(jobID: id); reloadJobs(selecting: id) }
-        catch { self.error = userFacing(error) }
+        guard let id = selectedJobID else { return }
+        do {
+            if let runtime { try await runtime.pause(jobID: id) }
+            else if let coordinator { try await coordinator.pause(jobID: id) }
+            reloadJobs(selecting: id)
+        } catch { self.error = userFacing(error) }
     }
 
     func resumeSelectedJob() async {
-        guard let coordinator, let id = selectedJobID else { return }
-        do { try await coordinator.resume(jobID: id); reloadJobs(selecting: id) }
-        catch { self.error = userFacing(error) }
+        guard let id = selectedJobID else { return }
+        do {
+            if let runtime { try await runtime.resume(jobID: id) }
+            else if let coordinator { try await coordinator.resume(jobID: id) }
+            reloadJobs(selecting: id)
+        } catch { self.error = userFacing(error) }
     }
 
     func cancelSelectedJob() async {
-        guard let coordinator, let id = selectedJobID else { return }
-        do { try await coordinator.cancel(jobID: id); runningTasks[id]?.cancel(); reloadJobs(selecting: id) }
-        catch { self.error = userFacing(error) }
+        guard let id = selectedJobID else { return }
+        do {
+            if let runtime { try await runtime.cancel(jobID: id) }
+            else if let coordinator { try await coordinator.cancel(jobID: id) }
+            reloadJobs(selecting: id)
+        } catch { self.error = userFacing(error) }
     }
 
     func resetWizard() {
@@ -195,6 +208,35 @@ final class NoteImportViewModel: ObservableObject {
         searchText = ""
         error = nil
         activity = .idle
+    }
+
+    private func observeRuntime() {
+        guard let runtime else { return }
+        runtimeObservationTask = Task { [weak self] in
+            let events = await runtime.events()
+            do { try await runtime.recover() }
+            catch { await MainActor.run { self?.error = self?.userFacing(error) } }
+            for await event in events {
+                guard !Task.isCancelled else { return }
+                switch event {
+                case .ledgerChanged(let jobID):
+                    await MainActor.run {
+                        self?.reloadJobs(selecting: jobID ?? self?.selectedJobID)
+                        if let jobID, self?.jobs.first(where: { $0.id == jobID })?.status.isTerminal == true {
+                            self?.activity = .idle
+                        }
+                    }
+                case .noteSessionCreated:
+                    break
+                case .jobFailed(let jobID, let message):
+                    await MainActor.run {
+                        self?.error = message
+                        self?.activity = .idle
+                        self?.reloadJobs(selecting: jobID)
+                    }
+                }
+            }
+        }
     }
 
     private func adapterForCurrentSource() -> any NoteImportSourceAdapter {

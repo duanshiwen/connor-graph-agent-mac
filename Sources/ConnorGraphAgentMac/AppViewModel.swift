@@ -4783,9 +4783,11 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionService: sessionService,
                 attachmentImporter: NoteImportAttachmentImporter(store: attachmentStore)
             )
+            let runtime = NoteImportRuntime(ledger: ledger, coordinator: coordinator)
             return NoteImportViewModel(
                 ledger: ledger,
                 coordinator: coordinator,
+                runtime: runtime,
                 sourceAccessService: NoteImportSourceAccessService()
             )
         } catch {
