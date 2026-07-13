@@ -16,6 +16,7 @@ public actor NoteImportCoordinator {
     private let attachmentImporter: NoteImportAttachmentImporter?
     private let schedulerVersion = "2"
     private static let payloadMetadataKey = "imported_note_payload"
+    private static let scanBatchSize = 50
 
     public init(
         ledger: AppNoteImportRepository,
@@ -31,15 +32,27 @@ public actor NoteImportCoordinator {
         let interval = NoteImportPerformanceLog.begin("Import Scan", jobID: jobID)
         defer { NoteImportPerformanceLog.end(interval, jobID: jobID) }
         _ = try ledger.transitionJob(id: jobID, to: .scanning)
-        var job = try requireJob(jobID)
+        var batch: [NoteImportItemRecord] = []
+        batch.reserveCapacity(Self.scanBatchSize)
+
         for try await note in adapter.scan(request) {
             try Task.checkCancellation()
             if try requireJob(jobID).cancelRequestedAt != nil { break }
             let status: NoteImportItemStatus = note.diagnostics.contains { $0.code == .decodingAmbiguous || $0.code == .decodingFailed } ? .needsEncodingReview : .ready
             let payload = try Self.encodePayload(note)
-            let item = NoteImportItemRecord(jobID: jobID, sourceID: request.sourceID, sourceIdentity: note.sourceIdentity, externalID: note.externalID, relativePath: note.relativePath, title: note.title, status: status, rawByteHash: note.rawByteHash, normalizedTextHash: note.normalizedTextHash, sourceEncoding: note.sourceMetadata["encoding"], encodingConfidence: confidence(note.sourceMetadata["encoding_confidence"]), decoderVersion: note.sourceMetadata["decoder_version"], metadata: [Self.payloadMetadataKey: payload])
-            do { try ledger.saveItem(item); job.discoveredCount += 1 } catch { job.duplicateCount += 1 }
-            job.updatedAt = Date(); try ledger.saveJob(job)
+            batch.append(NoteImportItemRecord(jobID: jobID, sourceID: request.sourceID, sourceIdentity: note.sourceIdentity, externalID: note.externalID, relativePath: note.relativePath, title: note.title, status: status, rawByteHash: note.rawByteHash, normalizedTextHash: note.normalizedTextHash, sourceEncoding: note.sourceMetadata["encoding"], encodingConfidence: confidence(note.sourceMetadata["encoding_confidence"]), decoderVersion: note.sourceMetadata["decoder_version"], metadata: [Self.payloadMetadataKey: payload]))
+            if batch.count >= Self.scanBatchSize {
+                let items = batch
+                batch.removeAll(keepingCapacity: true)
+                _ = try ledger.appendScannedItems(jobID: jobID, items: items)
+                NoteImportPerformanceLog.event("Scan Batch", jobID: jobID, itemCount: items.count)
+                await Task.yield()
+            }
+        }
+        if !batch.isEmpty {
+            _ = try ledger.appendScannedItems(jobID: jobID, items: batch)
+            NoteImportPerformanceLog.event("Scan Batch", jobID: jobID, itemCount: batch.count)
+            await Task.yield()
         }
         if try requireJob(jobID).cancelRequestedAt != nil { return try ledger.transitionJob(id: jobID, to: .cancelling) }
         return try ledger.transitionJob(id: jobID, to: .awaitingReview)
