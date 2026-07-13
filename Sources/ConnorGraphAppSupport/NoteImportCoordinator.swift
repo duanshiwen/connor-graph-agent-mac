@@ -16,6 +16,7 @@ public actor NoteImportCoordinator {
     private let attachmentImporter: NoteImportAttachmentImporter?
     private let payloadStore: NoteImportPayloadStore?
     private let schedulerVersion = "2"
+    private var activeSchedulers: [String: NoteImportExecutionScheduler] = [:]
     private static let payloadMetadataKey = "imported_note_payload"
     private static let scanBatchSize = 50
 
@@ -83,6 +84,8 @@ public actor NoteImportCoordinator {
 
         let executionConcurrency = job.options.llmMode == .automatic ? job.options.llmConcurrency : 1
         let scheduler = NoteImportExecutionScheduler(configuration: .init(concurrency: executionConcurrency))
+        activeSchedulers[jobID] = scheduler
+        defer { activeSchedulers.removeValue(forKey: jobID) }
         let pending = try ledger.items(
             jobID: jobID,
             statuses: [.ready, .duplicateChanged, .imported, .queuedForLLM]
@@ -195,7 +198,13 @@ public actor NoteImportCoordinator {
 
     public func pause(jobID: String) throws { _ = try ledger.requestPause(jobID: jobID) }
     public func resume(jobID: String) throws { _ = try ledger.resumeJob(jobID: jobID) }
-    public func cancel(jobID: String) async throws { _ = try ledger.requestCancel(jobID: jobID); for item in try ledger.items(jobID: jobID, statuses: [.runningLLM]) { if let sessionID = item.sessionID { await sessionService.cancel(sessionID: sessionID) } } }
+    public func cancel(jobID: String) async throws {
+        _ = try ledger.requestCancel(jobID: jobID)
+        await activeSchedulers[jobID]?.cancel()
+        for item in try ledger.items(jobID: jobID, statuses: [.runningLLM]) {
+            if let sessionID = item.sessionID { await sessionService.cancel(sessionID: sessionID) }
+        }
+    }
     public func recoverableJobs() throws -> [NoteImportJobRecord] { try ledger.recoverableJobs() }
     public func progress(jobID: String) throws -> NoteImportProgress { let job = try requireJob(jobID); let items = try ledger.items(jobID: jobID); return .init(jobID: jobID, status: job.status, discovered: job.discoveredCount, imported: job.importedCount, completed: items.filter { $0.status == .completed }.count, failed: job.failedCount) }
     private func requireJob(_ id: String) throws -> NoteImportJobRecord { guard let value = try ledger.job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }; return value }

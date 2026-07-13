@@ -16,6 +16,20 @@ struct NoteImportControlStyleContractTests {
         #expect(!toolbar.contains("case .cancelling: .orange"))
     }
 
+    @Test("Cancelling an import stops undispatched work immediately")
+    func cancellationStopsScheduler() throws {
+        let coordinator = try appSupportSource("NoteImportCoordinator.swift")
+        #expect(coordinator.contains("activeSchedulers[jobID] = scheduler"))
+        #expect(coordinator.contains("await activeSchedulers[jobID]?.cancel()"))
+        #expect(coordinator.contains("defer { activeSchedulers.removeValue(forKey: jobID) }"))
+    }
+
+    @Test("Import center list omits relative update times")
+    func listOmitsRelativeTime() throws {
+        let center = try source("NoteImportCenterView.swift")
+        #expect(!center.contains("job.updatedAt, style: .relative"))
+    }
+
     @Test("Import center renders one state-driven pause or resume control")
     func stateDrivenControl() throws {
         let center = try source("NoteImportCenterView.swift")
@@ -27,13 +41,21 @@ struct NoteImportControlStyleContractTests {
     }
 
     private func source(_ filename: String) throws -> String {
+        try source(filename, target: "ConnorGraphAgentMac")
+    }
+
+    private func appSupportSource(_ filename: String) throws -> String {
+        try source(filename, target: "ConnorGraphAppSupport")
+    }
+
+    private func source(_ filename: String, target: String) throws -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         let root = testFile
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         return try String(
-            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/\(filename)"),
+            contentsOf: root.appendingPathComponent("Sources/\(target)/\(filename)"),
             encoding: .utf8
         )
     }
