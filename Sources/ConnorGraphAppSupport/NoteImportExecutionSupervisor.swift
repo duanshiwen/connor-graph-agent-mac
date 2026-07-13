@@ -84,7 +84,7 @@ public actor NoteImportExecutionSupervisor {
     private func shouldRecover(_ job: NoteImportJobRecord) -> Bool {
         if job.cancelRequestedAt != nil || job.status == .cancelling { return true }
         guard job.pauseRequestedAt == nil, job.status != .paused else { return false }
-        return [.ready, .importing, .processing].contains(job.status)
+        return [.awaitingReview, .ready, .importing, .processing].contains(job.status)
     }
 
     private func ensureRunning(jobID: String, recovering: Bool) {

@@ -16,7 +16,7 @@ struct NoteImportControlPresentation: Equatable {
             action = .resume
             title = "继续"
             systemImage = "play"
-        } else if [.ready, .importing, .processing].contains(job.status), runtimeState == nil {
+        } else if [.awaitingReview, .ready, .importing, .processing].contains(job.status), runtimeState == nil {
             action = .restart
             title = "继续剩余任务"
             systemImage = "arrow.clockwise"
@@ -44,7 +44,7 @@ struct NoteImportJobPresentation: Equatable {
         } else if NoteImportActivitySummary.isPaused(job) {
             displayName = NoteImportJobStatus.paused.displayName
             systemImage = NoteImportJobStatus.paused.systemImage
-        } else if [.ready, .importing, .processing].contains(job.status), runtimeState == nil {
+        } else if [.awaitingReview, .ready, .importing, .processing].contains(job.status), runtimeState == nil {
             displayName = "导入已中断"
             systemImage = "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
         } else if runtimeState == .recovering || runtimeState == .starting {

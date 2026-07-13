@@ -92,6 +92,17 @@ struct NoteImportToolbarPresentationTests {
         #expect(control.systemImage == "arrow.clockwise")
     }
 
+    @Test("Orphaned post-scan job offers recovery instead of waiting forever")
+    func orphanedAwaitingReviewOffersRecovery() throws {
+        let orphaned = job(status: .awaitingReview)
+        let presentation = NoteImportJobPresentation(job: orphaned, runtimeState: nil)
+        let control = try #require(NoteImportControlPresentation(job: orphaned, runtimeState: nil))
+
+        #expect(presentation.displayName == "导入已中断")
+        #expect(control.action == .restart)
+        #expect(control.title == "继续剩余任务")
+    }
+
     @Test("Describes cancellation")
     func cancelling() {
         let presentation = presentation(for: [job(status: .cancelling, discovered: 4, imported: 1)])
