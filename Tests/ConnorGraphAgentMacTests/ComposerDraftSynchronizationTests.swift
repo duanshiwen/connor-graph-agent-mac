@@ -65,4 +65,22 @@ struct ComposerDraftSynchronizationTests {
         #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "ab")
         #expect(viewModel.chatInput == "published value")
     }
+
+    @Test(arguments: [true, false])
+    func externalContextAppendPreservesLatestManualDraft(autoSaveDraftsEnabled: Bool) {
+        _ = NSApplication.shared
+        let viewModel = AppViewModel(
+            entities: [],
+            statements: [],
+            observeLogEntries: []
+        )
+        viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        viewModel.chatInput = "stale published value"
+        viewModel.updateSelectedChatInputDraft("current manual draft")
+
+        viewModel.appendToSelectedChatInputDraft("external browser context")
+
+        #expect(viewModel.chatInput == "current manual draft\n\nexternal browser context")
+        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "current manual draft\n\nexternal browser context")
+    }
 }
