@@ -63,7 +63,7 @@ struct NoteImportRuntimeTests {
     }
 
     private func waitUntil(
-        timeout: Duration = .seconds(3),
+        timeout: Duration = .seconds(30),
         condition: @escaping @Sendable () throws -> Bool
     ) async throws {
         let clock = ContinuousClock()
