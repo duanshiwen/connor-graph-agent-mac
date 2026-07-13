@@ -4824,7 +4824,10 @@ final class AppViewModel: NSObject, ObservableObject {
             let coordinator = NoteImportCoordinator(
                 ledger: ledger,
                 sessionService: sessionService,
-                attachmentImporter: NoteImportAttachmentImporter(store: attachmentStore)
+                attachmentImporter: NoteImportAttachmentImporter(store: attachmentStore),
+                payloadStore: NoteImportPayloadStore(
+                    rootDirectory: storagePaths.artifactsDirectory.appendingPathComponent("note-import-staging", isDirectory: true)
+                )
             )
             return NoteImportViewModel(
                 ledger: ledger,

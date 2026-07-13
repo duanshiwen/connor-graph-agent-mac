@@ -14,6 +14,7 @@ public actor NoteImportCoordinator {
     private let ledger: AppNoteImportRepository
     private let sessionService: HeadlessNoteSessionService
     private let attachmentImporter: NoteImportAttachmentImporter?
+    private let payloadStore: NoteImportPayloadStore?
     private let schedulerVersion = "2"
     private static let payloadMetadataKey = "imported_note_payload"
     private static let scanBatchSize = 50
@@ -21,11 +22,13 @@ public actor NoteImportCoordinator {
     public init(
         ledger: AppNoteImportRepository,
         sessionService: HeadlessNoteSessionService,
-        attachmentImporter: NoteImportAttachmentImporter? = nil
+        attachmentImporter: NoteImportAttachmentImporter? = nil,
+        payloadStore: NoteImportPayloadStore? = nil
     ) {
         self.ledger = ledger
         self.sessionService = sessionService
         self.attachmentImporter = attachmentImporter
+        self.payloadStore = payloadStore
     }
 
     public func scan(jobID: String, adapter: any NoteImportSourceAdapter, request: NoteImportScanRequest) async throws -> NoteImportJobRecord {
@@ -39,8 +42,14 @@ public actor NoteImportCoordinator {
             try Task.checkCancellation()
             if try requireJob(jobID).cancelRequestedAt != nil { break }
             let status: NoteImportItemStatus = note.diagnostics.contains { $0.code == .decodingAmbiguous || $0.code == .decodingFailed } ? .needsEncodingReview : .ready
-            let payload = try Self.encodePayload(note)
-            batch.append(NoteImportItemRecord(jobID: jobID, sourceID: request.sourceID, sourceIdentity: note.sourceIdentity, externalID: note.externalID, relativePath: note.relativePath, title: note.title, status: status, rawByteHash: note.rawByteHash, normalizedTextHash: note.normalizedTextHash, sourceEncoding: note.sourceMetadata["encoding"], encodingConfidence: confidence(note.sourceMetadata["encoding_confidence"]), decoderVersion: note.sourceMetadata["decoder_version"], metadata: [Self.payloadMetadataKey: payload]))
+            let itemID = UUID().uuidString
+            let metadata: [String: String]
+            if let payloadStore {
+                metadata = try payloadStore.save(note, jobID: jobID, itemID: itemID)
+            } else {
+                metadata = [Self.payloadMetadataKey: try Self.encodePayload(note)]
+            }
+            batch.append(NoteImportItemRecord(id: itemID, jobID: jobID, sourceID: request.sourceID, sourceIdentity: note.sourceIdentity, externalID: note.externalID, relativePath: note.relativePath, title: note.title, status: status, rawByteHash: note.rawByteHash, normalizedTextHash: note.normalizedTextHash, sourceEncoding: note.sourceMetadata["encoding"], encodingConfidence: confidence(note.sourceMetadata["encoding_confidence"]), decoderVersion: note.sourceMetadata["decoder_version"], metadata: metadata))
             if batch.count >= Self.scanBatchSize {
                 let items = batch
                 batch.removeAll(keepingCapacity: true)
@@ -70,7 +79,8 @@ public actor NoteImportCoordinator {
         let llmMode = job.options.llmMode
         let pending = try ledger.items(jobID: jobID, statuses: [.ready, .duplicateChanged])
         let options = job.options
-        let results = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, llmMode, options] item in
+        let payloadStore = self.payloadStore
+        let results = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, llmMode, options] item in
             let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
             defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
             let control = try ledger.job(id: jobID)
@@ -78,7 +88,7 @@ public actor NoteImportCoordinator {
             while try ledger.job(id: jobID)?.pauseRequestedAt != nil { try await Task.sleep(for: .milliseconds(200)) }
             do {
                 _ = try ledger.transitionItem(id: item.id, to: .creatingSession)
-                let note = try Self.decodePayload(item)
+                let note = try Self.decodePayload(item, payloadStore: payloadStore)
                 let canCreateInSingleWrite = llmMode != .automatic
                     && (!options.importAttachments || note.attachments.isEmpty)
                 let session: AgentSession
@@ -150,9 +160,12 @@ public actor NoteImportCoordinator {
         return try encoder.encode(note).base64EncodedString()
     }
 
-    private static func decodePayload(_ item: NoteImportItemRecord) throws -> ImportedNote {
+    private static func decodePayload(_ item: NoteImportItemRecord, payloadStore: NoteImportPayloadStore?) throws -> ImportedNote {
         let interval = NoteImportPerformanceLog.begin("Payload Decode", jobID: item.jobID)
         defer { NoteImportPerformanceLog.end(interval, jobID: item.jobID) }
+        if let payloadStore, let staged = try payloadStore.load(metadata: item.metadata) {
+            return staged
+        }
         guard let encoded = item.metadata[payloadMetadataKey], let data = Data(base64Encoded: encoded) else {
             throw NoteImportErrorCode.internalInvariantViolation
         }
