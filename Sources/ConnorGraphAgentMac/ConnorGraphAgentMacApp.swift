@@ -50,8 +50,7 @@ struct ConnorGraphAgentMacApp: App {
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
                     viewModel.startTaskSchedulerTimer()
-                    noteImportModel.reloadJobs(reloadSelectedItems: false)
-                    noteImportModel.startJobMonitoring()
+                    await noteImportModel.recoverPersistedJobs()
                     await identityStore.restoreSession()
                 }
         }

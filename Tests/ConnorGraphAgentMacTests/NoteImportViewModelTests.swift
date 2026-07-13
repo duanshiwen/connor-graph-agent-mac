@@ -71,8 +71,8 @@ struct NoteImportViewModelTests {
         await waitUntil { !model.isMonitoringJobs }
     }
 
-    @Test("Resume replaces a legacy paused snapshot and restarts monitoring")
-    func resumeRestartsMonitoring() async throws {
+    @Test("Resume replaces a legacy paused snapshot and executes remaining work")
+    func resumeExecutesRemainingWork() async throws {
         let fixture = try ImportLedgerFixture()
         try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
         try fixture.repository.saveJob(NoteImportJobRecord(
@@ -82,6 +82,16 @@ struct NoteImportViewModelTests {
             discoveredCount: 4,
             importedCount: 2
         ))
+        let payload = ImportedNote(
+            sourceKind: .markdownFolder,
+            sourceIdentity: "note.md",
+            title: "Note",
+            markdownContent: "Body",
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
         try fixture.repository.saveItem(NoteImportItemRecord(
             id: "item",
             jobID: "paused",
@@ -90,7 +100,8 @@ struct NoteImportViewModelTests {
             title: "Note",
             status: .ready,
             rawByteHash: "raw",
-            normalizedTextHash: "text"
+            normalizedTextHash: "text",
+            metadata: ["imported_note_payload": try encoder.encode(payload).base64EncodedString()]
         ))
         let chat = AppChatSessionRepository(store: fixture.graphStore)
         let service = HeadlessNoteSessionService(repository: chat) { session in
@@ -107,11 +118,12 @@ struct NoteImportViewModelTests {
         #expect(!model.isMonitoringJobs)
         await model.resumeSelectedJob()
 
-        #expect(model.selectedJob?.status == .importing)
         #expect(model.selectedJob?.pauseRequestedAt == nil)
-        #expect(model.activitySummary.presentationState == .running)
-        #expect(model.isMonitoringJobs)
-        model.stopJobMonitoring()
+        await waitUntil { model.jobs.first?.status.isTerminal == true }
+        #expect(model.selectedJob?.status == .completed)
+        #expect(try fixture.repository.item(id: "item")?.status == .completed)
+        #expect(try chat.loadRecentSessions(limit: 10).count == 1)
+        await waitUntil { !model.isMonitoringJobs }
     }
 
     @Test("Static paused jobs are loaded without high frequency monitoring")
