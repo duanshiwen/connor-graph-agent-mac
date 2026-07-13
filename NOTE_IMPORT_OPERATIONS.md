@@ -25,23 +25,30 @@ Each imported note is stored as `AgentSessionKind.note`. Source provenance remai
 
 ## Recovery behavior
 
-The ledger is the source of truth for pause, cancel, heartbeat, lease and retry state.
+The ledger is the source of truth for pause, cancel, heartbeat, lease and retry state. `NoteImportRuntime` is the App-owned worker boundary: import windows submit commands and observe events but do not own execution tasks.
 
+- Runtime submission is idempotent by job ID, so reopening the Import Center or issuing resume repeatedly does not create duplicate workers.
+- On App startup, confirmed jobs in `awaitingReview`, `ready`, `importing`, or `processing` resume automatically. Jobs with persisted pause or cancel intent do not auto-resume.
 - `creatingSession` with a bound Session resumes as imported; it does not create another Session.
 - `creatingSession` without a Session returns to ready.
 - `runningLLM` returns to the persistent LLM queue.
 - Active leases prevent duplicate workers; expired leases may be reclaimed.
-- Pause stops new dispatch while active work safely completes.
-- Cancel stops new dispatch and requests cancellation of active headless runs. Existing Sessions are retained.
+- Pause persists intent and moves active jobs to `paused`; resume returns them to the import or processing phase and guarantees a worker is submitted.
+- Cancel stops new dispatch and requests cancellation of active headless runs. Existing Sessions and original note content are retained.
+
+Each successful source-note persistence creates one `AgentSessionKind.note` Session before optional LLM processing. A Session with its original note content counts as imported even while AI processing is queued, running, or failed. LLM failure must not remove the Session or decrement the imported count.
 
 ## Import Center actions
 
-The current native Import Center loads persisted jobs and item status from the ledger and offers:
+The current native Import Center observes App-runtime ledger events and loads persisted jobs and item status from the ledger. While a job is active, low-frequency runtime signals reconcile the UI with SQLite even if an individual event is missed.
 
 - Pause / resume dispatch
 - Cancel remaining work while retaining Sessions already created
-- Refresh persisted job and item status
+- Manual refresh as an explicit recovery aid, not as the normal progress mechanism
 - Inspect discovered/imported/duplicate/failed counts and per-item errors
+- See imported counts advance from persisted item/Session state before the entire batch completes
+
+When the imported Session count increases, the main AppViewModel refreshes its Session list and search index through the existing asynchronous list-refresh coordinator. Imported notes therefore become visible without restarting the App or pressing pause/resume.
 
 The domain and reporting services also model retry, reauthorization, encoding review, opening imported Sessions, and diagnostic export. These actions must not be advertised as complete until their UI commands are connected and verified.
 
