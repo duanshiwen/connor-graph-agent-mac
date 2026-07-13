@@ -21,6 +21,29 @@ struct ObsidianVaultNoteImportAdapterTests {
         let robert = try #require(notes.first { $0.title == "Robert" }); #expect(robert.sourceMetadata["obsidian_aliases"] == "Robert|Bob")
     }
 
+    @Test("Asset index prefers a note-relative path and preserves ambiguous basename diagnostics")
+    func indexesAssetsOnceWithRelativePathPrecedence() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("A"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("B"), withIntermediateDirectories: true)
+        try Data("a".utf8).write(to: root.appendingPathComponent("A/image.png"))
+        try Data("b".utf8).write(to: root.appendingPathComponent("B/image.png"))
+        try "![[image.png]]".write(to: root.appendingPathComponent("A/Relative.md"), atomically: true, encoding: .utf8)
+        try "![[image.png]]".write(to: root.appendingPathComponent("Ambiguous.md"), atomically: true, encoding: .utf8)
+
+        var notes: [ImportedNote] = []
+        for try await note in ObsidianVaultNoteImportAdapter().scan(.init(sourceID: "v", sourceURL: root, kind: .obsidianVault, options: .init())) {
+            notes.append(note)
+        }
+
+        let relative = try #require(notes.first { $0.title == "Relative" })
+        let attachment = try #require(relative.attachments.first)
+        #expect(attachment.sourcePath?.hasSuffix("/A/image.png") == true)
+        let ambiguous = try #require(notes.first { $0.title == "Ambiguous" })
+        #expect(ambiguous.attachments.isEmpty)
+        #expect(ambiguous.diagnostics.contains { $0.message.contains("Ambiguous Obsidian attachment") })
+    }
+
     @Test("Preserves cyclic note embeds as links without recursive expansion")
     func preservesCycles() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
