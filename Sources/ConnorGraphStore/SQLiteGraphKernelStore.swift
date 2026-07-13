@@ -176,6 +176,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
             throw SQLiteGraphKernelStoreError.openFailed(Self.message(db))
         }
+        guard sqlite3_busy_timeout(db, 5_000) == SQLITE_OK else {
+            throw SQLiteGraphKernelStoreError.openFailed(Self.message(db))
+        }
+        try execute("PRAGMA foreign_keys = ON;")
+        try execute("PRAGMA journal_mode = WAL;")
     }
 
     deinit {
