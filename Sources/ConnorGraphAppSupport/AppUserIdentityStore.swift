@@ -271,6 +271,17 @@ public actor ConnorBackendAuthenticatedSession {
         self.credentials = credentials
     }
 
+    public func accessToken() throws -> String {
+        guard let token = try credentials.tokens()?.accessToken, !token.isEmpty else { throw ConnorBackendAPIError.unauthorized }
+        return token
+    }
+
+    public func refreshAccessToken(afterRejectedToken rejectedToken: String) async throws -> String {
+        guard let tokens = try credentials.tokens() else { throw ConnorBackendAPIError.unauthorized }
+        if tokens.accessToken != rejectedToken { return tokens.accessToken }
+        return try await refreshTokens(from: tokens).accessToken
+    }
+
     public func currentUser() async throws -> ConnorRemoteUserIdentity {
         try await authenticated { try await api.currentUser(token: $0) }
     }
@@ -336,7 +347,7 @@ public final class AppUserIdentityStore: ObservableObject {
     private let authenticatedSession: ConnorBackendAuthenticatedSession
 
     public init(
-        baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://127.0.0.1:8080")!,
+        baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!,
         credentials: AppConnorAccountCredentialStore = .init(),
         transport: any ConnorBackendHTTPTransport = URLSession.shared
     ) {
