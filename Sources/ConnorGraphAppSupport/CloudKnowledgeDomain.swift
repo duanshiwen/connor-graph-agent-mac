@@ -4,6 +4,8 @@ public enum CloudKnowledgeLayer: String, Codable, Sendable, CaseIterable { case 
 public enum CloudKnowledgeSearchChannel: String, Codable, Sendable { case recentContext = "recent_context", knowledgeContext = "knowledge_context", writeAssist = "write_assist", answer }
 public enum CloudKnowledgeSearchView: String, Codable, Sendable { case committed, staged, combined }
 public enum CloudKnowledgeRunStatus: String, Codable, Sendable { case open, staging, validating, ready, conflict, committed, abandoned }
+public enum CloudKnowledgeGovernanceState: String, Codable, Sendable, CaseIterable { case draft, unpublished, published, takenDown = "taken_down", deleting, deleted }
+public enum CloudKnowledgeGovernanceAction: String, Codable, Sendable, CaseIterable { case publish, unpublish, appeal }
 public enum CloudKnowledgeDecision: String, Codable, Sendable, CaseIterable { case skipDuplicate = "skip_duplicate", reviseExisting = "revise_existing", reuseIdentity = "reuse_identity", recordTemporalChange = "record_temporal_change", recordConflict = "record_conflict", createNew = "create_new" }
 
 public enum CloudKnowledgeJSONValue: Codable, Sendable, Equatable {
@@ -132,7 +134,7 @@ public struct CloudKnowledgePublishingContext: Sendable, Equatable {
 }
 
 public enum CloudKnowledgeError: Error, Sendable, Equatable, LocalizedError {
-    case invalidResponse, unauthorized, server(status: Int, code: String?, message: String), publicationConflict(currentSequence: Int?), searchBeforeWriteRequired, searchContextNotRelevant, searchContextStale, cancelled
+    case invalidResponse, unauthorized, server(status: Int, code: String?, message: String), publicationConflict(currentSequence: Int?), searchBeforeWriteRequired, searchContextNotRelevant, searchContextStale, cancelled, takenDown, deleting, deleted, staleGovernanceVersion
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: "云端知识服务返回了无法识别的数据。"
@@ -143,6 +145,10 @@ public enum CloudKnowledgeError: Error, Sendable, Equatable, LocalizedError {
         case .searchContextNotRelevant: "搜索上下文没有覆盖本次知识写入。"
         case .searchContextStale: "搜索上下文已过期，请重新搜索。"
         case .cancelled: "发布已取消。"
+        case .takenDown: "知识库已被下架。"
+        case .deleting: "知识库正在删除中。"
+        case .deleted: "知识库已删除。"
+        case .staleGovernanceVersion: "治理版本已过期，请刷新后重试。"
         }
     }
 }

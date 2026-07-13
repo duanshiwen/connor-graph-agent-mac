@@ -347,7 +347,7 @@ public final class AppUserIdentityStore: ObservableObject {
     private let authenticatedSession: ConnorBackendAuthenticatedSession
 
     public init(
-        baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://127.0.0.1:8080")!,
+        baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!,
         credentials: AppConnorAccountCredentialStore = .init(),
         transport: any ConnorBackendHTTPTransport = URLSession.shared
     ) {

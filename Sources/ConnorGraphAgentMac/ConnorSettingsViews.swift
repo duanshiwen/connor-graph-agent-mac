@@ -50,15 +50,18 @@ struct ConnorSettingsDetailView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var identityStore: AppUserIdentityStore
     @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
+    @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
     init(viewModel: AppViewModel, identityStore: AppUserIdentityStore) {
         self.viewModel = viewModel
         self.identityStore = identityStore
-        let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://127.0.0.1:8080")!
+        let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
         _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: baseURL),
             publicationAPI: CloudKnowledgeAPIClient(baseURL: baseURL)
         ))
+        let marketplaceAPI = CloudKnowledgeMarketplaceAPIClient(baseURL: baseURL)
+        _cloudKnowledgeMarketplaceStore = StateObject(wrappedValue: CloudKnowledgeMarketplaceStore(api: marketplaceAPI))
     }
 
     var body: some View {
@@ -71,7 +74,7 @@ struct ConnorSettingsDetailView: View {
                 Group {
                     switch viewModel.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, sessions: viewModel.allChatSessions)
+                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.allChatSessions)
                     case .app:
                         SettingsAppSection(viewModel: viewModel)
                     case .ai:
