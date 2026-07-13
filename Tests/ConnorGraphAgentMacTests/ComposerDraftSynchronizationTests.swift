@@ -32,4 +32,37 @@ struct ComposerDraftSynchronizationTests {
 
         #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "")
     }
+
+    @Test func manualComposerEditKeepsLiveDraftWhenAutoSaveIsDisabled() {
+        _ = NSApplication.shared
+        let viewModel = AppViewModel(
+            entities: [],
+            statements: [],
+            observeLogEntries: []
+        )
+        viewModel.autoSaveDraftsEnabled = false
+        viewModel.chatInput = ""
+
+        viewModel.updateSelectedChatInputDraft("a")
+
+        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "a")
+        #expect(viewModel.chatInput == "")
+    }
+
+    @Test func repeatedManualEditsReplaceLiveDraftWithoutPublishingChatInput() {
+        _ = NSApplication.shared
+        let viewModel = AppViewModel(
+            entities: [],
+            statements: [],
+            observeLogEntries: []
+        )
+        viewModel.autoSaveDraftsEnabled = false
+        viewModel.chatInput = "published value"
+
+        viewModel.updateSelectedChatInputDraft("a")
+        viewModel.updateSelectedChatInputDraft("ab")
+
+        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "ab")
+        #expect(viewModel.chatInput == "published value")
+    }
 }
