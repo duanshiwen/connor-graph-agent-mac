@@ -42,6 +42,30 @@ struct NoteImportViewModelTests {
         #expect(model.filteredNotes.map(\.title) == ["计划"])
     }
 
+    @Test("Selecting a job loads its items through the async projection reader")
+    func selectingJobLoadsItems() async throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "first", sourceID: "source", status: .completed))
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "second", sourceID: "source", status: .completed))
+        try fixture.repository.saveItem(NoteImportItemRecord(
+            id: "second-item",
+            jobID: "second",
+            sourceID: "source",
+            sourceIdentity: "second.md",
+            title: "Second",
+            status: .completed,
+            rawByteHash: "raw",
+            normalizedTextHash: "normalized"
+        ))
+        let model = NoteImportViewModel(ledger: fixture.repository)
+
+        await model.selectJob("second")
+
+        #expect(model.selectedJobID == "second")
+        #expect(model.selectedJobItems.map(\.id) == ["second-item"])
+    }
+
     @Test("Monitoring refreshes persisted progress and stops at a terminal state")
     func monitoringRefreshesProgress() async throws {
         let fixture = try ImportLedgerFixture()
