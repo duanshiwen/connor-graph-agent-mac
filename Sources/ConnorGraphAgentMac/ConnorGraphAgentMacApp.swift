@@ -136,7 +136,7 @@ struct ConnorGraphAgentMacApp: App {
             }
         }
 
-        WindowGroup("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
+        Window("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
             NoteImportWizardView(
                 model: noteImportModel,
                 importExecutionEnabled: featureFlags.noteImportEnabled
