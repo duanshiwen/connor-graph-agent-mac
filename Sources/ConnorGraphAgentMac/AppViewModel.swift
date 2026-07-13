@@ -4832,6 +4832,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return NoteImportViewModel(
                 ledger: ledger,
                 coordinator: coordinator,
+                executionSupervisor: NoteImportExecutionSupervisor(coordinator: coordinator),
                 sourceAccessService: NoteImportSourceAccessService()
             )
         } catch {

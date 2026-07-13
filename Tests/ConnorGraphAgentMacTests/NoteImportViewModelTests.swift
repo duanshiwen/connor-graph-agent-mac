@@ -42,6 +42,30 @@ struct NoteImportViewModelTests {
         #expect(model.filteredNotes.map(\.title) == ["计划"])
     }
 
+    @Test("Selecting a job loads its items through the async projection reader")
+    func selectingJobLoadsItems() async throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "first", sourceID: "source", status: .completed))
+        try fixture.repository.saveJob(NoteImportJobRecord(id: "second", sourceID: "source", status: .completed))
+        try fixture.repository.saveItem(NoteImportItemRecord(
+            id: "second-item",
+            jobID: "second",
+            sourceID: "source",
+            sourceIdentity: "second.md",
+            title: "Second",
+            status: .completed,
+            rawByteHash: "raw",
+            normalizedTextHash: "normalized"
+        ))
+        let model = NoteImportViewModel(ledger: fixture.repository)
+
+        await model.selectJob("second")
+
+        #expect(model.selectedJobID == "second")
+        #expect(model.selectedJobItems.map(\.id) == ["second-item"])
+    }
+
     @Test("Monitoring refreshes persisted progress and stops at a terminal state")
     func monitoringRefreshesProgress() async throws {
         let fixture = try ImportLedgerFixture()
@@ -71,8 +95,37 @@ struct NoteImportViewModelTests {
         await waitUntil { !model.isMonitoringJobs }
     }
 
-    @Test("Resume replaces a legacy paused snapshot and restarts monitoring")
-    func resumeRestartsMonitoring() async throws {
+    @Test("Monitoring follows a post-scan job beyond awaiting review")
+    func monitoringFollowsAwaitingReviewTransition() async throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        try fixture.repository.saveJob(NoteImportJobRecord(
+            id: "job",
+            sourceID: "source",
+            status: .awaitingReview,
+            discoveredCount: 392
+        ))
+        let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+
+        #expect(model.selectedJob?.status == .awaitingReview)
+        #expect(model.isMonitoringJobs)
+
+        let persistedJob = try fixture.repository.job(id: "job")
+        var running = try #require(persistedJob)
+        running.status = .processing
+        running.importedCount = 5
+        try fixture.repository.saveJob(running)
+        await waitUntil { model.selectedJob?.status == .processing }
+        #expect(model.selectedJob?.importedCount == 5)
+
+        running.status = .completed
+        try fixture.repository.saveJob(running)
+        await waitUntil { model.selectedJob?.status == .completed }
+        await waitUntil { !model.isMonitoringJobs }
+    }
+
+    @Test("Resume replaces a legacy paused snapshot and executes remaining work")
+    func resumeExecutesRemainingWork() async throws {
         let fixture = try ImportLedgerFixture()
         try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
         try fixture.repository.saveJob(NoteImportJobRecord(
@@ -82,6 +135,16 @@ struct NoteImportViewModelTests {
             discoveredCount: 4,
             importedCount: 2
         ))
+        let payload = ImportedNote(
+            sourceKind: .markdownFolder,
+            sourceIdentity: "note.md",
+            title: "Note",
+            markdownContent: "Body",
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
         try fixture.repository.saveItem(NoteImportItemRecord(
             id: "item",
             jobID: "paused",
@@ -90,7 +153,8 @@ struct NoteImportViewModelTests {
             title: "Note",
             status: .ready,
             rawByteHash: "raw",
-            normalizedTextHash: "text"
+            normalizedTextHash: "text",
+            metadata: ["imported_note_payload": try encoder.encode(payload).base64EncodedString()]
         ))
         let chat = AppChatSessionRepository(store: fixture.graphStore)
         let service = HeadlessNoteSessionService(repository: chat) { session in
@@ -107,11 +171,33 @@ struct NoteImportViewModelTests {
         #expect(!model.isMonitoringJobs)
         await model.resumeSelectedJob()
 
-        #expect(model.selectedJob?.status == .importing)
         #expect(model.selectedJob?.pauseRequestedAt == nil)
-        #expect(model.activitySummary.presentationState == .running)
-        #expect(model.isMonitoringJobs)
-        model.stopJobMonitoring()
+        await waitUntil { model.jobs.first?.status.isTerminal == true }
+        #expect(model.selectedJob?.status == .completed)
+        #expect(try fixture.repository.item(id: "item")?.status == .completed)
+        #expect(try chat.loadRecentSessions(limit: 10).count == 1)
+        await waitUntil { !model.isMonitoringJobs }
+    }
+
+    @Test("Cancelled jobs with a persisted request timestamp do not keep polling")
+    func cancelledJobsDoNotPoll() throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        var cancelled = NoteImportJobRecord(
+            id: "cancelled",
+            sourceID: "source",
+            status: .cancelled,
+            discoveredCount: 392,
+            importedCount: 253,
+            failedCount: 2
+        )
+        cancelled.cancelRequestedAt = Date()
+        try fixture.repository.saveJob(cancelled)
+
+        let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+
+        #expect(model.selectedJob?.status == .cancelled)
+        #expect(!model.isMonitoringJobs)
     }
 
     @Test("Static paused jobs are loaded without high frequency monitoring")
