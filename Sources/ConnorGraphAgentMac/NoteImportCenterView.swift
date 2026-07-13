@@ -34,15 +34,29 @@ struct NoteImportCenterView: View {
         .alert("导入中心", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("好") { model.error = nil } } message: { Text(model.error ?? "") }
     }
 
-    private var activeJobs: [NoteImportJobRecord] { model.jobs.filter { !$0.status.isTerminal && $0.status != .paused } }
-    private var issueJobs: [NoteImportJobRecord] { model.jobs.filter { $0.status == .paused || $0.status == .completedWithIssues || $0.status == .failed } }
-    private var completedJobs: [NoteImportJobRecord] { model.jobs.filter { $0.status == .completed || $0.status == .cancelled } }
+    private var activeJobs: [NoteImportJobRecord] {
+        model.jobs.filter { NoteImportActivitySummary.isVisible($0) && !NoteImportActivitySummary.isPaused($0) }
+    }
+    private var issueJobs: [NoteImportJobRecord] {
+        model.jobs.filter {
+            NoteImportActivitySummary.isPaused($0) || $0.status == .completedWithIssues || $0.status == .failed
+        }
+    }
+    private var completedJobs: [NoteImportJobRecord] {
+        model.jobs.filter { $0.status == .completed || $0.status == .cancelled }
+    }
 
     private func jobRow(_ job: NoteImportJobRecord) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack { Image(systemName: job.status.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer(); Text(job.updatedAt, style: .relative).font(.caption).foregroundStyle(.secondary) }
-            ProgressView(value: Double(job.importedCount + job.failedCount), total: Double(max(job.discoveredCount, 1)))
-            HStack { Text(job.status.displayName); Spacer(); Text("\(job.importedCount)/\(job.discoveredCount)") }.font(.caption).foregroundStyle(.secondary)
+            jobProgress(job)
+            HStack {
+                Text(job.status.displayName)
+                Spacer()
+                Text("\(NoteImportActivitySummary.processedCount(for: job))/\(job.discoveredCount)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }.padding(.vertical, 5).tag(job.id)
     }
 
@@ -55,7 +69,7 @@ struct NoteImportCenterView: View {
             }.padding(24)
             Divider()
             VStack(alignment: .leading, spacing: 16) {
-                ProgressView(value: Double(job.importedCount + job.failedCount), total: Double(max(job.discoveredCount, 1)))
+                jobProgress(job)
                 HStack(spacing: 24) { metric("已发现", job.discoveredCount); metric("已导入", job.importedCount); metric("重复", job.duplicateCount); metric("失败", job.failedCount) }
                 Table(model.selectedJobItems) {
                     TableColumn("笔记") { Text($0.title).lineLimit(1) }
@@ -72,6 +86,18 @@ struct NoteImportCenterView: View {
             if job.pauseRequestedAt == nil && !job.status.isTerminal { Button("暂停", systemImage: "pause") { Task { await model.pauseSelectedJob() } } }
             if job.pauseRequestedAt != nil || job.status == .paused { Button("继续", systemImage: "play") { Task { await model.resumeSelectedJob() } } }
             if !job.status.isTerminal { Button("取消…", role: .destructive) { confirmsCancellation = true } }
+        }
+    }
+
+    @ViewBuilder
+    private func jobProgress(_ job: NoteImportJobRecord) -> some View {
+        if job.discoveredCount > 0 {
+            ProgressView(
+                value: Double(NoteImportActivitySummary.processedCount(for: job)),
+                total: Double(job.discoveredCount)
+            )
+        } else {
+            ProgressView()
         }
     }
 
