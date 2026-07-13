@@ -79,10 +79,21 @@ public actor NoteImportCoordinator {
             do {
                 _ = try ledger.transitionItem(id: item.id, to: .creatingSession)
                 let note = try Self.decodePayload(item)
-                let session = try await sessionService.createNoteSession(title: item.title)
+                let canCreateInSingleWrite = llmMode != .automatic
+                    && (!options.importAttachments || note.attachments.isEmpty)
+                let session: AgentSession
                 var attachmentRefs: [AgentMessageAttachmentRef] = []
-                if options.importAttachments, let attachmentImporter {
-                    attachmentRefs = try await attachmentImporter.importAttachments(note.attachments, sessionID: session.id).map(\.messageRef)
+                if canCreateInSingleWrite {
+                    session = try await sessionService.createImportedNoteSession(
+                        title: item.title,
+                        content: note.markdownContent,
+                        createdAt: note.createdAt ?? Date()
+                    )
+                } else {
+                    session = try await sessionService.createNoteSession(title: item.title)
+                    if options.importAttachments, let attachmentImporter {
+                        attachmentRefs = try await attachmentImporter.importAttachments(note.attachments, sessionID: session.id).map(\.messageRef)
+                    }
                 }
                 guard var imported = try ledger.item(id: item.id) else { throw AppNoteImportRepositoryError.itemNotFound(item.id) }
                 imported.sessionID = session.id
@@ -98,7 +109,7 @@ public actor NoteImportCoordinator {
                         attachmentIDs: attachmentRefs.map(\.id),
                         allowNetworkReadTools: options.allowNetworkReadTools
                     ))
-                } else {
+                } else if !canCreateInSingleWrite {
                     _ = try await sessionService.saveImportedNote(
                         sessionID: session.id,
                         content: note.markdownContent,

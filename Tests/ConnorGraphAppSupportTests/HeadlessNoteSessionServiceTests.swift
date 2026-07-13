@@ -37,6 +37,33 @@ struct HeadlessNoteSessionServiceTests {
         #expect(try fixture.repository.loadSession(id: session.id)?.title == "Imported")
     }
 
+    @Test("Creates an imported note with its first message in one operation")
+    func createsImportedNoteSession() async throws {
+        let fixture = try Fixture()
+        let service = fixture.service()
+        let attachment = AgentMessageAttachmentRef(
+            id: "attachment",
+            displayName: "image.png",
+            kind: .image,
+            byteCount: 42,
+            lifecycleStatus: .ready,
+            extractionStatus: .pending,
+            manifestRelativePath: "attachments/attachment/manifest.json"
+        )
+
+        let session = try await service.createImportedNoteSession(
+            title: "Imported",
+            content: "# Original note",
+            attachments: [attachment]
+        )
+
+        let loaded = try #require(try fixture.repository.loadSession(id: session.id))
+        #expect(loaded.governance.kind == AgentSessionKind.note)
+        #expect(loaded.messages.count == 1)
+        #expect(loaded.messages[0].content == "# Original note")
+        #expect(loaded.messages[0].attachments.map { $0.id } == ["attachment"])
+    }
+
     @Test("Persists display prompt while sending augmented note instructions to backend")
     func submitsHeadlessly() async throws {
         let fixture = try Fixture()

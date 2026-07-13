@@ -41,6 +41,20 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         return try repository.saveSession(session)
     }
 
+    public func createImportedNoteSession(
+        title: String,
+        content: String,
+        attachments: [AgentMessageAttachmentRef] = [],
+        createdAt: Date = Date()
+    ) throws -> AgentSession {
+        try repository.createImportedNoteSession(
+            title: title,
+            content: content,
+            attachments: attachments,
+            createdAt: createdAt
+        )
+    }
+
     @discardableResult
     public func saveImportedNote(
         sessionID: String,
