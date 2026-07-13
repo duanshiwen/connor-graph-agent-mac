@@ -126,6 +126,27 @@ struct NoteImportViewModelTests {
         await waitUntil { !model.isMonitoringJobs }
     }
 
+    @Test("Cancelled jobs with a persisted request timestamp do not keep polling")
+    func cancelledJobsDoNotPoll() throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        var cancelled = NoteImportJobRecord(
+            id: "cancelled",
+            sourceID: "source",
+            status: .cancelled,
+            discoveredCount: 392,
+            importedCount: 253,
+            failedCount: 2
+        )
+        cancelled.cancelRequestedAt = Date()
+        try fixture.repository.saveJob(cancelled)
+
+        let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+
+        #expect(model.selectedJob?.status == .cancelled)
+        #expect(!model.isMonitoringJobs)
+    }
+
     @Test("Static paused jobs are loaded without high frequency monitoring")
     func pausedJobsDoNotPoll() throws {
         let fixture = try ImportLedgerFixture()

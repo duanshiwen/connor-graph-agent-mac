@@ -268,8 +268,9 @@ final class NoteImportViewModel: ObservableObject {
 
     private var hasDynamicallyChangingJobs: Bool {
         jobs.contains { job in
-            [.scanning, .importing, .processing, .cancelling].contains(job.status)
-                || job.cancelRequestedAt != nil
+            !job.status.isTerminal
+                && ([.scanning, .importing, .processing, .cancelling].contains(job.status)
+                    || job.cancelRequestedAt != nil)
         }
     }
 
