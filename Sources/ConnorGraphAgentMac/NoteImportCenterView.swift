@@ -7,13 +7,11 @@ struct NoteImportCenterView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var confirmsCancellation = false
     @State private var pendingControlJobID: String?
+    @State private var selectedJobID: String?
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding<String?>(
-                get: { model.selectedJobID },
-                set: { newValue in model.selectJob(newValue) }
-            )) {
+            List(selection: $selectedJobID) {
                 if !activeJobs.isEmpty { Section("进行中") { ForEach(activeJobs) { jobRow($0) } } }
                 if !issueJobs.isEmpty { Section("需要处理") { ForEach(issueJobs) { jobRow($0) } } }
                 if !completedJobs.isEmpty { Section("已完成") { ForEach(completedJobs) { jobRow($0) } } }
@@ -28,7 +26,16 @@ struct NoteImportCenterView: View {
             ToolbarItem(placement: .primaryAction) { Button { openWindow(id: AppMenuPresentation.noteImportWizardWindowID) } label: { Label("新建导入", systemImage: "plus") } }
             ToolbarItem { Button { model.reloadJobs() } label: { Label("刷新", systemImage: "arrow.clockwise") } }
         }
-        .onAppear { model.reloadJobs() }
+        .onAppear {
+            model.reloadJobs()
+            selectedJobID = model.selectedJobID
+        }
+        .task(id: selectedJobID) {
+            await model.selectJob(selectedJobID)
+        }
+        .onChange(of: model.selectedJobID) { _, newValue in
+            if selectedJobID != newValue { selectedJobID = newValue }
+        }
         .confirmationDialog("取消剩余导入？", isPresented: $confirmsCancellation) {
             Button("取消剩余导入", role: .destructive) { Task { await model.cancelSelectedJob() } }
         } message: { Text("已经创建的笔记会保留，尚未开始的项目不会导入。") }
@@ -87,7 +94,7 @@ struct NoteImportCenterView: View {
                     TableColumn("问题") { Text($0.errorMessage ?? "—").foregroundStyle($0.errorMessage == nil ? Color.secondary : Color.red).lineLimit(1) }
                 }
             }.padding(24)
-        }.onChange(of: model.selectedJobID) { _, _ in model.reloadSelectedJobItems() }
+        }
     }
 
     @ViewBuilder private func controls(_ job: NoteImportJobRecord) -> some View {

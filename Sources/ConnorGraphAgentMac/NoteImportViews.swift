@@ -196,9 +196,27 @@ final class NoteImportViewModel: ObservableObject {
         } catch { self.error = userFacing(error) }
     }
 
-    func selectJob(_ id: String?) {
-        selectedJobID = id
-        reloadSelectedJobItems()
+    func selectJob(_ id: String?) async {
+        if selectedJobID != id { selectedJobID = id }
+        guard let id else {
+            selectedJobItems = []
+            return
+        }
+        guard let activityReader else {
+            selectedJobItems = []
+            return
+        }
+        do {
+            let items = try await activityReader.items(jobID: id)
+            try Task.checkCancellation()
+            guard selectedJobID == id else { return }
+            selectedJobItems = items
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedJobID == id else { return }
+            self.error = userFacing(error)
+        }
     }
 
     func reloadSelectedJobItems() {

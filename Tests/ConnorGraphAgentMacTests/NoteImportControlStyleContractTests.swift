@@ -30,6 +30,16 @@ struct NoteImportControlStyleContractTests {
         #expect(!center.contains("job.updatedAt, style: .relative"))
     }
 
+    @Test("Import center owns transient list selection without publishing during view updates")
+    func localListSelection() throws {
+        let center = try source("NoteImportCenterView.swift")
+        #expect(center.contains("@State private var selectedJobID"))
+        #expect(center.contains("List(selection: $selectedJobID)"))
+        #expect(center.contains(".task(id: selectedJobID)"))
+        #expect(!center.contains("set: { newValue in model.selectJob(newValue) }"))
+        #expect(!center.contains(".onChange(of: model.selectedJobID) { _, _ in model.reloadSelectedJobItems() }"))
+    }
+
     @Test("Import center renders one state-driven pause or resume control")
     func stateDrivenControl() throws {
         let center = try source("NoteImportCenterView.swift")
