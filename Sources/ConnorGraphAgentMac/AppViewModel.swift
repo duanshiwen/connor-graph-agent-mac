@@ -310,8 +310,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var searchResults: [GraphSearchHit] = []
     @Published var chatInput: String = "" {
         didSet {
-            guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
-            chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
+            guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+            updateLiveChatInputDraft(chatInput, for: selectedChatSessionID)
+            if autoSaveDraftsEnabled {
+                chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
+            }
         }
     }
     @Published var transcript: [AgentMessage] = []
@@ -593,6 +596,9 @@ final class AppViewModel: NSObject, ObservableObject {
     private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var chatInputDraftsBySessionID: [String: String] = [:]
+    private var liveChatInputDraftSessionID: String?
+    private var liveChatInputDraft: String = ""
+    private var liveChatInputDraftRevision: UInt64 = 0
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
     private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
     private var browserHistoryContentFetchTasksByID: [UUID: Task<Void, Never>] = [:]
@@ -745,25 +751,55 @@ final class AppViewModel: NSObject, ObservableObject {
         submittingChatSessionIDs.contains(sessionID)
     }
 
+    private func updateLiveChatInputDraft(_ draft: String, for sessionID: String) {
+        if liveChatInputDraftSessionID != sessionID {
+            liveChatInputDraftSessionID = sessionID
+        }
+        guard liveChatInputDraft != draft else { return }
+        liveChatInputDraft = draft
+        liveChatInputDraftRevision &+= 1
+    }
+
     private func setChatInputDraft(_ draft: String, for sessionID: String?) {
+        if let sessionID {
+            updateLiveChatInputDraft(draft, for: sessionID)
+        } else {
+            liveChatInputDraftSessionID = nil
+            liveChatInputDraft = draft
+            liveChatInputDraftRevision &+= 1
+        }
         isRestoringChatInputDraft = true
-        chatInput = sessionID.flatMap { chatInputDraftsBySessionID[$0] } ?? draft
+        chatInput = draft
         isRestoringChatInputDraft = false
     }
 
     func updateSelectedChatInputDraft(_ draft: String) {
-        guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
-        chatInputDraftsBySessionID[selectedChatSessionID] = draft
+        guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+        updateLiveChatInputDraft(draft, for: selectedChatSessionID)
+        if autoSaveDraftsEnabled {
+            chatInputDraftsBySessionID[selectedChatSessionID] = draft
+        }
         speechTranscriptionCoordinator.noteUserEditedDraft(sessionID: selectedChatSessionID, draft: draft)
     }
 
     func currentSelectedChatInputDraftForSpeech() -> String {
-        guard autoSaveDraftsEnabled, let selectedChatSessionID else { return chatInput }
-        return chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput
+        guard let selectedChatSessionID else { return chatInput }
+        if liveChatInputDraftSessionID == selectedChatSessionID {
+            return liveChatInputDraft
+        }
+        return autoSaveDraftsEnabled ? (chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput) : chatInput
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
-        setChatInputDraft(autoSaveDraftsEnabled ? "" : chatInput, for: autoSaveDraftsEnabled ? sessionID : nil)
+        let draft: String
+        if let sessionID, liveChatInputDraftSessionID == sessionID {
+            draft = liveChatInputDraft
+        } else if let sessionID, autoSaveDraftsEnabled {
+            draft = chatInputDraftsBySessionID[sessionID] ?? ""
+        } else {
+            draft = ""
+        }
+        setChatInputDraft(draft, for: sessionID)
         pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
     }
 

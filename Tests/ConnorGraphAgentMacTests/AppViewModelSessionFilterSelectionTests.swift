@@ -126,6 +126,40 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.loadingChatSessionDetailID == nil)
     }
 
+    @Test(arguments: [true, false])
+    func detailLoadDoesNotOverwriteComposerEdit(autoSaveDraftsEnabled: Bool) async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = try fixture.repository.createSession(title: "Composer race", now: Date(timeIntervalSince1970: 2_000))
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.viewModel.selectChatSession(session.id)
+        #expect(fixture.viewModel.loadingChatSessionDetailID == session.id)
+
+        fixture.viewModel.updateSelectedChatInputDraft("a")
+        try await waitForLoadingToFinish(fixture.viewModel)
+
+        #expect(fixture.viewModel.chatInput == "a")
+        #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == "a")
+    }
+
+    @Test(arguments: [true, false])
+    func sameSessionReloadDoesNotOverwriteComposerEdit(autoSaveDraftsEnabled: Bool) throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID)
+        fixture.viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.viewModel.updateSelectedChatInputDraft("draft in progress")
+
+        fixture.viewModel.reloadChatSessions()
+
+        #expect(fixture.viewModel.selectedChatSessionID == sessionID)
+        #expect(fixture.viewModel.chatInput == "draft in progress")
+        #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == "draft in progress")
+    }
+
     @Test func creatingNewSessionDoesNotEnterDetailLoadingState() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
