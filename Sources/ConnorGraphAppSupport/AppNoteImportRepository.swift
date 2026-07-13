@@ -356,8 +356,42 @@ public final class AppNoteImportRepository: @unchecked Sendable {
 
     public func requestCancel(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
         guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
-        job.cancelRequestedAt = now; job.updatedAt = now
+        guard !job.status.isTerminal else {
+            throw AppNoteImportRepositoryError.jobControlUnavailable("Task cannot be cancelled from \(job.status.rawValue)")
+        }
+        if job.cancelRequestedAt == nil { job.cancelRequestedAt = now }
+        job.updatedAt = now
         try saveJob(job); return job
+    }
+
+    @discardableResult
+    public func cancelRemainingItems(jobID: String, now: Date = Date()) throws -> Int {
+        let cancellable = try items(jobID: jobID).filter { !$0.status.isTerminal }
+        for var item in cancellable {
+            item.status = .cancelled
+            item.leaseOwner = nil
+            item.leaseExpiresAt = nil
+            item.updatedAt = now
+            try saveItem(item)
+        }
+        return cancellable.count
+    }
+
+    @discardableResult
+    public func recalculateJobCounts(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
+        guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
+        let persistedItems = try items(jobID: jobID)
+        let importedStatuses: Set<NoteImportItemStatus> = [
+            .imported, .queuedForLLM, .runningLLM, .completed, .attachmentFailed, .llmFailed
+        ]
+        let failureStatuses: Set<NoteImportItemStatus> = [
+            .parseFailed, .sessionFailed, .attachmentFailed, .llmFailed
+        ]
+        job.importedCount = persistedItems.filter { importedStatuses.contains($0.status) }.count
+        job.failedCount = persistedItems.filter { failureStatuses.contains($0.status) }.count
+        job.updatedAt = now
+        try saveJob(job)
+        return job
     }
 
     public func heartbeat(jobID: String, schedulerVersion: String, now: Date = Date()) throws -> NoteImportJobRecord {
