@@ -75,8 +75,9 @@ public actor NoteImportCoordinator {
         _ = try ledger.heartbeat(jobID: jobID, schedulerVersion: schedulerVersion)
         if job.status == .awaitingReview { job = try ledger.transitionJob(id: jobID, to: .ready) }
         if job.status == .ready { job = try ledger.transitionJob(id: jobID, to: .importing) }
-        let scheduler = NoteImportExecutionScheduler(configuration: .init(concurrency: job.options.llmConcurrency))
         let llmMode = job.options.llmMode
+        let executionConcurrency = llmMode == .automatic ? job.options.llmConcurrency : 1
+        let scheduler = NoteImportExecutionScheduler(configuration: .init(concurrency: executionConcurrency))
         let pending = try ledger.items(jobID: jobID, statuses: [.ready, .duplicateChanged])
         let options = job.options
         let payloadStore = self.payloadStore

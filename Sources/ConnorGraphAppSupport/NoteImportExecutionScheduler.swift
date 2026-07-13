@@ -35,13 +35,19 @@ public actor NoteImportExecutionScheduler {
             var results = Array<Swift.Result<Result, Error>?>(repeating: nil, count: elements.count)
             func submit(_ index: Int) {
                 let element = elements[index]
-                group.addTask { do { return (index, .success(try await operation(element))) } catch { return (index, .failure(error)) } }
+                group.addTask(priority: .utility) {
+                    do { return (index, .success(try await operation(element))) }
+                    catch { return (index, .failure(error)) }
+                }
             }
             while next < min(limit, elements.count) { submit(next); next += 1; activeCount += 1; peakActiveCount = max(peakActiveCount, activeCount) }
             while let (index, result) = await group.next() {
                 activeCount -= 1; results[index] = result
                 while pauseRequested && !cancelRequested { try? await Task.sleep(for: .milliseconds(50)) }
-                if !cancelRequested, next < elements.count { submit(next); next += 1; activeCount += 1; peakActiveCount = max(peakActiveCount, activeCount) }
+                if !cancelRequested, next < elements.count {
+                    await Task.yield()
+                    submit(next); next += 1; activeCount += 1; peakActiveCount = max(peakActiveCount, activeCount)
+                }
             }
             return results.compactMap { $0 }
         }
