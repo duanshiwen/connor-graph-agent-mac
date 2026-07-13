@@ -37,6 +37,9 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         guard sqlite3_open_v2(databasePath, &db, flags, nil) == SQLITE_OK else {
             throw AppNoteImportRepositoryError.openFailed(Self.message(db))
         }
+        guard sqlite3_busy_timeout(db, 5_000) == SQLITE_OK else {
+            throw AppNoteImportRepositoryError.openFailed(Self.message(db))
+        }
         try execute("PRAGMA foreign_keys = ON;")
         try execute("PRAGMA journal_mode = WAL;")
         try migrate()
