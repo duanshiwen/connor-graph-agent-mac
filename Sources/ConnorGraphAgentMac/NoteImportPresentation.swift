@@ -35,7 +35,10 @@ struct NoteImportJobPresentation: Equatable {
     let systemImage: String
 
     init(job: NoteImportJobRecord, runtimeState: NoteImportRuntimeState? = .running) {
-        if job.cancelRequestedAt != nil || job.status == .cancelling {
+        if job.status.isTerminal {
+            displayName = job.status.displayName
+            systemImage = job.status.systemImage
+        } else if job.cancelRequestedAt != nil || job.status == .cancelling {
             displayName = NoteImportJobStatus.cancelling.displayName
             systemImage = NoteImportJobStatus.cancelling.systemImage
         } else if NoteImportActivitySummary.isPaused(job) {

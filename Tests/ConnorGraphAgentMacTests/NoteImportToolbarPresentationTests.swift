@@ -69,6 +69,18 @@ struct NoteImportToolbarPresentationTests {
         #expect(toolbar.accessibilityValue.contains("正在取消"))
     }
 
+    @Test("Terminal cancellation wins over its persisted request timestamp")
+    func terminalCancellationWinsOverRequestTimestamp() {
+        var cancelled = job(status: .cancelled, discovered: 392, imported: 253)
+        cancelled.cancelRequestedAt = Date()
+
+        let presentation = NoteImportJobPresentation(job: cancelled, runtimeState: nil)
+
+        #expect(presentation.displayName == "已取消")
+        #expect(presentation.systemImage == "xmark.circle")
+        #expect(NoteImportControlPresentation(job: cancelled, runtimeState: nil) == nil)
+    }
+
     @Test("Missing runner offers one explicit recovery action")
     func missingRunnerOffersRecovery() throws {
         let interrupted = job(status: .processing)
