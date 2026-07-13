@@ -5,6 +5,7 @@ import ConnorGraphAppSupport
 struct UserIdentitySettingsView: View {
     @ObservedObject var identityStore: AppUserIdentityStore
     @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
+    @ObservedObject var marketplaceStore: CloudKnowledgeMarketplaceStore
     var sessions: [AgentSession]
     @State private var mode: AuthenticationMode = .login
     @State private var username = ""
@@ -34,7 +35,10 @@ struct UserIdentitySettingsView: View {
         }
         .onChange(of: mode) { _, _ in didAttemptSubmit = false }
         .onChange(of: identityStore.authenticationState) { _, state in
-            if state == .signedOut || state == .expired { creatorStore.reset() }
+            if state == .signedOut || state == .expired {
+                creatorStore.reset()
+                Task { await marketplaceStore.clearSession() }
+            }
         }
     }
 
@@ -131,6 +135,7 @@ struct UserIdentitySettingsView: View {
             libraryGroup(title: "我创建的知识库", emptyMessage: "你还没有创建知识库。", libraries: identityStore.ownedKnowledgeBases)
             CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
             libraryGroup(title: "我订阅的知识库", emptyMessage: "你还没有订阅知识库。", libraries: identityStore.subscribedKnowledgeBases.map(\.knowledgeBase))
+            CloudKnowledgeMarketplaceView(store: marketplaceStore)
 
             if identityStore.isLoadingLibraries { ProgressView("正在刷新知识库…") }
             if let error = identityStore.errorMessage { Text(error).font(SettingsListTypography.rowCaption).foregroundStyle(.red) }
