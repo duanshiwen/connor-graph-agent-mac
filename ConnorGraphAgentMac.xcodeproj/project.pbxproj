@@ -94,6 +94,8 @@
 		D10000000000000000000003 /* Sources/ConnorGraphAgentMac/NoteImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000003 /* Sources/ConnorGraphAgentMac/NoteImportWizardView.swift */; };
 		D10000000000000000000004 /* Sources/ConnorGraphAgentMac/NoteImportCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000004 /* Sources/ConnorGraphAgentMac/NoteImportCenterView.swift */; };
 		D10000000000000000000005 /* Sources/ConnorGraphAgentMac/NoteImportPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000005 /* Sources/ConnorGraphAgentMac/NoteImportPresentation.swift */; };
+		D20000000000000000000001 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift */; };
+		D20000000000000000000002 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift */; };
 		D0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */; };
 		D0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */; };
 		D0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */; };
@@ -193,6 +195,8 @@
 		C10000000000000000000003 /* Sources/ConnorGraphAgentMac/NoteImportWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/NoteImportWizardView.swift; sourceTree = "<group>"; };
 		C10000000000000000000004 /* Sources/ConnorGraphAgentMac/NoteImportCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/NoteImportCenterView.swift; sourceTree = "<group>"; };
 		C10000000000000000000005 /* Sources/ConnorGraphAgentMac/NoteImportPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/NoteImportPresentation.swift; sourceTree = "<group>"; };
+		C20000000000000000000001 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift; sourceTree = "<group>"; };
 		C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift; sourceTree = "<group>"; };
 		C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift; sourceTree = "<group>"; };
 		C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift; sourceTree = "<group>"; };
@@ -282,6 +286,8 @@
 				C10000000000000000000003 /* Sources/ConnorGraphAgentMac/NoteImportWizardView.swift */,
 				C10000000000000000000004 /* Sources/ConnorGraphAgentMac/NoteImportCenterView.swift */,
 				C10000000000000000000005 /* Sources/ConnorGraphAgentMac/NoteImportPresentation.swift */,
+				C20000000000000000000001 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift */,
+				C20000000000000000000002 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift */,
 				C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */,
 				C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */,
 				C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */,
@@ -533,6 +539,8 @@
 				D10000000000000000000003 /* Sources/ConnorGraphAgentMac/NoteImportWizardView.swift in Sources */,
 				D10000000000000000000004 /* Sources/ConnorGraphAgentMac/NoteImportCenterView.swift in Sources */,
 				D10000000000000000000005 /* Sources/ConnorGraphAgentMac/NoteImportPresentation.swift in Sources */,
+				D20000000000000000000001 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift in Sources */,
+				D20000000000000000000002 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift in Sources */,
 				D0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift in Sources */,
 				D0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift in Sources */,
 				D0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift in Sources */,
