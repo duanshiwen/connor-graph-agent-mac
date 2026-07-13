@@ -93,7 +93,8 @@ public actor NoteImportCoordinator {
             let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
             defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
             if try ledger.job(id: jobID)?.cancelRequestedAt != nil { throw CancellationError() }
-            while try ledger.job(id: jobID)?.pauseRequestedAt != nil {
+            while let control = try ledger.job(id: jobID), control.pauseRequestedAt != nil {
+                if control.cancelRequestedAt != nil { throw CancellationError() }
                 try Task.checkCancellation()
                 try await Task.sleep(for: .milliseconds(200))
             }

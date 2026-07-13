@@ -19,7 +19,8 @@ struct NoteImportControlStyleContractTests {
     @Test("Import center renders one state-driven pause or resume control")
     func stateDrivenControl() throws {
         let center = try source("NoteImportCenterView.swift")
-        #expect(center.contains("if let presentation = NoteImportControlPresentation(job: job)"))
+        #expect(center.contains("if let presentation = NoteImportControlPresentation("))
+        #expect(center.contains("runtimeState: model.runtimeSnapshot.state(for: job.id)"))
         #expect(center.contains("switch presentation.action"))
         #expect(!center.contains("if job.pauseRequestedAt == nil"))
         #expect(!center.contains("if job.pauseRequestedAt != nil || job.status == .paused"))
