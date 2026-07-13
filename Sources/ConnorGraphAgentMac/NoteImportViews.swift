@@ -23,21 +23,23 @@ final class NoteImportViewModel: ObservableObject {
 
     let ledger: AppNoteImportRepository?
     let coordinator: NoteImportCoordinator?
+    let executionSupervisor: NoteImportExecutionSupervisor?
     let sourceAccessService: NoteImportSourceAccessService
     private let activityReader: NoteImportActivityReader?
     private let monitoringInterval: Duration
-    private var runningTasks: [String: Task<Void, Never>] = [:]
     private var monitoringTask: Task<Void, Never>?
 
     init(
         ledger: AppNoteImportRepository? = nil,
         coordinator: NoteImportCoordinator? = nil,
+        executionSupervisor: NoteImportExecutionSupervisor? = nil,
         sourceAccessService: NoteImportSourceAccessService = .init(),
         configurationError: String? = nil,
         monitoringInterval: Duration = .milliseconds(750)
     ) {
         self.ledger = ledger
         self.coordinator = coordinator
+        self.executionSupervisor = executionSupervisor ?? coordinator.map(NoteImportExecutionSupervisor.init(coordinator:))
         self.sourceAccessService = sourceAccessService
         self.activityReader = ledger.map(NoteImportActivityReader.init(ledger:))
         self.error = configurationError
@@ -158,15 +160,8 @@ final class NoteImportViewModel: ObservableObject {
             let request = NoteImportScanRequest(sourceID: source.id, sourceURL: sourceURL, kind: sourceKind, options: options)
             _ = try await coordinator.scan(jobID: job.id, adapter: adapter, request: request)
             reloadJobs(selecting: job.id)
-            let task = Task { @MainActor [weak self] in
-                guard let self else { return }
-                do { _ = try await coordinator.execute(jobID: job.id) }
-                catch { self.error = self.userFacing(error) }
-                self.runningTasks.removeValue(forKey: job.id)
-                self.activity = .idle
-                self.reloadJobs(selecting: job.id)
-            }
-            runningTasks[job.id] = task
+            await executionSupervisor?.ensureRunning(jobID: job.id)
+            activity = .idle
             return true
         } catch {
             self.error = userFacing(error)
@@ -210,24 +205,30 @@ final class NoteImportViewModel: ObservableObject {
         catch { self.error = userFacing(error) }
     }
 
+    func recoverPersistedJobs() async {
+        await executionSupervisor?.recoverPersistedJobs()
+        reloadJobs(reloadSelectedItems: false)
+        startJobMonitoring()
+    }
+
     func pauseSelectedJob() async {
-        guard let coordinator, let id = selectedJobID else { return }
-        do { try await coordinator.pause(jobID: id); reloadJobs(selecting: id) }
+        guard let executionSupervisor, let id = selectedJobID else { return }
+        do { try await executionSupervisor.requestPause(jobID: id); reloadJobs(selecting: id) }
         catch { self.error = userFacing(error) }
     }
 
     func resumeSelectedJob() async {
-        guard let coordinator, let id = selectedJobID else { return }
+        guard let executionSupervisor, let id = selectedJobID else { return }
         do {
-            try await coordinator.resume(jobID: id)
+            try await executionSupervisor.resume(jobID: id)
             reloadJobs(selecting: id)
             startJobMonitoring()
         } catch { self.error = userFacing(error) }
     }
 
     func cancelSelectedJob() async {
-        guard let coordinator, let id = selectedJobID else { return }
-        do { try await coordinator.cancel(jobID: id); runningTasks[id]?.cancel(); reloadJobs(selecting: id) }
+        guard let executionSupervisor, let id = selectedJobID else { return }
+        do { try await executionSupervisor.requestCancel(jobID: id); reloadJobs(selecting: id) }
         catch { self.error = userFacing(error) }
     }
 
