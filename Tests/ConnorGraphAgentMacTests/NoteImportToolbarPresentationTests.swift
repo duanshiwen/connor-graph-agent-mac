@@ -58,6 +58,51 @@ struct NoteImportToolbarPresentationTests {
         #expect(presentation.systemImage == "pause.circle.fill")
     }
 
+    @Test("Cancel request overrides a stale processing presentation")
+    func requestedCancellationOverridesProcessing() {
+        var requestedCancellation = job(status: .processing)
+        requestedCancellation.cancelRequestedAt = Date()
+        let jobPresentation = NoteImportJobPresentation(job: requestedCancellation, runtimeState: nil)
+        #expect(jobPresentation.displayName == "正在取消")
+        #expect(NoteImportControlPresentation(job: requestedCancellation, runtimeState: nil) == nil)
+        let toolbar = presentation(for: [requestedCancellation])
+        #expect(toolbar.accessibilityValue.contains("正在取消"))
+    }
+
+    @Test("Terminal cancellation wins over its persisted request timestamp")
+    func terminalCancellationWinsOverRequestTimestamp() {
+        var cancelled = job(status: .cancelled, discovered: 392, imported: 253)
+        cancelled.cancelRequestedAt = Date()
+
+        let presentation = NoteImportJobPresentation(job: cancelled, runtimeState: nil)
+
+        #expect(presentation.displayName == "已取消")
+        #expect(presentation.systemImage == "xmark.circle")
+        #expect(NoteImportControlPresentation(job: cancelled, runtimeState: nil) == nil)
+    }
+
+    @Test("Missing runner offers one explicit recovery action")
+    func missingRunnerOffersRecovery() throws {
+        let interrupted = job(status: .processing)
+        let jobPresentation = NoteImportJobPresentation(job: interrupted, runtimeState: nil)
+        #expect(jobPresentation.displayName == "导入已中断")
+        let control = try #require(NoteImportControlPresentation(job: interrupted, runtimeState: nil))
+        #expect(control.action == .restart)
+        #expect(control.title == "继续剩余任务")
+        #expect(control.systemImage == "arrow.clockwise")
+    }
+
+    @Test("Orphaned post-scan job offers recovery instead of waiting forever")
+    func orphanedAwaitingReviewOffersRecovery() throws {
+        let orphaned = job(status: .awaitingReview)
+        let presentation = NoteImportJobPresentation(job: orphaned, runtimeState: nil)
+        let control = try #require(NoteImportControlPresentation(job: orphaned, runtimeState: nil))
+
+        #expect(presentation.displayName == "导入已中断")
+        #expect(control.action == .restart)
+        #expect(control.title == "继续剩余任务")
+    }
+
     @Test("Describes cancellation")
     func cancelling() {
         let presentation = presentation(for: [job(status: .cancelling, discovered: 4, imported: 1)])

@@ -16,6 +16,7 @@ public actor NoteImportCoordinator {
     private let attachmentImporter: NoteImportAttachmentImporter?
     private let payloadStore: NoteImportPayloadStore?
     private let schedulerVersion = "2"
+    private var activeSchedulers: [String: NoteImportExecutionScheduler] = [:]
     private static let payloadMetadataKey = "imported_note_payload"
     private static let scanBatchSize = 50
 
@@ -73,80 +74,137 @@ public actor NoteImportCoordinator {
         var job = try requireJob(jobID)
         _ = try ledger.reconcileInterruptedItems(jobID: jobID)
         _ = try ledger.heartbeat(jobID: jobID, schedulerVersion: schedulerVersion)
+        if job.cancelRequestedAt != nil { return try finalizeCancellation(jobID: jobID) }
+        if job.pauseRequestedAt != nil || job.status == .paused { return job }
         if job.status == .awaitingReview { job = try ledger.transitionJob(id: jobID, to: .ready) }
         if job.status == .ready { job = try ledger.transitionJob(id: jobID, to: .importing) }
-        let llmMode = job.options.llmMode
-        let executionConcurrency = llmMode == .automatic ? job.options.llmConcurrency : 1
+        if job.status == .importing && job.options.llmMode == .automatic {
+            job = try ledger.transitionJob(id: jobID, to: .processing)
+        }
+
+        let executionConcurrency = job.options.llmMode == .automatic ? job.options.llmConcurrency : 1
         let scheduler = NoteImportExecutionScheduler(configuration: .init(concurrency: executionConcurrency))
-        let pending = try ledger.items(jobID: jobID, statuses: [.ready, .duplicateChanged])
+        activeSchedulers[jobID] = scheduler
+        defer { activeSchedulers.removeValue(forKey: jobID) }
+        let pending = try ledger.items(
+            jobID: jobID,
+            statuses: [.ready, .duplicateChanged, .imported, .queuedForLLM]
+        )
         let options = job.options
         let payloadStore = self.payloadStore
-        let results = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, llmMode, options] item in
+        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options] item in
             let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
             defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
-            let control = try ledger.job(id: jobID)
-            if control?.cancelRequestedAt != nil { throw CancellationError() }
-            while try ledger.job(id: jobID)?.pauseRequestedAt != nil { try await Task.sleep(for: .milliseconds(200)) }
+            if try ledger.job(id: jobID)?.cancelRequestedAt != nil { throw CancellationError() }
+            while let control = try ledger.job(id: jobID), control.pauseRequestedAt != nil {
+                if control.cancelRequestedAt != nil { throw CancellationError() }
+                try Task.checkCancellation()
+                try await Task.sleep(for: .milliseconds(200))
+            }
             do {
-                _ = try ledger.transitionItem(id: item.id, to: .creatingSession)
                 let note = try Self.decodePayload(item, payloadStore: payloadStore)
-                let canCreateInSingleWrite = llmMode != .automatic
-                    && (!options.importAttachments || note.attachments.isEmpty)
-                let session: AgentSession
+                var current = try ledger.item(id: item.id) ?? item
                 var attachmentRefs: [AgentMessageAttachmentRef] = []
-                if canCreateInSingleWrite {
-                    session = try await sessionService.createImportedNoteSession(
-                        title: item.title,
-                        content: note.markdownContent,
-                        createdAt: note.createdAt ?? Date()
-                    )
-                } else {
-                    session = try await sessionService.createNoteSession(title: item.title)
-                    if options.importAttachments, let attachmentImporter {
-                        attachmentRefs = try await attachmentImporter.importAttachments(note.attachments, sessionID: session.id).map(\.messageRef)
+                var savedOriginalContent = false
+
+                if [.ready, .duplicateChanged].contains(current.status) {
+                    _ = try ledger.transitionItem(id: current.id, to: .creatingSession)
+                    let canCreateInSingleWrite = options.llmMode != .automatic
+                        && (!options.importAttachments || note.attachments.isEmpty)
+                    let session: AgentSession
+                    if canCreateInSingleWrite {
+                        session = try await sessionService.createImportedNoteSession(
+                            title: current.title,
+                            content: note.markdownContent,
+                            createdAt: note.createdAt ?? Date()
+                        )
+                        savedOriginalContent = true
+                    } else {
+                        session = try await sessionService.createNoteSession(title: current.title)
+                        if options.importAttachments, let attachmentImporter {
+                            attachmentRefs = try await attachmentImporter
+                                .importAttachments(note.attachments, sessionID: session.id)
+                                .map(\.messageRef)
+                        }
                     }
+                    guard var imported = try ledger.item(id: current.id) else {
+                        throw AppNoteImportRepositoryError.itemNotFound(current.id)
+                    }
+                    imported.sessionID = session.id
+                    imported.status = .imported
+                    imported.updatedAt = Date()
+                    try ledger.saveItem(imported)
+                    current = imported
                 }
-                guard var imported = try ledger.item(id: item.id) else { throw AppNoteImportRepositoryError.itemNotFound(item.id) }
-                imported.sessionID = session.id
-                imported.status = .imported
-                imported.updatedAt = Date()
-                try ledger.saveItem(imported)
-                if llmMode == .automatic {
-                    _ = try ledger.transitionItem(id: item.id, to: .queuedForLLM)
-                    _ = try ledger.transitionItem(id: item.id, to: .runningLLM)
+
+                guard let sessionID = current.sessionID else {
+                    throw AppNoteImportRepositoryError.itemNotFound("Missing session for item \(current.id)")
+                }
+                if options.llmMode == .automatic {
+                    if current.status == .imported {
+                        current = try ledger.transitionItem(id: current.id, to: .queuedForLLM)
+                    }
+                    if current.status == .queuedForLLM {
+                        current = try ledger.transitionItem(id: current.id, to: .runningLLM)
+                    }
                     _ = try await sessionService.run(.init(
-                        sessionID: session.id,
+                        sessionID: sessionID,
                         prompt: note.markdownContent,
                         attachmentIDs: attachmentRefs.map(\.id),
                         allowNetworkReadTools: options.allowNetworkReadTools
                     ))
-                } else if !canCreateInSingleWrite {
+                } else if !savedOriginalContent && current.status == .imported {
                     _ = try await sessionService.saveImportedNote(
-                        sessionID: session.id,
+                        sessionID: sessionID,
                         content: note.markdownContent,
                         attachments: attachmentRefs,
                         createdAt: note.createdAt ?? Date()
                     )
                 }
-                _ = try ledger.transitionItem(id: item.id, to: .completed)
+                _ = try ledger.transitionItem(id: current.id, to: .completed)
                 return true
             } catch {
                 guard !(error is CancellationError) else { throw error }
-                guard var failed = try ledger.item(id: item.id) else { throw error }; failed.status = failed.sessionID == nil ? .sessionFailed : .llmFailed; failed.errorMessage = String(describing: error); failed.updatedAt = Date(); try ledger.saveItem(failed); return false
+                guard var failed = try ledger.item(id: item.id) else { throw error }
+                failed.status = failed.sessionID == nil ? .sessionFailed : .llmFailed
+                failed.errorMessage = String(describing: error)
+                failed.updatedAt = Date()
+                try ledger.saveItem(failed)
+                return false
             }
         }
+
         job = try requireJob(jobID)
-        if job.cancelRequestedAt != nil { if job.status != .cancelling { job = try ledger.transitionJob(id: jobID, to: .cancelling) }; return try ledger.transitionJob(id: jobID, to: .cancelled) }
-        job.importedCount += results.reduce(0) { count, result in count + ((try? result.get()) == true ? 1 : 0) }
-        job.failedCount += results.reduce(0) { count, result in count + ((try? result.get()) == false ? 1 : 0) }
-        job.updatedAt = Date(); try ledger.saveJob(job)
-        if job.status == .importing && job.options.llmMode == .automatic { job = try ledger.transitionJob(id: jobID, to: .processing) }
+        if job.cancelRequestedAt != nil { return try finalizeCancellation(jobID: jobID) }
+        if job.pauseRequestedAt != nil { return job }
+        job = try ledger.recalculateJobCounts(jobID: jobID)
+        let remaining = try ledger.items(
+            jobID: jobID,
+            statuses: [.ready, .duplicateChanged, .creatingSession, .imported, .queuedForLLM, .runningLLM]
+        )
+        guard remaining.isEmpty else { return job }
         return try ledger.transitionJob(id: jobID, to: job.failedCount > 0 ? .completedWithIssues : .completed)
+    }
+
+    private func finalizeCancellation(jobID: String) throws -> NoteImportJobRecord {
+        var job = try requireJob(jobID)
+        if [.scanning, .importing, .processing, .paused].contains(job.status) {
+            job = try ledger.transitionJob(id: jobID, to: .cancelling)
+        }
+        _ = try ledger.cancelRemainingItems(jobID: jobID)
+        _ = try ledger.recalculateJobCounts(jobID: jobID)
+        return try ledger.transitionJob(id: jobID, to: .cancelled)
     }
 
     public func pause(jobID: String) throws { _ = try ledger.requestPause(jobID: jobID) }
     public func resume(jobID: String) throws { _ = try ledger.resumeJob(jobID: jobID) }
-    public func cancel(jobID: String) async throws { _ = try ledger.requestCancel(jobID: jobID); for item in try ledger.items(jobID: jobID, statuses: [.runningLLM]) { if let sessionID = item.sessionID { await sessionService.cancel(sessionID: sessionID) } } }
+    public func cancel(jobID: String) async throws {
+        _ = try ledger.requestCancel(jobID: jobID)
+        await activeSchedulers[jobID]?.cancel()
+        for item in try ledger.items(jobID: jobID, statuses: [.runningLLM]) {
+            if let sessionID = item.sessionID { await sessionService.cancel(sessionID: sessionID) }
+        }
+    }
     public func recoverableJobs() throws -> [NoteImportJobRecord] { try ledger.recoverableJobs() }
     public func progress(jobID: String) throws -> NoteImportProgress { let job = try requireJob(jobID); let items = try ledger.items(jobID: jobID); return .init(jobID: jobID, status: job.status, discovered: job.discoveredCount, imported: job.importedCount, completed: items.filter { $0.status == .completed }.count, failed: job.failedCount) }
     private func requireJob(_ id: String) throws -> NoteImportJobRecord { guard let value = try ledger.job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }; return value }

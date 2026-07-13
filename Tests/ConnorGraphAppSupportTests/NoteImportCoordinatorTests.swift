@@ -31,6 +31,64 @@ struct NoteImportCoordinatorTests {
         #expect(sessions.count == 2); #expect(sessions.allSatisfy { $0.governance.kind == .note && $0.messages.count == 2 })
     }
 
+    @Test("Resumes an imported item at the LLM phase without recreating its session")
+    func resumesImportedItemWithoutRecreatingSession() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(
+            id: "job",
+            sourceID: source.id,
+            status: .processing,
+            options: .init(llmMode: .automatic),
+            discoveredCount: 1,
+            importedCount: 1
+        )
+        try ledger.saveJob(job)
+        let existingSession = try chat.createImportedNoteSession(title: "Existing", content: "Original")
+        let payload = ImportedNote(
+            sourceKind: .markdownFolder,
+            sourceIdentity: "note.md",
+            title: "Existing",
+            markdownContent: "Original",
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try ledger.saveItem(NoteImportItemRecord(
+            id: "item",
+            jobID: job.id,
+            sourceID: source.id,
+            sourceIdentity: payload.sourceIdentity,
+            title: payload.title,
+            status: .imported,
+            sessionID: existingSession.id,
+            rawByteHash: payload.rawByteHash,
+            normalizedTextHash: payload.normalizedTextHash,
+            metadata: ["imported_note_payload": try encoder.encode(payload).base64EncodedString()]
+        ))
+        let sessionService = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: sessionService)
+
+        let completed = try await coordinator.execute(jobID: job.id)
+
+        #expect(completed.status == .completed)
+        #expect(try ledger.item(id: "item")?.status == .completed)
+        let sessions = try chat.loadRecentSessions(limit: 10)
+        #expect(sessions.count == 1)
+        #expect(sessions[0].id == existingSession.id)
+    }
+
     @Test("Imports original note content without requiring LLM processing")
     func importsWithoutLLM() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
