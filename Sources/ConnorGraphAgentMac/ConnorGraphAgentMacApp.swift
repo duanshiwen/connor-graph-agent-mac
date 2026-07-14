@@ -25,50 +25,33 @@ enum AppMenuPresentation {
 @main
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorApplicationDelegate.self) private var applicationDelegate
-    @StateObject private var viewModel: AppViewModel
-    @StateObject private var identityStore: AppUserIdentityStore
-    @StateObject private var noteImportModel: NoteImportViewModel
-    private let featureFlags: AppFeatureFlags
+    @StateObject private var root: AppCompositionRoot
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
-        let liveViewModel = AppStartupPerformance.measure("AppViewModelLive") {
-            AppViewModel.live()
-        }
-        _viewModel = StateObject(wrappedValue: liveViewModel)
-        _identityStore = StateObject(wrappedValue: AppUserIdentityStore())
-        _noteImportModel = StateObject(wrappedValue: AppStartupPerformance.measure("NoteImportModelConstruction") {
-            liveViewModel.makeNoteImportViewModel()
-        })
-        featureFlags = AppFeatureFlags.load()
-        AppStartupPerformance.event("AppCompositionConstructed")
+        _root = StateObject(wrappedValue: AppCompositionRoot.live())
     }
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
             AppShellView(
-                viewModel: viewModel,
-                identityStore: identityStore,
-                noteImportModel: noteImportModel
+                viewModel: root.viewModel,
+                identityStore: root.identityStore,
+                noteImportModel: root.noteImportModel
             )
-                .preferredColorScheme(viewModel.appearanceMode.colorScheme)
+                .preferredColorScheme(root.viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
-                    AppStartupPerformance.event("RootViewTaskStarted")
-                    viewModel.startTaskSchedulerTimer()
-                    await AppStartupPerformance.measure("NoteImportRecovery") {
-                        await noteImportModel.recoverPersistedJobs()
-                    }
-                    await AppStartupPerformance.measure("IdentityRestore") {
-                        await identityStore.restoreSession()
-                    }
-                    AppStartupPerformance.event("InitialRootTasksCompleted")
+                    await root.lifecycle.startIfNeeded()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    root.lifecycle.shutdown()
                 }
         }
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
         .commands {
-            NoteImportFileCommands(viewModel: viewModel)
+            NoteImportFileCommands(viewModel: root.viewModel)
 
             CommandGroup(replacing: .undoRedo) {
                 Button("撤销") {
@@ -128,19 +111,19 @@ struct ConnorGraphAgentMacApp: App {
 
             CommandMenu(AppMenuPresentation.actionMenuTitle) {
                 Button("切换浏览器") {
-                    viewModel.performShortcutAction(.toggleBrowser)
+                    root.viewModel.performShortcutAction(.toggleBrowser)
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
                 Button("聚焦搜索") {
-                    viewModel.performShortcutAction(.focusTopSearch)
+                    root.viewModel.performShortcutAction(.focusTopSearch)
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
                 Divider()
 
                 Button("打开设置") {
-                    viewModel.performShortcutAction(.openSettings)
+                    root.viewModel.performShortcutAction(.openSettings)
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -148,14 +131,14 @@ struct ConnorGraphAgentMacApp: App {
 
         Window("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
             NoteImportWizardView(
-                model: noteImportModel,
-                importExecutionEnabled: featureFlags.noteImportEnabled
+                model: root.noteImportModel,
+                importExecutionEnabled: root.featureFlags.noteImportEnabled
             )
         }
         .defaultSize(width: 720, height: 560)
 
         Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
-            NoteImportCenterView(model: noteImportModel)
+            NoteImportCenterView(model: root.noteImportModel)
         }
         .defaultSize(width: 900, height: 620)
     }
