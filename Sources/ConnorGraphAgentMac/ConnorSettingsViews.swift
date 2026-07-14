@@ -49,12 +49,14 @@ enum SettingsListLayout {
 struct ConnorSettingsDetailView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var identityStore: AppUserIdentityStore
+    let rssFeatureModel: RSSFeatureModel
     @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
     @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
-    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore) {
+    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore, rssFeatureModel: RSSFeatureModel) {
         self.viewModel = viewModel
         self.identityStore = identityStore
+        self.rssFeatureModel = rssFeatureModel
         let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
         _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: baseURL),
@@ -82,7 +84,7 @@ struct ConnorSettingsDetailView: View {
                     case .calendar:
                         SettingsCalendarSection(viewModel: viewModel)
                     case .rss:
-                        SettingsRSSSection(viewModel: viewModel)
+                        SettingsRSSSection(model: rssFeatureModel)
                     case .mail:
                         SettingsMailSection(viewModel: viewModel)
                     case .permissions:
@@ -367,38 +369,38 @@ struct SettingsAppSection: View {
 }
 
 struct SettingsRSSSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: RSSFeatureModel
 
-    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
+    private var presentation: NativeRSSBrowserPresentation { model.presentation }
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             sourceConnections
             fetchPolicy
         }
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
-                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+                try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
-        .sheet(item: $viewModel.editingRSSSource) { source in
+        .sheet(item: $model.editingSource) { source in
             AddRSSSourceSheet(source: source) { feedURL, displayName in
-                try await viewModel.updateRSSSource(sourceID: source.id, feedURL: feedURL, displayName: displayName)
+                try await model.updateSource(sourceID: source.id, feedURL: feedURL, displayName: displayName)
             }
         }
         .confirmationDialog(
             "删除 RSS 订阅源？",
             isPresented: Binding(
-                get: { viewModel.pendingRSSSourceDeletion != nil },
-                set: { if !$0 { viewModel.pendingRSSSourceDeletion = nil } }
+                get: { model.pendingSourceDeletion != nil },
+                set: { if !$0 { model.pendingSourceDeletion = nil } }
             ),
-            presenting: viewModel.pendingRSSSourceDeletion
+            presenting: model.pendingSourceDeletion
         ) { source in
             Button("删除订阅源", role: .destructive) {
-                viewModel.deleteRSSSource(source)
+                model.deleteSource(source)
             }
             Button("取消", role: .cancel) {
-                viewModel.pendingRSSSourceDeletion = nil
+                model.pendingSourceDeletion = nil
             }
         } message: { source in
             Text("将删除“\(source.displayName)”及其本地文章缓存。")
@@ -421,8 +423,8 @@ struct SettingsRSSSection: View {
                         RSSSettingsSourceRow(
                             source: source,
                             unreadCount: presentation.unreadCount(sourceID: source.id),
-                            onEdit: { viewModel.editingRSSSource = source },
-                            onDelete: { viewModel.pendingRSSSourceDeletion = source }
+                            onEdit: { model.editingSource = source },
+                            onDelete: { model.pendingSourceDeletion = source }
                         )
                         if source.id != presentation.sources.last?.id { Divider().padding(.leading, 32) }
                     }
@@ -434,7 +436,7 @@ struct SettingsRSSSection: View {
                 .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
             }
 
-            Button(action: { viewModel.isPresentingAddRSSSourceSheet = true }) {
+            Button(action: { model.isPresentingAddSourceSheet = true }) {
                 Label("添加订阅源", systemImage: "plus")
                     .font(SettingsListTypography.actionTitle)
                     .padding(.horizontal, SettingsListLayout.spaceM)

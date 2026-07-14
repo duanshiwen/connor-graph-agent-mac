@@ -13,6 +13,7 @@ struct CraftListPaneView: View {
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
     let productOSControlModel: ProductOSControlFeatureModel
+    let rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -27,7 +28,7 @@ struct CraftListPaneView: View {
             case .contacts:
                 CraftContactsListPane(viewModel: viewModel)
             case .rss:
-                CraftRSSListPane(viewModel: viewModel)
+                CraftRSSListPane(model: rssFeatureModel)
             case .mail:
                 CraftMailListPane(viewModel: viewModel)
             case .sources:
@@ -1980,10 +1981,10 @@ private struct MailMessageListRow: View, Equatable {
 }
 
 struct CraftRSSListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: RSSFeatureModel
 
-    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: viewModel.rssSearchQuery) }
+    private var presentation: NativeRSSBrowserPresentation { model.presentation }
+    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: model.searchQuery) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1991,7 +1992,7 @@ struct CraftRSSListPane: View {
                 Text("RSS 阅读")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.isPresentingAddRSSSourceSheet = true }) {
+                Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -2003,8 +2004,8 @@ struct CraftRSSListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.rssSearchQuery, sourceTitle: "RSS") {
-                viewModel.rssSearchQuery = ""
+            ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "RSS") {
+                model.searchQuery = ""
             }
 
             if presentation.sources.isEmpty {
@@ -2021,7 +2022,7 @@ struct CraftRSSListPane: View {
                     RSSItemListRow(
                         item: item,
                         source: presentation.source(id: item.sourceID),
-                        isSelected: item.id == viewModel.selectedRSSItemID,
+                        isSelected: item.id == model.selectedItemID,
                         onSelect: { selectItem(item) }
                     )
                     .nativeListRowStyle()
@@ -2032,18 +2033,15 @@ struct CraftRSSListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
-                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+                try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
     }
 
     private func selectItem(_ item: RSSItemSummary) {
-        viewModel.selectedRSSSourceID = item.sourceID
-        viewModel.selectedRSSItemID = item.id
-        guard !item.state.isRead else { return }
-        viewModel.markRSSItemsRead([item.id], isRead: true)
+        model.selectItem(item)
     }
 }
 
@@ -2107,6 +2105,7 @@ struct CraftDetailPaneView: View {
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
     let productOSControlModel: ProductOSControlFeatureModel
+    let rssFeatureModel: RSSFeatureModel
     var selection: SidebarItem
 
     var body: some View {
@@ -2145,13 +2144,13 @@ struct CraftDetailPaneView: View {
             case .mail:
                 MailSourceDetailView(viewModel: viewModel)
             case .rss:
-                RSSSourceSettingsView(viewModel: viewModel)
+                RSSSourceSettingsView(model: rssFeatureModel)
             case .sources:
                 SourceRuntimePanelView(model: sourceRuntimeModel)
             case .skills:
                 SkillRuntimePanelView(model: skillRuntimeModel)
             case .llmSettings:
-                ConnorSettingsDetailView(viewModel: viewModel, identityStore: identityStore)
+                ConnorSettingsDetailView(viewModel: viewModel, identityStore: identityStore, rssFeatureModel: rssFeatureModel)
             }
         }
     }
@@ -2982,11 +2981,11 @@ private struct TaskAutomationStatusPill: View {
 }
 
 struct RSSSourceSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: RSSFeatureModel
 
-    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var selectedSource: RSSSource? { presentation.source(id: viewModel.selectedRSSSourceID) }
-    private var selectedItem: RSSItemSummary? { presentation.item(id: viewModel.selectedRSSItemID) }
+    private var presentation: NativeRSSBrowserPresentation { model.presentation }
+    private var selectedSource: RSSSource? { presentation.source(id: model.selectedSourceID) }
+    private var selectedItem: RSSItemSummary? { presentation.item(id: model.selectedItemID) }
 
     var body: some View {
         Group {
@@ -2994,7 +2993,7 @@ struct RSSSourceSettingsView: View {
                 RSSItemDetailPane(
                     source: selectedSource ?? presentation.source(id: selectedItem.sourceID),
                     item: selectedItem,
-                    onFollow: { viewModel.followRSSItemInNewSession(selectedItem) }
+                    onFollow: { model.followItem(selectedItem) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
@@ -3003,9 +3002,9 @@ struct RSSSourceSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
-                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+                try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
     }

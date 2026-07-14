@@ -255,13 +255,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var mailPreferences: MailPreferences = MailPreferences()
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var mailSyncMessage: String?
-    @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
-    @Published var rssSearchQuery: String = ""
-    @Published var selectedRSSSourceID: RSSSourceID?
-    @Published var selectedRSSItemID: RSSItemID?
-    @Published var isPresentingAddRSSSourceSheet: Bool = false
-    @Published var editingRSSSource: RSSSource?
-    @Published var pendingRSSSourceDeletion: RSSSource?
+    let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     @Published var activeSkillSlug: String?
     @Published var activeSkillDisplayName: String?
@@ -353,7 +347,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var providerCapabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
     private var providerCapabilityDiscoveryService: AppProviderCapabilityDiscoveryService
     private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
-    private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var sessionSearchIndexService: SessionSearchIndexService?
     private var globalSearchHistoryRepository: AppGlobalSearchHistoryRepository?
@@ -1510,7 +1503,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func presentationFallbackRSSResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
-        rssBrowserPresentation.items(sourceID: nil, query: query).prefix(limit).map { item in
+        rssFeatureModel.presentation.items(sourceID: nil, query: query).prefix(limit).map { item in
             NativeSearchResult(
                 id: "rss:\(item.id.rawValue)",
                 sourceKind: .rss,
@@ -1638,11 +1631,7 @@ final class AppViewModel: NSObject, ObservableObject {
             selectedCalendarEventID = CalendarEventID(rawValue: result.externalID)
         case .rss:
             selection = .rss
-            if let item = rssBrowserPresentation.item(id: RSSItemID(rawValue: result.externalID)) {
-                selectRSSItem(item)
-            } else {
-                selectedRSSItemID = RSSItemID(rawValue: result.externalID)
-            }
+            rssFeatureModel.selectItem(id: RSSItemID(rawValue: result.externalID))
         case .mail:
             openGlobalSearchMailResult(result)
         case .browserHistory:
@@ -1780,7 +1769,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 calendarSearchQuery = query
                 selection = .calendar
             case .rss:
-                rssSearchQuery = query
+                rssFeatureModel.searchQuery = query
                 selection = .rss
             case .mail:
                 mailSearchQuery = query
@@ -2187,6 +2176,7 @@ final class AppViewModel: NSObject, ObservableObject {
         governanceConfig: AppSessionGovernanceConfig = .default,
         productOSRegistry: ProductOSRegistrySnapshot = .default,
         automationConfig: ProductOSAutomationConfig = .default,
+        rssRuntime: RSSRuntime? = nil,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
         llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
@@ -2211,6 +2201,22 @@ final class AppViewModel: NSObject, ObservableObject {
         self.sourceRuntimeModel = SourceRuntimeFeatureModel(
             repository: storagePaths.map { AppMCPSourceRuntimeRepository(storagePaths: $0) }
         )
+        let nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = {
+            guard let storagePaths else { return nil }
+            if let sqliteBackend = try? SQLiteNativeSourceSearchBackend(
+                databaseURL: storagePaths.nativeSourceSearchDatabaseURL
+            ) {
+                return sqliteBackend
+            }
+            return NativeSourceSearchService(storagePaths: storagePaths)
+        }()
+        let resolvedRSSRuntime = rssRuntime ?? storagePaths.map { paths in
+            RSSRuntime(
+                repository: FileBackedRSSSourceRepository(storagePaths: paths),
+                cache: FileBackedRSSSourceCache(storagePaths: paths, searchService: nativeSourceSearchBackend)
+            )
+        } ?? RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
+        self.rssFeatureModel = RSSFeatureModel(runtime: resolvedRSSRuntime)
         self.skillRuntimeModel = SkillRuntimeFeatureModel(
             repository: storagePaths.map { AppSkillRuntimeRepository(storagePaths: $0) },
             storagePaths: storagePaths
@@ -2238,7 +2244,6 @@ final class AppViewModel: NSObject, ObservableObject {
             )
         }
         if let storagePaths {
-            let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
             self.sessionSearchIndexService = try? SessionSearchIndexService(databaseURL: storagePaths.sessionSearchDatabaseURL)
             let globalSearchHistoryRepository = AppGlobalSearchHistoryRepository(historyURL: storagePaths.globalSearchHistoryURL)
@@ -2247,10 +2252,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
-            self.rssRuntime = RSSRuntime(
-                repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
-                cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
-            )
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             let personProfilesDatabaseURL = storagePaths.applicationSupportDirectory
@@ -2315,6 +2316,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 store: repository.store,
                 settingsRepository: llmSettingsRepository,
                 storagePaths: storagePaths,
+                rssRuntime: rssFeatureModel.agentRuntime,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
@@ -2398,6 +2400,26 @@ final class AppViewModel: NSObject, ObservableObject {
                 self?.errorMessage = message
             }
         }
+        rssFeatureModel.sessionIDProvider = { [weak self] in
+            guard let self else { return nil }
+            return self.selectedChatSessionID ?? self.activeChatSession.id
+        }
+        rssFeatureModel.sourceSetChanged = { [weak self] scope in
+            guard let self else { return }
+            switch scope {
+            case .rssOnly:
+                try await self.reconcileRSSSourceRefreshTasks()
+            case .allSources:
+                try await self.reconcileSourceRefreshTasks()
+            }
+            self.taskAutomationModel.reload()
+        }
+        rssFeatureModel.onEvent = { [weak self] event in
+            self?.objectWillChange.send()
+            if case let .operationFailed(message) = event {
+                self?.errorMessage = message
+            }
+        }
         if chatSessionRepository != nil {
             skillRuntimeModel.onAddRequest = { [weak self] request in
                 guard let self else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
@@ -2436,7 +2458,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         sourceRuntimeModel.reload()
         skillRuntimeModel.reload()
-        Task { await reloadRSSBrowserPresentation() }
+        Task { await rssFeatureModel.reload() }
         Task { await reloadCalendarContactsFromStorage() }
         Task { await reloadMailBrowserPresentation() }
         reloadChatSessions()
@@ -2469,6 +2491,7 @@ final class AppViewModel: NSObject, ObservableObject {
         globalSearchPreviewTask = nil
         runtimeSettingsAutosaveTask?.cancel()
         runtimeSettingsAutosaveTask = nil
+        rssFeatureModel.shutdown()
         cancelBrowserHistoryContentFetchTasks()
         resumePendingBrowserAssistedWebFetchContinuationsForShutdown()
         releaseIdleSleepAssertion()
@@ -2656,7 +2679,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
         guard let taskManagementRepository = taskAutomationModel.repository else { return }
-        let materializer = SourceRefreshTaskMaterializer(taskRepository: taskManagementRepository, rssSourceRepository: rssRuntime.repository)
+        let materializer = SourceRefreshTaskMaterializer(taskRepository: taskManagementRepository, rssSourceRepository: rssFeatureModel.repository)
         _ = try await materializer.reconcileRSSSourceRefreshTasks(now: now)
     }
 
@@ -2791,23 +2814,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
-        if let sourceInstanceID, !sourceInstanceID.isEmpty {
-            let sourceID = RSSSourceID(rawValue: sourceInstanceID)
-            let result = try await rssRuntime.syncSource(sourceID: sourceID, runID: runID, sessionID: selectedChatSessionID)
-            await reloadRSSBrowserPresentation()
-            return "RSS refreshed source \(sourceInstanceID); inserted \(result.insertedCount), duplicates \(result.duplicateCount)"
-        }
-
-        let sources = try await rssRuntime.listSources(runID: runID, sessionID: selectedChatSessionID)
-        var inserted = 0
-        var duplicates = 0
-        for source in sources {
-            let result = try await rssRuntime.syncSource(sourceID: source.id, runID: runID, sessionID: selectedChatSessionID)
-            inserted += result.insertedCount
-            duplicates += result.duplicateCount
-        }
-        await reloadRSSBrowserPresentation()
-        return "RSS refreshed \(sources.count) sources; inserted \(inserted), duplicates \(duplicates)"
+        try await rssFeatureModel.refreshForScheduledTask(
+            sourceInstanceID: sourceInstanceID,
+            runID: runID
+        )
     }
 
     private func performTaskSessionMessage(_ request: TaskSessionMessageRequest) async -> String {
@@ -3494,124 +3504,16 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func reloadRSSBrowserPresentation() async {
-        do {
-            let sources = try await rssRuntime.listSources(runID: nil, sessionID: selectedChatSessionID)
-            let items = try await rssRuntime.listItems(sourceID: nil, includeHidden: false, limit: 200, runID: nil, sessionID: selectedChatSessionID)
-            rssBrowserPresentation = NativeRSSBrowserPresentation(sources: sources, items: items)
-            if let selectedRSSSourceID,
-               !sources.contains(where: { $0.id == selectedRSSSourceID }) {
-                self.selectedRSSSourceID = sources.first?.id
-            } else if selectedRSSSourceID == nil {
-                selectedRSSSourceID = sources.first?.id
-            }
-            if let selectedRSSItemID,
-               !items.contains(where: { $0.id == selectedRSSItemID }) {
-                self.selectedRSSItemID = items.first?.id
-            } else if selectedRSSItemID == nil {
-                selectedRSSItemID = items.first?.id
-            }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func selectRSSItem(_ item: RSSItemSummary) {
-        selectedRSSSourceID = item.sourceID
-        selectedRSSItemID = item.id
-        guard !item.state.isRead else { return }
-        markRSSItemsRead([item.id], isRead: true)
-    }
-
-    func markRSSItemsRead(_ itemIDs: [RSSItemID], isRead: Bool) {
-        guard !itemIDs.isEmpty else { return }
-        let targetIDs = Set(itemIDs)
-        let updatedItems = rssBrowserPresentation.items.map { item in
-            guard targetIDs.contains(item.id), item.state.isRead != isRead else { return item }
-            var copy = item
-            copy.state.isRead = isRead
-            return copy
-        }
-        rssBrowserPresentation = NativeRSSBrowserPresentation(sources: rssBrowserPresentation.sources, items: updatedItems)
-        Task { @MainActor in
-            do {
-                try await rssRuntime.setReadState(itemIDs: itemIDs, isRead: isRead, runID: nil, sessionID: selectedChatSessionID)
-                await reloadRSSBrowserPresentation()
-            } catch {
-                errorMessage = String(describing: error)
-                await reloadRSSBrowserPresentation()
-            }
-        }
-    }
-
-    func addRSSSourceAndSync(feedURL: URL, displayName: String?) async throws {
-        let source = try await rssRuntime.addSource(feedURL: feedURL, displayName: displayName, runID: nil, sessionID: selectedChatSessionID)
-        selectedRSSSourceID = source.id
-        do {
-            _ = try await rssRuntime.syncSource(sourceID: source.id, runID: nil, sessionID: selectedChatSessionID)
-            errorMessage = nil
-        } catch {
-            errorMessage = "RSS 订阅源已添加，但首次抓取失败：\(error.localizedDescription)"
-        }
-        try await reconcileRSSSourceRefreshTasks()
-        taskAutomationModel.reload()
-        await reloadRSSBrowserPresentation()
-    }
-
-    func updateRSSSource(sourceID: RSSSourceID, feedURL: URL, displayName: String?) async throws {
-        let source = try await rssRuntime.updateSource(sourceID: sourceID, feedURL: feedURL, displayName: displayName, runID: nil, sessionID: selectedChatSessionID)
-        selectedRSSSourceID = source.id
-        if let selectedRSSItemID,
-           rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == sourceID,
-           source.feedURL == feedURL {
-            self.selectedRSSItemID = selectedRSSItemID
-        }
-        try await reconcileRSSSourceRefreshTasks()
-        taskAutomationModel.reload()
-        errorMessage = nil
-        await reloadRSSBrowserPresentation()
-    }
-
-    func deleteRSSSource(_ source: RSSSource) {
-        Task { @MainActor in
-            do {
-                try await rssRuntime.deleteSource(sourceID: source.id, runID: nil, sessionID: selectedChatSessionID)
-                if selectedRSSSourceID == source.id { selectedRSSSourceID = nil }
-                if let selectedRSSItemID,
-                   rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == source.id {
-                    self.selectedRSSItemID = nil
-                }
-                try await reconcileSourceRefreshTasks()
-                taskAutomationModel.reload()
-                pendingRSSSourceDeletion = nil
-                errorMessage = nil
-                await reloadRSSBrowserPresentation()
-            } catch {
-                pendingRSSSourceDeletion = nil
-                errorMessage = String(describing: error)
-                await reloadRSSBrowserPresentation()
-            }
-        }
-    }
-
-    func followRSSItemInNewSession(_ item: RSSItemSummary) {
-        guard let url = item.link else {
-            errorMessage = "这篇 RSS 文章没有可打开的原文链接。"
-            return
-        }
-        if !item.state.isRead {
-            markRSSItemsRead([item.id], isRead: true)
-        }
+    func handleRSSFollowRequest(_ request: RSSFollowRequest) {
         let currentSessionID = selectedChatSessionID ?? activeChatSession.id
-        if focusExistingBrowserTabIfPresent(urlString: url.absoluteString, preferredSessionID: currentSessionID) {
+        if focusExistingBrowserTabIfPresent(urlString: request.url.absoluteString, preferredSessionID: currentSessionID) {
             errorMessage = nil
             return
         }
         guard let chatSessionRepository else { return }
         rememberCurrentWorkspaceMode()
         do {
-            let title = rssFollowSessionTitle(for: item)
-            let session = try chatSessionRepository.createSession(title: title)
+            let session = try chatSessionRepository.createSession(title: rssFollowSessionTitle(request.title))
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserWorkspaceSessionID = nil
@@ -3630,17 +3532,16 @@ final class AppViewModel: NSObject, ObservableObject {
             lastPromptInspection = nil
             reloadChatSessions(restoreWorkspaceMode: false)
             selectedChatSessionID = session.id
-            openURLInCurrentChatBrowser(url)
+            openURLInCurrentChatBrowser(request.url)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
-    private func rssFollowSessionTitle(for item: RSSItemSummary) -> String {
-        let rawTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = rawTitle.isEmpty ? "RSS 文章" : rawTitle
-        return "关注 \(title)"
+    private func rssFollowSessionTitle(_ rawTitle: String) -> String {
+        let trimmedTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "关注 \(trimmedTitle.isEmpty ? "RSS 文章" : trimmedTitle)"
     }
 
     private func performAddSkillRequest(_ request: String) async throws -> String {

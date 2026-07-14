@@ -27,6 +27,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
     public var groupID: String
     public var storagePaths: AppStoragePaths?
+    public var rssRuntime: RSSRuntime?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
@@ -38,6 +39,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(),
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
+        rssRuntime: RSSRuntime? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
@@ -48,6 +50,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.capabilityEvidenceRepository = capabilityEvidenceRepository
         self.groupID = groupID
         self.storagePaths = storagePaths
+        self.rssRuntime = rssRuntime
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
@@ -189,10 +192,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 .nextcloudCalDAV: calDAVAdapter
             ])
             registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: calendarStore, mutationService: calendarMutationService), recorder: nativeSourceReferenceRecorder)
-            registry.registerNativeRSSTools(runtime: RSSRuntime(
+            let effectiveRSSRuntime = rssRuntime ?? RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
-            ), recorder: nativeSourceReferenceRecorder)
+            )
+            registry.registerNativeRSSTools(runtime: effectiveRSSRuntime, recorder: nativeSourceReferenceRecorder)
             let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             registry.registerNativeMailTools(runtime: MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
