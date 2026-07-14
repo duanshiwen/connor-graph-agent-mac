@@ -809,10 +809,10 @@ private struct SkillPill: View {
 }
 
 struct AutomationRuntimePanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
 
     private var presentation: TaskManagementUIPresentation {
-        viewModel.taskManagementPresentation
+        model.presentation
     }
 
     var body: some View {
@@ -828,10 +828,10 @@ struct AutomationRuntimePanelView: View {
                 ("事件", "\(presentation.summary.eventTriggeredTaskCount)")
             ],
             onRefresh: {
-                viewModel.reloadTaskManagementPresentation()
+                model.reload()
             }
         ) {
-            if viewModel.isRunningScheduledTasks {
+            if model.isRunningScheduledTasks {
                 Label("正在执行到期任务…", systemImage: "clock.arrow.circlepath")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -844,7 +844,7 @@ struct AutomationRuntimePanelView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(presentation.scheduledTasks) { card in
-                TaskRuntimeCard(card: card, viewModel: viewModel)
+                TaskRuntimeCard(card: card, model: model)
             }
 
             SectionHeader(title: "事件触发")
@@ -854,18 +854,18 @@ struct AutomationRuntimePanelView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(presentation.eventTriggeredTasks) { card in
-                TaskRuntimeCard(card: card, viewModel: viewModel)
+                TaskRuntimeCard(card: card, model: model)
             }
         }
         .onAppear {
-            viewModel.reloadTaskManagementPresentation()
+            model.reload()
         }
     }
 }
 
 private struct TaskRuntimeCard: View {
     var card: TaskManagementUICard
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
 
     var body: some View {
         RuntimePanelCard(
@@ -879,17 +879,17 @@ private struct TaskRuntimeCard: View {
             HStack(spacing: 8) {
                 if card.canStop {
                     TaskRuntimeCardActionButton(title: "暂停", systemImage: "pause.fill") {
-                        viewModel.stopTask(card.id)
+                        model.stopTask(card.id)
                     }
                 }
                 if card.canRestore {
                     TaskRuntimeCardActionButton(title: "恢复", systemImage: "play.fill") {
-                        viewModel.restoreTask(card.id)
+                        model.restoreTask(card.id)
                     }
                 }
                 if card.canDelete {
                     TaskRuntimeCardActionButton(title: "删除", systemImage: "trash", role: .destructive) {
-                        viewModel.deleteTask(card.id)
+                        model.deleteTask(card.id)
                     }
                 }
             }

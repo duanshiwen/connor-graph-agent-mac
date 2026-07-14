@@ -11,6 +11,7 @@ struct CraftListPaneView: View {
     @ObservedObject var viewModel: AppViewModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
+    let taskAutomationModel: TaskAutomationFeatureModel
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -33,9 +34,9 @@ struct CraftListPaneView: View {
             case .skills:
                 CraftSkillListPane(model: skillRuntimeModel)
             case .automation, .scheduledTasks:
-                CraftTaskAutomationListPane(viewModel: viewModel, kind: .scheduled)
+                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: viewModel.governanceConfig, kind: .scheduled)
             case .eventTriggeredTasks:
-                CraftTaskAutomationListPane(viewModel: viewModel, kind: .eventTriggered)
+                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: viewModel.governanceConfig, kind: .eventTriggered)
             case .productOS:
                 CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
             default:
@@ -1123,12 +1124,13 @@ private enum TaskAutomationKind {
 }
 
 private struct CraftTaskAutomationListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
+    var governanceConfig: AppSessionGovernanceConfig
     var kind: TaskAutomationKind
     @State private var isPresentingCreateSheet = false
 
     private var cards: [TaskManagementUICard] {
-        kind.cards(from: viewModel.taskManagementPresentation)
+        kind.cards(from: model.presentation)
     }
 
     var body: some View {
@@ -1156,8 +1158,8 @@ private struct CraftTaskAutomationListPane: View {
                 List(cards) { card in
                     TaskAutomationListRow(
                         card: card,
-                        isSelected: card.id == viewModel.selectedTaskAutomationID,
-                        onSelect: { viewModel.selectedTaskAutomationID = card.id }
+                        isSelected: card.id == model.selectedTaskID,
+                        onSelect: { model.selectTask(card.id) }
                     )
                     .nativeListRowStyle()
                 }
@@ -1168,10 +1170,10 @@ private struct CraftTaskAutomationListPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $isPresentingCreateSheet) {
-            AddTaskAutomationSheet(kind: kind, governanceConfig: viewModel.governanceConfig) { request in
+            AddTaskAutomationSheet(kind: kind, governanceConfig: governanceConfig) { request in
                 switch request.kind {
                 case .scheduled:
-                    try viewModel.createScheduledSessionMessageTask(
+                    try model.createScheduledSessionMessageTask(
                         name: request.name,
                         runAt: request.runAt,
                         recurrence: request.recurrence,
@@ -1180,7 +1182,7 @@ private struct CraftTaskAutomationListPane: View {
                         rationale: request.rationale
                     )
                 case .eventTriggered:
-                    try viewModel.createSessionStatusMessageTask(
+                    try model.createSessionStatusMessageTask(
                         name: request.name,
                         toStatus: request.toStatus,
                         message: request.message,
@@ -1191,7 +1193,7 @@ private struct CraftTaskAutomationListPane: View {
             }
         }
         .task {
-            viewModel.reloadTaskManagementPresentation()
+            model.reload()
         }
     }
 }
@@ -2102,6 +2104,7 @@ struct CraftDetailPaneView: View {
     let graphDiagnosticsModel: GraphDiagnosticsModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
+    let taskAutomationModel: TaskAutomationFeatureModel
     var selection: SidebarItem
 
     var body: some View {
@@ -2124,9 +2127,9 @@ struct CraftDetailPaneView: View {
             case .pendingApprovals:
                 AgentPendingApprovalReviewView(viewModel: viewModel)
             case .automation, .scheduledTasks:
-                TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
+                TaskAutomationDetailPane(model: taskAutomationModel, kind: .scheduled)
             case .eventTriggeredTasks:
-                TaskAutomationDetailPane(viewModel: viewModel, kind: .eventTriggered)
+                TaskAutomationDetailPane(model: taskAutomationModel, kind: .eventTriggered)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
             case .calendar:
@@ -2733,15 +2736,15 @@ private struct PersonProfileStatusPill: View {
 }
 
 private struct TaskAutomationDetailPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
     var kind: TaskAutomationKind
 
     private var cards: [TaskManagementUICard] {
-        kind.cards(from: viewModel.taskManagementPresentation)
+        kind.cards(from: model.presentation)
     }
 
     private var selectedCard: TaskManagementUICard? {
-        guard let selectedID = viewModel.selectedTaskAutomationID else { return nil }
+        guard let selectedID = model.selectedTaskID else { return nil }
         return cards.first { $0.id == selectedID }
     }
 
@@ -2778,7 +2781,7 @@ private struct TaskAutomationDetailPane: View {
                                 }
                             }
                         }
-                        TaskAutomationActionSection(card: selectedCard, viewModel: viewModel)
+                        TaskAutomationActionSection(card: selectedCard, model: model)
                     }
                     .padding(.horizontal, AgentChatLayout.spaceXL)
                     .padding(.vertical, AgentChatLayout.spaceL)
@@ -2792,7 +2795,7 @@ private struct TaskAutomationDetailPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .task { viewModel.reloadTaskManagementPresentation() }
+        .task { model.reload() }
     }
 }
 
@@ -2894,24 +2897,24 @@ private struct TaskAutomationMetadataLine: View {
 
 private struct TaskAutomationActionSection: View {
     var card: TaskManagementUICard
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
 
     var body: some View {
         TaskAutomationDetailSection(title: "操作", systemImage: "slider.horizontal.3") {
             HStack(spacing: AgentChatLayout.spaceS) {
                 if card.canStop {
                     TaskAutomationActionButton(title: "暂停", systemImage: "pause.fill") {
-                        viewModel.stopTask(card.id)
+                        model.stopTask(card.id)
                     }
                 }
                 if card.canRestore {
                     TaskAutomationActionButton(title: "恢复", systemImage: "play.fill") {
-                        viewModel.restoreTask(card.id)
+                        model.restoreTask(card.id)
                     }
                 }
                 if card.canDelete {
                     TaskAutomationActionButton(title: "删除", systemImage: "trash", role: .destructive) {
-                        viewModel.deleteTask(card.id)
+                        model.deleteTask(card.id)
                     }
                 }
                 if !card.canStop && !card.canRestore && !card.canDelete {

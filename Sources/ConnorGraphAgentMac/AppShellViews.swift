@@ -34,6 +34,7 @@ struct AppShellView: View {
                             viewModel: viewModel,
                             sourceRuntimeModel: viewModel.sourceRuntimeModel,
                             skillRuntimeModel: viewModel.skillRuntimeModel,
+                            taskAutomationModel: viewModel.taskAutomationModel,
                             selection: selectionBinding
                         )
                     .frame(
@@ -50,6 +51,7 @@ struct AppShellView: View {
                 viewModel: viewModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
                 skillRuntimeModel: viewModel.skillRuntimeModel,
+                taskAutomationModel: viewModel.taskAutomationModel,
                 selection: selectionBinding
             )
                 .frame(
@@ -67,6 +69,7 @@ struct AppShellView: View {
                 graphDiagnosticsModel: viewModel.graphDiagnosticsModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
                 skillRuntimeModel: viewModel.skillRuntimeModel,
+                taskAutomationModel: viewModel.taskAutomationModel,
                 selection: viewModel.selection ?? .agentChat
             )
                 .id(viewModel.selection ?? .agentChat)

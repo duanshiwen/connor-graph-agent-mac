@@ -11,6 +11,7 @@ struct CraftPrimarySidebarView: View {
     @ObservedObject var viewModel: AppViewModel
     @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
     @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
+    @Bindable var taskAutomationModel: TaskAutomationFeatureModel
     @Binding var selection: SidebarItem?
     @State private var sessionsExpanded = true
     @State private var labelsExpanded = true
@@ -118,8 +119,8 @@ struct CraftPrimarySidebarView: View {
                     SidebarRow(title: "技能", systemImage: "bolt", count: skillRuntimeModel.presentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
-                        SidebarRow(title: "定时任务", systemImage: "clock", count: viewModel.taskManagementPresentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
-                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: viewModel.taskManagementPresentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
+                        SidebarRow(title: "定时任务", systemImage: "clock", count: taskAutomationModel.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
+                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: taskAutomationModel.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
                     }
                 }
                 .padding(.horizontal, 10)
