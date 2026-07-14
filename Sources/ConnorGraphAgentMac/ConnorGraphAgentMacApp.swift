@@ -42,16 +42,16 @@ struct ConnorGraphAgentMacApp: App {
                 .preferredColorScheme(root.viewModel.appSettingsModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
-                    await root.lifecycle.startIfNeeded()
+                    await root.startupCoordinator.startIfNeeded()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                    root.lifecycle.shutdown()
+                    root.startupCoordinator.shutdown()
                 }
         }
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
         .commands {
-            NoteImportFileCommands(viewModel: root.viewModel)
+            NoteImportFileCommands(root: root)
 
             CommandGroup(replacing: .undoRedo) {
                 Button("撤销") {
@@ -111,19 +111,19 @@ struct ConnorGraphAgentMacApp: App {
 
             CommandMenu(AppMenuPresentation.actionMenuTitle) {
                 Button("切换浏览器") {
-                    root.viewModel.performShortcutAction(.toggleBrowser)
+                    root.performWhenInteractive { $0.performShortcutAction(.toggleBrowser) }
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
                 Button("聚焦搜索") {
-                    root.viewModel.performShortcutAction(.focusTopSearch)
+                    root.performWhenInteractive { $0.performShortcutAction(.focusTopSearch) }
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
                 Divider()
 
                 Button("打开设置") {
-                    root.viewModel.performShortcutAction(.openSettings)
+                    root.performWhenInteractive { $0.performShortcutAction(.openSettings) }
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -145,18 +145,18 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 private struct NoteImportFileCommands: Commands {
-    @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var root: AppCompositionRoot
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button(AppMenuPresentation.newSessionTitle) {
-                viewModel.performShortcutAction(.newSession)
+                root.performWhenInteractive { $0.performShortcutAction(.newSession) }
             }
             .keyboardShortcut("n", modifiers: .command)
 
             Button(AppMenuPresentation.newNoteTitle) {
-                viewModel.newNoteSession()
+                root.performWhenInteractive { $0.newNoteSession() }
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
 

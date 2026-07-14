@@ -62,12 +62,18 @@ static func live() -> AppViewModel {
     }
 }
 
-static func demo() -> AppViewModel {
+static func demo(startupMode: AppViewModelStartupMode = .immediate) -> AppViewModel {
     let snapshot = demoSnapshot()
-    return AppViewModel(entities: snapshot.entities, statements: snapshot.statements, episodes: snapshot.episodes, observeLogEntries: snapshot.observeLogEntries)
+    return AppViewModel(
+        entities: snapshot.entities,
+        statements: snapshot.statements,
+        episodes: snapshot.episodes,
+        observeLogEntries: snapshot.observeLogEntries,
+        startupMode: startupMode
+    )
 }
 
-private static func demoSnapshot() -> GraphStoreSnapshot {
+nonisolated static func demoSnapshot() -> GraphStoreSnapshot {
     let workObject = GraphEntity(
         id: "work-object-agent-os",
         graphID: "default",

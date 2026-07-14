@@ -49,6 +49,18 @@ final class ProductOSControlFeatureModel {
         self.automationRepository = automationRepository
     }
 
+    func applyStartupSnapshot(_ result: StartupDomainResult<ProductOSContentSnapshot>) {
+        guard let snapshot = result.value else {
+            if let failureMessage = result.failureMessage { onEvent?(.operationFailed(failureMessage)) }
+            return
+        }
+        registry = snapshot.registry
+        automationConfig = snapshot.automationConfig
+        automationTriggerRecords = snapshot.triggerRecords
+        automationExecutionHistory = snapshot.executionHistory
+        message = "Product OS 注册表已从康纳同学 Home 加载。"
+    }
+
     func reloadRegistry() {
         do {
             if let registryRepository {

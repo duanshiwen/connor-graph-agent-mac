@@ -39,6 +39,18 @@ final class TaskAutomationFeatureModel {
         taskRepository
     }
 
+    func applyStartupSnapshot(_ result: StartupDomainResult<TaskManagementUIPresentation>) {
+        guard let presentation = result.value else {
+            if let failureMessage = result.failureMessage { onEvent?(.operationFailed(failureMessage)) }
+            return
+        }
+        self.presentation = presentation
+        if let selectedTaskID,
+           !presentation.cards.contains(where: { $0.id == selectedTaskID }) {
+            self.selectedTaskID = nil
+        }
+    }
+
     func reload() {
         do {
             guard let taskRepository else { return }

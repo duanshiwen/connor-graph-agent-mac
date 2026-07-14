@@ -19,15 +19,22 @@ public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Send
         }
     }
 
-    public init(storagePaths: AppStoragePaths, searchService: (any NativeSourceSearchBackend)? = nil) {
+    public convenience init(storagePaths: AppStoragePaths, searchService: (any NativeSourceSearchBackend)? = nil) {
+        do {
+            try self.init(openingStoragePaths: storagePaths, searchService: searchService)
+        } catch {
+            let databaseURL = storagePaths.applicationSupportDirectory
+                .appendingPathComponent("mail", isDirectory: true)
+                .appendingPathComponent("mail-source.sqlite")
+            preconditionFailure("Unable to open mail source store at \(databaseURL.path): \(error)")
+        }
+    }
+
+    public init(openingStoragePaths storagePaths: AppStoragePaths, searchService: (any NativeSourceSearchBackend)? = nil) throws {
         let databaseURL = storagePaths.applicationSupportDirectory
             .appendingPathComponent("mail", isDirectory: true)
             .appendingPathComponent("mail-source.sqlite")
-        do {
-            self.store = try SQLiteMailSourceStore(databaseURL: databaseURL, searchService: searchService)
-        } catch {
-            preconditionFailure("Unable to open mail source store at \(databaseURL.path): \(error)")
-        }
+        self.store = try SQLiteMailSourceStore(databaseURL: databaseURL, searchService: searchService)
     }
 
     private static func databaseURL(fromLegacyStoreURL url: URL) -> URL {

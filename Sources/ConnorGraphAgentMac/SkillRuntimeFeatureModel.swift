@@ -42,6 +42,19 @@ final class SkillRuntimeFeatureModel {
         }
     }
 
+    func applyStartupSnapshot(_ result: StartupDomainResult<[SkillRuntimeDefinition]>) {
+        guard let definitions = result.value else {
+            if let failureMessage = result.failureMessage { onEvent?(.operationFailed(failureMessage)) }
+            return
+        }
+        self.definitions = definitions
+        presentation = buildPresentation()
+        if let selectedCardID,
+           !presentation.cards.contains(where: { $0.id == selectedCardID }) {
+            self.selectedCardID = nil
+        }
+    }
+
     func reload() {
         do {
             definitions = try repository?.list() ?? []

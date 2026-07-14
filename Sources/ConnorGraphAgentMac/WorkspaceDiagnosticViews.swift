@@ -53,6 +53,22 @@ final class GraphDiagnosticsModel {
         observeLogEntries = snapshot.observeLogEntries
     }
 
+    func applyStartupMaintenance(
+        promotionCandidates: StartupDomainResult<[ObserveLogEntry]>,
+        schemaHealth: StartupDomainResult<GraphSchemaHealthReport>
+    ) {
+        if let candidates = promotionCandidates.value {
+            self.promotionCandidates = candidates
+        } else if let failureMessage = promotionCandidates.failureMessage {
+            errorMessage = failureMessage
+        }
+        if let report = schemaHealth.value {
+            schemaHealthReport = report
+        } else if let failureMessage = schemaHealth.failureMessage {
+            errorMessage = failureMessage
+        }
+    }
+
     func reloadPromotionCandidates() {
         do {
             promotionCandidates = try promotionRepository?.loadCandidates() ?? []
