@@ -15,6 +15,7 @@ struct CraftListPaneView: View {
     let productOSControlModel: ProductOSControlFeatureModel
     let calendarFeatureModel: CalendarFeatureModel
     let contactsFeatureModel: ContactsFeatureModel
+    let mailFeatureModel: MailFeatureModel
     let rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
 
@@ -32,7 +33,7 @@ struct CraftListPaneView: View {
             case .rss:
                 CraftRSSListPane(model: rssFeatureModel)
             case .mail:
-                CraftMailListPane(viewModel: viewModel)
+                CraftMailListPane(model: mailFeatureModel)
             case .sources:
                 CraftSourceListPane(model: sourceRuntimeModel)
             case .skills:
@@ -1549,7 +1550,7 @@ private struct AddTaskAutomationSheet: View {
 }
 
 struct CraftMailListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
     @State private var directionFilter: MailMessageDirectionFilter = .all
     @State private var filteredMessagesCache: [MailMessageSummary] = []
     @State private var visibleMessagesCache: [MailMessageSummary] = []
@@ -1560,7 +1561,7 @@ struct CraftMailListPane: View {
     private static let initialVisibleMessagesLimit = 500
     private static let visibleMessagesBatchSize = 500
 
-    private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
+    private var presentation: NativeMailBrowserPresentation { model.presentation }
     private var visibleMessages: [MailMessageSummary] { visibleMessagesCache }
     private var hiddenFilteredMessageCount: Int { max(filteredMessagesCache.count - visibleMessagesCache.count, 0) }
 
@@ -1570,7 +1571,7 @@ struct CraftMailListPane: View {
                 Text("邮件")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.presentAddMailAccountSheet() }) {
+                Button(action: { model.presentAddAccountSheet() }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -1582,8 +1583,8 @@ struct CraftMailListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
-                viewModel.mailSearchQuery = ""
+            ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "邮件") {
+                model.searchQuery = ""
             }
 
             if presentation.accounts.isEmpty {
@@ -1611,7 +1612,7 @@ struct CraftMailListPane: View {
                                     message: message,
                                     account: presentation.account(id: message.accountID),
                                     mailbox: presentation.mailbox(id: message.mailboxID),
-                                    isSelected: message.id == viewModel.selectedMailMessageID,
+                                    isSelected: message.id == model.selectedMessageID,
                                     onSelect: { selectMessage(message) }
                                 )
                                 .equatable()
@@ -1632,7 +1633,7 @@ struct CraftMailListPane: View {
                         .onAppear {
                             scrollToSelectedMessage(with: proxy)
                         }
-                        .onChange(of: viewModel.selectedMailMessageID) { _, _ in
+                        .onChange(of: model.selectedMessageID) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
                         .onChange(of: visibleMessagesCacheKey) { _, _ in
@@ -1645,10 +1646,10 @@ struct CraftMailListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear(perform: refreshVisibleMessagesCacheIfNeeded)
         .onChange(of: directionFilter) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
-        .onChange(of: viewModel.mailSearchQuery) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
+        .onChange(of: model.searchQuery) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
         .onChange(of: mailPresentationListSignature) { _, _ in refreshVisibleMessagesCache(force: true) }
-        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddAccountSheet) {
+            AddMailAccountSheet(model: model)
         }
     }
 
@@ -1658,10 +1659,10 @@ struct CraftMailListPane: View {
 
     private func refreshVisibleMessagesCache(force: Bool) {
         let key = MailVisibleMessagesCacheKey(
-            messageCount: viewModel.mailBrowserPresentation.messages.count,
-            firstMessageID: viewModel.mailBrowserPresentation.messages.first?.id,
-            lastMessageID: viewModel.mailBrowserPresentation.messages.last?.id,
-            query: viewModel.mailSearchQuery,
+            messageCount: model.presentation.messages.count,
+            firstMessageID: model.presentation.messages.first?.id,
+            lastMessageID: model.presentation.messages.last?.id,
+            query: model.searchQuery,
             direction: directionFilter
         )
         guard force || key != visibleMessagesCacheKey else { return }
@@ -1672,7 +1673,7 @@ struct CraftMailListPane: View {
             || key.lastMessageID != visibleMessagesCacheKey.lastMessageID {
             visibleMessagesLimit = Self.initialVisibleMessagesLimit
         }
-        let messages = viewModel.mailListMessages(direction: directionFilter)
+        let messages = model.listMessages(direction: directionFilter)
         visibleMessagesCacheKey = key
         filteredMessagesCache = messages
         rebuildVisibleMessagesWindow()
@@ -1691,14 +1692,14 @@ struct CraftMailListPane: View {
 
     private var mailPresentationListSignature: MailPresentationListSignature {
         MailPresentationListSignature(
-            messageCount: viewModel.mailBrowserPresentation.messages.count,
-            firstMessageID: viewModel.mailBrowserPresentation.messages.first?.id,
-            lastMessageID: viewModel.mailBrowserPresentation.messages.last?.id
+            messageCount: model.presentation.messages.count,
+            firstMessageID: model.presentation.messages.first?.id,
+            lastMessageID: model.presentation.messages.last?.id
         )
     }
 
     private var isFilteringBySearch: Bool {
-        !viewModel.mailSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var mailEmptyListTitle: String {
@@ -1714,11 +1715,11 @@ struct CraftMailListPane: View {
     }
 
     private func selectMessage(_ message: MailMessageSummary) {
-        viewModel.selectMailMessageFromList(message)
+        model.selectMessageFromList(message)
     }
 
     private func scrollToSelectedMessage(with proxy: ScrollViewProxy) {
-        guard let selectedID = viewModel.selectedMailMessageID,
+        guard let selectedID = model.selectedMessageID,
               visibleMessageIDCache.contains(selectedID) else { return }
         Task { @MainActor in
             await Task.yield()
@@ -2108,6 +2109,7 @@ struct CraftDetailPaneView: View {
     let productOSControlModel: ProductOSControlFeatureModel
     let calendarFeatureModel: CalendarFeatureModel
     let contactsFeatureModel: ContactsFeatureModel
+    let mailFeatureModel: MailFeatureModel
     let rssFeatureModel: RSSFeatureModel
     var selection: SidebarItem
 
@@ -2145,7 +2147,7 @@ struct CraftDetailPaneView: View {
             case .contacts:
                 ContactsSourceSettingsView(model: contactsFeatureModel)
             case .mail:
-                MailSourceDetailView(viewModel: viewModel)
+                MailSourceDetailView(model: mailFeatureModel)
             case .rss:
                 RSSSourceSettingsView(model: rssFeatureModel)
             case .sources:

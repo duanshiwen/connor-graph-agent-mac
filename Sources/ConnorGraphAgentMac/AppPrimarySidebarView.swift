@@ -14,6 +14,7 @@ struct CraftPrimarySidebarView: View {
     @Bindable var taskAutomationModel: TaskAutomationFeatureModel
     @Bindable var calendarFeatureModel: CalendarFeatureModel
     @Bindable var contactsFeatureModel: ContactsFeatureModel
+    @Bindable var mailFeatureModel: MailFeatureModel
     @Bindable var rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
     @State private var sessionsExpanded = true
@@ -174,9 +175,9 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var mailSidebarCount: Int? {
-        let unreadCount = viewModel.mailBrowserPresentation.totalUnreadCount
+        let unreadCount = mailFeatureModel.presentation.totalUnreadCount
         if unreadCount > 0 { return unreadCount }
-        let totalCount = viewModel.mailBrowserPresentation.totalMessageCount
+        let totalCount = mailFeatureModel.presentation.totalMessageCount
         return totalCount > 0 ? totalCount : nil
     }
 

@@ -134,10 +134,10 @@ struct MailSettingsSummaryPresentation: Equatable {
 }
 
 struct SettingsMailSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
 
     private var presentation: NativeMailBrowserPresentation {
-        viewModel.mailBrowserPresentation
+        model.presentation
     }
 
     private var summary: MailSettingsSummaryPresentation {
@@ -153,8 +153,8 @@ struct SettingsMailSection: View {
             securitySection
             protocolSection
         }
-        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddAccountSheet) {
+            AddMailAccountSheet(model: model)
         }
     }
 
@@ -171,7 +171,7 @@ struct SettingsMailSection: View {
     private var accountsSection: some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             if presentation.accounts.isEmpty {
-                MailSettingsEmptyStateCard(onAdd: { viewModel.presentAddMailAccountSheet() })
+                MailSettingsEmptyStateCard(onAdd: { model.presentAddAccountSheet() })
             } else {
                 VStack(spacing: 0) {
                     ForEach(presentation.accounts) { account in
@@ -179,7 +179,7 @@ struct SettingsMailSection: View {
                             account: account,
                             mailboxCount: presentation.mailboxes(accountID: account.id).count,
                             unreadCount: presentation.mailboxes(accountID: account.id).reduce(0) { $0 + $1.status.unreadCount },
-                            onAdd: { viewModel.presentAddMailAccountSheet() }
+                            onAdd: { model.presentAddAccountSheet() }
                         )
                         if account.id != presentation.accounts.last?.id {
                             Divider().padding(.leading, 32)
@@ -192,7 +192,7 @@ struct SettingsMailSection: View {
                 .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
                 .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-                Button(action: { viewModel.presentAddMailAccountSheet() }) {
+                Button(action: { model.presentAddAccountSheet() }) {
                     Label("添加邮件账户", systemImage: "plus")
                         .font(SettingsListTypography.actionTitle)
                         .padding(.horizontal, SettingsListLayout.spaceM)
@@ -206,16 +206,16 @@ struct SettingsMailSection: View {
     private var sendingSection: some View {
         SettingsGroup(title: "发信设置") {
             if presentation.accounts.isEmpty {
-                SettingsValueRow(title: "默认发信账户", value: summary.defaultSendAccountText(preferences: viewModel.mailPreferences))
+                SettingsValueRow(title: "默认发信账户", value: summary.defaultSendAccountText(preferences: model.preferences))
             } else {
                 MailDefaultSendAccountRow(
                     accounts: presentation.accounts,
-                    selectedAccountID: viewModel.mailPreferences.defaultSendAccountID ?? presentation.defaultAccountID(),
+                    selectedAccountID: model.preferences.defaultSendAccountID ?? presentation.defaultAccountID(),
                     titleFor: defaultAccountPickerTitle(for:),
-                    onSelect: { accountID in Task { @MainActor in await viewModel.setDefaultMailSendAccount(accountID) } }
+                    onSelect: { accountID in Task { @MainActor in await model.setDefaultSendAccount(accountID) } }
                 )
                 Divider()
-                SettingsValueRow(title: "默认发件身份", value: summary.defaultSendIdentityText(preferences: viewModel.mailPreferences))
+                SettingsValueRow(title: "默认发件身份", value: summary.defaultSendIdentityText(preferences: model.preferences))
                 Divider()
                 SettingsValueRow(title: "发送确认", value: "Compose 审批卡会显示实际 From，允许后才发送")
             }
@@ -242,7 +242,7 @@ struct SettingsMailSection: View {
             }
             Divider()
             SettingsValueRow(title: "默认策略", value: "添加后立即同步最近 50 封，后台定时刷新")
-            if let message = viewModel.mailSyncMessage {
+            if let message = model.syncMessage {
                 Divider()
                 Text(message)
                     .font(SettingsListTypography.rowCaption)
@@ -350,42 +350,42 @@ private struct MailDefaultSendAccountRow: View {
 }
 
 struct MailSourceDetailView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
 
     private var presentation: NativeMailBrowserPresentation {
-        viewModel.mailBrowserPresentation
+        model.presentation
     }
 
     private var selectedAccount: MailAccount? {
-        presentation.account(id: viewModel.selectedMailAccountID)
+        presentation.account(id: model.selectedAccountID)
     }
 
     private var selectedMailbox: MailMailbox? {
-        presentation.mailbox(id: viewModel.selectedMailMailboxID)
+        presentation.mailbox(id: model.selectedMailboxID)
     }
 
     private var selectedMessage: MailMessageSummary? {
-        viewModel.selectedMailMessageForDetail()
+        model.selectedMessageForDetail()
     }
 
     var body: some View {
         Group {
             if let selectedMessage {
-                MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
+                MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 MailDetailEmptyState(
-                    state: viewModel.mailNavigationTargetID == nil ? .idle : .locating,
-                    message: viewModel.mailNavigationMessage,
+                    state: model.navigationTargetID == nil ? .idle : .locating,
+                    message: model.navigationMessage,
                     hasAccounts: !presentation.accounts.isEmpty,
-                    onAdd: { viewModel.presentAddMailAccountSheet() }
+                    onAdd: { model.presentAddAccountSheet() }
                 )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddAccountSheet) {
+            AddMailAccountSheet(model: model)
         }
     }
 }
@@ -898,7 +898,7 @@ private struct MailMessageDetailPane: View {
     var account: MailAccount?
     var mailbox: MailMailbox?
     var message: MailMessageSummary
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var preparedHTMLBody: MailPreparedHTMLBodyPresentation?
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
@@ -977,7 +977,7 @@ private struct MailMessageDetailPane: View {
             bodyWebLayout = .initial
             bodyDisplay = .loading
             await Task.yield()
-            let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
+            let display = await model.loadBodyDisplay(for: token.messageID)
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
             let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
@@ -1122,7 +1122,7 @@ struct AddMailAccountSheet: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
     @State private var selectedPreset: MailAccountProviderPreset = .apple
     @State private var displayName: String = ""
     @State private var email: String = ""
@@ -1352,7 +1352,7 @@ struct AddMailAccountSheet: View {
         setupError = nil
         setupMessage = "正在添加账户…"
         do {
-            try await viewModel.addMailAccountAndPrepareSync(
+            try await model.addAccountAndPrepareSync(
                 preset: selectedPreset,
                 displayName: displayName,
                 email: email,
