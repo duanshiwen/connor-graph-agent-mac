@@ -14,7 +14,7 @@ struct AgentChatView: View {
 
     var body: some View {
         Group {
-            if model.sessions.selectedSessionID == nil && !chatActions.orchestration.browserFeatureModel.isVisible {
+            if model.sessions.selectedSessionID == nil && !chatActions.dependencies.browser.isVisible {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -22,32 +22,32 @@ struct AgentChatView: View {
             }
         }
         .onAppear {
-            chatActions.orchestration.reloadChatSessionsIfNeededAfterInitialLoad()
-            chatActions.orchestration.reloadPendingApprovals()
+            chatActions.session.reloadChatSessionsIfNeededAfterInitialLoad()
+            chatActions.approval.reloadPendingApprovals()
         }
     }
 
     private var activeSessionContent: some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if chatActions.orchestration.browserFeatureModel.isVisible {
+                if chatActions.dependencies.browser.isVisible {
                     BrowserWorkspaceView(
-                        model: chatActions.orchestration.browserFeatureModel,
+                        model: chatActions.dependencies.browser,
                         chat: BrowserWorkspaceChatActions(
                             selectedSessionID: model.sessions.selectedSessionID,
                             isSubmitting: model.run.isSubmitting,
-                            defaultSearchEngine: chatActions.orchestration.appSettingsModel.defaultSearchEngine,
-                            shortcutSettings: chatActions.orchestration.inputSettingsModel.shortcutSettings,
-                            cancelActiveRun: { chatActions.orchestration.cancelActiveChatRun() },
-                            appendToDraft: { chatActions.orchestration.appendToSelectedChatInputDraft($0) },
+                            defaultSearchEngine: chatActions.dependencies.appSettings.defaultSearchEngine,
+                            shortcutSettings: chatActions.dependencies.inputSettings.shortcutSettings,
+                            cancelActiveRun: { chatActions.run.cancelActiveChatRun() },
+                            appendToDraft: { chatActions.composer.appendToSelectedChatInputDraft($0) },
                             appendSessionRecord: { kind, title, body, metadata, sessionID in
-                                chatActions.orchestration.appendSessionRecord(kind: kind, title: title, body: body, metadata: metadata, sessionID: sessionID)
+                                chatActions.workspace.appendSessionRecord(kind: kind, title: title, body: body, metadata: metadata, sessionID: sessionID)
                             },
                             submit: { prompt, displayPrompt in
-                                await chatActions.orchestration.submitChat(prompt: prompt, displayPrompt: displayPrompt)
+                                await chatActions.run.submitChat(prompt: prompt, displayPrompt: displayPrompt)
                             },
-                            currentErrorMessage: { chatActions.orchestration.errorMessage },
-                            reportError: { chatActions.orchestration.errorMessage = $0 }
+                            currentErrorMessage: { chatActions.errors.errorMessage },
+                            reportError: { chatActions.errors.errorMessage = $0 }
                         )
                     )
                 } else {
@@ -83,8 +83,8 @@ struct AgentChatView: View {
             if let previewModel = model.composer.attachmentPreviewModel {
                 AgentAttachmentPreviewOverlay(
                     model: previewModel,
-                    onDownloadImage: { chatActions.orchestration.downloadPreviewImage(previewModel) },
-                    onRetryExtraction: { chatActions.orchestration.retryAttachmentExtraction(attachmentID: previewModel.attachment.id) },
+                    onDownloadImage: { chatActions.run.downloadPreviewImage(previewModel) },
+                    onRetryExtraction: { chatActions.composer.retryAttachmentExtraction(attachmentID: previewModel.attachment.id) },
                     onClose: { model.composer.attachmentPreviewModel = nil }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -93,7 +93,7 @@ struct AgentChatView: View {
 
             if model.sessions.isBackgroundTasksPresented {
                 AgentBackgroundTaskOverlay(
-                    tasks: chatActions.orchestration.activeSessionBackgroundTasks,
+                    tasks: chatActions.run.activeSessionBackgroundTasks,
                     onClose: { model.sessions.isBackgroundTasksPresented = false }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
@@ -101,7 +101,7 @@ struct AgentChatView: View {
             }
         }
         .environment(\.openURL, OpenURLAction { url in
-            chatActions.orchestration.openURLInCurrentChatBrowser(url)
+            chatActions.workspace.openURLInCurrentChatBrowser(url)
             return .handled
         })
     }
@@ -354,7 +354,7 @@ private struct AgentChatSessionListView: View {
 
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
-            Button(action: { chatActions.orchestration.newChatSession() }) {
+            Button(action: { chatActions.session.newChatSession() }) {
                 SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
@@ -364,7 +364,7 @@ private struct AgentChatSessionListView: View {
                     Text("会话")
                         .font(AgentChatTypography.sectionTitle)
                     Spacer()
-                    Button(action: { chatActions.orchestration.reloadChatSessions() }) {
+                    Button(action: { chatActions.session.reloadChatSessions() }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
                             .symbolRenderingMode(.hierarchical)
@@ -387,7 +387,7 @@ private struct AgentChatSessionListView: View {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
-                                chatActions.orchestration.selectChatSession(session.id)
+                                chatActions.session.selectChatSession(session.id)
                             }
                         }
                     }
@@ -492,7 +492,7 @@ private struct AgentChatConversationView: View {
 
     private var expandedApproval: AgentPendingApproval? {
         guard let expandedApprovalID else { return nil }
-        return chatActions.orchestration.activeChatPendingApprovals.first { $0.id == expandedApprovalID }
+        return chatActions.approval.activeChatPendingApprovals.first { $0.id == expandedApprovalID }
     }
 
     @ViewBuilder
@@ -616,7 +616,7 @@ private struct AgentChatConversationView: View {
         if process.id == latestProcessID, !model.run.eventTimeline.isEmpty {
             return model.run.eventTimeline
         }
-        let restoredEvents = chatActions.orchestration.restoredAgentEventTimeline(for: process)
+        let restoredEvents = chatActions.run.restoredAgentEventTimeline(for: process)
         if !restoredEvents.isEmpty {
             return restoredEvents
         }
@@ -628,18 +628,18 @@ private struct AgentChatConversationView: View {
         if let message = item.message {
             AgentChatMessageRow(
                 row: message,
-                persistentCacheContext: chatActions.orchestration.markdownPersistentCacheContext(messageID: message.message.id),
+                persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
                 localAttachmentFileURL: { attachment in
-                    chatActions.orchestration.localAttachmentFileURL(attachment)
+                    chatActions.composer.localAttachmentFileURL(attachment)
                 },
                 onPreviewAttachment: { attachment in
-                    chatActions.orchestration.previewAttachment(attachment)
+                    chatActions.composer.previewAttachment(attachment)
                 },
                 onCopyAssistantMessage: { message in
-                    chatActions.orchestration.copyAssistantMessageToPasteboard(message)
+                    chatActions.run.copyAssistantMessageToPasteboard(message)
                 },
                 onExportAssistantMessage: { message in
-                    chatActions.orchestration.exportAssistantMessageToFile(message)
+                    chatActions.run.exportAssistantMessageToFile(message)
                 }
             )
         } else if let process = item.process {
@@ -693,7 +693,7 @@ private struct AgentChatConversationView: View {
                         .frame(maxWidth: .infinity, maxHeight: 0)
                         .clipped()
                         .allowsHitTesting(false)
-                } else if chatActions.orchestration.isLoadingSelectedChatSessionDetail {
+                } else if chatActions.session.isLoadingSelectedChatSessionDetail {
                     AgentChatSessionLoadingView()
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
                 } else if chatItems.isEmpty {
@@ -764,7 +764,7 @@ private struct AgentChatConversationView: View {
             AgentChatComposerView(
                 model: model,
                 chatActions: chatActions,
-                contactsFeatureModel: chatActions.orchestration.contactsFeatureModel,
+                contactsFeatureModel: chatActions.dependencies.contacts,
                 isSessionInfoPresented: $isSessionInfoPresented,
                 onExpandApprovalReview: { approval in
                     expandedApprovalID = approval.id
@@ -797,7 +797,7 @@ private struct AgentChatConversationView: View {
         .overlay {
             expandedApprovalOverlay
         }
-        .onChange(of: chatActions.orchestration.activeChatPendingApprovals.map(\.id)) { _, activeIDs in
+        .onChange(of: chatActions.approval.activeChatPendingApprovals.map(\.id)) { _, activeIDs in
             if let expandedApprovalID, !activeIDs.contains(expandedApprovalID) {
                 self.expandedApprovalID = nil
             }
@@ -850,14 +850,14 @@ private struct AgentChatConversationHeader: View {
                         Text(summary.content)
                             .font(AgentChatTypography.callout)
                             .textSelection(.enabled)
-                        if let freshness = chatActions.orchestration.latestChatSummaryFreshness {
+                        if let freshness = chatActions.run.latestChatSummaryFreshness {
                             Text("覆盖 \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) 条消息 · 更新于 \(summary.updatedAt.connorLocalStandardDateTime())")
                                 .font(AgentChatTypography.meta)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(chatActions.orchestration.latestChatSummaryContextMessage)
+                        Text(chatActions.run.latestChatSummaryContextMessage)
                             .font(AgentChatTypography.meta)
-                            .foregroundColor(chatActions.orchestration.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
+                            .foregroundColor(chatActions.run.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
                         if let message = model.run.summaryMessage {
                             Text(message)
                                 .font(AgentChatTypography.meta)
@@ -935,7 +935,7 @@ private struct AgentChatConversationHeader: View {
             titleDraft = selectedTitle
             return
         }
-        chatActions.orchestration.renameChatSession(selectedID, title: trimmed)
+        chatActions.session.renameChatSession(selectedID, title: trimmed)
     }
 }
 
@@ -946,13 +946,13 @@ private struct AgentSessionFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             HStack(spacing: AgentChatLayout.spaceS) {
-                FilterButton(title: "All", isSelected: model.sessions.filter == .all) { chatActions.orchestration.setSessionListFilter(.all) }
+                FilterButton(title: "All", isSelected: model.sessions.filter == .all) { chatActions.session.setSessionListFilter(.all) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
                         FilterButton(title: status.displayName, isSelected: model.sessions.filter == .status(status)) {
-                            chatActions.orchestration.setSessionListFilter(.status(status))
+                            chatActions.session.setSessionListFilter(.status(status))
                         }
                     }
                 }
@@ -1102,7 +1102,7 @@ private struct AgentChatInspectorView: View {
                 get: { session.governance.status },
                 set: { newValue in
                     DispatchQueue.main.async {
-                        chatActions.orchestration.setSelectedSessionStatus(newValue)
+                        chatActions.session.setSelectedSessionStatus(newValue)
                     }
                 }
             )) {
@@ -1113,7 +1113,7 @@ private struct AgentChatInspectorView: View {
             .pickerStyle(.menu)
 
             HStack(spacing: AgentChatLayout.spaceS) {
-                Button(session.governance.isFlagged ? "取消标记" : "标记") { chatActions.orchestration.toggleSelectedSessionFlag() }
+                Button(session.governance.isFlagged ? "取消标记" : "标记") { chatActions.session.toggleSelectedSessionFlag() }
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
@@ -1157,9 +1157,9 @@ private struct AgentChatInspectorView: View {
                     .font(AgentChatTypography.metaEmphasis)
                     .foregroundStyle(.secondary)
 
-                ForEach(chatActions.orchestration.governanceConfig.labels) { definition in
+                ForEach(chatActions.dependencies.governance.config.labels) { definition in
                     Button {
-                        chatActions.orchestration.toggleSelectedSessionLabel(definition.id)
+                        chatActions.session.toggleSelectedSessionLabel(definition.id)
                     } label: {
                         HStack {
                             Image(systemName: session.governance.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
@@ -1178,7 +1178,7 @@ private struct AgentChatInspectorView: View {
     }
 
     private func displayText(for label: AgentSessionLabel) -> String {
-        chatActions.orchestration.governanceConfig.definition(for: label.id)?.name ?? label.id
+        chatActions.dependencies.governance.config.definition(for: label.id)?.name ?? label.id
     }
 
     private var artifacts: some View {

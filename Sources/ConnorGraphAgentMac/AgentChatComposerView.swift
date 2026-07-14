@@ -139,17 +139,17 @@ struct AgentChatComposerView: View {
 
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
-                            title: chatActions.orchestration.browserFeatureModel.isVisible ? "隐藏浏览器" : "浏览器",
+                            title: chatActions.dependencies.browser.isVisible ? "隐藏浏览器" : "浏览器",
                             systemImage: "safari",
-                            tint: chatActions.orchestration.browserFeatureModel.isVisible ? composerControlActiveForeground : composerControlForeground,
+                            tint: chatActions.dependencies.browser.isVisible ? composerControlActiveForeground : composerControlForeground,
                             showsChevron: false,
-                            isActive: chatActions.orchestration.browserFeatureModel.isVisible,
+                            isActive: chatActions.dependencies.browser.isVisible,
                             style: .compact
                         )
                     }
                     .buttonStyle(.plain)
-                    .help(chatActions.orchestration.browserFeatureModel.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
-                    .accessibilityLabel(chatActions.orchestration.browserFeatureModel.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+                    .help(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+                    .accessibilityLabel(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
                     if let inspection = model.run.lastPromptInspection {
                         promptBudgetLabel(inspection)
@@ -185,7 +185,7 @@ struct AgentChatComposerView: View {
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
             .overlay {
-                if let approval = chatActions.orchestration.activeChatPendingApprovals.first {
+                if let approval = chatActions.approval.activeChatPendingApprovals.first {
                     ZStack {
                         RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
@@ -224,7 +224,7 @@ struct AgentChatComposerView: View {
             composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
             updatePersonMentionTrigger(for: newValue)
         }
-        .onChange(of: chatActions.orchestration.inputSettingsModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
+        .onChange(of: chatActions.dependencies.inputSettings.sessionSpeechTranscriptionEnabled) { _, isEnabled in
             if isEnabled {
                 installSpeechKeyboardMonitorIfNeeded()
             } else {
@@ -233,14 +233,14 @@ struct AgentChatComposerView: View {
             }
         }
         .onAppear {
-            chatActions.orchestration.skillRuntimeModel.reload()
+            chatActions.dependencies.skills.reload()
         }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
-                Task { await chatActions.orchestration.importAttachments(urls: urls) }
+                Task { await chatActions.composer.importAttachments(urls: urls) }
             case .failure(let error):
-                chatActions.orchestration.showAttachmentToast(title: "附件选择失败", message: String(describing: error), systemImage: "xmark.circle")
+                chatActions.composer.showAttachmentToast(title: "附件选择失败", message: String(describing: error), systemImage: "xmark.circle")
             }
         }
         .fileImporter(isPresented: $isImageImporterPresented, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
@@ -258,7 +258,7 @@ struct AgentChatComposerView: View {
     }
 
     private var composerStore: AgentComposerStore {
-        AgentComposerStore(viewModel: chatActions.orchestration)
+        AgentComposerStore(model: model, actions: chatActions)
     }
 
     private var composerState: AgentComposerState {
@@ -270,7 +270,7 @@ struct AgentChatComposerView: View {
     }
 
     private func installSpeechKeyboardMonitorIfNeeded() {
-        guard chatActions.orchestration.inputSettingsModel.sessionSpeechTranscriptionEnabled else { return }
+        guard chatActions.dependencies.inputSettings.sessionSpeechTranscriptionEnabled else { return }
         guard speechKeyboardMonitor == nil else { return }
         let monitor = SpeechInputKeyboardMonitor(
             spaceHoldEnabled: false,
@@ -299,8 +299,8 @@ struct AgentChatComposerView: View {
                 text: localChatInputBinding,
                 selectionTracker: composerSelectionTracker,
                 placeholder: composerPlaceholder,
-                isSpellCheckEnabled: chatActions.orchestration.inputSettingsModel.spellCheckEnabled,
-                sendShortcut: chatActions.orchestration.inputSettingsModel.composerSendShortcut,
+                isSpellCheckEnabled: chatActions.dependencies.inputSettings.spellCheckEnabled,
+                sendShortcut: chatActions.dependencies.inputSettings.composerSendShortcut,
                 isSkillPickerPresented: isSkillPickerPresented,
                 isPersonMentionPickerPresented: isPersonMentionPickerPresented,
                 onSubmit: submitLocalChatInput,
@@ -315,7 +315,7 @@ struct AgentChatComposerView: View {
                     } else {
                         localChatInput += "\n\n\(droppedText)"
                     }
-                    chatActions.orchestration.updateSelectedChatInputDraft(localChatInput)
+                    chatActions.composer.updateSelectedChatInputDraft(localChatInput)
                 },
                 isNoteMode: composerState.displayMode == .note
             )
@@ -329,7 +329,7 @@ struct AgentChatComposerView: View {
         if composerState.displayMode == .note {
             return "写下你的笔记..."
         }
-        let sendHint = chatActions.orchestration.inputSettingsModel.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
+        let sendHint = chatActions.dependencies.inputSettings.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
         return "输入 / 选择技能，输入 @ 选择人名；\(sendHint)"
     }
 
@@ -377,7 +377,7 @@ struct AgentChatComposerView: View {
 
     private func handleImageImport(_ urls: [URL]) {
         Task {
-            let result = await chatActions.orchestration.importAttachments(urls: urls)
+            let result = await chatActions.composer.importAttachments(urls: urls)
             guard !result.accepted.isEmpty else { return }
             let imageRefs = result.accepted.filter { $0.kind == .image }
             for ref in imageRefs {
@@ -388,10 +388,10 @@ struct AgentChatComposerView: View {
                 } else {
                     localChatInput += "\n\n\(mdImage)"
                 }
-                chatActions.orchestration.updateSelectedChatInputDraft(localChatInput)
+                chatActions.composer.updateSelectedChatInputDraft(localChatInput)
                 // Check model image support
-                if !chatActions.orchestration.currentModelSupportsImages() {
-                    chatActions.orchestration.showAttachmentToast(
+                if !chatActions.composer.currentModelSupportsImages() {
+                    chatActions.composer.showAttachmentToast(
                         title: "图片已保存到本地",
                         message: "当前模型不支持图片识别，仅发送文字内容给模型。你可以在后续对话中引用这张图片。",
                         systemImage: "photo.badge.checkmark"
@@ -451,7 +451,7 @@ struct AgentChatComposerView: View {
             localChatInput = replacement.text
             composerSelectionTracker.selectedRange = replacement.selectedRange
             composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: replacement.text, mentions: composerPersonMentions + [replacement.mention])
-            chatActions.orchestration.updateSelectedChatInputDraft(replacement.text)
+            chatActions.composer.updateSelectedChatInputDraft(replacement.text)
             sendComposerAction(.inputChanged(replacement.text))
             closePersonMentionPicker()
         } catch {
@@ -475,11 +475,11 @@ struct AgentChatComposerView: View {
               localChatInput[range] == "/"
         else { return }
         localChatInput.removeSubrange(range)
-        chatActions.orchestration.updateSelectedChatInputDraft(localChatInput)
+        chatActions.composer.updateSelectedChatInputDraft(localChatInput)
     }
 
     private func preferredSkillPickerSelectionIndex() -> Int {
-        let cards = chatActions.orchestration.skillRuntimeModel.presentation.cards
+        let cards = chatActions.dependencies.skills.presentation.cards
         guard !cards.isEmpty else { return 0 }
         if let activeSkillSlug = composerState.activeSkillSlug,
            let activeIndex = cards.firstIndex(where: { $0.id == activeSkillSlug }) {
@@ -489,7 +489,7 @@ struct AgentChatComposerView: View {
     }
 
     private func handleSkillPickerKeyCommand(_ command: SkillPickerKeyCommand) {
-        let cards = chatActions.orchestration.skillRuntimeModel.presentation.cards
+        let cards = chatActions.dependencies.skills.presentation.cards
         switch command {
         case .moveUp:
             guard !cards.isEmpty else { return }
@@ -543,13 +543,13 @@ struct AgentChatComposerView: View {
         localChatInput = ""
         composerPersonMentions = []
         closePersonMentionPicker()
-        chatActions.orchestration.updateSelectedChatInputDraft("")
+        chatActions.composer.updateSelectedChatInputDraft("")
         Task {
-            let runID = await chatActions.orchestration.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences)
+            let runID = await chatActions.run.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personReferences: personReferences)
             if runID == nil, localChatInput.isEmpty {
                 localChatInput = submittedText
                 composerPersonMentions = submittedMentions
-                chatActions.orchestration.updateSelectedChatInputDraft(submittedText)
+                chatActions.composer.updateSelectedChatInputDraft(submittedText)
             }
         }
     }
@@ -560,7 +560,7 @@ struct AgentChatComposerView: View {
         } label: {
             AgentComposerOptionBadge(
                 title: workingDirectoryBadgeTitle,
-                systemImage: chatActions.orchestration.workspaceSettingsModel.primaryRoot == nil ? "folder" : "folder.fill",
+                systemImage: chatActions.dependencies.workspaceSettings.primaryRoot == nil ? "folder" : "folder.fill",
                 tint: .secondary,
                 isActive: false,
                 style: .compact,
@@ -578,7 +578,7 @@ struct AgentChatComposerView: View {
 
     private var workingDirectoryPopoverContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if chatActions.orchestration.workspaceSettingsModel.roots.isEmpty {
+            if chatActions.dependencies.workspaceSettings.roots.isEmpty {
                 Text("尚未设置工作目录")
                     .font(AgentChatTypography.micro)
                     .foregroundStyle(.secondary)
@@ -587,7 +587,7 @@ struct AgentChatComposerView: View {
                     .padding(.vertical, 6)
             } else {
                 VStack(spacing: 2) {
-                    ForEach(chatActions.orchestration.workspaceSettingsModel.roots) { root in
+                    ForEach(chatActions.dependencies.workspaceSettings.roots) { root in
                         workspaceRootPopoverRow(root)
                     }
                 }
@@ -602,16 +602,16 @@ struct AgentChatComposerView: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 2)
 
-                if chatActions.orchestration.workspaceSettingsModel.recentPaths.isEmpty {
+                if chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
                     Text("暂无历史记录")
                         .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                 } else {
-                    ForEach(chatActions.orchestration.workspaceSettingsModel.recentPaths, id: \.self) { path in
+                    ForEach(chatActions.dependencies.workspaceSettings.recentPaths, id: \.self) { path in
                         Button {
-                            chatActions.orchestration.workspaceSettingsModel.addRoot(path: path, makePrimary: true)
+                            chatActions.dependencies.workspaceSettings.addRoot(path: path, makePrimary: true)
                             isWorkspacePopoverPresented = false
                         } label: {
                             workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
@@ -638,21 +638,21 @@ struct AgentChatComposerView: View {
                 .buttonStyle(.borderless)
 
                 Button {
-                    chatActions.orchestration.workspaceSettingsModel.reset()
+                    chatActions.dependencies.workspaceSettings.reset()
                     isWorkspacePopoverPresented = false
                 } label: {
                     Label("重置为默认", systemImage: "arrow.counterclockwise")
                 }
                 .buttonStyle(.borderless)
-                .disabled(chatActions.orchestration.workspaceSettingsModel.roots.isEmpty && chatActions.orchestration.workspaceSettingsModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(chatActions.dependencies.workspaceSettings.roots.isEmpty && chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button {
-                    chatActions.orchestration.workspaceSettingsModel.clearRecentPaths()
+                    chatActions.dependencies.workspaceSettings.clearRecentPaths()
                 } label: {
                     Label("清空历史", systemImage: "trash")
                 }
                 .buttonStyle(.borderless)
-                .disabled(chatActions.orchestration.workspaceSettingsModel.recentPaths.isEmpty)
+                .disabled(chatActions.dependencies.workspaceSettings.recentPaths.isEmpty)
             }
             .font(AgentChatTypography.micro)
             .padding(.horizontal, 4)
@@ -662,7 +662,7 @@ struct AgentChatComposerView: View {
     private func workspaceRootPopoverRow(_ root: WorkspaceRootDraft) -> some View {
         HStack(spacing: 6) {
             Button {
-                chatActions.orchestration.workspaceSettingsModel.setPrimaryRoot(id: root.id)
+                chatActions.dependencies.workspaceSettings.setPrimaryRoot(id: root.id)
                 isWorkspacePopoverPresented = false
             } label: {
                 workspaceMenuItemLabel(title: workspaceMenuItemTitle(for: root), systemImage: "folder")
@@ -672,7 +672,7 @@ struct AgentChatComposerView: View {
             .help(root.path)
 
             Button {
-                chatActions.orchestration.workspaceSettingsModel.removeRoot(id: root.id)
+                chatActions.dependencies.workspaceSettings.removeRoot(id: root.id)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -688,12 +688,12 @@ struct AgentChatComposerView: View {
     }
 
     private var workingDirectoryBadgeTitle: String {
-        guard let root = chatActions.orchestration.workspaceSettingsModel.primaryRoot else { return "选择工作目录" }
+        guard let root = chatActions.dependencies.workspaceSettings.primaryRoot else { return "选择工作目录" }
         return workspaceDisplayName(for: root)
     }
 
     private var workingDirectoryHelpText: String {
-        guard let root = chatActions.orchestration.workspaceSettingsModel.primaryRoot else {
+        guard let root = chatActions.dependencies.workspaceSettings.primaryRoot else {
             return "设置当前会话工作目录；本地工具将从主目录开始。"
         }
         return "当前会话工作目录：\(root.path)"
@@ -750,7 +750,7 @@ struct AgentChatComposerView: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.urls.first {
-            chatActions.orchestration.workspaceSettingsModel.addRoot(path: url.path, makePrimary: true)
+            chatActions.dependencies.workspaceSettings.addRoot(path: url.path, makePrimary: true)
         }
     }
 
@@ -762,8 +762,8 @@ struct AgentChatComposerView: View {
         AgentComposerOptionBar(
             selectedSession: selectedSession,
             composerState: composerState,
-            governanceConfig: chatActions.orchestration.governanceConfig,
-            hasRunningBackgroundTask: chatActions.orchestration.hasRunningActiveSessionBackgroundTask,
+            governanceConfig: chatActions.dependencies.governance.config,
+            hasRunningBackgroundTask: chatActions.run.hasRunningActiveSessionBackgroundTask,
             currentTextSelectionRange: { composerSelectionTracker.selectedRange },
             isSessionInfoPresented: $isSessionInfoPresented,
             onAction: sendComposerAction
@@ -772,15 +772,15 @@ struct AgentChatComposerView: View {
 
     private var modelSelectionMenu: some View {
         Menu {
-            if chatActions.orchestration.isLoadingLLMModelConnections {
+            if chatActions.dependencies.aiConnections.isLoadingModelConnections {
                 Label("正在加载模型列表…", systemImage: "arrow.triangle.2.circlepath")
             }
 
-            if chatActions.orchestration.llmModelConnections.isEmpty {
+            if chatActions.dependencies.aiConnections.modelConnections.isEmpty {
                 Button(composerState.selectedModel.isEmpty ? "未选择模型" : composerState.selectedModel) {}
                     .disabled(true)
             } else {
-                ForEach(chatActions.orchestration.llmModelConnections) { connection in
+                ForEach(chatActions.dependencies.aiConnections.modelConnections) { connection in
                     Menu {
                         if connection.models.isEmpty {
                             Button("没有可用模型") {}
@@ -788,9 +788,9 @@ struct AgentChatComposerView: View {
                         } else {
                             ForEach(connection.models) { model in
                                 Button {
-                                    chatActions.orchestration.selectLLMModel(model.id, providerMode: connection.providerMode, connectionID: connection.id)
+                                    chatActions.run.selectLLMModel(model.id, providerMode: connection.providerMode, connectionID: connection.id)
                                 } label: {
-                                    if model.id == composerState.selectedModel && connection.id == chatActions.orchestration.llmDefaultConnectionID {
+                                    if model.id == composerState.selectedModel && connection.id == chatActions.dependencies.aiConnections.defaultConnectionID {
                                         Label(model.displayName, systemImage: "checkmark")
                                     } else {
                                         Text(model.displayName)
@@ -818,9 +818,9 @@ struct AgentChatComposerView: View {
                 Menu {
                     ForEach(AppLLMThinkingLevel.allCases) { level in
                         Button {
-                            chatActions.orchestration.selectLLMThinkingLevel(level)
+                            chatActions.run.selectLLMThinkingLevel(level)
                         } label: {
-                            if level == chatActions.orchestration.llmThinkingLevel {
+                            if level == chatActions.dependencies.aiConnections.thinkingLevel {
                                 Label(level.displayName, systemImage: "checkmark")
                             } else {
                                 Text(level.displayName)
@@ -832,18 +832,18 @@ struct AgentChatComposerView: View {
                     Divider()
 
                     Button {
-                        chatActions.orchestration.selectDefaultLLMThinkingLevel(chatActions.orchestration.llmThinkingLevel)
+                        chatActions.run.selectDefaultLLMThinkingLevel(chatActions.dependencies.aiConnections.thinkingLevel)
                     } label: {
                         Label("设为全局默认", systemImage: "pin")
                     }
                 } label: {
-                    Label("思考强度 · \(chatActions.orchestration.llmThinkingLevel.displayName)", systemImage: "brain.head.profile")
+                    Label("思考强度 · \(chatActions.dependencies.aiConnections.thinkingLevel.displayName)", systemImage: "brain.head.profile")
                 }
 
                 if composerState.sessionHasLLMOverride {
                     Divider()
                     Button {
-                        chatActions.orchestration.clearSessionLLMOverride()
+                        chatActions.run.clearSessionLLMOverride()
                     } label: {
                         Label("恢复全局默认模型", systemImage: "arrow.counterclockwise")
                     }
@@ -852,7 +852,7 @@ struct AgentChatComposerView: View {
                 Divider()
 
                 Button {
-                    Task { await chatActions.orchestration.reloadLLMModelConnections() }
+                    Task { await chatActions.run.reloadLLMModelConnections() }
                 } label: {
                     Label("刷新模型列表", systemImage: "arrow.clockwise")
                 }
@@ -942,7 +942,7 @@ struct AgentChatComposerView: View {
 
             Divider()
 
-            let allSkills = chatActions.orchestration.skillRuntimeModel.presentation.cards
+            let allSkills = chatActions.dependencies.skills.presentation.cards
             if allSkills.isEmpty {
                 Text("暂无可用技能")
                     .font(AgentChatTypography.micro)

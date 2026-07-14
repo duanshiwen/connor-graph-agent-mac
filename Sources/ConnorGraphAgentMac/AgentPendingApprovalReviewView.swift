@@ -14,7 +14,7 @@ struct AgentPendingApprovalReviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Button("刷新") { chatActions.orchestration.reloadPendingApprovals() }
+                Button("刷新") { chatActions.approval.reloadPendingApprovals() }
                 if let summary = model.approvals.lastResultSummary {
                     Text(summary).font(.caption).foregroundStyle(.secondary)
                 }
@@ -71,22 +71,22 @@ struct AgentPendingApprovalReviewView: View {
                         }
 
                         HStack {
-                            Button("批准") { chatActions.orchestration.approvePendingApproval(approval) }
-                            Button("拒绝", role: .destructive) { chatActions.orchestration.denyPendingApproval(approval) }
-                            Button("取消") { chatActions.orchestration.cancelPendingApproval(approval) }
+                            Button("批准") { chatActions.approval.approvePendingApproval(approval) }
+                            Button("拒绝", role: .destructive) { chatActions.approval.denyPendingApproval(approval) }
+                            Button("取消") { chatActions.approval.cancelPendingApproval(approval) }
                         }
                     }
                     .padding(.vertical, 8)
                 }
             }
 
-            if let error = chatActions.orchestration.errorMessage {
+            if let error = chatActions.errors.errorMessage {
                 Text(error).foregroundStyle(.red)
             }
         }
         .padding()
         .onAppear {
-            chatActions.orchestration.reloadPendingApprovals()
+            chatActions.approval.reloadPendingApprovals()
         }
     }
 
