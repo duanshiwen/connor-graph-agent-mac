@@ -23,7 +23,7 @@ struct RSSFollowRequest: Sendable, Equatable {
 final class AppFlowCoordinator {
     typealias IntentHandler = @MainActor (AppFlowIntent) -> Void
 
-    private let handleIntent: IntentHandler
+    private var handleIntent: IntentHandler
 
     init(handleIntent: @escaping IntentHandler) {
         self.handleIntent = handleIntent
@@ -31,5 +31,9 @@ final class AppFlowCoordinator {
 
     func send(_ intent: AppFlowIntent) {
         handleIntent(intent)
+    }
+
+    func replaceHandler(_ handler: @escaping IntentHandler) {
+        handleIntent = handler
     }
 }

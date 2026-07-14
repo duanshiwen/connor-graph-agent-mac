@@ -29,6 +29,11 @@ final class RuntimeSettingsPersistenceCoordinator {
         catch { onEvent?(.failed(String(describing: error))) }
     }
 
+    func installLoadedSnapshot(_ settings: AgentRuntimeSettings) {
+        guard !isShutdown else { return }
+        cachedSettings = settings
+    }
+
     func baseSnapshot() -> AgentRuntimeSettings { cachedSettings }
 
     func scheduleAutosave(snapshot: @escaping @MainActor () -> AgentRuntimeSettings) {

@@ -136,6 +136,11 @@ private extension AppSessionBackgroundTaskStatus {
     }
 }
 
+enum AppViewModelStartupMode: Equatable {
+    case immediate
+    case deferred
+}
+
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
 #if DEBUG
@@ -1041,6 +1046,13 @@ final class AppViewModel: NSObject, ObservableObject {
         injectedMailStore: FileBackedMailSourceStore? = nil,
         injectedMailPreferencesStore: (any MailPreferencesStore)? = nil,
         mailCredentialStore: AppMailCredentialStore = AppMailCredentialStore(),
+        injectedNativeSourceSearchBackend: (any NativeSourceSearchBackend)? = nil,
+        injectedSessionSearchIndexService: SessionSearchIndexService? = nil,
+        injectedMemoryOSStore: SQLiteMemoryOSStore? = nil,
+        injectedMemoryOSFacade: AppMemoryOSFacade? = nil,
+        injectedMemoryOSSearchHealthSummary: String? = nil,
+        injectedMemoryOSInitializationError: String? = nil,
+        startupMode: AppViewModelStartupMode = .immediate,
         calendarRemoteAccountSynchronizer: @escaping CalendarFeatureModel.RemoteAccountSynchronizer = { account, credential, runID, runtimeStore in
             let engine = CalendarSourceSyncEngine(
                 connectors: [
@@ -1103,19 +1115,19 @@ final class AppViewModel: NSObject, ObservableObject {
         let contactsDatabaseURL = storagePaths?.applicationSupportDirectory
             .appendingPathComponent("contacts", isDirectory: true)
             .appendingPathComponent("person-profiles.sqlite")
-        let resolvedContactsProfileStore = contactsProfileStore ?? contactsDatabaseURL.flatMap {
+        let resolvedContactsProfileStore = contactsProfileStore ?? (startupMode == .immediate ? contactsDatabaseURL.flatMap {
             try? SQLitePersonProfileStore(databaseURL: $0)
-        }
-        let resolvedContactsRelationshipStore = contactsRelationshipStore ?? contactsDatabaseURL.flatMap {
+        } : nil)
+        let resolvedContactsRelationshipStore = contactsRelationshipStore ?? (startupMode == .immediate ? contactsDatabaseURL.flatMap {
             try? SQLitePersonRelationshipStore(databaseURL: $0)
-        }
+        } : nil)
         self.contactsFeatureModel = ContactsFeatureModel(
             profileStore: resolvedContactsProfileStore,
             relationshipStore: resolvedContactsRelationshipStore,
             systemContactsLoader: contactsSystemLoader
         )
-        let nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = {
-            guard let storagePaths else { return nil }
+        let nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = injectedNativeSourceSearchBackend ?? {
+            guard startupMode == .immediate, let storagePaths else { return nil }
             if let sqliteBackend = try? SQLiteNativeSourceSearchBackend(
                 databaseURL: storagePaths.nativeSourceSearchDatabaseURL
             ) {
@@ -1123,7 +1135,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             return NativeSourceSearchService(storagePaths: storagePaths)
         }()
-        let resolvedMailStore = injectedMailStore ?? storagePaths.map { FileBackedMailSourceStore(storagePaths: $0, searchService: nativeSourceSearchBackend) }
+        let resolvedMailStore = injectedMailStore ?? (startupMode == .immediate ? storagePaths.map { FileBackedMailSourceStore(storagePaths: $0, searchService: nativeSourceSearchBackend) } : nil)
         let resolvedMailPreferencesStore = injectedMailPreferencesStore ?? storagePaths.map { FileBackedMailPreferencesStore(storagePaths: $0) }
         self.mailFeatureModel = MailFeatureModel(store: resolvedMailStore, preferencesStore: resolvedMailPreferencesStore, credentialStore: mailCredentialStore)
         self.browserFeatureModel = BrowserFeatureModel(
@@ -1131,7 +1143,7 @@ final class AppViewModel: NSObject, ObservableObject {
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
-        let resolvedSessionSearchIndexService = storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) }
+        let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
         let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
         self.globalSearchFeatureModel = GlobalSearchFeatureModel(
             nativeSourceSearchBackend: nativeSourceSearchBackend,
@@ -1181,7 +1193,12 @@ final class AppViewModel: NSObject, ObservableObject {
             self.chatSessionRepository = chatSessionRepository
             self.activityTimelineCacheWriter = ActivityTimelineCacheWriter(persistor: chatSessionRepository)
         }
-        if let storagePaths {
+        if startupMode == .deferred || injectedMemoryOSStore != nil || injectedMemoryOSFacade != nil || injectedMemoryOSInitializationError != nil {
+            self.memoryOSStore = injectedMemoryOSStore
+            self.memoryOSFacade = injectedMemoryOSFacade
+            self.memoryOSSearchHealthSummary = injectedMemoryOSSearchHealthSummary
+            self.errorMessage = injectedMemoryOSInitializationError
+        } else if let storagePaths {
             do {
                 let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
                 try store.migrate()
@@ -1200,17 +1217,8 @@ final class AppViewModel: NSObject, ObservableObject {
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
         super.init()
-#if DEBUG
-        mainActorStallMonitor.start()
-#endif
-        applicationDidFinishLaunchingObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didFinishLaunchingNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshDockBadge()
-            }
+        if startupMode == .immediate {
+            registerMaintenanceObserversIfNeeded()
         }
         if let repository {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
@@ -1458,11 +1466,13 @@ final class AppViewModel: NSObject, ObservableObject {
                 self?.errorMessage = message
             }
         }
-        loadLLMSettings()
-        Task { await reloadLLMModelConnections() }
-        updateWelcomeState()
-        loadRuntimeSettings()
-        self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
+        if startupMode == .immediate {
+            runImmediateStartupWork(initialSession: initialSession)
+        }
+    }
+
+    private func runImmediateStartupWork(initialSession: AgentSession) {
+        prepareInteractiveStartup(initialSession: initialSession)
         productOSControlModel.reloadRegistry()
         productOSControlModel.reloadAutomation(governanceConfig: governanceConfig)
         productOSControlModel.reloadExecutionHistory()
@@ -1481,10 +1491,189 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { await calendarFeatureModel.reload() }
         Task { await contactsFeatureModel.reload() }
         Task { await mailFeatureModel.reload() }
-        reloadChatSessions()
         browserFeatureModel.loadHistory()
         graphDiagnosticsModel.reloadSchemaHealthReport()
         scheduleMemoryOSSearchIndexRepairIfNeeded()
+    }
+
+    func prepareInteractiveStartup(snapshot: AppInteractiveBootstrapSnapshot? = nil) {
+        guard let snapshot else {
+            prepareInteractiveStartup(initialSession: fallbackChatSession)
+            return
+        }
+        applyInteractiveLLMSettings(snapshot.llmSettings)
+        applyInteractiveRuntimeSettings(snapshot.runtimeSettings)
+        applyInteractiveSessionContent(snapshot.sessionContent)
+        Task { await reloadLLMModelConnections() }
+    }
+
+    func prepareDemoInteractiveStartup() {
+        hasLoadedInitialChatSessions = true
+        let session = fallbackChatSession
+        chatFeatureModel.sessions.sessions = [session]
+        chatFeatureModel.sessions.allSessions = [session]
+        synchronizeSessionReadStates(from: [session])
+        chatFeatureModel.sessions.selectedSessionID = session.id
+        replaceSelectedChatTranscript(session.messages)
+        nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+    }
+
+    private func applyInteractiveLLMSettings(_ result: StartupDomainResult<AppLLMSettings>) {
+        guard let settings = result.value else {
+            if let failureMessage = result.failureMessage { errorMessage = failureMessage }
+            return
+        }
+        let connection = settings.defaultConnection
+        llmConnectionConfigs = settings.connections
+        llmDefaultConnectionID = settings.defaultConnectionID
+        llmConnectionName = connection?.name ?? ""
+        llmProviderMode = connection?.providerMode ?? .openAICompatible
+        llmBaseURLString = connection?.baseURLString ?? ""
+        llmModel = connection?.model ?? ""
+        llmSelectedModel = connection?.effectiveModel ?? ""
+        llmShouldFetchModelsList = connection?.shouldFetchModelsList ?? true
+        llmThinkingLevel = settings.defaultThinkingLevel
+        llmHasAPIKey = connection?.hasAPIKey ?? false
+        llmAPIKeyInput = ""
+        llmSettingsMessage = nil
+        llmHealthCheckMessage = nil
+        showWelcomePlaceholder = settings.connections.isEmpty
+    }
+
+    private func applyInteractiveRuntimeSettings(_ result: StartupDomainResult<AgentRuntimeSettings>) {
+        guard let settings = result.value else {
+            if let failureMessage = result.failureMessage { errorMessage = failureMessage }
+            return
+        }
+        runtimeSettingsCoordinator.installLoadedSnapshot(settings)
+        isLoadingRuntimeSettings = true
+        loadedLoopConfiguration = settings.loop
+        appSettingsModel.apply(settings)
+        inputSettingsModel.apply(settings)
+        permissionSettingsModel.apply(settings)
+        workspaceSettingsModel.applyRecentPaths(settings.workspace.recentWorkspacePaths)
+        userPreferencesModel.apply(settings.preferences)
+        let shouldPersistSystemDefaults = userPreferencesModel.fillEmptyFieldsFromSystem()
+        browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
+        settingsSectionMessageStore = SettingsSectionMessageStore()
+        isLoadingRuntimeSettings = false
+        if hasActivatedRuntimeSettingsSideEffects { applyRuntimeSettingsSideEffects() }
+        if shouldPersistSystemDefaults { scheduleRuntimeSettingsAutosave() }
+    }
+
+    private func applyInteractiveSessionContent(_ result: StartupDomainResult<InitialSessionContentSnapshot>) {
+        hasLoadedInitialChatSessions = true
+        guard let snapshot = result.value else {
+            replaceSelectedChatTranscript(activeChatTranscript)
+            chatFeatureModel.sessions.sessions = [activeChatSession]
+            chatFeatureModel.sessions.allSessions = [activeChatSession]
+            synchronizeSessionReadStates(from: chatFeatureModel.sessions.allSessions)
+            chatFeatureModel.sessions.selectedSessionID = activeChatSession.id
+            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: activeChatSession)
+            if let failureMessage = result.failureMessage { errorMessage = failureMessage }
+            return
+        }
+        chatFeatureModel.sessions.sessions = snapshot.sessions
+        chatFeatureModel.sessions.allSessions = snapshot.allSessions
+        rebuildSessionSearchIndexSoon(sessions: snapshot.allSessions)
+        synchronizeSessionReadStates(from: snapshot.allSessions)
+        guard let session = snapshot.selectedSession else {
+            clearSelectedChatSessionDetail()
+            return
+        }
+        let sessionID = session.id
+        chatFeatureModel.sessions.selectedSessionID = sessionID
+        if let state = snapshot.state {
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            syncWorkspaceDraftsFromSession(state)
+            if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
+                chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+            }
+        }
+        sessionRecordsBySessionID[sessionID] = snapshot.records
+        if let browserState = snapshot.browserState {
+            browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
+        }
+        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID] = snapshot.backgroundTasks
+        chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
+        fallbackChatSession = session
+        nativeSessionManager = makeNativeSessionManager(for: session)
+        replaceSelectedChatTranscript(session.messages)
+        restoreChatInputDraft(for: sessionID)
+        refreshSelectedSubmittingState()
+        agentEventTimelinesBySessionID[sessionID] = snapshot.timeline
+        chatFeatureModel.run.eventTimeline = snapshot.timeline
+        chatFeatureModel.run.latestSummary = snapshot.latestSummary
+        chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
+        restoreWorkspaceMode(for: sessionID)
+        chatFeatureModel.run.summaryMessage = nil
+    }
+
+    private func prepareInteractiveStartup(initialSession: AgentSession) {
+        loadLLMSettings()
+        Task { await reloadLLMModelConnections() }
+        updateWelcomeState()
+        loadRuntimeSettings()
+        nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
+        reloadChatSessions()
+    }
+
+    func loadStartupContent(snapshot: AppContentBootstrapSnapshot? = nil) async {
+        if let snapshot {
+            productOSControlModel.applyStartupSnapshot(snapshot.productOS)
+            taskAutomationModel.applyStartupSnapshot(snapshot.tasks)
+            sourceRuntimeModel.applyStartupSnapshot(snapshot.sources)
+            skillRuntimeModel.applyStartupSnapshot(snapshot.skills)
+            browserFeatureModel.applyStartupHistory(snapshot.browserHistory)
+        }
+
+        async let rss: Void = rssFeatureModel.reload()
+        async let calendar: Void = calendarFeatureModel.reload()
+        async let contacts: Void = contactsFeatureModel.reload()
+        async let mail: Void = mailFeatureModel.reload()
+        _ = await (rss, calendar, contacts, mail)
+    }
+
+    func reconcileStartupRefreshTasks() async {
+        do {
+            try await reconcileSourceRefreshTasks()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func startStartupMaintenance(snapshot: AppMaintenanceBootstrapSnapshot? = nil) async {
+        registerMaintenanceObserversIfNeeded()
+        if let snapshot {
+            taskAutomationModel.applyStartupSnapshot(snapshot.tasks)
+            graphDiagnosticsModel.applyStartupMaintenance(
+                promotionCandidates: snapshot.promotionCandidates,
+                schemaHealth: snapshot.schemaHealth
+            )
+            if let approvals = snapshot.pendingApprovals.value {
+                chatFeatureModel.approvals.pendingApprovals = approvals
+                autoApproveCurrentPolicyPendingApprovals()
+            } else if let failureMessage = snapshot.pendingApprovals.failureMessage {
+                errorMessage = failureMessage
+            }
+        }
+        scheduleMemoryOSSearchIndexRepairIfNeeded()
+    }
+
+    private func registerMaintenanceObserversIfNeeded() {
+#if DEBUG
+        mainActorStallMonitor.start()
+#endif
+        guard applicationDidFinishLaunchingObserver == nil else { return }
+        applicationDidFinishLaunchingObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshDockBadge()
+            }
+        }
     }
 
     deinit {

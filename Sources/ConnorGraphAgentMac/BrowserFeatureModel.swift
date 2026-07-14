@@ -408,6 +408,15 @@ final class BrowserFeatureModel {
 
     // MARK: History
 
+    func applyStartupHistory(_ result: StartupDomainResult<[BrowserHistoryRecord]>) {
+        guard let history = result.value else { return }
+        historyRecords = history
+        applyHistoryFilter()
+        startHistoryIndexTask { [weak self] in
+            try? await self?.rebuildHistorySearchIndexIfNeeded()
+        }
+    }
+
     func loadHistory() {
         guard let historyStore else { return }
         historyRecords = historyStore.loadHistory()

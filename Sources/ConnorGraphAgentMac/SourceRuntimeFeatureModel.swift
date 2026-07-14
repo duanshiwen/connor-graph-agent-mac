@@ -182,6 +182,21 @@ final class SourceRuntimeFeatureModel {
         )
     }
 
+    func applyStartupSnapshot(_ result: StartupDomainResult<SourceRuntimeContentSnapshot>) {
+        guard let snapshot = result.value else {
+            if let failureMessage = result.failureMessage { onEvent?(.operationFailed(failureMessage)) }
+            return
+        }
+        configurations = snapshot.configurations
+        healthRecords = snapshot.healthRecords
+        toolCatalogs = snapshot.toolCatalogs
+        auditRecordsBySource = snapshot.auditRecordsBySource
+        if let selectedCardID,
+           !configurations.contains(where: { $0.sourceID == selectedCardID }) {
+            self.selectedCardID = nil
+        }
+    }
+
     func reload() {
         do {
             let configurations = try repository?.list() ?? []
