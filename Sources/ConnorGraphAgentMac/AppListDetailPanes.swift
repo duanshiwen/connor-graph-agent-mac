@@ -10,6 +10,7 @@ import ConnorGraphAppSupport
 struct CraftListPaneView: View {
     @ObservedObject var viewModel: AppViewModel
     @Bindable var shellModel: AppShellFeatureModel
+    @Bindable var governanceModel: GovernanceFeatureModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
@@ -24,7 +25,7 @@ struct CraftListPaneView: View {
         VStack(spacing: 0) {
             switch selection ?? .agentChat {
             case .agentChat:
-                CraftSessionListPane(viewModel: viewModel)
+                CraftSessionListPane(viewModel: viewModel, governanceModel: governanceModel)
             case .llmSettings:
                 CraftSettingsListPane(shellModel: shellModel, selection: $selection)
             case .calendar:
@@ -40,9 +41,9 @@ struct CraftListPaneView: View {
             case .skills:
                 CraftSkillListPane(model: skillRuntimeModel)
             case .automation, .scheduledTasks:
-                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: viewModel.governanceConfig, kind: .scheduled)
+                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: governanceModel.config, kind: .scheduled)
             case .eventTriggeredTasks:
-                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: viewModel.governanceConfig, kind: .eventTriggered)
+                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: governanceModel.config, kind: .eventTriggered)
             case .productOS:
                 CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: productOSControlModel.registry.sources.map(\.displayName) + productOSControlModel.registry.skills.map(\.displayName))
             default:
@@ -640,6 +641,7 @@ private struct ContactRowButton: View {
 
 struct CraftSessionListPane: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var governanceModel: GovernanceFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -667,7 +669,7 @@ struct CraftSessionListPane: View {
                                 isRunning: viewModel.isChatSessionSubmitting(session.id),
                                 isRegeneratingTitle: viewModel.chatFeatureModel.sessions.regeneratingTitleSessionIDs.contains(session.id),
                                 hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
-                                labelDefinitions: viewModel.governanceConfig.labels,
+                                labelDefinitions: governanceModel.config.labels,
                                 onSelect: {
                                     var transaction = Transaction()
                                     transaction.disablesAnimations = true
@@ -718,7 +720,7 @@ struct CraftSessionListPane: View {
         switch viewModel.chatFeatureModel.sessions.filter {
         case .all: "全部会话"
         case .status(let status): status.displayName
-        case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
+        case .label(let labelID): governanceModel.config.labels.first(where: { $0.id == labelID })?.name ?? labelID
         }
     }
 }
@@ -2103,6 +2105,7 @@ private struct RSSItemListRow: View {
 struct CraftDetailPaneView: View {
     @ObservedObject var viewModel: AppViewModel
     @Bindable var shellModel: AppShellFeatureModel
+    @Bindable var governanceModel: GovernanceFeatureModel
     @ObservedObject var identityStore: AppUserIdentityStore
     let graphDiagnosticsModel: GraphDiagnosticsModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
@@ -2141,7 +2144,7 @@ struct CraftDetailPaneView: View {
             case .productOS:
                 ProductOSRegistryView(
                     model: productOSControlModel,
-                    governanceConfig: viewModel.governanceConfig,
+                    governanceConfig: governanceModel.config,
                     commercialReadinessDashboard: viewModel.commercialReadinessDashboard
                 )
             case .calendar:

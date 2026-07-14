@@ -5,7 +5,8 @@ import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 struct SettingsLabelsSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: GovernanceFeatureModel
+    var sessions: [AgentSession]
     @State private var editorRequest: SettingsLabelEditorRequest?
 
     var body: some View {
@@ -21,17 +22,17 @@ struct SettingsLabelsSection: View {
             }
 
             SettingsGroup(title: "标签") {
-                if viewModel.governanceConfig.labels.isEmpty {
+                if model.config.labels.isEmpty {
                     SettingsEmptyStateRow(systemImage: "tag.slash", title: "暂无标签", subtitle: "点击“新建标签…”创建第一个会话标签。")
                 } else {
-                    ForEach(viewModel.governanceConfig.labels) { label in
+                    ForEach(model.config.labels) { label in
                         SettingsLabelDefinitionRow(
                             definition: label,
                             usageCount: countSessions(using: label.id),
                             edit: { presentLabelEditor(label) },
-                            delete: { viewModel.deleteLabelDefinition(label) }
+                            delete: { model.deleteLabel(label) }
                         )
-                        if label.id != viewModel.governanceConfig.labels.last?.id { Divider().padding(.leading, 48) }
+                        if label.id != model.config.labels.last?.id { Divider().padding(.leading, 48) }
                     }
                 }
             }
@@ -49,7 +50,7 @@ struct SettingsLabelsSection: View {
                 definition: request.definition,
                 onCancel: { editorRequest = nil },
                 onSave: { updated in
-                    viewModel.upsertLabelDefinition(updated)
+                    model.upsertLabel(updated)
                     editorRequest = nil
                 }
             )
@@ -68,14 +69,15 @@ struct SettingsLabelsSection: View {
     }
 
     private func countSessions(using labelID: String) -> Int {
-        viewModel.chatFeatureModel.sessions.allSessions.filter { session in
+        sessions.filter { session in
             session.governance.labels.contains { $0.id == labelID }
         }.count
     }
 }
 
 struct SettingsStatusesSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: GovernanceFeatureModel
+    var sessions: [AgentSession]
     @State private var editorRequest: SettingsStatusEditorRequest?
 
     var body: some View {
@@ -95,9 +97,9 @@ struct SettingsStatusesSection: View {
                     SettingsStatusDefinitionRow(
                         definition: status,
                         usageCount: countSessions(using: status),
-                        canDelete: viewModel.canDeleteStatusDefinition(status),
+                        canDelete: model.canDeleteStatus(status),
                         edit: { presentStatusEditor(status) },
-                        delete: { viewModel.deleteStatusDefinition(status) }
+                        delete: { model.deleteStatus(status) }
                     )
                     if status.id != sortedStatuses.last?.id { Divider().padding(.leading, 48) }
                 }
@@ -116,7 +118,7 @@ struct SettingsStatusesSection: View {
                 definition: request.definition,
                 onCancel: { editorRequest = nil },
                 onSave: { updated in
-                    viewModel.upsertStatusDefinition(updated)
+                    model.upsertStatus(updated)
                     editorRequest = nil
                 }
             )
@@ -124,7 +126,7 @@ struct SettingsStatusesSection: View {
     }
 
     private var sortedStatuses: [AgentSessionStatusDefinition] {
-        viewModel.governanceConfig.statuses.sorted { lhs, rhs in
+        model.config.statuses.sorted { lhs, rhs in
             if lhs.sortOrder == rhs.sortOrder { return lhs.name < rhs.name }
             return lhs.sortOrder < rhs.sortOrder
         }
@@ -135,7 +137,7 @@ struct SettingsStatusesSection: View {
     }
 
     private func presentNewStatusEditor() {
-        let nextSortOrder = (viewModel.governanceConfig.statuses.map(\.sortOrder).max() ?? 0) + 10
+        let nextSortOrder = (model.config.statuses.map(\.sortOrder).max() ?? 0) + 10
         editorRequest = SettingsStatusEditorRequest(
             definition: AgentSessionStatusDefinition(id: "", name: "", systemImage: "circle", sortOrder: nextSortOrder, isTerminal: false),
             isCreating: true
@@ -143,7 +145,7 @@ struct SettingsStatusesSection: View {
     }
 
     private func countSessions(using definition: AgentSessionStatusDefinition) -> Int {
-        viewModel.chatFeatureModel.sessions.allSessions.filter { $0.governance.status.rawValue == definition.id }.count
+        sessions.filter { $0.governance.status.rawValue == definition.id }.count
     }
 }
 

@@ -10,6 +10,7 @@ import ConnorGraphAppSupport
 struct CraftPrimarySidebarView: View {
     @ObservedObject var viewModel: AppViewModel
     @Bindable var shellModel: AppShellFeatureModel
+    @Bindable var governanceModel: GovernanceFeatureModel
     @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
     @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
     @Bindable var taskAutomationModel: TaskAutomationFeatureModel
@@ -56,7 +57,7 @@ struct CraftPrimarySidebarView: View {
                         .contextMenu {
                             Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor() }
                         }
-                        ForEach(viewModel.governanceConfig.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
+                        ForEach(governanceModel.config.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .status(sessionStatus)) {
                                     viewModel.setSessionListFilter(.status(sessionStatus))
@@ -66,10 +67,10 @@ struct CraftPrimarySidebarView: View {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
                                     Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
                                     Divider()
-                                    Button(role: .destructive) { viewModel.deleteStatusDefinition(status) } label: {
+                                    Button(role: .destructive) { governanceModel.deleteStatus(status) } label: {
                                         Label("删除状态", systemImage: "trash")
                                     }
-                                    .disabled(!viewModel.canDeleteStatusDefinition(status))
+                                    .disabled(!governanceModel.canDeleteStatus(status))
                                 }
                             } else {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: 0, isSelected: false) {
@@ -79,23 +80,23 @@ struct CraftPrimarySidebarView: View {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
                                     Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
                                     Divider()
-                                    Button(role: .destructive) { viewModel.deleteStatusDefinition(status) } label: {
+                                    Button(role: .destructive) { governanceModel.deleteStatus(status) } label: {
                                         Label("删除状态", systemImage: "trash")
                                     }
-                                    .disabled(!viewModel.canDeleteStatusDefinition(status))
+                                    .disabled(!governanceModel.canDeleteStatus(status))
                                 }
                             }
                         }
                     }
 
                     SidebarDisclosure(title: "标签", systemImage: "tag", isExpanded: $labelsExpanded) {
-                        if viewModel.governanceConfig.labels.isEmpty {
+                        if governanceModel.config.labels.isEmpty {
                             SidebarMutedText("暂无标签")
                                 .contextMenu {
                                     Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
                                 }
                         } else {
-                            ForEach(viewModel.governanceConfig.labels) { label in
+                            ForEach(governanceModel.config.labels) { label in
                                 SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .label(label.id)) {
                                     viewModel.setSessionListFilter(.label(label.id))
                                     select(.agentChat)
@@ -104,7 +105,7 @@ struct CraftPrimarySidebarView: View {
                                     Button("编辑标签…", systemImage: "pencil") { presentLabelEditor(label) }
                                     Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
                                     Divider()
-                                    Button(role: .destructive) { viewModel.deleteLabelDefinition(label) } label: {
+                                    Button(role: .destructive) { governanceModel.deleteLabel(label) } label: {
                                         Label("删除标签", systemImage: "trash")
                                     }
                                 }
@@ -147,7 +148,7 @@ struct CraftPrimarySidebarView: View {
                 isCreating: request.isCreating,
                 onCancel: { statusEditorRequest = nil },
                 onSave: { definition in
-                    viewModel.upsertStatusDefinition(definition)
+                    governanceModel.upsertStatus(definition)
                     statusEditorRequest = nil
                 }
             )
@@ -159,7 +160,7 @@ struct CraftPrimarySidebarView: View {
                 isCreating: request.isCreating,
                 onCancel: { labelEditorRequest = nil },
                 onSave: { definition in
-                    viewModel.upsertLabelDefinition(definition)
+                    governanceModel.upsertLabel(definition)
                     labelEditorRequest = nil
                 }
             )
@@ -211,7 +212,7 @@ struct CraftPrimarySidebarView: View {
     }
 
     private func presentNewStatusEditor(after definition: AgentSessionStatusDefinition? = nil) {
-        let nextSortOrder = (definition?.sortOrder ?? viewModel.governanceConfig.statuses.map(\.sortOrder).max() ?? 0) + 10
+        let nextSortOrder = (definition?.sortOrder ?? governanceModel.config.statuses.map(\.sortOrder).max() ?? 0) + 10
         statusEditorRequest = StatusDefinitionEditorRequest(
             definition: AgentSessionStatusDefinition(
                 id: "",
