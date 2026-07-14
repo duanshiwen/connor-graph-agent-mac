@@ -8,6 +8,7 @@ final class AppCompositionRoot: ObservableObject {
     let identityStore: AppUserIdentityStore
     let featureFlags: AppFeatureFlags
     let flowCoordinator: AppFlowCoordinator
+    let commandRouter: AppCommandRouter
     private(set) var startupCoordinator: AppStartupCoordinator!
 
     private enum CoreOutcome {
@@ -34,6 +35,7 @@ final class AppCompositionRoot: ObservableObject {
         self.featureFlags = featureFlags
         self.bootstrapActor = bootstrapActor
         self.flowCoordinator = AppFlowCoordinator { _ in }
+        self.commandRouter = AppCommandRouter()
     }
 
     static func live() -> AppCompositionRoot {
@@ -52,16 +54,15 @@ final class AppCompositionRoot: ObservableObject {
                 bootstrapActor: AppBootstrapActor()
             )
             root.installStartupCoordinator()
-            root.bindFlow(to: placeholder)
+            root.bindCommandRouting(to: placeholder)
             AppStartupPerformance.event("AppCompositionLightConstructed")
             return root
         }
     }
 
-    func performWhenInteractive(_ action: @escaping @MainActor (AppViewModel) -> Void) {
+    func sendWhenInteractive(_ command: AppCommand) {
         startupCoordinator.performWhenInteractive { [weak self] in
-            guard let self else { return }
-            action(self.viewModel)
+            self?.commandRouter.send(command)
         }
     }
 
@@ -123,7 +124,7 @@ final class AppCompositionRoot: ObservableObject {
                     model = AppViewModel.demo(startupMode: .deferred)
                     model.errorMessage = "已回退到演示数据：\(error)"
                 }
-                self.bindFlow(to: model)
+                self.bindCommandRouting(to: model)
                 if let interactiveSnapshot {
                     model.prepareInteractiveStartup(snapshot: interactiveSnapshot)
                 } else {
@@ -178,18 +179,36 @@ final class AppCompositionRoot: ObservableObject {
         )
     }
 
-    private func bindFlow(to model: AppViewModel) {
+    private func bindCommandRouting(to model: AppViewModel) {
+        commandRouter.replaceHandler { [weak self] command in
+            guard let model = self?.viewModel else { return }
+            switch command {
+            case let .shortcut(action):
+                model.performShortcutAction(action)
+            case .newNote:
+                model.newNoteSession()
+            case let .selectSidebar(selection):
+                model.shellFeatureModel.select(selection)
+            case let .navigate(item):
+                model.navigate(to: item)
+            case let .openSessionNotification(sessionID):
+                model.openSessionFromNotification(sessionID)
+            case .openCalendarSettings:
+                model.selectSettingsSection(.calendar)
+            case let .followRSSItem(request):
+                model.handleRSSFollowRequest(request)
+            }
+        }
         flowCoordinator.replaceHandler { [weak self] intent in
             guard let self else { return }
-            self.startupCoordinator.performWhenInteractive { [weak self] in
-                guard let model = self?.viewModel else { return }
-                switch intent {
-                case let .navigate(selection): model.selection = selection
-                case let .openSessionNotification(sessionID): model.openSessionFromNotification(sessionID)
-                case .openCalendarSettings: model.selectSettingsSection(.calendar)
-                case let .followRSSItem(request): model.handleRSSFollowRequest(request)
-                }
+            let command: AppCommand
+            switch intent {
+            case let .navigate(selection): command = .selectSidebar(selection)
+            case let .openSessionNotification(sessionID): command = .openSessionNotification(sessionID)
+            case .openCalendarSettings: command = .openCalendarSettings
+            case let .followRSSItem(request): command = .followRSSItem(request)
             }
+            self.sendWhenInteractive(command)
         }
         model.rssFeatureModel.onFollowRequest = { [weak flowCoordinator] request in
             flowCoordinator?.send(.followRSSItem(request))

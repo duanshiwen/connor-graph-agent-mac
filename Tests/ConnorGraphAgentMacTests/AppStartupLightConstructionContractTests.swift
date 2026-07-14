@@ -8,7 +8,7 @@ struct AppStartupLightConstructionContractTests {
         let source = try projectSource(named: "AppCompositionRoot.swift")
         let liveBody = try #require(source.range(of: "static func live() -> AppCompositionRoot"))
         let tail = String(source[liveBody.lowerBound...])
-        let end = try #require(tail.range(of: "    func performWhenInteractive"))
+        let end = try #require(tail.range(of: "    func sendWhenInteractive"))
         let body = String(tail[..<end.lowerBound])
 
         #expect(!body.contains("AppViewModel.live()"))
