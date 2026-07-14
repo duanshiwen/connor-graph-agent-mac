@@ -12,6 +12,7 @@ struct CraftListPaneView: View {
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
+    let productOSControlModel: ProductOSControlFeatureModel
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -38,7 +39,7 @@ struct CraftListPaneView: View {
             case .eventTriggeredTasks:
                 CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: viewModel.governanceConfig, kind: .eventTriggered)
             case .productOS:
-                CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
+                CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: productOSControlModel.registry.sources.map(\.displayName) + productOSControlModel.registry.skills.map(\.displayName))
             default:
                 CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
             }
@@ -2105,6 +2106,7 @@ struct CraftDetailPaneView: View {
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
+    let productOSControlModel: ProductOSControlFeatureModel
     var selection: SidebarItem
 
     var body: some View {
@@ -2131,7 +2133,11 @@ struct CraftDetailPaneView: View {
             case .eventTriggeredTasks:
                 TaskAutomationDetailPane(model: taskAutomationModel, kind: .eventTriggered)
             case .productOS:
-                ProductOSRegistryView(viewModel: viewModel)
+                ProductOSRegistryView(
+                    model: productOSControlModel,
+                    governanceConfig: viewModel.governanceConfig,
+                    commercialReadinessDashboard: viewModel.commercialReadinessDashboard
+                )
             case .calendar:
                 CalendarSourceSettingsView(viewModel: viewModel)
             case .contacts:

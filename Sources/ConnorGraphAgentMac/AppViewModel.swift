@@ -220,10 +220,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published private(set) var globalSearchTimings: [GlobalSearchSectionTiming] = []
     @Published private(set) var globalSearchHistoryEntries: [GlobalSearchHistoryEntry] = []
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
-    @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
-    @Published var automationConfig: ProductOSAutomationConfig = .default
-    @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
-    @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
+    let productOSControlModel: ProductOSControlFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     @Published var calendarBrowserPresentation: NativeCalendarBrowserPresentation = .empty
@@ -268,8 +265,6 @@ final class AppViewModel: NSObject, ObservableObject {
     let skillRuntimeModel: SkillRuntimeFeatureModel
     @Published var activeSkillSlug: String?
     @Published var activeSkillDisplayName: String?
-    @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
-    @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
     @Published var isSummarizingChatSession: Bool = false
@@ -348,8 +343,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var chatSessionRepository: AppChatSessionRepository?
     private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
-    private var productOSRegistryRepository: AppProductOSRegistryRepository?
-    private var automationRepository: AppProductOSAutomationRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
     private var browserBookmarkStore: BrowserBookmarkStore?
@@ -2144,7 +2137,7 @@ final class AppViewModel: NSObject, ObservableObject {
             artifactDirectoriesReady: storagePaths != nil,
             sourceRuntimeConfigurations: sourceRuntimeModel.configurations,
             skillRuntimeDefinitions: skillRuntimeModel.definitions,
-            automationConfig: automationConfig,
+            automationConfig: productOSControlModel.automationConfig,
             graphMemoryDashboard: graphMemoryDashboardPresentation
         )
     }
@@ -2206,6 +2199,12 @@ final class AppViewModel: NSObject, ObservableObject {
             repository: repository
         )
         self.repository = repository
+        self.productOSControlModel = ProductOSControlFeatureModel(
+            registry: productOSRegistry,
+            automationConfig: automationConfig,
+            registryRepository: storagePaths.map { AppProductOSRegistryRepository(storagePaths: $0) },
+            automationRepository: storagePaths.map { AppProductOSAutomationRepository(storagePaths: $0) }
+        )
         self.taskAutomationModel = TaskAutomationFeatureModel(
             repository: storagePaths.map { AppTaskManagementRepository(storagePaths: $0) }
         )
@@ -2218,8 +2217,6 @@ final class AppViewModel: NSObject, ObservableObject {
         )
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
-        self.productOSRegistry = productOSRegistry
-        self.automationConfig = automationConfig
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         let capabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(
@@ -2248,8 +2245,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.globalSearchHistoryRepository = globalSearchHistoryRepository
             self.globalSearchHistoryEntries = (try? globalSearchHistoryRepository.load()) ?? []
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
-            self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
-            self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
             self.rssRuntime = RSSRuntime(
@@ -2346,6 +2341,35 @@ final class AppViewModel: NSObject, ObservableObject {
         graphDiagnosticsModel.onPromotedSnapshot = { [weak self] snapshot in
             self?.applyPromotedGraphSnapshot(snapshot)
         }
+        productOSControlModel.sessionIDProvider = { [weak self] in
+            guard let self else { return "" }
+            return self.selectedChatSessionID ?? self.activeChatSession.id
+        }
+        productOSControlModel.onEvent = { [weak self] event in
+            guard let self else { return }
+            self.objectWillChange.send()
+            switch event {
+            case .operationSucceeded:
+                self.errorMessage = nil
+            case .operationFailed(let message):
+                self.errorMessage = message
+            case .registryChanged(let kind, let entryID, let status, let message, let automationContext):
+                self.appendProductOSRegistryEvent(
+                    kind: kind.rawValue,
+                    entryID: entryID,
+                    status: status,
+                    message: message
+                )
+                self.productOSControlModel.evaluateAutomation(
+                    automationContext,
+                    governanceConfig: self.governanceConfig
+                )
+            case .automationMatched(let records):
+                self.appendAutomationMatchedEvents(records)
+            case .releaseGateChecked:
+                self.navigate(to: .productOS)
+            }
+        }
         taskAutomationModel.createdBySessionIDProvider = { [weak self] in
             guard let self else { return "" }
             return self.selectedChatSessionID ?? self.activeChatSession.id
@@ -2398,9 +2422,9 @@ final class AppViewModel: NSObject, ObservableObject {
         updateWelcomeState()
         loadRuntimeSettings()
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
-        reloadProductOSRegistry()
-        reloadAutomationConfig()
-        reloadAutomationExecutionHistory()
+        productOSControlModel.reloadRegistry()
+        productOSControlModel.reloadAutomation(governanceConfig: governanceConfig)
+        productOSControlModel.reloadExecutionHistory()
         taskAutomationModel.reload()
         Task { @MainActor in
             do {
@@ -2809,39 +2833,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         _ = await submitChat(prompt: request.message, clearComposer: false)
         return "sent task message to session \(sessionID)"
-    }
-
-    func reloadProductOSRegistry() {
-        do {
-            if let productOSRegistryRepository {
-                productOSRegistry = try productOSRegistryRepository.loadOrCreateDefault()
-                productOSRegistryMessage = "Product OS 注册表已从康纳同学 Home 加载。"
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func reloadAutomationConfig() {
-        do {
-            if let automationRepository {
-                automationConfig = try automationRepository.loadOrCreateDefault(governanceConfig: governanceConfig)
-                automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func reloadAutomationExecutionHistory() {
-        do {
-            automationExecutionHistory = try automationRepository?.loadRecentExecutionHistory() ?? []
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
     }
 
     func reloadCalendarBrowserPresentation() {
@@ -3772,66 +3763,17 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func runCommercialReadinessReleaseGate() {
-        let result = CommercialReadinessReleaseGate().evaluate(commercialReadinessDashboard)
-        commercialReleaseGateResult = result
-        productOSRegistryMessage = result.summary
-        navigate(to: .productOS)
+        productOSControlModel.runCommercialReadinessReleaseGate(dashboard: commercialReadinessDashboard)
     }
 
-    func setAutomationRuleEnabled(id: String, isEnabled: Bool) {
-        do {
-            guard let automationRepository else { return }
-            automationConfig = try automationRepository.setRuleEnabled(id: id, isEnabled: isEnabled, governanceConfig: governanceConfig)
-            automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
-            productOSRegistryMessage = "Automation rule \(id) is now \(isEnabled ? "enabled" : "disabled")."
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func evaluateAutomation(_ context: ProductOSAutomationEventContext) {
-        do {
-            guard let automationRepository else { return }
-            let records = try automationRepository.evaluate(context: context, governanceConfig: governanceConfig)
-            guard !records.isEmpty else { return }
-            automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
-            for record in records {
-                let payload = AgentAutomationPlaceholderEvent(
-                    sessionID: record.sessionID,
-                    trigger: record.trigger.rawValue,
-                    message: "Automation \(record.ruleName) matched. Actions are recorded for governed review: \(record.actionSummaries.joined(separator: "; "))"
-                )
-                agentEventTimeline.insert(AgentEventPresenter().presentation(for: .automationTriggered(payload)), at: 0)
-            }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func setSourceRegistryStatus(id: String, status: ProductOSRegistryEntryStatus) {
-        do {
-            guard let productOSRegistryRepository else { return }
-            productOSRegistry = try productOSRegistryRepository.setSourceStatus(id: id, status: status)
-            productOSRegistryMessage = "Source \(id) 当前状态为 \(status.rawValue)。康纳同学仍负责凭据、权限、审计和图谱摄取治理。"
-            appendProductOSRegistryEvent(kind: "source", entryID: id, status: status, message: productOSRegistryMessage ?? "Source registry changed")
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sourceRegistryChanged, sessionID: selectedChatSessionID ?? activeChatSession.id, registryEntryID: id))
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func setSkillRegistryStatus(id: String, status: ProductOSRegistryEntryStatus) {
-        do {
-            guard let productOSRegistryRepository else { return }
-            productOSRegistry = try productOSRegistryRepository.setSkillStatus(id: id, status: status)
-            productOSRegistryMessage = "Skill \(id) is now \(status.rawValue). Skills are instruction profiles; graph memory writes remain governed."
-            appendProductOSRegistryEvent(kind: "skill", entryID: id, status: status, message: productOSRegistryMessage ?? "Skill registry changed")
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .skillRegistryChanged, sessionID: selectedChatSessionID ?? activeChatSession.id, registryEntryID: id))
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
+    private func appendAutomationMatchedEvents(_ records: [ProductOSAutomationTriggerRecord]) {
+        for record in records {
+            let payload = AgentAutomationPlaceholderEvent(
+                sessionID: record.sessionID,
+                trigger: record.trigger.rawValue,
+                message: "Automation \(record.ruleName) matched. Actions are recorded for governed review: \(record.actionSummaries.joined(separator: "; "))"
+            )
+            agentEventTimeline.insert(AgentEventPresenter().presentation(for: .automationTriggered(payload)), at: 0)
         }
     }
 
@@ -4968,7 +4910,7 @@ final class AppViewModel: NSObject, ObservableObject {
             try governanceConfigRepository?.save(normalizedConfig)
             governanceConfig = normalizedConfig
             chatSessionRepository?.governanceConfig = normalizedConfig
-            automationConfig = try automationRepository?.loadOrCreateDefault(governanceConfig: normalizedConfig) ?? automationConfig
+            try productOSControlModel.reloadAutomationAfterGovernanceChange(governanceConfig: normalizedConfig)
             setSettingsMessage(successMessage, for: section)
             errorMessage = nil
         } catch {
@@ -6147,7 +6089,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
+            productOSControlModel.evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status), governanceConfig: governanceConfig)
             dispatchTaskSessionStatusChanged(sessionID: session.id, fromStatus: previousStatus?.rawValue, toStatus: status.rawValue)
             errorMessage = nil
         } catch {
@@ -6218,7 +6160,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             reloadChatSessions()
             appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.id).joined(separator: ", "))", labels: updated.governance.labels)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
+            productOSControlModel.evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID), governanceConfig: governanceConfig)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
