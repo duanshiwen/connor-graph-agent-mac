@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 import ConnorGraphCore
+import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
@@ -67,6 +68,81 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(task.errorMessage?.contains("不会自动继续执行") == true)
     }
 
+    @Test func runCoordinatorOwnsSubmissionCancellationAndShutdownState() {
+        let model = ChatRunModel()
+        let coordinator = ChatRunCoordinator(model: model, fallbackSession: AgentSession(id: "session"))
+        coordinator.selectedSessionID = { "session" }
+        let backend = AnyAgentBackend(CoordinatorTestBackend())
+
+        #expect(coordinator.begin(sessionID: "session", backend: backend))
+        #expect(!coordinator.begin(sessionID: "session", backend: backend))
+        #expect(model.submittingSessionIDs == ["session"])
+        if case .queued = coordinator.requestCancellation(sessionID: "session", reason: "cancel") {} else { Issue.record("Expected queued cancellation") }
+        if case .alreadyQueued = coordinator.requestCancellation(sessionID: "session", reason: "cancel") {} else { Issue.record("Expected deduplicated cancellation") }
+        #expect(coordinator.registerRun(sessionID: "session", runID: "run", backend: backend) == "cancel")
+
+        coordinator.shutdown()
+        #expect(model.submittingSessionIDs.isEmpty)
+        #expect(!model.isSubmitting)
+        #expect(!coordinator.begin(sessionID: "session", backend: backend))
+    }
+
+    @Test func composerCoordinatorPreservesLiveDraftAndConsumesSubmissionState() {
+        let model = ChatComposerModel()
+        let coordinator = ChatComposerCoordinator(model: model, storagePaths: nil)
+        var selectedID: String? = "session"
+        var autosave = false
+        coordinator.selectedSessionID = { selectedID }
+        coordinator.autoSaveDraftsEnabled = { autosave }
+        model.input = "published"
+
+        coordinator.updateSelectedDraft("manual")
+        #expect(model.input == "published")
+        #expect(coordinator.currentSelectedDraft() == "manual")
+
+        selectedID = "other"
+        autosave = true
+        coordinator.restore(sessionID: "other")
+        #expect(model.input == "")
+        model.pendingAttachmentRefs = [AgentMessageAttachmentRef(
+            id: "attachment",
+            displayName: "file.txt",
+            kind: .text,
+            byteCount: 1,
+            lifecycleStatus: .ready,
+            extractionStatus: .extracted,
+            manifestRelativePath: "attachments/attachment/manifest.json"
+        )]
+        coordinator.consumeForSubmission(sessionID: "other")
+        #expect(model.input == "")
+        #expect(model.pendingAttachmentRefs.isEmpty)
+    }
+
+    @Test func composerCoordinatorShutdownPreventsNewToast() {
+        let model = ChatComposerModel()
+        let coordinator = ChatComposerCoordinator(model: model, storagePaths: nil)
+        coordinator.showToast(title: "Before", message: "Visible")
+        #expect(model.attachmentToast?.title == "Before")
+        coordinator.shutdown()
+        coordinator.showToast(title: "After", message: "Ignored")
+        #expect(model.attachmentToast?.title == "Before")
+    }
+
+    @Test func approvalCoordinatorFiltersAutoApprovedCapabilitiesAndStopsAfterShutdown() {
+        let model = ChatApprovalModel()
+        let coordinator = ChatApprovalCoordinator(model: model, repository: nil)
+        coordinator.permissionMode = { .trustedWrite }
+        let readable = AgentPendingApproval(requestID: "read", runID: "run", sessionID: "session", capability: .readSession)
+        let destructive = AgentPendingApproval(requestID: "delete", runID: "run", sessionID: "session", capability: .deleteGraphObject)
+
+        coordinator.install([readable, destructive])
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["delete"])
+
+        coordinator.shutdown()
+        coordinator.install([])
+        #expect(model.pendingApprovals.count == 2)
+    }
+
     @Test func sessionCoordinatorShutdownClearsLoadingAndRejectsNewSelection() throws {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanup() }
@@ -81,6 +157,12 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(model.loadingSessionDetailID == nil)
         coordinator.select(session.id)
         #expect(model.loadingSessionDetailID == nil)
+    }
+}
+
+private struct CoordinatorTestBackend: AgentBackend {
+    func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        AsyncThrowingStream { $0.finish() }
     }
 }
 

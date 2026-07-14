@@ -135,7 +135,7 @@ struct AgentChatPermissionRequestCard: View {
             .help("放大查看完整权限请求细节；缩小或按 Esc 不会批准或拒绝。")
 
             Button {
-                chatActions.orchestration.approvePendingApproval(approval)
+                chatActions.approval.approvePendingApproval(approval)
             } label: {
                 Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")
             }
@@ -144,7 +144,7 @@ struct AgentChatPermissionRequestCard: View {
 
             if approvalPresentation.allowsAlwaysAllow {
                 Button {
-                    chatActions.orchestration.alwaysAllowPendingApproval(approval)
+                    chatActions.approval.alwaysAllowPendingApproval(approval)
                 } label: {
                     Label("Always Allow", systemImage: "arrow.triangle.2.circlepath")
                 }
@@ -154,7 +154,7 @@ struct AgentChatPermissionRequestCard: View {
             }
 
             Button(role: .destructive) {
-                chatActions.orchestration.denyPendingApproval(approval)
+                chatActions.approval.denyPendingApproval(approval)
             } label: {
                 Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
             }
@@ -269,7 +269,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             Spacer(minLength: AgentChatLayout.spaceM)
 
             Button(role: .destructive) {
-                chatActions.orchestration.denyPendingApproval(approval)
+                chatActions.approval.denyPendingApproval(approval)
                 onCollapse()
             } label: {
                 Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
@@ -278,7 +278,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             .controlSize(.large)
 
             Button {
-                chatActions.orchestration.approvePendingApproval(approval)
+                chatActions.approval.approvePendingApproval(approval)
                 onCollapse()
             } label: {
                 Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")

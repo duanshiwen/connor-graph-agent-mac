@@ -14,7 +14,7 @@ struct ComposerDraftSynchronizationTests {
         )
 
         viewModel.chatFeatureModel.composer.input = "上一轮语音"
-        viewModel.updateSelectedChatInputDraft("")
+        viewModel.chatComposerCoordinator.updateSelectedDraft("")
 
         #expect(viewModel.chatFeatureModel.composer.input == "上一轮语音")
     }
@@ -28,9 +28,9 @@ struct ComposerDraftSynchronizationTests {
         )
 
         viewModel.chatFeatureModel.composer.input = "上一轮语音"
-        viewModel.updateSelectedChatInputDraft("")
+        viewModel.chatComposerCoordinator.updateSelectedDraft("")
 
-        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "")
+        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "")
     }
 
     @Test func manualComposerEditKeepsLiveDraftWhenAutoSaveIsDisabled() {
@@ -43,9 +43,9 @@ struct ComposerDraftSynchronizationTests {
         viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
         viewModel.chatFeatureModel.composer.input = ""
 
-        viewModel.updateSelectedChatInputDraft("a")
+        viewModel.chatComposerCoordinator.updateSelectedDraft("a")
 
-        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "a")
+        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "a")
         #expect(viewModel.chatFeatureModel.composer.input == "")
     }
 
@@ -59,10 +59,10 @@ struct ComposerDraftSynchronizationTests {
         viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
         viewModel.chatFeatureModel.composer.input = "published value"
 
-        viewModel.updateSelectedChatInputDraft("a")
-        viewModel.updateSelectedChatInputDraft("ab")
+        viewModel.chatComposerCoordinator.updateSelectedDraft("a")
+        viewModel.chatComposerCoordinator.updateSelectedDraft("ab")
 
-        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "ab")
+        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "ab")
         #expect(viewModel.chatFeatureModel.composer.input == "published value")
     }
 
@@ -76,11 +76,11 @@ struct ComposerDraftSynchronizationTests {
         )
         viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
         viewModel.chatFeatureModel.composer.input = "stale published value"
-        viewModel.updateSelectedChatInputDraft("current manual draft")
+        viewModel.chatComposerCoordinator.updateSelectedDraft("current manual draft")
 
-        viewModel.appendToSelectedChatInputDraft("external browser context")
+        viewModel.chatComposerCoordinator.appendToSelectedDraft("external browser context")
 
         #expect(viewModel.chatFeatureModel.composer.input == "current manual draft\n\nexternal browser context")
-        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "current manual draft\n\nexternal browser context")
+        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "current manual draft\n\nexternal browser context")
     }
 }

@@ -137,11 +137,11 @@ struct AppViewModelSessionFilterSelectionTests {
         fixture.viewModel.selectChatSession(session.id)
         #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
 
-        fixture.viewModel.updateSelectedChatInputDraft("a")
+        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("a")
         try await waitForLoadingToFinish(fixture.viewModel)
 
         #expect(fixture.viewModel.chatFeatureModel.composer.input == "a")
-        #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == "a")
+        #expect(fixture.viewModel.chatComposerCoordinator.currentSelectedDraft() == "a")
     }
 
     @Test(arguments: [true, false])
@@ -151,13 +151,13 @@ struct AppViewModelSessionFilterSelectionTests {
 
         let sessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID)
         fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        fixture.viewModel.updateSelectedChatInputDraft("draft in progress")
+        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("draft in progress")
 
         fixture.viewModel.reloadChatSessions()
 
         #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == sessionID)
         #expect(fixture.viewModel.chatFeatureModel.composer.input == "draft in progress")
-        #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == "draft in progress")
+        #expect(fixture.viewModel.chatComposerCoordinator.currentSelectedDraft() == "draft in progress")
     }
 
     @Test(arguments: [true, false])
@@ -169,18 +169,18 @@ struct AppViewModelSessionFilterSelectionTests {
         let secondSession = try fixture.repository.createSession(title: "Second composer", now: Date(timeIntervalSince1970: 3_000))
         fixture.viewModel.reloadChatSessions()
         fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        fixture.viewModel.updateSelectedChatInputDraft("first draft")
+        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("first draft")
 
         fixture.viewModel.selectChatSession(secondSession.id)
         try await waitForLoadingToFinish(fixture.viewModel)
         #expect(fixture.viewModel.chatFeatureModel.composer.input == "")
-        fixture.viewModel.updateSelectedChatInputDraft("second draft")
+        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("second draft")
 
         fixture.viewModel.selectChatSession(firstSessionID)
         try await waitForLoadingToFinish(fixture.viewModel)
 
         #expect(fixture.viewModel.chatFeatureModel.composer.input == (autoSaveDraftsEnabled ? "first draft" : ""))
-        #expect(fixture.viewModel.currentSelectedChatInputDraftForSpeech() == (autoSaveDraftsEnabled ? "first draft" : ""))
+        #expect(fixture.viewModel.chatComposerCoordinator.currentSelectedDraft() == (autoSaveDraftsEnabled ? "first draft" : ""))
     }
 
     @Test func creatingNewSessionDoesNotEnterDetailLoadingState() throws {

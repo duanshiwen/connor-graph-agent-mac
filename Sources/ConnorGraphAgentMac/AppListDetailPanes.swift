@@ -662,28 +662,7 @@ struct CraftSessionListPane: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(visibleSessions) { session in
-                            CraftSessionRow(
-                                row: AgentChatSessionPresentation(session: session),
-                                readState: viewModel.chatFeatureModel.sessions.readStates[session.id],
-                                isSelected: session.id == viewModel.chatFeatureModel.sessions.selectedSessionID,
-                                isRunning: viewModel.isChatSessionSubmitting(session.id),
-                                isRegeneratingTitle: viewModel.chatFeatureModel.sessions.regeneratingTitleSessionIDs.contains(session.id),
-                                hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
-                                labelDefinitions: governanceModel.config.labels,
-                                onSelect: {
-                                    var transaction = Transaction()
-                                    transaction.disablesAnimations = true
-                                    withTransaction(transaction) {
-                                        viewModel.selectChatSession(session.id)
-                                    }
-                                },
-                                onRename: { title in viewModel.renameChatSession(session.id, title: title) },
-                                onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
-                                onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
-                                onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
-                                onDelete: { viewModel.deleteChatSession(session.id) }
-                            )
-                            .id(session.id)
+                            sessionRow(session)
                         }
                     }
                     .padding(.horizontal, 8)
@@ -695,6 +674,33 @@ struct CraftSessionListPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task { viewModel.reloadChatSessions() }
+    }
+
+    private func sessionRow(_ session: AgentSession) -> some View {
+        CraftSessionRow(
+            row: AgentChatSessionPresentation(session: session),
+            readState: viewModel.chatFeatureModel.sessions.readStates[session.id],
+            isSelected: session.id == viewModel.chatFeatureModel.sessions.selectedSessionID,
+            isRunning: viewModel.isChatSessionSubmitting(session.id),
+            isRegeneratingTitle: viewModel.chatFeatureModel.sessions.regeneratingTitleSessionIDs.contains(session.id),
+            hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
+            labelDefinitions: governanceModel.config.labels,
+            onSelect: { selectSession(id: session.id) },
+            onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+            onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
+            onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
+            onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+            onDelete: { viewModel.deleteChatSession(session.id) }
+        )
+        .id(session.id)
+    }
+
+    private func selectSession(id: String) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            viewModel.selectChatSession(id)
+        }
     }
 
     private var visibleSessions: [AgentSession] {
@@ -2118,6 +2124,74 @@ struct CraftDetailPaneView: View {
     let rssFeatureModel: RSSFeatureModel
     var selection: SidebarItem
 
+    private var chatActions: ChatFeatureActions {
+        let session = ClosureChatSessionPort(
+            isLoading: { [weak viewModel] in viewModel?.isLoadingSelectedChatSessionDetail ?? false },
+            reloadIfNeeded: { [weak viewModel] restore in viewModel?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: restore) },
+            reload: { [weak viewModel] restore in viewModel?.reloadChatSessions(restoreWorkspaceMode: restore) },
+            new: { [weak viewModel] in viewModel?.newChatSession() },
+            select: { [weak viewModel] in viewModel?.selectChatSession($0) },
+            rename: { [weak viewModel] in viewModel?.renameChatSession($0, title: $1) },
+            filter: { [weak viewModel] in viewModel?.setSessionListFilter($0, restoreWorkspaceMode: $1) },
+            status: { [weak viewModel] in viewModel?.setSelectedSessionStatus($0) },
+            flag: { [weak viewModel] in viewModel?.toggleSelectedSessionFlag() },
+            label: { [weak viewModel] in viewModel?.toggleSelectedSessionLabel($0) }
+        )
+        let run = ClosureChatRunPort(
+            backgroundTasks: { [weak viewModel] in
+                guard let viewModel else { return [] }
+                return viewModel.chatBackgroundTaskCoordinator.tasks(for: viewModel.chatFeatureModel.sessions.selectedSessionID)
+            },
+            hasBackgroundTask: { [weak viewModel] in
+                guard let viewModel, let sessionID = viewModel.chatFeatureModel.sessions.selectedSessionID else { return false }
+                return viewModel.chatBackgroundTaskCoordinator.hasRunningTask(sessionID: sessionID)
+            },
+            summaryFreshness: { [weak viewModel] in viewModel?.latestChatSummaryFreshness },
+            summaryContext: { [weak viewModel] in viewModel?.latestChatSummaryContextMessage ?? "" },
+            submit: { [weak viewModel] prompt, clear, display, attachments, people in
+                await viewModel?.submitChat(prompt: prompt, clearComposer: clear, displayPrompt: display, attachments: attachments, personReferences: people)
+            },
+            cancel: { [weak viewModel] in viewModel?.cancelActiveChatRun() },
+            permission: { [weak viewModel] in viewModel?.setAgentPermissionMode($0) },
+            timeline: { [weak viewModel] in viewModel?.restoredAgentEventTimeline(for: $0) ?? [] },
+            markdown: { [weak viewModel] in viewModel?.markdownPersistentCacheContext(messageID: $0) },
+            copy: { [weak viewModel] in viewModel?.copyAssistantMessageToPasteboard($0) },
+            export: { [weak viewModel] in viewModel?.exportAssistantMessageToFile($0, now: $1) },
+            download: { [weak viewModel] in viewModel?.downloadPreviewImage($0) },
+            clearOverride: { [weak viewModel] in viewModel?.clearSessionLLMOverride() },
+            selectModel: { [weak viewModel] in viewModel?.selectLLMModel($0, providerMode: $1, connectionID: $2) },
+            thinking: { [weak viewModel] in viewModel?.selectLLMThinkingLevel($0) },
+            defaultThinking: { [weak viewModel] in viewModel?.selectDefaultLLMThinkingLevel($0) },
+            reloadModels: { [weak viewModel] in await viewModel?.reloadLLMModelConnections() }
+        )
+        return ChatFeatureActions(
+            session: session,
+            composer: viewModel.chatComposerCoordinator,
+            run: run,
+            approval: viewModel.chatApprovalCoordinator,
+            workspace: ClosureChatWorkspacePort(
+                open: { [weak viewModel] in viewModel?.openURLInCurrentChatBrowser($0) },
+                record: { [weak viewModel] in viewModel?.appendSessionRecord(kind: $0, title: $1, body: $2, metadata: $3, sessionID: $4) }
+            ),
+            errors: ClosureChatErrorPort(
+                get: { [weak viewModel] in viewModel?.errorMessage },
+                set: { [weak viewModel] in viewModel?.errorMessage = $0 }
+            ),
+            dependencies: ChatFeatureDependencies(
+                browser: viewModel.browserFeatureModel,
+                appSettings: viewModel.appSettingsModel,
+                inputSettings: viewModel.inputSettingsModel,
+                workspaceSettings: viewModel.workspaceSettingsModel,
+                skills: skillRuntimeModel,
+                contacts: contactsFeatureModel,
+                governance: governanceModel,
+                aiConnections: viewModel.aiConnectionsModel,
+                permissionMode: { [weak viewModel] in viewModel?.agentPermissionMode ?? .askToWrite },
+                sessionHasLLMOverride: { [weak viewModel] in viewModel?.sessionHasLLMOverride ?? false }
+            )
+        )
+    }
+
     var body: some View {
         Group {
             switch selection {
@@ -2131,12 +2205,12 @@ struct CraftDetailPaneView: View {
                 if viewModel.chatFeatureModel.sessions.selectedSessionID == nil {
                     AgentChatNoSelectionDetailView()
                 } else {
-                    AgentChatView(model: viewModel.chatFeatureModel, chatActions: ChatFeatureActions(orchestration: viewModel))
+                    AgentChatView(model: viewModel.chatFeatureModel, chatActions: chatActions)
                 }
             case .promotionQueue:
                 PromotionQueueView(model: graphDiagnosticsModel)
             case .pendingApprovals:
-                AgentPendingApprovalReviewView(model: viewModel.chatFeatureModel, chatActions: ChatFeatureActions(orchestration: viewModel))
+                AgentPendingApprovalReviewView(model: viewModel.chatFeatureModel, chatActions: chatActions)
             case .automation, .scheduledTasks:
                 TaskAutomationDetailPane(model: taskAutomationModel, kind: .scheduled)
             case .eventTriggeredTasks:
