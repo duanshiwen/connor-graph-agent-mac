@@ -230,7 +230,7 @@ struct AgentChatComposerView: View {
             }
         }
         .onAppear {
-            viewModel.reloadSkillRuntimeDefinitions()
+            viewModel.skillRuntimeModel.reload()
         }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
@@ -476,7 +476,7 @@ struct AgentChatComposerView: View {
     }
 
     private func preferredSkillPickerSelectionIndex() -> Int {
-        let cards = viewModel.commercialSkillManagerPresentation.cards
+        let cards = viewModel.skillRuntimeModel.presentation.cards
         guard !cards.isEmpty else { return 0 }
         if let activeSkillSlug = composerState.activeSkillSlug,
            let activeIndex = cards.firstIndex(where: { $0.id == activeSkillSlug }) {
@@ -486,7 +486,7 @@ struct AgentChatComposerView: View {
     }
 
     private func handleSkillPickerKeyCommand(_ command: SkillPickerKeyCommand) {
-        let cards = viewModel.commercialSkillManagerPresentation.cards
+        let cards = viewModel.skillRuntimeModel.presentation.cards
         switch command {
         case .moveUp:
             guard !cards.isEmpty else { return }
@@ -939,7 +939,7 @@ struct AgentChatComposerView: View {
 
             Divider()
 
-            let allSkills = viewModel.commercialSkillManagerPresentation.cards
+            let allSkills = viewModel.skillRuntimeModel.presentation.cards
             if allSkills.isEmpty {
                 Text("暂无可用技能")
                     .font(AgentChatTypography.micro)

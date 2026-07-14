@@ -281,23 +281,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isPresentingAddRSSSourceSheet: Bool = false
     @Published var editingRSSSource: RSSSource?
     @Published var pendingRSSSourceDeletion: RSSSource?
-    @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
-    @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
-        summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
-        cards: [],
-        globalWarnings: []
-    )
-    @Published var selectedSkillManagerCardID: String?
-    @Published var isAddSkillDialogPresented: Bool = false
-    @Published var addSkillRequestDraft: String = ""
-    @Published var isSubmittingAddSkillRequest: Bool = false
-    @Published var addSkillDialogMessage: String?
-    @Published var isEditSkillDialogPresented: Bool = false
-    @Published var editSkillRequestDraft: String = ""
-    @Published var editingSkillCard: SkillManagerCard?
-    @Published var isSubmittingEditSkillRequest: Bool = false
-    @Published var editSkillDialogMessage: String?
-    @Published var pendingSkillDeletionCard: SkillManagerCard?
+    let skillRuntimeModel: SkillRuntimeFeatureModel
     @Published var activeSkillSlug: String?
     @Published var activeSkillDisplayName: String?
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
@@ -383,7 +367,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
     private var taskManagementRepository: AppTaskManagementRepository?
-    private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
     private var browserBookmarkStore: BrowserBookmarkStore?
@@ -2177,7 +2160,7 @@ final class AppViewModel: NSObject, ObservableObject {
             governanceConfig: governanceConfig,
             artifactDirectoriesReady: storagePaths != nil,
             sourceRuntimeConfigurations: sourceRuntimeModel.configurations,
-            skillRuntimeDefinitions: skillRuntimeDefinitions,
+            skillRuntimeDefinitions: skillRuntimeModel.definitions,
             automationConfig: automationConfig,
             graphMemoryDashboard: graphMemoryDashboardPresentation
         )
@@ -2243,6 +2226,10 @@ final class AppViewModel: NSObject, ObservableObject {
         self.sourceRuntimeModel = SourceRuntimeFeatureModel(
             repository: storagePaths.map { AppMCPSourceRuntimeRepository(storagePaths: $0) }
         )
+        self.skillRuntimeModel = SkillRuntimeFeatureModel(
+            repository: storagePaths.map { AppSkillRuntimeRepository(storagePaths: $0) },
+            storagePaths: storagePaths
+        )
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
         self.productOSRegistry = productOSRegistry
@@ -2278,7 +2265,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
             self.taskManagementRepository = AppTaskManagementRepository(storagePaths: storagePaths)
-            self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
             self.rssRuntime = RSSRuntime(
@@ -2390,6 +2376,25 @@ final class AppViewModel: NSObject, ObservableObject {
                 self?.errorMessage = message
             }
         }
+        if chatSessionRepository != nil {
+            skillRuntimeModel.onAddRequest = { [weak self] request in
+                guard let self else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+                return try await self.performAddSkillRequest(request)
+            }
+            skillRuntimeModel.onEditRequest = { [weak self] card, request in
+                guard let self else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+                try await self.performEditSkillRequest(card: card, request: request)
+            }
+        }
+        skillRuntimeModel.onEvent = { [weak self] event in
+            self?.objectWillChange.send()
+            switch event {
+            case .operationSucceeded:
+                self?.errorMessage = nil
+            case .operationFailed(let message):
+                self?.errorMessage = message
+            }
+        }
         loadLLMSettings()
         Task { await reloadLLMModelConnections() }
         updateWelcomeState()
@@ -2408,7 +2413,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         sourceRuntimeModel.reload()
-        reloadSkillRuntimeDefinitions()
+        skillRuntimeModel.reload()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadCalendarContactsFromStorage() }
         Task { await reloadMailBrowserPresentation() }
@@ -3739,165 +3744,37 @@ final class AppViewModel: NSObject, ObservableObject {
         return "关注 \(title)"
     }
 
-    func reloadSkillRuntimeDefinitions() {
-        do {
-            skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
-            commercialSkillManagerPresentation = buildCommercialSkillManagerPresentation()
-            if let selectedSkillManagerCardID,
-               !commercialSkillManagerPresentation.cards.contains(where: { $0.id == selectedSkillManagerCardID }) {
-                self.selectedSkillManagerCardID = nil
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func reloadSkillRuntimeDefinitionsIfNeeded(after presentation: AgentEventPresentation) {
-        guard presentation.kind == AgentEventKind.toolFinished.rawValue else { return }
-        let skillMutationToolNames: Set<String> = [
-            "connor_skill_create",
-            "connor_skill_update",
-            "connor_skill_delete"
-        ]
-        guard skillMutationToolNames.contains(where: { presentation.title.contains($0) }) else { return }
-        reloadSkillRuntimeDefinitions()
-    }
-
-    func selectSkillManagerCard(_ id: String) {
-        selectedSkillManagerCardID = id
-    }
-
-    func presentAddSkillDialog() {
-        addSkillRequestDraft = ""
-        addSkillDialogMessage = nil
-        isSubmittingAddSkillRequest = false
-        isAddSkillDialogPresented = true
-    }
-
-    func cancelAddSkillDialog() {
-        guard !isSubmittingAddSkillRequest else { return }
-        isAddSkillDialogPresented = false
-        addSkillRequestDraft = ""
-        addSkillDialogMessage = nil
-    }
-
-    func submitAddSkillRequest() async {
-        let request = addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !request.isEmpty, !isSubmittingAddSkillRequest else { return }
+    private func performAddSkillRequest(_ request: String) async throws -> String {
         guard let chatSessionRepository else {
-            addSkillDialogMessage = "会话系统尚未初始化。"
-            return
+            throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
         }
-        isSubmittingAddSkillRequest = true
-        addSkillDialogMessage = "康纳正在根据你的需求创建技能…"
-        do {
-            let knownSkillSlugs = currentUserSkillSlugs()
-            let title = sanitizedSessionTitle("添加技能：\(request)")
-            let session = try chatSessionRepository.createSession(title: title)
-            rememberWorkspaceMode(.conversation, for: session.id)
-            try loadBackgroundTasks(sessionID: session.id)
-            reloadChatSessions(restoreWorkspaceMode: false)
-            try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
-            let createdSlug = try ensureSkillPackageExists(for: request, excluding: knownSkillSlugs)
-            addSkillRequestDraft = ""
-            addSkillDialogMessage = "技能已创建：\(createdSlug)。"
-            reloadChatSessions(restoreWorkspaceMode: false)
-            reloadSkillRuntimeDefinitions()
-            selectedSkillManagerCardID = createdSlug
-            errorMessage = nil
-        } catch {
-            addSkillDialogMessage = "创建失败：\(String(describing: error))"
-            errorMessage = String(describing: error)
-        }
-        isSubmittingAddSkillRequest = false
+        let knownSkillSlugs = currentUserSkillSlugs()
+        let title = sanitizedSessionTitle("添加技能：\(request)")
+        let session = try chatSessionRepository.createSession(title: title)
+        rememberWorkspaceMode(.conversation, for: session.id)
+        try loadBackgroundTasks(sessionID: session.id)
+        reloadChatSessions(restoreWorkspaceMode: false)
+        try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
+        let createdSlug = try ensureSkillPackageExists(for: request, excluding: knownSkillSlugs)
+        reloadChatSessions(restoreWorkspaceMode: false)
+        return createdSlug
     }
 
-    func presentEditSkillDialog(card: SkillManagerCard) {
-        editingSkillCard = card
-        editSkillRequestDraft = ""
-        editSkillDialogMessage = nil
-        isSubmittingEditSkillRequest = false
-        isEditSkillDialogPresented = true
-    }
-
-    func cancelEditSkillDialog() {
-        guard !isSubmittingEditSkillRequest else { return }
-        isEditSkillDialogPresented = false
-        editSkillRequestDraft = ""
-        editSkillDialogMessage = nil
-        editingSkillCard = nil
-    }
-
-    func submitEditSkillRequest() async {
-        guard let card = editingSkillCard else { return }
-        let request = editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !request.isEmpty, !isSubmittingEditSkillRequest else { return }
+    private func performEditSkillRequest(card: SkillManagerCard, request: String) async throws {
         guard let chatSessionRepository else {
-            editSkillDialogMessage = "会话系统尚未初始化。"
-            return
+            throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
         }
-        isSubmittingEditSkillRequest = true
-        editSkillDialogMessage = "康纳正在根据你的需求修改技能…"
-        do {
-            let title = sanitizedSessionTitle("编辑技能：\(card.title)")
-            let session = try chatSessionRepository.createSession(title: title)
-            rememberWorkspaceMode(.conversation, for: session.id)
-            try loadBackgroundTasks(sessionID: session.id)
-            reloadChatSessions(restoreWorkspaceMode: false)
-            try await runSkillRequestInBackgroundSession(
-                session: session,
-                prompt: buildEditSkillAgentPrompt(card: card, userRequest: request),
-                displayPrompt: "编辑技能：\(card.title) — \(request)"
-            )
-            editSkillRequestDraft = ""
-            editSkillDialogMessage = "修改请求已提交。完成后技能列表会自动刷新。"
-            reloadChatSessions(restoreWorkspaceMode: false)
-            reloadSkillRuntimeDefinitions()
-            selectedSkillManagerCardID = card.id
-            errorMessage = nil
-        } catch {
-            editSkillDialogMessage = "修改失败：\(String(describing: error))"
-            errorMessage = String(describing: error)
-        }
-        isSubmittingEditSkillRequest = false
-    }
-
-    func requestDeleteSkill(card: SkillManagerCard) {
-        pendingSkillDeletionCard = card
-    }
-
-    func cancelDeleteSkill() {
-        pendingSkillDeletionCard = nil
-    }
-
-    func confirmDeletePendingSkill() {
-        guard let card = pendingSkillDeletionCard else { return }
-        do {
-            try deleteSkill(card: card)
-            pendingSkillDeletionCard = nil
-            reloadSkillRuntimeDefinitions()
-            if selectedSkillManagerCardID == card.id {
-                selectedSkillManagerCardID = nil
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func deleteSkill(card: SkillManagerCard) throws {
-        guard card.sourceTier == SkillSourceTier.user.rawValue else {
-            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Only user skills can be deleted from the skill manager. Skill \(card.id) is \(card.sourceTier).")
-        }
-        let packagePath = card.packagePath.isEmpty ? URL(fileURLWithPath: card.path).deletingLastPathComponent().path : card.packagePath
-        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
-        let packageURL = URL(fileURLWithPath: packagePath, isDirectory: true).standardizedFileURL
-        let rootURL = storagePaths.skillsDirectory.standardizedFileURL
-        guard packageURL.path == rootURL.appendingPathComponent(card.id, isDirectory: true).standardizedFileURL.path else {
-            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Refusing to delete skill outside user skill directory: \(packageURL.path)")
-        }
-        try FileManager.default.removeItem(at: packageURL)
+        let title = sanitizedSessionTitle("编辑技能：\(card.title)")
+        let session = try chatSessionRepository.createSession(title: title)
+        rememberWorkspaceMode(.conversation, for: session.id)
+        try loadBackgroundTasks(sessionID: session.id)
+        reloadChatSessions(restoreWorkspaceMode: false)
+        try await runSkillRequestInBackgroundSession(
+            session: session,
+            prompt: buildEditSkillAgentPrompt(card: card, userRequest: request),
+            displayPrompt: "编辑技能：\(card.title) — \(request)"
+        )
+        reloadChatSessions(restoreWorkspaceMode: false)
     }
 
     private func runAddSkillRequestInBackgroundSession(session: AgentSession, userRequest: String) async throws {
@@ -3939,7 +3816,7 @@ final class AppViewModel: NSObject, ObservableObject {
             onEventPresentation: { [weak self] presentation in
                 guard let self else { return }
                 self.agentEventTimelinesBySessionID[sessionID, default: []].append(presentation)
-                self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
+                self.skillRuntimeModel.reloadIfNeeded(after: presentation)
             }
         )
         if let timeline = agentEventTimelinesBySessionID[sessionID] {
@@ -3984,18 +3861,6 @@ final class AppViewModel: NSObject, ObservableObject {
         let skillURL = directory.appendingPathComponent("SKILL.md")
         try planner.generatedSkillMarkdown(name: identity.name, slug: identity.slug, userRequest: userRequest).write(to: skillURL, atomically: true, encoding: .utf8)
         return identity.slug
-    }
-
-    private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
-        guard let storagePaths else {
-            return SkillManagerPresentation(
-                summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
-                cards: [],
-                globalWarnings: ["Storage paths are not initialized."]
-            )
-        }
-        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
-        return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
     func runCommercialReadinessReleaseGate() {
@@ -6669,8 +6534,8 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func setActiveSkill(slug: String) {
         activeSkillSlug = slug
-        activeSkillDisplayName = skillRuntimeDefinitions.first(where: { $0.slug == slug })?.manifest.name
-            ?? commercialSkillManagerPresentation.cards.first(where: { $0.id == slug })?.title
+        activeSkillDisplayName = skillRuntimeModel.definitions.first(where: { $0.slug == slug })?.manifest.name
+            ?? skillRuntimeModel.presentation.cards.first(where: { $0.id == slug })?.title
             ?? slug
     }
 
@@ -6698,7 +6563,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 }
             }
         }
-        guard let card = commercialSkillManagerPresentation.cards.first(where: { $0.id == slug }) else { return nil }
+        guard let card = skillRuntimeModel.presentation.cards.first(where: { $0.id == slug }) else { return nil }
         return renderActiveSkillCardInstructions(card)
     }
 
@@ -6856,7 +6721,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     if presentation.kind == AgentEventKind.permissionRequested.rawValue {
                         self.reloadPendingApprovals()
                     }
-                    self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
+                    self.skillRuntimeModel.reloadIfNeeded(after: presentation)
                 }
             )
             let submitElapsed = submitStartedAt.duration(to: ContinuousClock.now)

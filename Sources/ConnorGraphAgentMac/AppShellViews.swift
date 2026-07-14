@@ -33,6 +33,7 @@ struct AppShellView: View {
                         CraftPrimarySidebarView(
                             viewModel: viewModel,
                             sourceRuntimeModel: viewModel.sourceRuntimeModel,
+                            skillRuntimeModel: viewModel.skillRuntimeModel,
                             selection: selectionBinding
                         )
                     .frame(
@@ -48,6 +49,7 @@ struct AppShellView: View {
             CraftListPaneView(
                 viewModel: viewModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
+                skillRuntimeModel: viewModel.skillRuntimeModel,
                 selection: selectionBinding
             )
                 .frame(
@@ -64,6 +66,7 @@ struct AppShellView: View {
                 identityStore: identityStore,
                 graphDiagnosticsModel: viewModel.graphDiagnosticsModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
+                skillRuntimeModel: viewModel.skillRuntimeModel,
                 selection: viewModel.selection ?? .agentChat
             )
                 .id(viewModel.selection ?? .agentChat)

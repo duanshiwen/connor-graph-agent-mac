@@ -4,28 +4,28 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct CraftSkillListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
-            SkillListHeader(onAdd: viewModel.presentAddSkillDialog)
+            SkillListHeader(onAdd: model.presentAddDialog)
 
-            if viewModel.commercialSkillManagerPresentation.cards.isEmpty {
+            if model.presentation.cards.isEmpty {
                 SkillListEmptyState()
             } else {
-                SkillListRows(viewModel: viewModel)
+                SkillListRows(model: model)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isAddSkillDialogPresented) {
-            AddSkillRequestDialog(viewModel: viewModel)
+        .sheet(isPresented: $model.isAddDialogPresented) {
+            AddSkillRequestDialog(model: model)
         }
-        .sheet(isPresented: $viewModel.isEditSkillDialogPresented) {
-            EditSkillRequestDialog(viewModel: viewModel)
+        .sheet(isPresented: $model.isEditDialogPresented) {
+            EditSkillRequestDialog(model: model)
         }
-        .modifier(SkillDeleteConfirmationModifier(viewModel: viewModel))
+        .modifier(SkillDeleteConfirmationModifier(model: model))
         .onAppear {
-            viewModel.reloadSkillRuntimeDefinitions()
+            model.reload()
         }
     }
 }
@@ -64,16 +64,16 @@ private struct SkillListEmptyState: View {
 }
 
 private struct SkillListRows: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
 
     var body: some View {
-        List(viewModel.commercialSkillManagerPresentation.cards) { card in
+        List(model.presentation.cards) { card in
             CraftSkillRow(
                 card: card,
-                isSelected: card.id == viewModel.selectedSkillManagerCardID,
-                onSelect: { viewModel.selectSkillManagerCard(card.id) },
-                onEdit: { viewModel.presentEditSkillDialog(card: card) },
-                onDelete: { viewModel.requestDeleteSkill(card: card) }
+                isSelected: card.id == model.selectedCardID,
+                onSelect: { model.selectCard(card.id) },
+                onEdit: { model.presentEditDialog(card: card) },
+                onDelete: { model.requestDelete(card: card) }
             )
             .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
             .listRowSeparator(.hidden)
@@ -85,29 +85,29 @@ private struct SkillListRows: View {
 }
 
 private struct SkillDeleteConfirmationModifier: ViewModifier {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
 
     func body(content: Content) -> some View {
         content.confirmationDialog(
             "删除这个技能？",
             isPresented: Binding(
-                get: { viewModel.pendingSkillDeletionCard != nil },
+                get: { model.pendingDeletionCard != nil },
                 set: { isPresented in
-                    if !isPresented { viewModel.cancelDeleteSkill() }
+                    if !isPresented { model.cancelDelete() }
                 }
             ),
             titleVisibility: .visible
         ) {
             Button("删除", role: .destructive) {
-                viewModel.confirmDeletePendingSkill()
+                model.confirmDelete()
             }
-            .disabled(viewModel.pendingSkillDeletionCard?.sourceTier != SkillSourceTier.user.rawValue)
+            .disabled(model.pendingDeletionCard?.sourceTier != SkillSourceTier.user.rawValue)
 
             Button("取消", role: .cancel) {
-                viewModel.cancelDeleteSkill()
+                model.cancelDelete()
             }
         } message: {
-            if let card = viewModel.pendingSkillDeletionCard {
+            if let card = model.pendingDeletionCard {
                 SkillDeleteConfirmationMessage(card: card)
             }
         }
@@ -127,7 +127,7 @@ private struct SkillDeleteConfirmationMessage: View {
 }
 
 private struct AddSkillRequestDialog: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isFocused: Bool
 
@@ -136,12 +136,12 @@ private struct AddSkillRequestDialog: View {
             iconName: "sparkles",
             title: "添加技能",
             description: "告诉康纳你希望新技能帮你完成什么，它会在这里帮你创建。",
-            statusMessage: viewModel.addSkillDialogMessage,
-            isSubmitting: viewModel.isSubmittingAddSkillRequest,
+            statusMessage: model.addDialogMessage,
+            isSubmitting: model.isSubmittingAddRequest,
             isFailure: false,
             textEditor: {
                 SkillRequestTextEditor(
-                    text: $viewModel.addSkillRequestDraft,
+                    text: $model.addRequestDraft,
                     placeholder: "例如：帮我审查 PR，重点检查安全、测试和架构一致性。",
                     isFocused: $isFocused
                 )
@@ -149,14 +149,14 @@ private struct AddSkillRequestDialog: View {
             actions: {
                 SkillRequestDialogActions(
                     closeTitle: "关闭",
-                    primaryTitle: viewModel.isSubmittingAddSkillRequest ? "创建中…" : "开始创建",
-                    isSubmitting: viewModel.isSubmittingAddSkillRequest,
-                    isPrimaryDisabled: viewModel.addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    primaryTitle: model.isSubmittingAddRequest ? "创建中…" : "开始创建",
+                    isSubmitting: model.isSubmittingAddRequest,
+                    isPrimaryDisabled: model.addRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     onClose: {
-                        viewModel.cancelAddSkillDialog()
+                        model.cancelAddDialog()
                         dismiss()
                     },
-                    onSubmit: { Task { await viewModel.submitAddSkillRequest() } }
+                    onSubmit: { Task { await model.submitAddRequest() } }
                 )
             }
         )
@@ -165,12 +165,12 @@ private struct AddSkillRequestDialog: View {
 }
 
 private struct EditSkillRequestDialog: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isFocused: Bool
 
     private var skillTitle: String {
-        viewModel.editingSkillCard?.title ?? "这个技能"
+        model.editingCard?.title ?? "这个技能"
     }
 
     var body: some View {
@@ -178,16 +178,16 @@ private struct EditSkillRequestDialog: View {
             iconName: "pencil.and.sparkles",
             title: "编辑技能",
             description: "告诉康纳你想怎样调整“\(skillTitle)”，它会在这里帮你修改。",
-            statusMessage: viewModel.editSkillDialogMessage,
-            isSubmitting: viewModel.isSubmittingEditSkillRequest,
-            isFailure: viewModel.editSkillDialogMessage?.contains("失败") == true,
+            statusMessage: model.editDialogMessage,
+            isSubmitting: model.isSubmittingEditRequest,
+            isFailure: model.editDialogMessage?.contains("失败") == true,
             textEditor: {
                 VStack(alignment: .leading, spacing: 16) {
-                    if let card = viewModel.editingSkillCard {
+                    if let card = model.editingCard {
                         SkillEditingMetadataBar(card: card)
                     }
                     SkillRequestTextEditor(
-                        text: $viewModel.editSkillRequestDraft,
+                        text: $model.editRequestDraft,
                         placeholder: "例如：把它改成更关注性能瓶颈，并要求输出检查清单。",
                         isFocused: $isFocused
                     )
@@ -196,14 +196,14 @@ private struct EditSkillRequestDialog: View {
             actions: {
                 SkillRequestDialogActions(
                     closeTitle: "关闭",
-                    primaryTitle: viewModel.isSubmittingEditSkillRequest ? "修改中…" : "提交修改",
-                    isSubmitting: viewModel.isSubmittingEditSkillRequest,
-                    isPrimaryDisabled: viewModel.editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    primaryTitle: model.isSubmittingEditRequest ? "修改中…" : "提交修改",
+                    isSubmitting: model.isSubmittingEditRequest,
+                    isPrimaryDisabled: model.editRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     onClose: {
-                        viewModel.cancelEditSkillDialog()
+                        model.cancelEditDialog()
                         dismiss()
                     },
-                    onSubmit: { Task { await viewModel.submitEditSkillRequest() } }
+                    onSubmit: { Task { await model.submitEditRequest() } }
                 )
             }
         )
