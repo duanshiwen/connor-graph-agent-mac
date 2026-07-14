@@ -306,8 +306,7 @@ final class AppViewModel: NSObject, ObservableObject {
     static let genderIdentityPresetValues: Set<String> = ["女性", "男性", "非二元", "性别流动", "无性别", "酷儿 / 性别酷儿", "不愿透露"]
 
     @Published var selection: SidebarItem? = .agentChat
-    @Published var query: String = "记忆"
-    @Published var searchResults: [GraphSearchHit] = []
+    let graphDiagnosticsModel: GraphDiagnosticsModel
     @Published var chatInput: String = "" {
         didSet {
             guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
@@ -323,15 +322,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var lastPromptInspection: AgentChatPromptInspection?
     @Published var errorMessage: String?
     @Published var attachmentToast: AgentChatToast?
-    @Published var entities: [GraphEntity]
-    @Published var statements: [GraphStatement]
-    @Published var episodes: [GraphEpisodeV3]
-    @Published var observeLogEntries: [ObserveLogEntry]
     @Published var databasePath: String?
-    @Published var schemaHealthReport: GraphSchemaHealthReport?
-    @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var pendingApprovals: [AgentPendingApproval] = []
-    @Published var lastPromotionResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
     @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = []
     @Published var llmDefaultConnectionID: String = ""
@@ -528,7 +520,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published private(set) var isMemoryOSSearchIndexRepairing = false
 
     private var repository: AppGraphRepository?
-    private var promotionRepository: AppPromotionQueueRepository?
     private var pendingApprovalRepository: AppAgentPendingApprovalRepository?
     private var memoryOSStore: SQLiteMemoryOSStore?
     private var memoryOSFacade: AppMemoryOSFacade?
@@ -566,7 +557,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var applicationDidFinishLaunchingObserver: NSObjectProtocol?
     private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
-    private var hybridSearchService: (any GraphHybridSearchService)?
     private var isRunningBackgroundJobs: Bool = false
     private var lastMemoryOSDailySweep: Date?
     private var hasScheduledMemoryOSSearchIndexRepair = false
@@ -2389,10 +2379,14 @@ final class AppViewModel: NSObject, ObservableObject {
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
         llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
-        self.entities = entities
-        self.statements = statements
-        self.episodes = episodes
-        self.observeLogEntries = observeLogEntries
+        self.graphDiagnosticsModel = GraphDiagnosticsModel(
+            entities: entities,
+            statements: statements,
+            episodes: episodes,
+            observeLogEntries: observeLogEntries,
+            databasePath: databasePath,
+            repository: repository
+        )
         self.repository = repository
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
@@ -2448,7 +2442,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
         if let repository {
-            self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
             let chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
             self.chatSessionRepository = chatSessionRepository
@@ -2456,7 +2449,6 @@ final class AppViewModel: NSObject, ObservableObject {
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
-            self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
         }
         if let storagePaths {
             do {
@@ -2526,7 +2518,9 @@ final class AppViewModel: NSObject, ObservableObject {
                 }
             )
         }
-        self.searchResults = []
+        graphDiagnosticsModel.onPromotedSnapshot = { [weak self] snapshot in
+            self?.applyPromotedGraphSnapshot(snapshot)
+        }
         loadLLMSettings()
         Task { await reloadLLMModelConnections() }
         updateWelcomeState()
@@ -2551,7 +2545,7 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { await reloadMailBrowserPresentation() }
         reloadChatSessions()
         loadBrowserHistory()
-        reloadSchemaHealthReport()
+        graphDiagnosticsModel.reloadSchemaHealthReport()
         scheduleMemoryOSSearchIndexRepairIfNeeded()
     }
 
@@ -2625,16 +2619,12 @@ final class AppViewModel: NSObject, ObservableObject {
         idleSleepAssertionID = 0
     }
 
-    private func apply(snapshot: GraphStoreSnapshot) {
-        entities = snapshot.entities
-        statements = snapshot.statements
-        episodes = snapshot.episodes
-        observeLogEntries = snapshot.observeLogEntries
+    private func applyPromotedGraphSnapshot(_ snapshot: GraphStoreSnapshot) {
+        graphDiagnosticsModel.apply(snapshot: snapshot)
         let session = activeChatSession
         fallbackChatSession = session
         nativeSessionManager = makeNativeSessionManager(for: session)
-        Task { await runSearch() }
-        reloadPromotionCandidates()
+        Task { await graphDiagnosticsModel.runSearch() }
         reloadPendingApprovals()
     }
 
@@ -6815,53 +6805,6 @@ final class AppViewModel: NSObject, ObservableObject {
         agentEventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
     }
 
-    func reloadPromotionCandidates() {
-        do {
-            promotionCandidates = try promotionRepository?.loadCandidates() ?? []
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func promote(_ entry: ObserveLogEntry) {
-        guard let promotionRepository, let repository else {
-            errorMessage = "提升队列不可用。"
-            return
-        }
-        do {
-            let result = try promotionRepository.promote(entry)
-            let snapshot = try repository.loadSnapshot()
-            lastPromotionResultSummary = "已提升 \(entry.id)：\(result.entities.count) 个节点，\(result.statements.count) 条事实"
-            apply(snapshot: snapshot)
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func dismissPromotionCandidate(_ entry: ObserveLogEntry) {
-        do {
-            _ = try promotionRepository?.dismiss(entry)
-            reloadPromotionCandidates()
-            lastPromotionResultSummary = "已忽略 \(entry.id)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func pinPromotionCandidate(_ entry: ObserveLogEntry) {
-        do {
-            _ = try promotionRepository?.pin(entry)
-            reloadPromotionCandidates()
-            lastPromotionResultSummary = "已置顶 \(entry.id) 30 天"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func reloadPendingApprovals() {
         do {
             pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
@@ -6939,37 +6882,6 @@ final class AppViewModel: NSObject, ObservableObject {
             ?? nativeSessionManager?.backend
     }
 
-    func reloadSchemaHealthReport() {
-        do {
-            schemaHealthReport = try repository?.store.schemaHealthReport()
-        } catch {
-            schemaHealthReport = GraphSchemaHealthReport(
-                expectedVersion: SQLiteGraphKernelStore.currentSchemaVersion,
-                actualVersion: 0,
-                status: .warning,
-                missingTables: [],
-                missingIndexes: [],
-                checkedAt: Date()
-            )
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func runSearch() async {
-        guard let hybridSearchService else {
-            searchResults = []
-            errorMessage = "SQLite hybrid search is unavailable."
-            return
-        }
-        do {
-            let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, graphID: "default"))
-            searchResults = response.hits
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func saveBrowserSelectionAsEpisode(_ selection: BrowserSelectionContext) async {
         guard let memoryOSFacade else {
             errorMessage = "当前没有可用的 Memory OS，无法保存网页证据。"
@@ -6990,7 +6902,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 metadata: draft.episode.metadata
             )
             errorMessage = nil
-            lastPromotionResultSummary = "已保存网页证据到 Memory OS：\(draft.episode.title)"
+            graphDiagnosticsModel.lastPromotionResultSummary = "已保存网页证据到 Memory OS：\(draft.episode.title)"
             Task { await runBackgroundJobs() }
         } catch {
             errorMessage = String(describing: error)
