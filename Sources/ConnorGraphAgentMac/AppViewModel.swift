@@ -545,6 +545,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var browserHistoryStore: BrowserHistoryStore?
     private var browserBookmarkStore: BrowserBookmarkStore?
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
+    private var loadedLoopConfiguration = AgentLoopConfiguration()
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var providerCapabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
@@ -4809,10 +4810,18 @@ final class AppViewModel: NSObject, ObservableObject {
         settingsSectionMessageStore = store
     }
 
+    var effectiveLoopConfiguration: AgentLoopConfiguration {
+        var configuration = loadedLoopConfiguration
+        configuration.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
+        return configuration
+    }
+
     private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
-        agentRuntimeFactory?.makeNativeSessionManager(
+        let configuration = effectiveLoopConfiguration
+        return agentRuntimeFactory?.makeNativeSessionManager(
             session: session,
-            permissionMode: defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode,
+            permissionMode: configuration.permissionMode,
+            configuration: configuration,
             sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: sessionStateSnapshotsBySessionID[session.id]?.llmOverride
         )
@@ -5047,6 +5056,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 }
             }
             var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            loadedLoopConfiguration = settings.loop
             defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
             showProviderIcons = settings.ui.showProviderIcons
             richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
@@ -5125,6 +5135,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.defaultSearchEngine = defaultSearchEngine
             try runtimeSettingsRepository?.save(settings)
+            loadedLoopConfiguration = settings.loop
             applyRuntimeSettingsSideEffects()
             if submittingChatSessionIDs.isEmpty {
                 rebuildNativeSessionManagerForActiveSession()
