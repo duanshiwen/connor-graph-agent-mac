@@ -84,7 +84,10 @@ struct ConnorSettingsDetailView: View {
                     case .app:
                         SettingsAppSection(model: viewModel.appSettingsModel, inputModel: viewModel.inputSettingsModel, openProjectHelp: { viewModel.openProjectGitHubHelp() })
                     case .ai:
-                        SettingsAISection(viewModel: viewModel)
+                        SettingsAISection(
+                            model: viewModel.aiConnectionsModel,
+                            openURL: viewModel.openURLInSystemDefaultBrowser
+                        )
                     case .calendar:
                         SettingsCalendarSection(model: calendarFeatureModel)
                     case .rss:
@@ -106,14 +109,16 @@ struct ConnorSettingsDetailView: View {
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                if let message = viewModel.settingsMessage(for: shellModel.selectedSettingsSection) {
+                if let message = shellModel.settingsMessage(for: shellModel.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 760, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                if let error = viewModel.errorMessage {
+                if let error = shellModel.selectedSettingsSection == .ai
+                    ? viewModel.aiConnectionsModel.errorMessage
+                    : viewModel.errorMessage {
                     Text(error)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
@@ -532,7 +537,8 @@ private struct RSSSettingsSourceRow: View {
 }
 
 struct SettingsAISection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: AIConnectionsFeatureModel
+    var openURL: (URL) -> Void
     @State private var isShowingAddConnectionGuide = false
     @State private var setupOption: AIConnectionOnboardingOption?
     @State private var renamingConnection: AppLLMConnectionConfig?
@@ -543,8 +549,9 @@ struct SettingsAISection: View {
         Group {
             if let setupOption {
                 AIConnectionSetupView(
-                    viewModel: viewModel,
+                    aiModel: model,
                     option: setupOption,
+                    openURL: openURL,
                     complete: { addConnection(from: setupOption) },
                     back: { self.setupOption = nil },
                     cancel: {
@@ -592,21 +599,21 @@ struct SettingsAISection: View {
             }
 
             VStack(spacing: 0) {
-                ForEach(viewModel.llmConnectionConfigs) { connection in
+                ForEach(model.connectionConfigs) { connection in
                     AIConnectionEntryRow(
                         connection: connection,
-                        isDefault: connection.id == viewModel.llmDefaultConnectionID,
-                        canDelete: viewModel.llmConnectionConfigs.count > 1,
-                        makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
+                        isDefault: connection.id == model.defaultConnectionID,
+                        canDelete: model.connectionConfigs.count > 1,
+                        makeDefault: { model.selectDefaultConnection(connection.id) },
                         rename: { beginConnectionRename(connection) },
                         viewCapabilities: {
-                            capabilityDetail = viewModel.capabilityDetailPresentation(for: connection.id)
+                            capabilityDetail = model.capabilityDetailPresentation(for: connection.id)
                         },
                         delete: {
-                            viewModel.deleteLLMConnection(connection.id)
+                            model.deleteConnection(connection.id)
                         }
                     )
-                    if connection.id != viewModel.llmConnectionConfigs.last?.id {
+                    if connection.id != model.connectionConfigs.last?.id {
                         Divider()
                             .padding(.leading, 32)
                     }
@@ -660,7 +667,7 @@ struct SettingsAISection: View {
 
     private func commitConnectionRename() {
         guard let connection = renamingConnection else { return }
-        viewModel.renameLLMConnection(connection.id, name: renameDraft)
+        model.renameConnection(connection.id, name: renameDraft)
         renamingConnection = nil
         renameDraft = ""
     }
@@ -951,8 +958,9 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
 }
 
 struct AIConnectionSetupView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var aiModel: AIConnectionsFeatureModel
     var option: AIConnectionOnboardingOption
+    var openURL: (URL) -> Void
     var complete: () -> Void
     var back: () -> Void
     var cancel: () -> Void
@@ -1819,7 +1827,7 @@ struct AIConnectionSetupView: View {
             do {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
                     Task { @MainActor in
-                        viewModel.openURLInSystemDefaultBrowser(url)
+                        openURL(url)
                     }
                 }
                 let input = AppLLMConnectionSetupInput(
@@ -1832,7 +1840,7 @@ struct AIConnectionSetupView: View {
                     apiKey: result.apiKey,
                     oauthTokens: result.tokens
                 )
-                _ = try await viewModel.setupLLMConnection(input)
+                _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
                     isAuthenticating = false
                     complete()
@@ -1858,7 +1866,7 @@ struct AIConnectionSetupView: View {
                     githubDeviceCode = code
                     didOpenBrowser = true
                     if let url = URL(string: code.verificationURI) {
-                        viewModel.openURLInSystemDefaultBrowser(url)
+                        openURL(url)
                     }
                     statusMessage = "在系统默认浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
@@ -1873,7 +1881,7 @@ struct AIConnectionSetupView: View {
                     apiKey: tokens.accessToken,
                     oauthTokens: tokens
                 )
-                _ = try await viewModel.setupLLMConnection(input)
+                _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
                     isAuthenticating = false
                     complete()
@@ -1913,7 +1921,7 @@ struct AIConnectionSetupView: View {
                     explicitVisionSupport: visionSupportOverride,
                     shouldFetchModelsList: selectedProviderPresetID == "custom" && customProtocol == .openAICompatible ? shouldFetchModelsList : true
                 )
-                _ = try await viewModel.setupLLMConnection(input)
+                _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
                     isAuthenticating = false
                     complete()
