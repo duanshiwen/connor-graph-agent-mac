@@ -33,6 +33,7 @@ private final class WelcomeStateFakeSettingsStore: LLMSettingsStore, @unchecked 
 private func makeWelcomeStateViewModel(
     settingsStore: WelcomeStateFakeSettingsStore = WelcomeStateFakeSettingsStore(),
     credentialStore: WelcomeStateFakeCredentialStore = WelcomeStateFakeCredentialStore(),
+    runtimeSettings: AgentRuntimeSettings? = nil,
     llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
 ) throws -> AppViewModel {
     _ = NSApplication.shared
@@ -40,6 +41,9 @@ private func makeWelcomeStateViewModel(
         .appendingPathComponent("connor-app-vm-welcome-state-\(UUID().uuidString)", isDirectory: true)
     let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
     try paths.ensureDirectoryHierarchy(fileManager: .default)
+    if let runtimeSettings {
+        try AppRuntimeSettingsRepository(configDirectory: paths.configDirectory).save(runtimeSettings)
+    }
     let repository = try AppGraphRepository.bootstrap(paths: paths)
     let llmRepository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
     return AppViewModel(
@@ -52,6 +56,26 @@ private func makeWelcomeStateViewModel(
         llmSettingsRepository: llmRepository,
         llmConnectionSetupServiceFactory: llmConnectionSetupServiceFactory
     )
+}
+
+@MainActor
+@Test func appViewModelUsesDisabledToolErrorFuseByDefault() throws {
+    let viewModel = try makeWelcomeStateViewModel()
+
+    #expect(viewModel.effectiveLoopConfiguration.maxConsecutiveToolResultErrors == 0)
+}
+
+@MainActor
+@Test func appViewModelPreservesLoadedLoopConfigurationWithoutEnablingToolErrorFuse() throws {
+    var settings = AgentRuntimeSettings.default
+    settings.loop.maxToolIterations = 17
+    settings.loop.maxConsecutiveToolResultErrors = 0
+    let viewModel = try makeWelcomeStateViewModel(runtimeSettings: settings)
+
+    viewModel.loadRuntimeSettings()
+
+    #expect(viewModel.effectiveLoopConfiguration.maxToolIterations == 17)
+    #expect(viewModel.effectiveLoopConfiguration.maxConsecutiveToolResultErrors == 0)
 }
 
 @MainActor
