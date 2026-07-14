@@ -2,6 +2,30 @@ import Foundation
 import os
 import ConnorGraphAppSupport
 
+@MainActor
+enum AppStartupPerformance {
+    private static let signposter = OSSignposter(
+        subsystem: AppPerformanceLog.subsystem,
+        category: "AppStartup"
+    )
+
+    static func measure<T>(_ name: StaticString, operation: () throws -> T) rethrows -> T {
+        let state = signposter.beginInterval(name)
+        defer { signposter.endInterval(name, state) }
+        return try operation()
+    }
+
+    static func measure<T>(_ name: StaticString, operation: () async throws -> T) async rethrows -> T {
+        let state = signposter.beginInterval(name)
+        defer { signposter.endInterval(name, state) }
+        return try await operation()
+    }
+
+    static func event(_ name: StaticString) {
+        signposter.emitEvent(name)
+    }
+}
+
 final class AppMainActorStallMonitor {
     struct Configuration: Sendable, Equatable {
         var intervalNanoseconds: UInt64

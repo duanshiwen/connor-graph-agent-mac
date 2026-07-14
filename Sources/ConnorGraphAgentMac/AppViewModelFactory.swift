@@ -9,39 +9,56 @@ import ConnorGraphAppSupport
 @MainActor
 extension AppViewModel {
 static func live() -> AppViewModel {
-    do {
-        let paths = try AppStoragePaths.live()
-        let repository = try AppGraphRepository.bootstrap(paths: paths)
-        let governanceConfig = try AppSessionGovernanceConfigRepository(configDirectory: paths.configDirectory).loadOrCreateDefault()
-        let productOSRegistry = try AppProductOSRegistryRepository(storagePaths: paths).loadOrCreateDefault()
-        let automationConfig = try AppProductOSAutomationRepository(storagePaths: paths).loadOrCreateDefault(governanceConfig: governanceConfig)
-        var snapshot = try repository.loadSnapshot()
-        if snapshot.entities.isEmpty {
-            let demo = demoSnapshot()
-            for entity in demo.entities { try repository.store.upsert(entity: entity) }
-            for statement in demo.statements { try repository.store.upsert(statement: statement) }
-            for episode in demo.episodes { try repository.store.upsert(episode: episode) }
-            snapshot = try repository.loadSnapshot()
+    AppStartupPerformance.measure("SynchronousLiveBootstrap") {
+        do {
+            let paths = try AppStartupPerformance.measure("StoragePaths") {
+                try AppStoragePaths.live()
+            }
+            let repository = try AppStartupPerformance.measure("GraphRepositoryBootstrap") {
+                try AppGraphRepository.bootstrap(paths: paths)
+            }
+            let configurations = try AppStartupPerformance.measure("CoreConfigurationLoad") {
+                let governanceConfig = try AppSessionGovernanceConfigRepository(configDirectory: paths.configDirectory).loadOrCreateDefault()
+                let productOSRegistry = try AppProductOSRegistryRepository(storagePaths: paths).loadOrCreateDefault()
+                let automationConfig = try AppProductOSAutomationRepository(storagePaths: paths).loadOrCreateDefault(governanceConfig: governanceConfig)
+                return (governanceConfig, productOSRegistry, automationConfig)
+            }
+            var snapshot = try AppStartupPerformance.measure("GraphSnapshotLoad") {
+                try repository.loadSnapshot()
+            }
+            if snapshot.entities.isEmpty {
+                snapshot = try AppStartupPerformance.measure("DemoSeedPersistence") {
+                    let demo = demoSnapshot()
+                    for entity in demo.entities { try repository.store.upsert(entity: entity) }
+                    for statement in demo.statements { try repository.store.upsert(statement: statement) }
+                    for episode in demo.episodes { try repository.store.upsert(episode: episode) }
+                    return try repository.loadSnapshot()
+                }
+            }
+            let viewModel = AppStartupPerformance.measure("AppViewModelConstruction") {
+                AppViewModel(
+                    entities: snapshot.entities,
+                    statements: snapshot.statements,
+                    episodes: snapshot.episodes,
+                    observeLogEntries: snapshot.observeLogEntries,
+                    repository: repository,
+                    databasePath: paths.databaseURL.path,
+                    storagePaths: paths,
+                    governanceConfig: configurations.0,
+                    productOSRegistry: configurations.1,
+                    automationConfig: configurations.2
+                )
+            }
+            AppStartupPerformance.measure("InitialApprovalPresentation") {
+                viewModel.reloadPromotionCandidates()
+                viewModel.reloadPendingApprovals()
+            }
+            return viewModel
+        } catch {
+            let viewModel = AppViewModel.demo()
+            viewModel.errorMessage = "已回退到演示数据：\(error)"
+            return viewModel
         }
-        let viewModel = AppViewModel(
-            entities: snapshot.entities,
-            statements: snapshot.statements,
-            episodes: snapshot.episodes,
-            observeLogEntries: snapshot.observeLogEntries,
-            repository: repository,
-            databasePath: paths.databaseURL.path,
-            storagePaths: paths,
-            governanceConfig: governanceConfig,
-            productOSRegistry: productOSRegistry,
-            automationConfig: automationConfig
-        )
-        viewModel.reloadPromotionCandidates()
-        viewModel.reloadPendingApprovals()
-        return viewModel
-    } catch {
-        let viewModel = AppViewModel.demo()
-        viewModel.errorMessage = "已回退到演示数据：\(error)"
-        return viewModel
     }
 }
 
