@@ -133,7 +133,7 @@ struct AppViewModelSessionFilterSelectionTests {
 
         let session = try fixture.repository.createSession(title: "Composer race", now: Date(timeIntervalSince1970: 2_000))
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
         fixture.viewModel.selectChatSession(session.id)
         #expect(fixture.viewModel.loadingChatSessionDetailID == session.id)
 
@@ -150,7 +150,7 @@ struct AppViewModelSessionFilterSelectionTests {
         defer { fixture.cleanup() }
 
         let sessionID = try #require(fixture.viewModel.selectedChatSessionID)
-        fixture.viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
         fixture.viewModel.updateSelectedChatInputDraft("draft in progress")
 
         fixture.viewModel.reloadChatSessions()
@@ -168,7 +168,7 @@ struct AppViewModelSessionFilterSelectionTests {
         let firstSessionID = try #require(fixture.viewModel.selectedChatSessionID)
         let secondSession = try fixture.repository.createSession(title: "Second composer", now: Date(timeIntervalSince1970: 3_000))
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
         fixture.viewModel.updateSelectedChatInputDraft("first draft")
 
         fixture.viewModel.selectChatSession(secondSession.id)

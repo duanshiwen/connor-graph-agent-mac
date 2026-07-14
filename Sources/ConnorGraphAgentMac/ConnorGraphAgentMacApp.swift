@@ -39,7 +39,7 @@ struct ConnorGraphAgentMacApp: App {
                 identityStore: root.identityStore,
                 noteImportModel: root.noteImportModel
             )
-                .preferredColorScheme(root.viewModel.appearanceMode.colorScheme)
+                .preferredColorScheme(root.viewModel.appSettingsModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
                     await root.lifecycle.startIfNeeded()

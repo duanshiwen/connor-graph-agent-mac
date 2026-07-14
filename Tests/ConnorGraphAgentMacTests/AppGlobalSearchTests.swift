@@ -95,7 +95,7 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.defaultSearchEngine = .google
+        fixture.viewModel.appSettingsModel.defaultSearchEngine = .google
         fixture.viewModel.globalSearchFeatureModel.updateQuery("  SwiftUI   Search  ")
         fixture.viewModel.globalSearchFeatureModel.performWebSearch()
 
@@ -127,9 +127,9 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.defaultSearchEngine = .google
+        fixture.viewModel.appSettingsModel.defaultSearchEngine = .google
 
-        let url = try #require(fixture.viewModel.defaultSearchEngine.searchURL(for: "connor search"))
+        let url = try #require(fixture.viewModel.appSettingsModel.defaultSearchEngine.searchURL(for: "connor search"))
 
         #expect(url.host == "www.google.com")
         #expect(url.path == "/search")
@@ -140,7 +140,7 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.defaultSearchEngine = .baidu
+        fixture.viewModel.appSettingsModel.defaultSearchEngine = .baidu
         fixture.viewModel.globalSearchFeatureModel.updateQuery("康纳 搜索")
         fixture.viewModel.globalSearchFeatureModel.performWebSearch()
 

@@ -222,7 +222,7 @@ struct AgentChatComposerView: View {
             composerPersonMentions = ComposerPersonMentionResolver().validatedMentions(in: newValue, mentions: composerPersonMentions)
             updatePersonMentionTrigger(for: newValue)
         }
-        .onChange(of: viewModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
+        .onChange(of: viewModel.inputSettingsModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
             if isEnabled {
                 installSpeechKeyboardMonitorIfNeeded()
             } else {
@@ -268,7 +268,7 @@ struct AgentChatComposerView: View {
     }
 
     private func installSpeechKeyboardMonitorIfNeeded() {
-        guard viewModel.sessionSpeechTranscriptionEnabled else { return }
+        guard viewModel.inputSettingsModel.sessionSpeechTranscriptionEnabled else { return }
         guard speechKeyboardMonitor == nil else { return }
         let monitor = SpeechInputKeyboardMonitor(
             spaceHoldEnabled: false,
@@ -297,8 +297,8 @@ struct AgentChatComposerView: View {
                 text: localChatInputBinding,
                 selectionTracker: composerSelectionTracker,
                 placeholder: composerPlaceholder,
-                isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                sendShortcut: viewModel.composerSendShortcut,
+                isSpellCheckEnabled: viewModel.inputSettingsModel.spellCheckEnabled,
+                sendShortcut: viewModel.inputSettingsModel.composerSendShortcut,
                 isSkillPickerPresented: isSkillPickerPresented,
                 isPersonMentionPickerPresented: isPersonMentionPickerPresented,
                 onSubmit: submitLocalChatInput,
@@ -327,7 +327,7 @@ struct AgentChatComposerView: View {
         if composerState.displayMode == .note {
             return "写下你的笔记..."
         }
-        let sendHint = viewModel.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
+        let sendHint = viewModel.inputSettingsModel.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
         return "输入 / 选择技能，输入 @ 选择人名；\(sendHint)"
     }
 
@@ -558,7 +558,7 @@ struct AgentChatComposerView: View {
         } label: {
             AgentComposerOptionBadge(
                 title: workingDirectoryBadgeTitle,
-                systemImage: viewModel.primaryWorkspaceRootDraft == nil ? "folder" : "folder.fill",
+                systemImage: viewModel.workspaceSettingsModel.primaryRoot == nil ? "folder" : "folder.fill",
                 tint: .secondary,
                 isActive: false,
                 style: .compact,
@@ -576,7 +576,7 @@ struct AgentChatComposerView: View {
 
     private var workingDirectoryPopoverContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if viewModel.workspaceRoots.isEmpty {
+            if viewModel.workspaceSettingsModel.roots.isEmpty {
                 Text("尚未设置工作目录")
                     .font(AgentChatTypography.micro)
                     .foregroundStyle(.secondary)
@@ -585,7 +585,7 @@ struct AgentChatComposerView: View {
                     .padding(.vertical, 6)
             } else {
                 VStack(spacing: 2) {
-                    ForEach(viewModel.workspaceRoots) { root in
+                    ForEach(viewModel.workspaceSettingsModel.roots) { root in
                         workspaceRootPopoverRow(root)
                     }
                 }
@@ -600,16 +600,16 @@ struct AgentChatComposerView: View {
                     .padding(.horizontal, 8)
                     .padding(.top, 2)
 
-                if viewModel.recentWorkspacePaths.isEmpty {
+                if viewModel.workspaceSettingsModel.recentPaths.isEmpty {
                     Text("暂无历史记录")
                         .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                 } else {
-                    ForEach(viewModel.recentWorkspacePaths, id: \.self) { path in
+                    ForEach(viewModel.workspaceSettingsModel.recentPaths, id: \.self) { path in
                         Button {
-                            viewModel.addWorkspaceRootAndSetPrimary(path: path)
+                            viewModel.workspaceSettingsModel.addRoot(path: path, makePrimary: true)
                             isWorkspacePopoverPresented = false
                         } label: {
                             workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
@@ -636,21 +636,21 @@ struct AgentChatComposerView: View {
                 .buttonStyle(.borderless)
 
                 Button {
-                    viewModel.resetWorkspaceRootsForCurrentSession()
+                    viewModel.workspaceSettingsModel.reset()
                     isWorkspacePopoverPresented = false
                 } label: {
                     Label("重置为默认", systemImage: "arrow.counterclockwise")
                 }
                 .buttonStyle(.borderless)
-                .disabled(viewModel.workspaceRoots.isEmpty && viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(viewModel.workspaceSettingsModel.roots.isEmpty && viewModel.workspaceSettingsModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button {
-                    viewModel.clearRecentWorkspacePaths()
+                    viewModel.workspaceSettingsModel.clearRecentPaths()
                 } label: {
                     Label("清空历史", systemImage: "trash")
                 }
                 .buttonStyle(.borderless)
-                .disabled(viewModel.recentWorkspacePaths.isEmpty)
+                .disabled(viewModel.workspaceSettingsModel.recentPaths.isEmpty)
             }
             .font(AgentChatTypography.micro)
             .padding(.horizontal, 4)
@@ -660,7 +660,7 @@ struct AgentChatComposerView: View {
     private func workspaceRootPopoverRow(_ root: WorkspaceRootDraft) -> some View {
         HStack(spacing: 6) {
             Button {
-                viewModel.setPrimaryWorkspaceRoot(id: root.id)
+                viewModel.workspaceSettingsModel.setPrimaryRoot(id: root.id)
                 isWorkspacePopoverPresented = false
             } label: {
                 workspaceMenuItemLabel(title: workspaceMenuItemTitle(for: root), systemImage: "folder")
@@ -670,7 +670,7 @@ struct AgentChatComposerView: View {
             .help(root.path)
 
             Button {
-                viewModel.removeWorkspaceRoot(id: root.id)
+                viewModel.workspaceSettingsModel.removeRoot(id: root.id)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -686,12 +686,12 @@ struct AgentChatComposerView: View {
     }
 
     private var workingDirectoryBadgeTitle: String {
-        guard let root = viewModel.primaryWorkspaceRootDraft else { return "选择工作目录" }
+        guard let root = viewModel.workspaceSettingsModel.primaryRoot else { return "选择工作目录" }
         return workspaceDisplayName(for: root)
     }
 
     private var workingDirectoryHelpText: String {
-        guard let root = viewModel.primaryWorkspaceRootDraft else {
+        guard let root = viewModel.workspaceSettingsModel.primaryRoot else {
             return "设置当前会话工作目录；本地工具将从主目录开始。"
         }
         return "当前会话工作目录：\(root.path)"
@@ -748,7 +748,7 @@ struct AgentChatComposerView: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.urls.first {
-            viewModel.addWorkspaceRootAndSetPrimary(path: url.path)
+            viewModel.workspaceSettingsModel.addRoot(path: url.path, makePrimary: true)
         }
     }
 

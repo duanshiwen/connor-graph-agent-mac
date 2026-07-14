@@ -26,7 +26,7 @@ struct AgentComposerStore {
             sessionHasLLMOverride: viewModel.sessionHasLLMOverride,
             permissionMode: viewModel.agentPermissionMode,
             selectedSessionStatus: selectedSession?.governance.status,
-            isSpeechTranscriptionEnabled: viewModel.sessionSpeechTranscriptionEnabled,
+            isSpeechTranscriptionEnabled: viewModel.inputSettingsModel.sessionSpeechTranscriptionEnabled,
             isSpeechTranscriptionRunning: viewModel.isSpeechTranscriptionRunningForSelectedSession,
             speechTranscriptionStatus: viewModel.speechTranscriptionStatus,
             speechProvisionalTranscript: viewModel.speechProvisionalTranscript

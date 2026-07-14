@@ -5,10 +5,10 @@ import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 struct WorkspaceRootsSettingsContent: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: WorkspaceSettingsFeatureModel
 
     private var primaryRoot: WorkspaceRootDraft? {
-        viewModel.workspaceRoots.first(where: \.isPrimary) ?? viewModel.workspaceRoots.first
+        model.roots.first(where: \.isPrimary) ?? model.roots.first
     }
 
     var body: some View {
@@ -28,29 +28,29 @@ struct WorkspaceRootsSettingsContent: View {
             }
             .frame(minHeight: SettingsListLayout.rowMinHeight)
 
-            if !viewModel.workspaceRoots.isEmpty {
+            if !model.roots.isEmpty {
                 Divider()
                 VStack(spacing: 0) {
-                    ForEach(viewModel.workspaceRoots) { root in
+                    ForEach(model.roots) { root in
                         WorkspaceRootRow(
                             root: root,
-                            setPrimary: { viewModel.setPrimaryWorkspaceRoot(id: root.id) },
-                            remove: { viewModel.removeWorkspaceRoot(id: root.id) }
+                            setPrimary: { model.setPrimaryRoot(id: root.id) },
+                            remove: { model.removeRoot(id: root.id) }
                         )
-                        if root.id != viewModel.workspaceRoots.last?.id { Divider() }
+                        if root.id != model.roots.last?.id { Divider() }
                     }
                 }
             }
 
             Divider()
             HStack(spacing: 8) {
-                TextField("输入目录路径", text: $viewModel.workspaceRootPathInput)
+                TextField("输入目录路径", text: $model.pathInput)
                     .textFieldStyle(.roundedBorder)
                 Button("添加路径") {
-                    viewModel.addWorkspaceRoot(path: viewModel.workspaceRootPathInput)
+                    model.addRoot(path: model.pathInput)
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(model.pathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("这些目录只用于当前会话。本地工具可在你授权的目录中读取或处理文件；未设置时使用默认工作目录。")
                 .font(SettingsListTypography.rowCaption)
@@ -61,9 +61,9 @@ struct WorkspaceRootsSettingsContent: View {
 
     private var summaryText: String {
         if let primaryRoot {
-            return "主目录：\(primaryRoot.path) · 共 \(viewModel.workspaceRoots.count) 个目录"
+            return "主目录：\(primaryRoot.path) · 共 \(model.roots.count) 个目录"
         }
-        let fallback = viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = model.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         if !fallback.isEmpty { return "默认项目目录：\(fallback)" }
         return "尚未设置；将使用默认工作目录。"
     }
@@ -76,7 +76,7 @@ struct WorkspaceRootsSettingsContent: View {
         panel.allowsMultipleSelection = true
         panel.canCreateDirectories = true
         if panel.runModal() == .OK {
-            viewModel.addWorkspaceRoots(paths: panel.urls.map(\.path))
+            model.addRoots(paths: panel.urls.map(\.path))
         }
     }
 }
@@ -129,7 +129,7 @@ struct WorkspaceRootRow: View {
 }
 
 struct SettingsShortcutsSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: InputSettingsFeatureModel
 
     private let generalActions: [AgentRuntimeShortcutAction] = [
         .newSession,
@@ -164,9 +164,9 @@ struct SettingsShortcutsSection: View {
                     EditableShortcutRow(
                         title: title(for: generalActions[index]),
                         subtitle: subtitle(for: generalActions[index]),
-                        shortcut: viewModel.shortcut(for: generalActions[index]),
-                        onRecord: { viewModel.beginRecordingShortcut(for: generalActions[index]) },
-                        onReset: { viewModel.resetShortcut(generalActions[index]) }
+                        shortcut: model.shortcut(for: generalActions[index]),
+                        onRecord: { model.beginRecordingShortcut(for: generalActions[index]) },
+                        onReset: { model.resetShortcut(generalActions[index]) }
                     )
                 }
             }
@@ -177,9 +177,9 @@ struct SettingsShortcutsSection: View {
                     EditableShortcutRow(
                         title: title(for: browserActions[index]),
                         subtitle: subtitle(for: browserActions[index]),
-                        shortcut: viewModel.shortcut(for: browserActions[index]),
-                        onRecord: { viewModel.beginRecordingShortcut(for: browserActions[index]) },
-                        onReset: { viewModel.resetShortcut(browserActions[index]) }
+                        shortcut: model.shortcut(for: browserActions[index]),
+                        onRecord: { model.beginRecordingShortcut(for: browserActions[index]) },
+                        onReset: { model.resetShortcut(browserActions[index]) }
                     )
                 }
             }
@@ -204,12 +204,12 @@ struct SettingsShortcutsSection: View {
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
-        .sheet(item: $viewModel.recordingShortcutAction) { action in
+        .sheet(item: $model.recordingShortcutAction) { action in
             ShortcutRecorderSheet(
                 title: title(for: action),
-                currentShortcut: viewModel.shortcut(for: action),
-                onCancel: { viewModel.recordingShortcutAction = nil },
-                onSave: { shortcut in viewModel.updateShortcut(action, shortcut: shortcut) }
+                currentShortcut: model.shortcut(for: action),
+                onCancel: { model.recordingShortcutAction = nil },
+                onSave: { shortcut in model.updateShortcut(action, shortcut: shortcut) }
             )
         }
     }
@@ -248,7 +248,7 @@ struct SettingsShortcutsSection: View {
 }
 
 struct SettingsPreferencesSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: UserPreferencesFeatureModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -261,21 +261,21 @@ struct SettingsPreferencesSection: View {
             }
 
             SettingsGroup(title: "基本信息") {
-                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。首次启动且未设置时会读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
+                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。首次启动且未设置时会读取 macOS 账户名称，可手动更改。", text: $model.displayName)
                 Divider()
-                SettingsTextFieldRow(title: "时区", subtitle: "未设置时自动读取系统时区，用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+                SettingsTextFieldRow(title: "时区", subtitle: "未设置时自动读取系统时区，用于相对日期和日程上下文。", text: $model.timezone)
                 Divider()
-                SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
+                SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $model.preferredLanguage)
                 Divider()
-                SettingsGenderIdentityRow(viewModel: viewModel)
+                SettingsGenderIdentityRow(model: model)
                 Divider()
                 SettingsBirthDatePickerRow(
                     title: "出生日期",
                     subtitle: "可选。用于年龄、人生阶段和长期个性化上下文。",
-                    date: $viewModel.userBirthDatePickerDate,
-                    hasValue: !viewModel.userBirthDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    onDateChange: { viewModel.setUserBirthDateFromPicker($0) },
-                    onClear: { viewModel.clearUserBirthDate() }
+                    date: $model.birthDatePickerDate,
+                    hasValue: !model.birthDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    onDateChange: { model.setBirthDateFromPicker($0) },
+                    onClear: { model.clearBirthDate() }
                 )
                 Divider()
                 HStack {
@@ -287,21 +287,21 @@ struct SettingsPreferencesSection: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("重新读取空白项") { viewModel.refreshSystemPreferenceDefaults() }
+                    Button("重新读取空白项") { model.refreshSystemDefaults() }
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
                 }
             }
             SettingsGroup(title: "位置") {
-                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $viewModel.userCity)
+                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $model.city)
                 Divider()
-                SettingsTextFieldRow(title: "国家/地区", subtitle: "未设置时会优先从系统地区推断，也可手动更改。", text: $viewModel.userCountry)
+                SettingsTextFieldRow(title: "国家/地区", subtitle: "未设置时会优先从系统地区推断，也可手动更改。", text: $model.country)
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("当前位置")
                             .font(SettingsListTypography.rowTitleSelected)
-                        if let message = viewModel.userLocationStatusMessage {
+                        if let message = model.locationStatusMessage {
                             Text(message)
                                 .font(SettingsListTypography.rowCaption)
                                 .foregroundStyle(.secondary)
@@ -312,13 +312,13 @@ struct SettingsPreferencesSection: View {
                         }
                     }
                     Spacer()
-                    Button("使用当前位置") { viewModel.requestUserLocation() }
+                    Button("使用当前位置") { model.requestLocation() }
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
                 }
             }
             SettingsGroup(title: "备注") {
-                TextEditor(text: $viewModel.userPreferenceNotes)
+                TextEditor(text: $model.notes)
                     .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
                     .scrollContentBackground(.hidden)
@@ -330,7 +330,7 @@ struct SettingsPreferencesSection: View {
 }
 
 private struct SettingsGenderIdentityRow: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: UserPreferencesFeatureModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -346,8 +346,8 @@ private struct SettingsGenderIdentityRow: View {
                 Picker(
                     "性别",
                     selection: Binding(
-                        get: { viewModel.userGenderIdentitySelection },
-                        set: { viewModel.setUserGenderIdentitySelection($0) }
+                        get: { model.genderIdentitySelection },
+                        set: { model.setGenderIdentitySelection($0) }
                     )
                 ) {
                     Text("未设置").tag("")
@@ -358,7 +358,7 @@ private struct SettingsGenderIdentityRow: View {
                     Text("无性别").tag("无性别")
                     Text("酷儿 / 性别酷儿").tag("酷儿 / 性别酷儿")
                     Text("不愿透露").tag("不愿透露")
-                    Text("自我描述…").tag(AppViewModel.customGenderIdentitySelection)
+                    Text("自我描述…").tag(UserPreferencesFeatureModel.customGenderIdentitySelection)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -367,12 +367,12 @@ private struct SettingsGenderIdentityRow: View {
             }
             .frame(minHeight: SettingsListLayout.rowMinHeight)
 
-            if viewModel.userGenderIdentitySelection == AppViewModel.customGenderIdentitySelection {
+            if model.genderIdentitySelection == UserPreferencesFeatureModel.customGenderIdentitySelection {
                 TextField(
                     "请描述你的性别身份",
                     text: Binding(
-                        get: { viewModel.userGenderIdentityCustomText },
-                        set: { viewModel.setUserGenderIdentityCustomText($0) }
+                        get: { model.genderIdentityCustomText },
+                        set: { model.setGenderIdentityCustomText($0) }
                     )
                 )
                 .font(SettingsListTypography.rowTitle)
