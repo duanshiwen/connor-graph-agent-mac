@@ -14,6 +14,7 @@ struct CraftListPaneView: View {
     let taskAutomationModel: TaskAutomationFeatureModel
     let productOSControlModel: ProductOSControlFeatureModel
     let calendarFeatureModel: CalendarFeatureModel
+    let contactsFeatureModel: ContactsFeatureModel
     let rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
 
@@ -27,7 +28,7 @@ struct CraftListPaneView: View {
             case .calendar:
                 CraftCalendarListPane(model: calendarFeatureModel)
             case .contacts:
-                CraftContactsListPane(viewModel: viewModel)
+                CraftContactsListPane(model: contactsFeatureModel)
             case .rss:
                 CraftRSSListPane(model: rssFeatureModel)
             case .mail:
@@ -541,7 +542,7 @@ private struct CalendarEventButton: View {
 }
 
 struct CraftContactsListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ContactsFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -549,7 +550,7 @@ struct CraftContactsListPane: View {
                 Text("人际关系")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.presentNewPersonProfileEditor() }) {
+                Button(action: { model.presentNewProfileEditor() }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -561,11 +562,11 @@ struct CraftContactsListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            if viewModel.contactsBrowserPresentation.rows.isEmpty {
+            if model.presentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
-                ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
+                ContactsRowsScrollView(rows: model.presentation.rows, selectedID: model.selectedContactID, onSelect: { model.selectedContactID = $0 })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -2106,6 +2107,7 @@ struct CraftDetailPaneView: View {
     let taskAutomationModel: TaskAutomationFeatureModel
     let productOSControlModel: ProductOSControlFeatureModel
     let calendarFeatureModel: CalendarFeatureModel
+    let contactsFeatureModel: ContactsFeatureModel
     let rssFeatureModel: RSSFeatureModel
     var selection: SidebarItem
 
@@ -2141,7 +2143,7 @@ struct CraftDetailPaneView: View {
             case .calendar:
                 CalendarSourceSettingsView(model: calendarFeatureModel)
             case .contacts:
-                ContactsSourceSettingsView(viewModel: viewModel)
+                ContactsSourceSettingsView(model: contactsFeatureModel)
             case .mail:
                 MailSourceDetailView(viewModel: viewModel)
             case .rss:
@@ -2475,7 +2477,7 @@ private extension CalendarAttendeeResponseStatus {
 }
 
 struct ContactsSourceSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ContactsFeatureModel
 
     var body: some View {
         Group {
@@ -2484,9 +2486,9 @@ struct ContactsSourceSettingsView: View {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                         PersonProfileDetailHero(
                             row: selected,
-                            onEdit: { viewModel.presentEditPersonProfile(selected.id) },
-                            onAddRelationship: { viewModel.presentNewPersonRelationshipEditor(sourcePersonID: selected.id) },
-                            onDelete: { viewModel.pendingPersonProfileDeletionID = selected.id }
+                            onEdit: { model.presentEditProfile(selected.id) },
+                            onAddRelationship: { model.presentNewRelationshipEditor(sourcePersonID: selected.id) },
+                            onDelete: { model.pendingProfileDeletionID = selected.id }
                         )
 
                         PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
@@ -2502,8 +2504,8 @@ struct ContactsSourceSettingsView: View {
 
                         let relationshipRows = PersonRelationshipPresentation.rows(
                             for: selected.id,
-                            relationships: viewModel.personRelationships,
-                            displayTitle: { viewModel.displayTitle(for: $0) }
+                            relationships: model.relationships,
+                            displayTitle: { model.displayTitle(for: $0) }
                         )
                         if !relationshipRows.isEmpty {
                             PersonProfileInfoSection(title: "关系", systemImage: "person.2") {
@@ -2527,53 +2529,53 @@ struct ContactsSourceSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .sheet(isPresented: $viewModel.isPresentingPersonProfileEditor) {
-            if let draft = Binding($viewModel.editingPersonProfileDraft) {
+        .sheet(isPresented: $model.isPresentingProfileEditor) {
+            if let draft = Binding($model.editingProfileDraft) {
                 PersonProfileEditorView(
                     draft: draft,
                     onCancel: {
-                        viewModel.isPresentingPersonProfileEditor = false
-                        viewModel.editingPersonProfileDraft = nil
+                        model.isPresentingProfileEditor = false
+                        model.editingProfileDraft = nil
                     },
                     onSave: { draft in
-                        Task { @MainActor in await viewModel.savePersonProfileDraft(draft) }
+                        Task { @MainActor in await model.saveProfileDraft(draft) }
                     }
                 )
             }
         }
-        .sheet(isPresented: $viewModel.isPresentingPersonRelationshipEditor) {
-            if let draft = Binding($viewModel.editingPersonRelationshipDraft) {
+        .sheet(isPresented: $model.isPresentingRelationshipEditor) {
+            if let draft = Binding($model.editingRelationshipDraft) {
                 PersonRelationshipEditorView(
                     draft: draft,
                     sourceDisplayName: selectedContactRow?.displayName ?? "此人物",
-                    candidateProfiles: viewModel.personProfiles,
+                    candidateProfiles: model.profiles,
                     onCancel: {
-                        viewModel.isPresentingPersonRelationshipEditor = false
-                        viewModel.editingPersonRelationshipDraft = nil
+                        model.isPresentingRelationshipEditor = false
+                        model.editingRelationshipDraft = nil
                     },
                     onSave: { draft in
-                        Task { @MainActor in await viewModel.savePersonRelationshipDraft(draft) }
+                        Task { @MainActor in await model.saveRelationshipDraft(draft) }
                     }
                 )
             }
         }
         .confirmationDialog("删除人物档案？", isPresented: Binding(
-            get: { viewModel.pendingPersonProfileDeletionID != nil },
-            set: { if !$0 { viewModel.pendingPersonProfileDeletionID = nil } }
+            get: { model.pendingProfileDeletionID != nil },
+            set: { if !$0 { model.pendingProfileDeletionID = nil } }
         )) {
             Button("删除", role: .destructive) {
-                guard let id = viewModel.pendingPersonProfileDeletionID else { return }
-                Task { @MainActor in await viewModel.deletePersonProfile(id) }
+                guard let id = model.pendingProfileDeletionID else { return }
+                Task { @MainActor in await model.deleteProfile(id) }
             }
-            Button("取消", role: .cancel) { viewModel.pendingPersonProfileDeletionID = nil }
+            Button("取消", role: .cancel) { model.pendingProfileDeletionID = nil }
         } message: {
             Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
         }
     }
 
     private var selectedContactRow: NativeContactRowPresentation? {
-        guard let id = viewModel.selectedContactID else { return nil }
-        return viewModel.contactsBrowserPresentation.rows.first { $0.id == id }
+        guard let id = model.selectedContactID else { return nil }
+        return model.presentation.rows.first { $0.id == id }
     }
 }
 

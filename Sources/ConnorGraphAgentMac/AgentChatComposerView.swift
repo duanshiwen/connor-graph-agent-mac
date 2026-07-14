@@ -29,6 +29,7 @@ struct ComposerModelSelectionPresentation: Equatable, Sendable {
 
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var contactsFeatureModel: ContactsFeatureModel
     @Binding var isSessionInfoPresented: Bool
     var onExpandApprovalReview: ((AgentPendingApproval) -> Void)? = nil
     @State private var localChatInput: String = ""
@@ -412,7 +413,7 @@ struct AgentChatComposerView: View {
             VStack {
                 PersonMentionPickerView(
                     query: trigger.query,
-                    profiles: viewModel.personProfiles,
+                    profiles: contactsFeatureModel.profiles,
                     selectionIndex: personMentionPickerSelectionIndex,
                     onSelect: selectPersonMention
                 )
@@ -426,7 +427,7 @@ struct AgentChatComposerView: View {
 
     private var personMentionPickerResults: [PersonProfile] {
         guard let trigger = personMentionTrigger else { return [] }
-        return PersonMentionSearch().search(query: trigger.query, profiles: viewModel.personProfiles, limit: 8)
+        return PersonMentionSearch().search(query: trigger.query, profiles: contactsFeatureModel.profiles, limit: 8)
     }
 
     private func updatePersonMentionTrigger(for text: String) {

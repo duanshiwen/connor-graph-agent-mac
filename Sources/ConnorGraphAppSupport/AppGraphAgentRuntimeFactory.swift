@@ -29,6 +29,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var storagePaths: AppStoragePaths?
     public var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     public var calendarCredentialStore: AppCalendarCredentialStore?
+    public var personProfileStore: (any PersonProfileStore)?
     public var rssRuntime: RSSRuntime?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -43,6 +44,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         storagePaths: AppStoragePaths? = nil,
         calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore? = nil,
         calendarCredentialStore: AppCalendarCredentialStore? = nil,
+        personProfileStore: (any PersonProfileStore)? = nil,
         rssRuntime: RSSRuntime? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
@@ -56,6 +58,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.storagePaths = storagePaths
         self.calendarRuntimeStore = calendarRuntimeStore
         self.calendarCredentialStore = calendarCredentialStore
+        self.personProfileStore = personProfileStore
         self.rssRuntime = rssRuntime
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
@@ -117,6 +120,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     private func makePersonRegistryContactRuntime() -> (any AgentContactRuntime)? {
+        if let personProfileStore {
+            return PersonRegistryAgentContactRuntime(profileStore: personProfileStore)
+        }
         guard let storagePaths else { return nil }
         let databaseURL = storagePaths.applicationSupportDirectory
             .appendingPathComponent("contacts", isDirectory: true)

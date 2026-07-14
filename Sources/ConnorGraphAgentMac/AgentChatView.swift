@@ -742,6 +742,7 @@ private struct AgentChatConversationView: View {
 
             AgentChatComposerView(
                 viewModel: viewModel,
+                contactsFeatureModel: viewModel.contactsFeatureModel,
                 isSessionInfoPresented: $isSessionInfoPresented,
                 onExpandApprovalReview: { approval in
                     expandedApprovalID = approval.id
