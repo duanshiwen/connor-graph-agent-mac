@@ -32,11 +32,16 @@ struct ConnorGraphAgentMacApp: App {
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
-        let liveViewModel = AppViewModel.live()
+        let liveViewModel = AppStartupPerformance.measure("AppViewModelLive") {
+            AppViewModel.live()
+        }
         _viewModel = StateObject(wrappedValue: liveViewModel)
         _identityStore = StateObject(wrappedValue: AppUserIdentityStore())
-        _noteImportModel = StateObject(wrappedValue: liveViewModel.makeNoteImportViewModel())
+        _noteImportModel = StateObject(wrappedValue: AppStartupPerformance.measure("NoteImportModelConstruction") {
+            liveViewModel.makeNoteImportViewModel()
+        })
         featureFlags = AppFeatureFlags.load()
+        AppStartupPerformance.event("AppCompositionConstructed")
     }
 
     var body: some Scene {
@@ -49,9 +54,15 @@ struct ConnorGraphAgentMacApp: App {
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
+                    AppStartupPerformance.event("RootViewTaskStarted")
                     viewModel.startTaskSchedulerTimer()
-                    await noteImportModel.recoverPersistedJobs()
-                    await identityStore.restoreSession()
+                    await AppStartupPerformance.measure("NoteImportRecovery") {
+                        await noteImportModel.recoverPersistedJobs()
+                    }
+                    await AppStartupPerformance.measure("IdentityRestore") {
+                        await identityStore.restoreSession()
+                    }
+                    AppStartupPerformance.event("InitialRootTasksCompleted")
                 }
         }
         .windowToolbarStyle(.unifiedCompact)
