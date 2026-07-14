@@ -19,17 +19,6 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
-enum AppViewModelTaskCreationError: LocalizedError {
-    case missingRepository
-
-    var errorDescription: String? {
-        switch self {
-        case .missingRepository:
-            return "任务管理存储尚未初始化，请稍后重试。"
-        }
-    }
-}
-
 enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
     case queued
     case running
@@ -235,12 +224,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationConfig: ProductOSAutomationConfig = .default
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
-    @Published var taskManagementPresentation = TaskManagementUIPresentation(
-        summary: TaskManagementUISummary(totalTaskCount: 0, scheduledTaskCount: 0, eventTriggeredTaskCount: 0, systemTaskCount: 0, userTaskCount: 0, aiTaskCount: 0, stoppedTaskCount: 0, failedTaskCount: 0),
-        cards: []
-    )
-    @Published var selectedTaskAutomationID: String?
-    @Published var isRunningScheduledTasks: Bool = false
+    let taskAutomationModel: TaskAutomationFeatureModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     @Published var calendarBrowserPresentation: NativeCalendarBrowserPresentation = .empty
     @Published var calendarSearchQuery: String = ""
@@ -366,7 +350,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
-    private var taskManagementRepository: AppTaskManagementRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
     private var browserBookmarkStore: BrowserBookmarkStore?
@@ -2223,6 +2206,9 @@ final class AppViewModel: NSObject, ObservableObject {
             repository: repository
         )
         self.repository = repository
+        self.taskAutomationModel = TaskAutomationFeatureModel(
+            repository: storagePaths.map { AppTaskManagementRepository(storagePaths: $0) }
+        )
         self.sourceRuntimeModel = SourceRuntimeFeatureModel(
             repository: storagePaths.map { AppMCPSourceRuntimeRepository(storagePaths: $0) }
         )
@@ -2264,7 +2250,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
-            self.taskManagementRepository = AppTaskManagementRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
             self.rssRuntime = RSSRuntime(
@@ -2361,6 +2346,19 @@ final class AppViewModel: NSObject, ObservableObject {
         graphDiagnosticsModel.onPromotedSnapshot = { [weak self] snapshot in
             self?.applyPromotedGraphSnapshot(snapshot)
         }
+        taskAutomationModel.createdBySessionIDProvider = { [weak self] in
+            guard let self else { return "" }
+            return self.selectedChatSessionID ?? self.activeChatSession.id
+        }
+        taskAutomationModel.onEvent = { [weak self] event in
+            self?.objectWillChange.send()
+            switch event {
+            case .operationSucceeded:
+                self?.errorMessage = nil
+            case .operationFailed(let message):
+                self?.errorMessage = message
+            }
+        }
         sourceRuntimeModel.workingDirectoryURLProvider = { [weak self] in
             self?.primaryWorkspaceRootDraft
                 .map(\.path)
@@ -2403,11 +2401,11 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadProductOSRegistry()
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
-        reloadTaskManagementPresentation()
+        taskAutomationModel.reload()
         Task { @MainActor in
             do {
                 try await reconcileSourceRefreshTasks()
-                reloadTaskManagementPresentation()
+                taskAutomationModel.reload()
             } catch {
                 errorMessage = String(describing: error)
             }
@@ -2571,98 +2569,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func reloadTaskManagementPresentation() {
-        do {
-            guard let taskManagementRepository else { return }
-            let tasks = try taskManagementRepository.loadOrCreateDefault()
-            let history = try taskManagementRepository.loadRunHistory(taskID: nil, limit: 100)
-            taskManagementPresentation = TaskManagementUIPresentation.build(tasks: tasks, runHistory: history)
-            if let selectedTaskAutomationID,
-               !taskManagementPresentation.cards.contains(where: { $0.id == selectedTaskAutomationID }) {
-                self.selectedTaskAutomationID = nil
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    @discardableResult
-    func createScheduledSessionMessageTask(
-        name: String,
-        runAt: Date,
-        recurrence: ConnorTaskRecurrence,
-        message: String,
-        title: String,
-        rationale: String?
-    ) throws -> String {
-        guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
-        let task = try TaskCreationService(repository: taskManagementRepository).createScheduledSessionMessageTask(
-            origin: .user,
-            name: name,
-            runAt: runAt,
-            recurrence: recurrence,
-            timezoneIdentifier: TimeZone.current.identifier,
-            message: message,
-            title: title,
-            createdBySessionID: selectedChatSessionID ?? activeChatSession.id,
-            rationale: rationale
-        )
-        reloadTaskManagementPresentation()
-        selectedTaskAutomationID = task.id
-        return task.id
-    }
-
-    @discardableResult
-    func createSessionStatusMessageTask(
-        name: String,
-        toStatus: String,
-        message: String,
-        sessionID: String?,
-        rationale: String?
-    ) throws -> String {
-        guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
-        let task = try TaskCreationService(repository: taskManagementRepository).createSessionStatusMessageTask(
-            origin: .user,
-            name: name,
-            toStatus: toStatus,
-            message: message,
-            sessionID: sessionID,
-            createdBySessionID: selectedChatSessionID ?? activeChatSession.id,
-            rationale: rationale
-        )
-        reloadTaskManagementPresentation()
-        selectedTaskAutomationID = task.id
-        return task.id
-    }
-
-    func stopTask(_ id: String) {
-        do {
-            _ = try taskManagementRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
-            reloadTaskManagementPresentation()
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func restoreTask(_ id: String) {
-        do {
-            _ = try taskManagementRepository?.restoreTask(id: id)
-            reloadTaskManagementPresentation()
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func deleteTask(_ id: String) {
-        do {
-            _ = try taskManagementRepository?.deleteTask(id: id, reason: "Deleted from Task Management UI")
-            reloadTaskManagementPresentation()
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func startTaskSchedulerTimer() {
         guard taskSchedulerTimer == nil else { return }
         Task { await runScheduledTasksNow() }
@@ -2679,10 +2585,12 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func runScheduledTasksNow() async {
-        guard !isRunningScheduledTasks else { return }
-        guard let taskManagementRepository else { return }
-        isRunningScheduledTasks = true
-        defer { isRunningScheduledTasks = false }
+        guard taskAutomationModel.beginScheduledTaskRun() else { return }
+        guard let taskManagementRepository = taskAutomationModel.repository else {
+            taskAutomationModel.endScheduledTaskRun()
+            return
+        }
+        defer { taskAutomationModel.endScheduledTaskRun() }
         let runner = TaskTargetRunner.appRuntime(
             mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
@@ -2710,7 +2618,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let scheduler = TaskSchedulerService()
             let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: scheduler, runner: runner)
             _ = try await service.runDueTasks()
-            reloadTaskManagementPresentation()
+            taskAutomationModel.reload()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2723,13 +2631,13 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
-        guard let taskManagementRepository else { return }
+        guard let taskManagementRepository = taskAutomationModel.repository else { return }
         let materializer = SourceRefreshTaskMaterializer(taskRepository: taskManagementRepository, rssSourceRepository: rssRuntime.repository)
         _ = try await materializer.reconcileRSSSourceRefreshTasks(now: now)
     }
 
     private func reconcileCalendarAccountRefreshTasks(now: Date = Date()) async throws {
-        guard let taskManagementRepository else { return }
+        guard let taskManagementRepository = taskAutomationModel.repository else { return }
         let materializer = CalendarRefreshTaskMaterializer(
             taskRepository: taskManagementRepository,
             calendarSourceRepository: CalendarAccountSnapshotRepository(accounts: calendarAccounts)
@@ -2738,7 +2646,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func reconcileMailAccountRefreshTasks(now: Date = Date()) async throws {
-        guard let taskManagementRepository, let mailStore else { return }
+        guard let taskManagementRepository = taskAutomationModel.repository, let mailStore else { return }
         let materializer = MailRefreshTaskMaterializer(taskRepository: taskManagementRepository, mailSourceRepository: mailStore)
         _ = try await materializer.reconcileMailAccountRefreshTasks(now: now)
     }
@@ -3179,10 +3087,10 @@ final class AppViewModel: NSObject, ObservableObject {
         await reloadMailBrowserPresentation()
         do {
             try await reconcileMailAccountRefreshTasks()
-            reloadTaskManagementPresentation()
+            taskAutomationModel.reload()
             let summary = try await refreshMailForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil)
             mailSyncMessage = summary
-            reloadTaskManagementPresentation()
+            taskAutomationModel.reload()
         } catch {
             let message = String(describing: error)
             mailSyncMessage = "邮箱已添加，但同步失败：\(message)"
@@ -3378,7 +3286,7 @@ final class AppViewModel: NSObject, ObservableObject {
             upsertSystemCalendarSnapshot(snapshot)
             await persistCalendarSnapshot()
             try await reconcileCalendarAccountRefreshTasks()
-            reloadTaskManagementPresentation()
+            taskAutomationModel.reload()
             calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
             errorMessage = nil
             isSyncingSystemCalendar = false
@@ -3512,7 +3420,7 @@ final class AppViewModel: NSObject, ObservableObject {
             await persistCalendarSnapshot()
             do {
                 try await reconcileCalendarAccountRefreshTasks(now: now)
-                reloadTaskManagementPresentation()
+                taskAutomationModel.reload()
             } catch {
                 errorMessage = String(describing: error)
             }
@@ -3542,7 +3450,7 @@ final class AppViewModel: NSObject, ObservableObject {
             do {
                 try await reconcileCalendarAccountRefreshTasks()
                 reloadCalendarBrowserPresentation()
-                reloadTaskManagementPresentation()
+                taskAutomationModel.reload()
             } catch {
                 calendarSyncMessage = "日历源同步失败：\(error.localizedDescription)"
             }
@@ -3576,7 +3484,7 @@ final class AppViewModel: NSObject, ObservableObject {
             await persistCalendarSnapshot()
             do {
                 try await reconcileCalendarAccountRefreshTasks()
-                reloadTaskManagementPresentation()
+                taskAutomationModel.reload()
             } catch {
                 errorMessage = String(describing: error)
             }
@@ -3655,7 +3563,7 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = "RSS 订阅源已添加，但首次抓取失败：\(error.localizedDescription)"
         }
         try await reconcileRSSSourceRefreshTasks()
-        reloadTaskManagementPresentation()
+        taskAutomationModel.reload()
         await reloadRSSBrowserPresentation()
     }
 
@@ -3668,7 +3576,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.selectedRSSItemID = selectedRSSItemID
         }
         try await reconcileRSSSourceRefreshTasks()
-        reloadTaskManagementPresentation()
+        taskAutomationModel.reload()
         errorMessage = nil
         await reloadRSSBrowserPresentation()
     }
@@ -3683,7 +3591,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     self.selectedRSSItemID = nil
                 }
                 try await reconcileSourceRefreshTasks()
-                reloadTaskManagementPresentation()
+                taskAutomationModel.reload()
                 pendingRSSSourceDeletion = nil
                 errorMessage = nil
                 await reloadRSSBrowserPresentation()
@@ -6248,7 +6156,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func dispatchTaskSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String) {
-        guard let taskManagementRepository else { return }
+        guard let taskManagementRepository = taskAutomationModel.repository else { return }
         let runner = TaskTargetRunner.appRuntime(
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
@@ -6267,7 +6175,7 @@ final class AppViewModel: NSObject, ObservableObject {
             do {
                 let dispatcher = TaskEventDispatcher(repository: taskManagementRepository, runner: runner)
                 _ = try await dispatcher.dispatchSessionStatusChanged(sessionID: sessionID, fromStatus: fromStatus, toStatus: toStatus)
-                reloadTaskManagementPresentation()
+                taskAutomationModel.reload()
             } catch {
                 errorMessage = String(describing: error)
             }
