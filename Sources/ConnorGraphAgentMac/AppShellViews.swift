@@ -27,8 +27,11 @@ struct AppShellView: View {
 
     var body: some View {
         Group {
-            if viewModel.showWelcomePlaceholder {
-                WelcomeLLMView(viewModel: viewModel)
+            if viewModel.aiConnectionsModel.showsWelcome {
+                WelcomeLLMView(
+                    model: viewModel.aiConnectionsModel,
+                    openURL: viewModel.openURLInSystemDefaultBrowser
+                )
             } else {
                 HSplitView {
                     if isPrimarySidebarVisible {

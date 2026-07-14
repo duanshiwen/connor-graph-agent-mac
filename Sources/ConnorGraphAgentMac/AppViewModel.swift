@@ -173,27 +173,70 @@ final class AppViewModel: NSObject, ObservableObject {
     let chatFeatureModel: ChatFeatureModel
     @Published var errorMessage: String?
     @Published var databasePath: String?
-    @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = []
-    @Published var llmDefaultConnectionID: String = ""
-    @Published var llmConnectionName: String = ""
-    @Published var llmProviderMode: AppLLMProviderMode = .openAICompatible
-    @Published var llmBaseURLString: String = ""
-    @Published var llmModel: String = ""
-    @Published var llmSelectedModel: String = ""
-    @Published var llmShouldFetchModelsList: Bool = true
-    @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
-    @Published var llmAPIKeyInput: String = ""
-    @Published var llmHasAPIKey: Bool = false
+    let aiConnectionsModel: AIConnectionsFeatureModel
+    var llmConnectionConfigs: [AppLLMConnectionConfig] {
+        get { aiConnectionsModel.connectionConfigs }
+        set { aiConnectionsModel.connectionConfigs = newValue }
+    }
+    var llmDefaultConnectionID: String {
+        get { aiConnectionsModel.defaultConnectionID }
+        set { aiConnectionsModel.defaultConnectionID = newValue }
+    }
+    var llmConnectionName: String {
+        get { aiConnectionsModel.connectionName }
+        set { aiConnectionsModel.connectionName = newValue }
+    }
+    var llmProviderMode: AppLLMProviderMode {
+        get { aiConnectionsModel.providerMode }
+        set { aiConnectionsModel.providerMode = newValue }
+    }
+    var llmBaseURLString: String {
+        get { aiConnectionsModel.baseURLString }
+        set { aiConnectionsModel.baseURLString = newValue }
+    }
+    var llmModel: String {
+        get { aiConnectionsModel.model }
+        set { aiConnectionsModel.model = newValue }
+    }
+    var llmSelectedModel: String {
+        get { aiConnectionsModel.selectedModel }
+        set { aiConnectionsModel.selectedModel = newValue }
+    }
+    var llmShouldFetchModelsList: Bool {
+        get { aiConnectionsModel.shouldFetchModelsList }
+        set { aiConnectionsModel.shouldFetchModelsList = newValue }
+    }
+    var llmThinkingLevel: AppLLMThinkingLevel {
+        get { aiConnectionsModel.thinkingLevel }
+        set { aiConnectionsModel.thinkingLevel = newValue }
+    }
+    var llmAPIKeyInput: String {
+        get { aiConnectionsModel.apiKeyInput }
+        set { aiConnectionsModel.apiKeyInput = newValue }
+    }
+    var llmHasAPIKey: Bool {
+        get { aiConnectionsModel.hasAPIKey }
+        set { aiConnectionsModel.hasAPIKey = newValue }
+    }
     @Published var agentPermissionMode: AgentPermissionMode = .readOnly
-    @Published var llmSettingsMessage: String?
-    @Published var llmHealthCheckMessage: String?
-    @Published var isTestingLLMConnection: Bool = false
-    @Published private(set) var lastAddedLLMConnectionID: String?
-    @Published private(set) var lastAddedLLMCapabilityEvidence: [AppProviderCapabilityEvidence] = []
-    @Published var isAddingLLMConnection: Bool = false
-    @Published var llmModelConnections: [AppLLMModelConnection] = []
-    @Published var isLoadingLLMModelConnections: Bool = false
-    @Published var showWelcomePlaceholder: Bool = true
+    var llmSettingsMessage: String? {
+        get { aiConnectionsModel.settingsMessage }
+        set { aiConnectionsModel.settingsMessage = newValue }
+    }
+    var llmHealthCheckMessage: String? {
+        get { aiConnectionsModel.healthCheckMessage }
+        set { aiConnectionsModel.healthCheckMessage = newValue }
+    }
+    var isTestingLLMConnection: Bool { aiConnectionsModel.isTestingConnection }
+    var lastAddedLLMConnectionID: String? { aiConnectionsModel.lastAddedConnectionID }
+    var lastAddedLLMCapabilityEvidence: [AppProviderCapabilityEvidence] { aiConnectionsModel.lastAddedCapabilityEvidence }
+    var isAddingLLMConnection: Bool { aiConnectionsModel.isAddingConnection }
+    var llmModelConnections: [AppLLMModelConnection] { aiConnectionsModel.modelConnections }
+    var isLoadingLLMModelConnections: Bool { aiConnectionsModel.isLoadingModelConnections }
+    var showWelcomePlaceholder: Bool {
+        get { aiConnectionsModel.showsWelcome }
+        set { aiConnectionsModel.showsWelcome = newValue }
+    }
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     let productOSControlModel: ProductOSControlFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
@@ -217,7 +260,7 @@ final class AppViewModel: NSObject, ObservableObject {
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
     var focusTopSearchRequestID: UUID? { shellFeatureModel.focusTopSearchRequestID }
-    @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
+    var settingsSectionMessageStore: SettingsSectionMessageStore { shellFeatureModel.settingsSectionMessageStore }
     @Published var memoryOSSearchHealthSummary: String?
     @Published private(set) var isMemoryOSSearchIndexRepairing = false
 
@@ -231,11 +274,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var storagePaths: AppStoragePaths?
     private let runtimeSettingsCoordinator: RuntimeSettingsPersistenceCoordinator
     private var loadedLoopConfiguration = AgentLoopConfiguration()
-    private var llmSettingsRepository: AppLLMSettingsRepository
-    private var llmProviderHealthChecker: AppLLMProviderHealthChecker
-    private var providerCapabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
-    private var providerCapabilityDiscoveryService: AppProviderCapabilityDiscoveryService
-    private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
+    private var llmSettingsRepository: AppLLMSettingsRepository { aiConnectionsModel.settingsRepository }
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     private var applicationDidFinishLaunchingObserver: NSObjectProtocol?
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
@@ -1049,6 +1088,10 @@ final class AppViewModel: NSObject, ObservableObject {
         llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
         self.shellFeatureModel = AppShellFeatureModel()
+        self.aiConnectionsModel = AIConnectionsFeatureModel(
+            settingsRepository: llmSettingsRepository,
+            setupServiceFactory: llmConnectionSetupServiceFactory
+        )
         self.chatFeatureModel = ChatFeatureModel()
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
@@ -1143,26 +1186,6 @@ final class AppViewModel: NSObject, ObservableObject {
         )
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
-        self.llmSettingsRepository = llmSettingsRepository
-        self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
-        let capabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(
-            settingsStore: llmSettingsRepository.settingsStore,
-            credentialStore: llmSettingsRepository.credentialStore
-        )
-        self.providerCapabilityEvidenceRepository = capabilityEvidenceRepository
-        self.providerCapabilityDiscoveryService = AppProviderCapabilityDiscoveryService(
-            settingsRepository: llmSettingsRepository,
-            evidenceRepository: capabilityEvidenceRepository
-        )
-        self.llmConnectionSetupServiceFactory = llmConnectionSetupServiceFactory ?? { repository in
-            AppLLMConnectionSetupService(
-                settingsRepository: repository,
-                capabilityDiscoveryService: AppProviderCapabilityDiscoveryService(
-                    settingsRepository: repository,
-                    evidenceRepository: capabilityEvidenceRepository
-                )
-            )
-        }
         if let storagePaths {
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
@@ -1197,6 +1220,17 @@ final class AppViewModel: NSObject, ObservableObject {
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
         super.init()
+        aiConnectionsModel.onRuntimeSettingsChanged = { [weak self] rebuildRuntime in
+            guard let self else { return }
+            if rebuildRuntime {
+                self.rebuildNativeSessionManagerForActiveSession()
+            } else {
+                self.nativeSessionManager?.permissionMode = self.agentPermissionMode
+            }
+        }
+        aiConnectionsModel.onConnectionSetup = { [weak self] connection in
+            self?.syncActiveSessionLLMOverride(to: connection)
+        }
         if startupMode == .immediate {
             registerMaintenanceObserversIfNeeded()
         }
@@ -1245,7 +1279,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.objectWillChange.send()
             switch event {
             case .operationSucceeded:
-                self.errorMessage = nil
+                break
             case .operationFailed(let message):
                 self.errorMessage = message
             case .registryChanged(let kind, let entryID, let status, let message, let automationContext):
@@ -1348,7 +1382,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self?.objectWillChange.send()
             switch event {
             case .operationSucceeded:
-                self?.errorMessage = nil
+                break
             case .operationFailed(let message):
                 self?.errorMessage = message
             }
@@ -1363,7 +1397,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self?.objectWillChange.send()
             switch event {
             case .operationSucceeded:
-                self?.errorMessage = nil
+                break
             case .operationFailed(let message):
                 self?.errorMessage = message
             }
@@ -1441,7 +1475,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self?.objectWillChange.send()
             switch event {
             case .operationSucceeded:
-                self?.errorMessage = nil
+                break
             case .operationFailed(let message):
                 self?.errorMessage = message
             }
@@ -1503,21 +1537,7 @@ final class AppViewModel: NSObject, ObservableObject {
             if let failureMessage = result.failureMessage { errorMessage = failureMessage }
             return
         }
-        let connection = settings.defaultConnection
-        llmConnectionConfigs = settings.connections
-        llmDefaultConnectionID = settings.defaultConnectionID
-        llmConnectionName = connection?.name ?? ""
-        llmProviderMode = connection?.providerMode ?? .openAICompatible
-        llmBaseURLString = connection?.baseURLString ?? ""
-        llmModel = connection?.model ?? ""
-        llmSelectedModel = connection?.effectiveModel ?? ""
-        llmShouldFetchModelsList = connection?.shouldFetchModelsList ?? true
-        llmThinkingLevel = settings.defaultThinkingLevel
-        llmHasAPIKey = connection?.hasAPIKey ?? false
-        llmAPIKeyInput = ""
-        llmSettingsMessage = nil
-        llmHealthCheckMessage = nil
-        showWelcomePlaceholder = settings.connections.isEmpty
+        aiConnectionsModel.apply(settings)
     }
 
     private func applyInteractiveRuntimeSettings(_ result: StartupDomainResult<AgentRuntimeSettings>) {
@@ -1535,7 +1555,7 @@ final class AppViewModel: NSObject, ObservableObject {
         userPreferencesModel.apply(settings.preferences)
         let shouldPersistSystemDefaults = userPreferencesModel.fillEmptyFieldsFromSystem()
         browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
-        settingsSectionMessageStore = SettingsSectionMessageStore()
+        shellFeatureModel.clearAllSettingsMessages()
         isLoadingRuntimeSettings = false
         if hasActivatedRuntimeSettingsSideEffects { applyRuntimeSettingsSideEffects() }
         if shouldPersistSystemDefaults { scheduleRuntimeSettingsAutosave() }
@@ -1654,10 +1674,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 self?.refreshDockBadge()
             }
         }
-    }
-
-    isolated deinit {
-        shutdownRuntimeResources()
     }
 
     func shutdownRuntimeResourcesForTests() {
@@ -2087,46 +2103,20 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func loadLLMSettings() {
-        do {
-            let settings = try llmSettingsRepository.loadSettings()
-            let connection = settings.defaultConnection
-            llmConnectionConfigs = settings.connections
-            llmDefaultConnectionID = settings.defaultConnectionID
-            llmConnectionName = connection?.name ?? ""
-            llmProviderMode = connection?.providerMode ?? .openAICompatible
-            llmBaseURLString = connection?.baseURLString ?? ""
-            llmModel = connection?.model ?? ""
-            llmSelectedModel = connection?.effectiveModel ?? ""
-            llmShouldFetchModelsList = connection?.shouldFetchModelsList ?? true
-            llmThinkingLevel = settings.defaultThinkingLevel
-            llmHasAPIKey = connection?.hasAPIKey ?? false
-            llmAPIKeyInput = ""
-            llmSettingsMessage = nil
-            llmHealthCheckMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        aiConnectionsModel.loadSettings()
+        if let message = aiConnectionsModel.errorMessage { errorMessage = message }
     }
 
     func reloadLLMModelConnections() async {
-        isLoadingLLMModelConnections = true
-        defer { isLoadingLLMModelConnections = false }
-        let catalog = AppLLMModelCatalog(settingsRepository: llmSettingsRepository, httpClient: URLSessionAgentHTTPClient())
-        llmModelConnections = await catalog.loadConnections()
+        await aiConnectionsModel.reloadModelConnections()
     }
 
     func updateWelcomeState() {
-        do {
-            let settings = try llmSettingsRepository.loadSettings()
-            showWelcomePlaceholder = settings.connections.isEmpty
-        } catch {
-            showWelcomePlaceholder = llmConnectionConfigs.isEmpty
-        }
+        aiConnectionsModel.updateWelcomeState()
     }
 
     func handleSuccessfulLLMSetup() {
-        loadLLMSettings()
-        showWelcomePlaceholder = false
+        aiConnectionsModel.handleSuccessfulSetup()
     }
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
@@ -2158,17 +2148,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func selectDefaultLLMConnection(_ connectionID: String) {
-        guard let connection = llmConnectionConfigs.first(where: { $0.id == connectionID }) else { return }
-        llmDefaultConnectionID = connection.id
-        llmConnectionName = connection.name
-        llmProviderMode = connection.providerMode
-        llmBaseURLString = connection.baseURLString
-        llmModel = connection.model
-        llmSelectedModel = connection.effectiveModel
-        llmShouldFetchModelsList = connection.shouldFetchModelsList
-        llmHasAPIKey = connection.hasAPIKey
-        llmAPIKeyInput = ""
-        persistLLMSettings(rebuildRuntime: true)
+        aiConnectionsModel.selectDefaultConnection(connectionID)
     }
 
     func selectLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
@@ -2197,20 +2177,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func selectDefaultLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
-        do {
-            let existing = (try? llmSettingsRepository.loadSettings()) ?? .default
-            let settings = AppLLMSettings(
-                connections: existing.connections,
-                defaultConnectionID: existing.defaultConnectionID,
-                defaultThinkingLevel: level
-            )
-            try llmSettingsRepository.save(settings: settings, apiKey: nil)
-            llmThinkingLevel = level
-            rebuildNativeSessionManagerForActiveSession()
-            llmSettingsMessage = "默认思考强度已保存。"
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        aiConnectionsModel.selectDefaultThinkingLevel(level)
+        if let message = aiConnectionsModel.errorMessage { errorMessage = message }
     }
 
     @discardableResult
@@ -2267,23 +2235,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     @discardableResult
     func setupLLMConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
-        isAddingLLMConnection = true
-        defer { isAddingLLMConnection = false }
-        let service = llmConnectionSetupServiceFactory(llmSettingsRepository)
-        let result = try await service.setupConnection(input)
-        lastAddedLLMConnectionID = result.connection.id
-        lastAddedLLMCapabilityEvidence = result.capabilityEvidence
-        loadLLMSettings()
-        syncActiveSessionLLMOverride(to: result.connection)
-        updateWelcomeState()
-        rebuildNativeSessionManagerForActiveSession()
-        await reloadLLMModelConnections()
-        let verifiedCount = result.capabilityEvidence.filter { $0.status == .verified }.count
-        let capabilitySuffix = result.capabilityEvidence.isEmpty ? "" : "；已发现 \(verifiedCount)/\(result.capabilityEvidence.count) 项可用能力。"
-        llmSettingsMessage = result.message + capabilitySuffix
-        llmHealthCheckMessage = result.message + capabilitySuffix
-        errorMessage = nil
-        return result.connection
+        let connection = try await aiConnectionsModel.setupConnection(input)
+        errorMessage = aiConnectionsModel.errorMessage
+        return connection
     }
 
     @discardableResult
@@ -2324,121 +2278,32 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func deleteLLMConnection(_ connectionID: String) {
-        guard llmConnectionConfigs.count > 1 else {
-            llmSettingsMessage = "至少需要保留一个 AI 连接。"
-            return
-        }
-        guard llmConnectionConfigs.contains(where: { $0.id == connectionID }) else { return }
-        let wasDefault = connectionID == llmDefaultConnectionID
-        llmConnectionConfigs.removeAll { $0.id == connectionID }
-        try? llmSettingsRepository.clearAPIKey(connectionID: connectionID)
-        try? providerCapabilityEvidenceRepository.invalidate(connectionID: connectionID)
-        if wasDefault {
-            llmDefaultConnectionID = llmConnectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
-        }
-        persistLLMSettings(rebuildRuntime: true)
+        aiConnectionsModel.deleteConnection(connectionID)
+        errorMessage = aiConnectionsModel.errorMessage
     }
 
     func capabilityDetailPresentation(for connectionID: String) -> AppProviderCapabilityDetailPresentation? {
-        guard let connection = llmConnectionConfigs.first(where: { $0.id == connectionID }) else { return nil }
-        return providerCapabilityEvidenceRepository.detailPresentation(for: connection)
+        aiConnectionsModel.capabilityDetailPresentation(for: connectionID)
     }
 
     func renameLLMConnection(_ connectionID: String, name: String) {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty,
-              let index = llmConnectionConfigs.firstIndex(where: { $0.id == connectionID }) else { return }
-
-        var renamedConnection = llmConnectionConfigs[index]
-        guard renamedConnection.name != trimmedName else { return }
-        renamedConnection.name = trimmedName
-
-        do {
-            try llmSettingsRepository.updateConnection(renamedConnection)
-            loadLLMSettings()
-            rebuildNativeSessionManagerForActiveSession()
-            Task { await reloadLLMModelConnections() }
-            llmSettingsMessage = "连接名称已更新。"
-            llmHealthCheckMessage = nil
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        aiConnectionsModel.renameConnection(connectionID, name: name)
+        errorMessage = aiConnectionsModel.errorMessage
     }
 
     private func persistLLMSettings(rebuildRuntime: Bool) {
-        do {
-            let existing = (try? llmSettingsRepository.loadSettings()) ?? .default
-            var connections = llmConnectionConfigs.isEmpty ? existing.connections : llmConnectionConfigs
-            let targetID = llmDefaultConnectionID.isEmpty ? existing.defaultConnectionID : llmDefaultConnectionID
-            let updatedConnection = AppLLMConnectionConfig(
-                id: targetID,
-                name: llmConnectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? (connections.first(where: { $0.id == targetID })?.name ?? (llmProviderMode == .openAICompatible ? "OpenAI Compatible" : "Claude"))
-                    : llmConnectionName.trimmingCharacters(in: .whitespacesAndNewlines),
-                providerMode: llmProviderMode,
-                baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
-                model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                selectedModel: llmSelectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                hasAPIKey: llmHasAPIKey,
-                shouldFetchModelsList: llmShouldFetchModelsList
-            )
-            if let index = connections.firstIndex(where: { $0.id == targetID }) {
-                connections[index] = updatedConnection
-            } else {
-                connections.append(updatedConnection)
-            }
-            let settings = AppLLMSettings(connections: connections, defaultConnectionID: targetID, defaultThinkingLevel: llmThinkingLevel)
-            llmConnectionConfigs = settings.connections
-            llmDefaultConnectionID = settings.defaultConnectionID
-            let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
-            loadLLMSettings()
-            updateWelcomeState()
-            if rebuildRuntime {
-                let session = activeChatSession
-                fallbackChatSession = session
-                nativeSessionManager = makeNativeSessionManager(for: session)
-            } else {
-                nativeSessionManager?.permissionMode = agentPermissionMode
-            }
-            llmSettingsMessage = "模型设置已保存。"
-            llmHealthCheckMessage = nil
-            errorMessage = nil
-            Task { await reloadLLMModelConnections() }
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        aiConnectionsModel.persistSettings(rebuildRuntime: rebuildRuntime)
+        errorMessage = aiConnectionsModel.errorMessage
     }
 
     func clearLLMAPIKey() {
-        do {
-            try llmSettingsRepository.clearAPIKey()
-            loadLLMSettings()
-            updateWelcomeState()
-            let session = activeChatSession
-            fallbackChatSession = session
-            nativeSessionManager = makeNativeSessionManager(for: session)
-            llmSettingsMessage = "API Key 已清除。"
-            llmHealthCheckMessage = nil
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        aiConnectionsModel.clearAPIKey()
+        errorMessage = aiConnectionsModel.errorMessage
     }
 
     func testLLMConnection() async {
-        isTestingLLMConnection = true
-        defer { isTestingLLMConnection = false }
-        llmHealthCheckMessage = nil
-        let result = await llmProviderHealthChecker.testConnection()
-        llmHealthCheckMessage = result.message
-        switch result.status {
-        case .success:
-            errorMessage = nil
-        case .notConfigured, .failed:
-            errorMessage = result.message
-        }
+        await aiConnectionsModel.testConnection()
+        errorMessage = aiConnectionsModel.errorMessage
     }
 
     func selectSettingsSection(_ section: ConnorSettingsSection) {
@@ -2446,19 +2311,15 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func settingsMessage(for section: ConnorSettingsSection) -> String? {
-        settingsSectionMessageStore.message(for: section)
+        shellFeatureModel.settingsMessage(for: section)
     }
 
     func setSettingsMessage(_ message: String?, for section: ConnorSettingsSection) {
-        var store = settingsSectionMessageStore
-        store.set(message, for: section)
-        settingsSectionMessageStore = store
+        shellFeatureModel.setSettingsMessage(message, for: section)
     }
 
     func clearSettingsMessage(for section: ConnorSettingsSection) {
-        var store = settingsSectionMessageStore
-        store.clear(for: section)
-        settingsSectionMessageStore = store
+        shellFeatureModel.clearSettingsMessage(for: section)
     }
 
     var effectiveLoopConfiguration: AgentLoopConfiguration {
@@ -2696,7 +2557,7 @@ final class AppViewModel: NSObject, ObservableObject {
         userPreferencesModel.apply(settings.preferences)
         let shouldPersistSystemDefaults = userPreferencesModel.fillEmptyFieldsFromSystem()
         browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
-        settingsSectionMessageStore = SettingsSectionMessageStore()
+        shellFeatureModel.clearAllSettingsMessages()
         errorMessage = nil
         isLoadingRuntimeSettings = false
         if hasActivatedRuntimeSettingsSideEffects { applyRuntimeSettingsSideEffects() }
@@ -2735,7 +2596,7 @@ final class AppViewModel: NSObject, ObservableObject {
         } else {
             nativeSessionManager?.permissionMode = settings.loop.permissionMode
         }
-        settingsSectionMessageStore = SettingsSectionMessageStore()
+        shellFeatureModel.clearAllSettingsMessages()
         errorMessage = nil
     }
 

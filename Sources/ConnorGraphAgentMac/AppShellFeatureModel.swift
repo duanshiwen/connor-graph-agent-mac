@@ -8,6 +8,7 @@ final class AppShellFeatureModel {
     var selection: SidebarItem? = .agentChat
     var selectedSettingsSection: ConnorSettingsSection = .app
     private(set) var focusTopSearchRequestID: UUID?
+    private(set) var settingsSectionMessageStore = SettingsSectionMessageStore()
 
     func select(_ item: SidebarItem) {
         selection = item
@@ -20,6 +21,22 @@ final class AppShellFeatureModel {
 
     func requestTopSearchFocus() {
         focusTopSearchRequestID = UUID()
+    }
+
+    func settingsMessage(for section: ConnorSettingsSection) -> String? {
+        settingsSectionMessageStore.message(for: section)
+    }
+
+    func setSettingsMessage(_ message: String?, for section: ConnorSettingsSection) {
+        settingsSectionMessageStore.set(message, for: section)
+    }
+
+    func clearSettingsMessage(for section: ConnorSettingsSection) {
+        settingsSectionMessageStore.clear(for: section)
+    }
+
+    func clearAllSettingsMessages() {
+        settingsSectionMessageStore = SettingsSectionMessageStore()
     }
 
     func applyNavigation(_ item: ConnorNativeShellItem) {
