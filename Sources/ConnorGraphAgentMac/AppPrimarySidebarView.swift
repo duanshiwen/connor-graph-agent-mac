@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 
 struct CraftPrimarySidebarView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
     @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
     @Bindable var taskAutomationModel: TaskAutomationFeatureModel
@@ -201,7 +202,7 @@ struct CraftPrimarySidebarView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             selection = item
-            viewModel.selection = item
+            shellModel.select(item)
         }
     }
 

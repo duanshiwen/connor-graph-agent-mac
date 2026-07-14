@@ -9,16 +9,18 @@ import ConnorGraphAppSupport
 
 struct AppShellView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     @ObservedObject var identityStore: AppUserIdentityStore
     @ObservedObject var noteImportModel: NoteImportViewModel
+    var sendCommand: (AppCommand) -> Void
     @Environment(\.openWindow) private var openWindow
     @State private var isPrimarySidebarVisible = true
     @State private var isIdentityPopoverPresented = false
 
     private var selectionBinding: Binding<SidebarItem?> {
         Binding(
-            get: { viewModel.selection ?? .agentChat },
-            set: { viewModel.selection = $0 ?? .agentChat }
+            get: { shellModel.selection ?? .agentChat },
+            set: { shellModel.selection = $0 ?? .agentChat }
         )
     }
     @State private var topSearchKeyMonitor: Any?
@@ -32,6 +34,7 @@ struct AppShellView: View {
                     if isPrimarySidebarVisible {
                         CraftPrimarySidebarView(
                             viewModel: viewModel,
+                            shellModel: shellModel,
                             sourceRuntimeModel: viewModel.sourceRuntimeModel,
                             skillRuntimeModel: viewModel.skillRuntimeModel,
                             taskAutomationModel: viewModel.taskAutomationModel,
@@ -53,6 +56,7 @@ struct AppShellView: View {
 
             CraftListPaneView(
                 viewModel: viewModel,
+                shellModel: shellModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
                 skillRuntimeModel: viewModel.skillRuntimeModel,
                 taskAutomationModel: viewModel.taskAutomationModel,
@@ -74,6 +78,7 @@ struct AppShellView: View {
 
             CraftDetailPaneView(
                 viewModel: viewModel,
+                shellModel: shellModel,
                 identityStore: identityStore,
                 graphDiagnosticsModel: viewModel.graphDiagnosticsModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
@@ -84,9 +89,9 @@ struct AppShellView: View {
                 contactsFeatureModel: viewModel.contactsFeatureModel,
                 mailFeatureModel: viewModel.mailFeatureModel,
                 rssFeatureModel: viewModel.rssFeatureModel,
-                selection: viewModel.selection ?? .agentChat
+                selection: shellModel.selection ?? .agentChat
             )
-                .id(viewModel.selection ?? .agentChat)
+                .id(shellModel.selection ?? .agentChat)
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
@@ -125,7 +130,7 @@ struct AppShellView: View {
                             }
                         ),
                         placeholder: "搜索或发起对话",
-                        focusRequestID: viewModel.focusTopSearchRequestID,
+                        focusRequestID: shellModel.focusTopSearchRequestID,
                         onSubmit: { viewModel.globalSearchFeatureModel.performSelectedItem() },
                         onMoveUp: { viewModel.globalSearchFeatureModel.moveSelectionUp() },
                         onMoveDown: { viewModel.globalSearchFeatureModel.moveSelectionDown() },
@@ -168,7 +173,7 @@ struct AppShellView: View {
                 .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
                     UserIdentityPopoverView(identityStore: identityStore) {
                         isIdentityPopoverPresented = false
-                        viewModel.selectSettingsSection(.identity)
+                        shellModel.selectSettingsSection(.identity)
                     }
                 }
             }
@@ -194,8 +199,8 @@ struct AppShellView: View {
         .background(WindowTitlebarConfigurator())
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
-            if viewModel.selection == nil {
-                viewModel.selection = .agentChat
+            if shellModel.selection == nil {
+                shellModel.selection = .agentChat
             }
             viewModel.reloadChatSessionsIfNeededAfterInitialLoad()
             installTopSearchKeyMonitorIfNeeded()
@@ -206,7 +211,7 @@ struct AppShellView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .connorSessionNotificationActivated)) { notification in
             guard let sessionID = notification.userInfo?["sessionID"] as? String else { return }
-            viewModel.openSessionFromNotification(sessionID)
+            sendCommand(.openSessionNotification(sessionID))
         }
     }
 
@@ -223,7 +228,7 @@ struct AppShellView: View {
             ) else {
                 return event
             }
-            viewModel.performShortcutAction(.focusTopSearch)
+            shellModel.requestTopSearchFocus()
             return nil
         }
     }

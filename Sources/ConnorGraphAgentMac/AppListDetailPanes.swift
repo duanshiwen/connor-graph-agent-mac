@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 
 struct CraftListPaneView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
@@ -25,7 +26,7 @@ struct CraftListPaneView: View {
             case .agentChat:
                 CraftSessionListPane(viewModel: viewModel)
             case .llmSettings:
-                CraftSettingsListPane(viewModel: viewModel, selection: $selection)
+                CraftSettingsListPane(shellModel: shellModel, selection: $selection)
             case .calendar:
                 CraftCalendarListPane(model: calendarFeatureModel)
             case .contacts:
@@ -2101,6 +2102,7 @@ private struct RSSItemListRow: View {
 
 struct CraftDetailPaneView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     @ObservedObject var identityStore: AppUserIdentityStore
     let graphDiagnosticsModel: GraphDiagnosticsModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
@@ -2157,6 +2159,7 @@ struct CraftDetailPaneView: View {
             case .llmSettings:
                 ConnorSettingsDetailView(
                     viewModel: viewModel,
+                    shellModel: shellModel,
                     identityStore: identityStore,
                     calendarFeatureModel: calendarFeatureModel,
                     rssFeatureModel: rssFeatureModel
@@ -3625,7 +3628,7 @@ struct CraftSessionRow: View {
 
 
 struct CraftSettingsListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -3640,10 +3643,10 @@ struct CraftSettingsListPane: View {
                         title: section.title,
                         subtitle: section.subtitle,
                         systemImage: section.systemImage,
-                        isSelected: viewModel.selectedSettingsSection == section
+                        isSelected: shellModel.selectedSettingsSection == section
                     ) {
                         selection = .llmSettings
-                        viewModel.selectSettingsSection(section)
+                        shellModel.selectSettingsSection(section)
                     }
                 }
             }

@@ -164,7 +164,11 @@ final class AppViewModel: NSObject, ObservableObject {
     static let customGenderIdentitySelection = "__custom_gender_identity__"
     static let genderIdentityPresetValues: Set<String> = ["女性", "男性", "非二元", "性别流动", "无性别", "酷儿 / 性别酷儿", "不愿透露"]
 
-    @Published var selection: SidebarItem? = .agentChat
+    let shellFeatureModel: AppShellFeatureModel
+    var selection: SidebarItem? {
+        get { shellFeatureModel.selection }
+        set { shellFeatureModel.selection = newValue }
+    }
     let graphDiagnosticsModel: GraphDiagnosticsModel
     let chatFeatureModel: ChatFeatureModel
     @Published var errorMessage: String?
@@ -203,13 +207,16 @@ final class AppViewModel: NSObject, ObservableObject {
     let skillRuntimeModel: SkillRuntimeFeatureModel
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
-    @Published var selectedSettingsSection: ConnorSettingsSection = .app
+    var selectedSettingsSection: ConnorSettingsSection {
+        get { shellFeatureModel.selectedSettingsSection }
+        set { shellFeatureModel.selectedSettingsSection = newValue }
+    }
     let appSettingsModel: AppSettingsFeatureModel
     let inputSettingsModel: InputSettingsFeatureModel
     let userPreferencesModel: UserPreferencesFeatureModel
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
-    @Published var focusTopSearchRequestID: UUID?
+    var focusTopSearchRequestID: UUID? { shellFeatureModel.focusTopSearchRequestID }
     @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var memoryOSSearchHealthSummary: String?
     @Published private(set) var isMemoryOSSearchIndexRepairing = false
@@ -306,7 +313,7 @@ final class AppViewModel: NSObject, ObservableObject {
         case .toggleBrowser:
             performShellCommand(.toggleBrowser)
         case .focusTopSearch:
-            focusTopSearchRequestID = UUID()
+            shellFeatureModel.requestTopSearchFocus()
         case .openSettings:
             performShellCommand(.openSettings)
         case .focusBrowserAddress, .newBrowserTab, .closeBrowserTab, .browserBack, .browserForward, .toggleBrowserBookmarks, .toggleBrowserHistory:
@@ -721,42 +728,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func applyNavigation(to item: ConnorNativeShellItem) {
         switch item {
-        case .home:
+        case .home, .agentChat, .graphMemory:
             browserFeatureModel.isVisible = false
-            selection = .agentChat
-        case .agentChat:
-            browserFeatureModel.isVisible = false
-            selection = .agentChat
         case .browserWorkspace:
             browserFeatureModel.showWorkspace()
-        case .graphMemory:
-            browserFeatureModel.isVisible = false
-            selection = .agentChat
-        case .search:
-            selection = .search
-        case .graphEntities:
-            selection = .entities
-        case .approvals:
-            selection = .pendingApprovals
-        case .automation, .localAutomationSurface:
-            selection = .scheduledTasks
-        case .productOS:
-            selection = .productOS
-        case .calendar:
-            selection = .calendar
-        case .contacts:
-            selection = .contacts
-        case .mail:
-            selection = .mail
-        case .rss:
-            selection = .rss
-        case .sources:
-            selection = .sources
-        case .skills:
-            selection = .skills
-        case .settings:
-            selection = .llmSettings
+        default:
+            break
         }
+        shellFeatureModel.applyNavigation(item)
     }
 
     func performShellCommand(_ commandID: ConnorNativeShellCommandID) {
@@ -1069,6 +1048,7 @@ final class AppViewModel: NSObject, ObservableObject {
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
         llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
+        self.shellFeatureModel = AppShellFeatureModel()
         self.chatFeatureModel = ChatFeatureModel()
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
@@ -1676,10 +1656,8 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    deinit {
-        MainActor.assumeIsolated {
-            shutdownRuntimeResources()
-        }
+    isolated deinit {
+        shutdownRuntimeResources()
     }
 
     func shutdownRuntimeResourcesForTests() {
@@ -2464,8 +2442,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func selectSettingsSection(_ section: ConnorSettingsSection) {
-        selectedSettingsSection = section
-        selection = .llmSettings
+        shellFeatureModel.selectSettingsSection(section)
     }
 
     func settingsMessage(for section: ConnorSettingsSection) -> String? {

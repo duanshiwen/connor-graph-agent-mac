@@ -48,14 +48,16 @@ enum SettingsListLayout {
 
 struct ConnorSettingsDetailView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     @ObservedObject var identityStore: AppUserIdentityStore
     let calendarFeatureModel: CalendarFeatureModel
     let rssFeatureModel: RSSFeatureModel
     @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
     @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
-    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore, calendarFeatureModel: CalendarFeatureModel, rssFeatureModel: RSSFeatureModel) {
+    init(viewModel: AppViewModel, shellModel: AppShellFeatureModel, identityStore: AppUserIdentityStore, calendarFeatureModel: CalendarFeatureModel, rssFeatureModel: RSSFeatureModel) {
         self.viewModel = viewModel
+        self.shellModel = shellModel
         self.identityStore = identityStore
         self.calendarFeatureModel = calendarFeatureModel
         self.rssFeatureModel = rssFeatureModel
@@ -71,12 +73,12 @@ struct ConnorSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text(viewModel.selectedSettingsSection.title)
+                Text(shellModel.selectedSettingsSection.title)
                     .font(SettingsListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
-                    switch viewModel.selectedSettingsSection {
+                    switch shellModel.selectedSettingsSection {
                     case .identity:
                         UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.chatFeatureModel.sessions.allSessions)
                     case .app:
@@ -104,7 +106,7 @@ struct ConnorSettingsDetailView: View {
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                if let message = viewModel.settingsMessage(for: viewModel.selectedSettingsSection) {
+                if let message = viewModel.settingsMessage(for: shellModel.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)

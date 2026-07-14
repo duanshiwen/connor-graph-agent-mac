@@ -36,8 +36,10 @@ struct ConnorGraphAgentMacApp: App {
         Window("康纳同学", id: "main") {
             AppShellView(
                 viewModel: root.viewModel,
+                shellModel: root.viewModel.shellFeatureModel,
                 identityStore: root.identityStore,
-                noteImportModel: root.noteImportModel
+                noteImportModel: root.noteImportModel,
+                sendCommand: { root.sendWhenInteractive($0) }
             )
                 .preferredColorScheme(root.viewModel.appSettingsModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
@@ -111,19 +113,19 @@ struct ConnorGraphAgentMacApp: App {
 
             CommandMenu(AppMenuPresentation.actionMenuTitle) {
                 Button("切换浏览器") {
-                    root.performWhenInteractive { $0.performShortcutAction(.toggleBrowser) }
+                    root.sendWhenInteractive(.shortcut(.toggleBrowser))
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
                 Button("聚焦搜索") {
-                    root.performWhenInteractive { $0.performShortcutAction(.focusTopSearch) }
+                    root.sendWhenInteractive(.shortcut(.focusTopSearch))
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
                 Divider()
 
                 Button("打开设置") {
-                    root.performWhenInteractive { $0.performShortcutAction(.openSettings) }
+                    root.sendWhenInteractive(.shortcut(.openSettings))
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -151,12 +153,12 @@ private struct NoteImportFileCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button(AppMenuPresentation.newSessionTitle) {
-                root.performWhenInteractive { $0.performShortcutAction(.newSession) }
+                root.sendWhenInteractive(.shortcut(.newSession))
             }
             .keyboardShortcut("n", modifiers: .command)
 
             Button(AppMenuPresentation.newNoteTitle) {
-                root.performWhenInteractive { $0.newNoteSession() }
+                root.sendWhenInteractive(.newNote)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
 
