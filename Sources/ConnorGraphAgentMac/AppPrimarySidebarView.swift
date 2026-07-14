@@ -12,6 +12,7 @@ struct CraftPrimarySidebarView: View {
     @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
     @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
     @Bindable var taskAutomationModel: TaskAutomationFeatureModel
+    @Bindable var rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
     @State private var sessionsExpanded = true
     @State private var labelsExpanded = true
@@ -178,7 +179,7 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var rssUnreadCount: Int? {
-        let count = viewModel.rssBrowserPresentation.unreadCount(sourceID: nil)
+        let count = rssFeatureModel.presentation.unreadCount(sourceID: nil)
         return count > 0 ? count : nil
     }
 
