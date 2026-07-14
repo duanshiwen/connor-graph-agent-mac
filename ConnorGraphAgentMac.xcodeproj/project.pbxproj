@@ -98,6 +98,8 @@
 		D10000000000000000000007 /* Sources/ConnorGraphAgentMac/NoteImportToolbarProgressButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000007 /* Sources/ConnorGraphAgentMac/NoteImportToolbarProgressButton.swift */; };
 		D10000000000000000000008 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000008 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift */; };
 		D10000000000000000000009 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000009 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift */; };
+		D20000000000000000000001 /* Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift */; };
+		D20000000000000000000002 /* Sources/ConnorGraphAgentMac/CloudKnowledgeMarketplaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* Sources/ConnorGraphAgentMac/CloudKnowledgeMarketplaceView.swift */; };
 		D0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */; };
 		D0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */; };
 		D0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */; };
@@ -201,6 +203,8 @@
 		C10000000000000000000007 /* Sources/ConnorGraphAgentMac/NoteImportToolbarProgressButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/NoteImportToolbarProgressButton.swift; sourceTree = "<group>"; };
 		C10000000000000000000008 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift; sourceTree = "<group>"; };
 		C10000000000000000000009 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift; sourceTree = "<group>"; };
+		C20000000000000000000001 /* Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* Sources/ConnorGraphAgentMac/CloudKnowledgeMarketplaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/CloudKnowledgeMarketplaceView.swift; sourceTree = "<group>"; };
 		C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift; sourceTree = "<group>"; };
 		C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift; sourceTree = "<group>"; };
 		C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift; sourceTree = "<group>"; };
@@ -294,6 +298,8 @@
 				C10000000000000000000007 /* Sources/ConnorGraphAgentMac/NoteImportToolbarProgressButton.swift */,
 				C10000000000000000000008 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift */,
 				C10000000000000000000009 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift */,
+				C20000000000000000000001 /* Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift */,
+				C20000000000000000000002 /* Sources/ConnorGraphAgentMac/CloudKnowledgeMarketplaceView.swift */,
 				C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */,
 				C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */,
 				C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */,
@@ -549,6 +555,8 @@
 				D10000000000000000000007 /* Sources/ConnorGraphAgentMac/NoteImportToolbarProgressButton.swift in Sources */,
 				D10000000000000000000008 /* Sources/ConnorGraphAgentMac/UserIdentityPopoverView.swift in Sources */,
 				D10000000000000000000009 /* Sources/ConnorGraphAgentMac/UserIdentitySettingsView.swift in Sources */,
+				D20000000000000000000001 /* Sources/ConnorGraphAgentMac/CloudKnowledgeCreatorView.swift in Sources */,
+				D20000000000000000000002 /* Sources/ConnorGraphAgentMac/CloudKnowledgeMarketplaceView.swift in Sources */,
 				D0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift in Sources */,
 				D0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift in Sources */,
 				D0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift in Sources */,
