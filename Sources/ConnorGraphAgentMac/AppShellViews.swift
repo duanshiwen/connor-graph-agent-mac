@@ -38,6 +38,7 @@ struct AppShellView: View {
                         CraftPrimarySidebarView(
                             viewModel: viewModel,
                             shellModel: shellModel,
+                            governanceModel: viewModel.governanceModel,
                             sourceRuntimeModel: viewModel.sourceRuntimeModel,
                             skillRuntimeModel: viewModel.skillRuntimeModel,
                             taskAutomationModel: viewModel.taskAutomationModel,
@@ -60,6 +61,7 @@ struct AppShellView: View {
             CraftListPaneView(
                 viewModel: viewModel,
                 shellModel: shellModel,
+                governanceModel: viewModel.governanceModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,
                 skillRuntimeModel: viewModel.skillRuntimeModel,
                 taskAutomationModel: viewModel.taskAutomationModel,
@@ -82,6 +84,7 @@ struct AppShellView: View {
             CraftDetailPaneView(
                 viewModel: viewModel,
                 shellModel: shellModel,
+                governanceModel: viewModel.governanceModel,
                 identityStore: identityStore,
                 graphDiagnosticsModel: viewModel.graphDiagnosticsModel,
                 sourceRuntimeModel: viewModel.sourceRuntimeModel,

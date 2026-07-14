@@ -237,7 +237,8 @@ final class AppViewModel: NSObject, ObservableObject {
         get { aiConnectionsModel.showsWelcome }
         set { aiConnectionsModel.showsWelcome = newValue }
     }
-    @Published var governanceConfig: AppSessionGovernanceConfig = .default
+    let governanceModel: GovernanceFeatureModel
+    var governanceConfig: AppSessionGovernanceConfig { governanceModel.config }
     let productOSControlModel: ProductOSControlFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
@@ -270,7 +271,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var memoryOSFacade: AppMemoryOSFacade?
     private var chatSessionRepository: AppChatSessionRepository?
     private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
-    private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var storagePaths: AppStoragePaths?
     private let runtimeSettingsCoordinator: RuntimeSettingsPersistenceCoordinator
     private var loadedLoopConfiguration = AgentLoopConfiguration()
@@ -1101,6 +1101,10 @@ final class AppViewModel: NSObject, ObservableObject {
         self.runtimeSettingsCoordinator = RuntimeSettingsPersistenceCoordinator(
             repository: storagePaths.map { AppRuntimeSettingsRepository(configDirectory: $0.configDirectory) }
         )
+        self.governanceModel = GovernanceFeatureModel(
+            config: governanceConfig,
+            repository: storagePaths.map { AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory) }
+        )
         self.graphDiagnosticsModel = GraphDiagnosticsModel(
             entities: entities,
             statements: statements,
@@ -1185,10 +1189,8 @@ final class AppViewModel: NSObject, ObservableObject {
             storagePaths: storagePaths
         )
         self.storagePaths = storagePaths
-        self.governanceConfig = governanceConfig
-        if let storagePaths {
+        if storagePaths != nil {
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
-            self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
         }
         if let repository {
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
@@ -1230,6 +1232,50 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         aiConnectionsModel.onConnectionSetup = { [weak self] connection in
             self?.syncActiveSessionLLMOverride(to: connection)
+        }
+        governanceModel.sessionsProvider = { [weak self] in
+            guard let self else { return [] }
+            return try self.chatSessionRepository?.loadSessions(filter: .all)
+                ?? self.chatFeatureModel.sessions.allSessions
+        }
+        governanceModel.removeLabelFromSessions = { [weak self] labelID in
+            guard let self, let repository = self.chatSessionRepository else { return 0 }
+            let sessions = try repository.loadSessions(filter: .all)
+            var removedCount = 0
+            for session in sessions where session.governance.labels.contains(where: { $0.id == labelID }) {
+                let labels = session.governance.labels.filter { $0.id != labelID }
+                _ = try repository.setLabels(sessionID: session.id, labels: labels)
+                removedCount += 1
+            }
+            return removedCount
+        }
+        governanceModel.onConfigSaved = { [weak self] config in
+            guard let self else { return }
+            self.chatSessionRepository?.governanceConfig = config
+            try self.productOSControlModel.reloadAutomationAfterGovernanceChange(governanceConfig: config)
+        }
+        governanceModel.onSettingsMessage = { [weak self] message, section in
+            self?.shellFeatureModel.setSettingsMessage(message, for: section)
+        }
+        governanceModel.onError = { [weak self] message in
+            self?.errorMessage = message
+        }
+        governanceModel.onDefinitionDeleted = { [weak self] deletion in
+            guard let self else { return }
+            switch deletion {
+            case .status(let id):
+                if case .status(let selected) = self.chatFeatureModel.sessions.filter, selected.rawValue == id {
+                    self.setSessionListFilter(.all, restoreWorkspaceMode: false)
+                } else {
+                    self.reloadChatSessions(restoreWorkspaceMode: false)
+                }
+            case .label(let id):
+                if case .label(let selected) = self.chatFeatureModel.sessions.filter, selected == id {
+                    self.setSessionListFilter(.all, restoreWorkspaceMode: false)
+                } else {
+                    self.reloadChatSessions(restoreWorkspaceMode: false)
+                }
+            }
         }
         if startupMode == .immediate {
             registerMaintenanceObserversIfNeeded()
@@ -2776,137 +2822,23 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
-        var config = governanceConfig
-        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedID.isEmpty, let index = config.statuses.firstIndex(where: { $0.id == trimmedID }) {
-            var updatedDefinition = definition
-            updatedDefinition.id = trimmedID
-            config.statuses[index] = updatedDefinition
-        } else {
-            var newDefinition = definition
-            newDefinition.id = makeUniqueGovernanceStatusID(existingIDs: Set(config.statuses.map(\.id)), preferredName: definition.name)
-            config.statuses.append(newDefinition)
-        }
-        saveGovernanceConfig(config, successMessage: "状态定义已保存。", section: .statuses)
+        governanceModel.upsertStatus(definition)
     }
 
     func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
-        governanceConfig.statuses.count > 1 && !chatFeatureModel.sessions.allSessions.contains { $0.governance.status.rawValue == definition.id }
+        governanceModel.canDeleteStatus(definition)
     }
 
     func deleteStatusDefinition(_ definition: AgentSessionStatusDefinition) {
-        guard governanceConfig.statuses.count > 1 else {
-            errorMessage = "至少需要保留一个状态。"
-            return
-        }
-        do {
-            let sessions = try chatSessionRepository?.loadSessions(filter: .all) ?? chatFeatureModel.sessions.allSessions
-            let sessionsUsingStatus = sessions.filter { $0.governance.status.rawValue == definition.id }
-            guard sessionsUsingStatus.isEmpty else {
-                errorMessage = "无法删除状态“\(definition.name)”: 仍有 \(sessionsUsingStatus.count) 个会话处于此状态。"
-                return
-            }
-            var config = governanceConfig
-            config.statuses.removeAll { $0.id == definition.id }
-            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。", section: .statuses)
-            if case .status(let selectedStatus) = chatFeatureModel.sessions.filter, selectedStatus.rawValue == definition.id {
-                setSessionListFilter(.all, restoreWorkspaceMode: false)
-            } else {
-                reloadChatSessions(restoreWorkspaceMode: false)
-            }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func makeUniqueGovernanceStatusID(existingIDs: Set<String>, preferredName: String = "") -> String {
-        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "status", preferredName: preferredName)
+        governanceModel.deleteStatus(definition)
     }
 
     func upsertLabelDefinition(_ definition: AgentSessionLabelDefinition) {
-        var config = governanceConfig
-        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedID.isEmpty, let index = config.labels.firstIndex(where: { $0.id == trimmedID }) {
-            var updatedDefinition = definition
-            updatedDefinition.id = trimmedID
-            config.labels[index] = updatedDefinition
-        } else {
-            var newDefinition = definition
-            newDefinition.id = makeUniqueGovernanceLabelID(existingIDs: Set(config.labels.map(\.id)), preferredName: definition.name)
-            config.labels.append(newDefinition)
-        }
-        saveGovernanceConfig(config, successMessage: "标签定义已保存。", section: .labels)
+        governanceModel.upsertLabel(definition)
     }
 
     func deleteLabelDefinition(_ definition: AgentSessionLabelDefinition) {
-        guard let chatSessionRepository else { return }
-        do {
-            let sessions = try chatSessionRepository.loadSessions(filter: .all)
-            var removedFromSessionCount = 0
-            for session in sessions where session.governance.labels.contains(where: { $0.id == definition.id }) {
-                let remainingLabels = session.governance.labels.filter { $0.id != definition.id }
-                _ = try chatSessionRepository.setLabels(sessionID: session.id, labels: remainingLabels)
-                removedFromSessionCount += 1
-            }
-
-            var config = governanceConfig
-            config.labels.removeAll { $0.id == definition.id }
-            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。", section: .labels)
-            if case .label(let selectedLabelID) = chatFeatureModel.sessions.filter, selectedLabelID == definition.id {
-                setSessionListFilter(.all, restoreWorkspaceMode: false)
-            } else {
-                reloadChatSessions(restoreWorkspaceMode: false)
-            }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func makeUniqueGovernanceLabelID(existingIDs: Set<String>, preferredName: String = "") -> String {
-        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "label", preferredName: preferredName)
-    }
-
-    private func makeUniqueGovernanceSlug(existingIDs: Set<String>, prefix: String, preferredName: String) -> String {
-        let allowedScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
-        let slug = preferredName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .unicodeScalars
-            .map { scalar -> Character in
-                allowedScalars.contains(scalar) ? Character(scalar) : "-"
-            }
-            .reduce(into: "") { partial, character in
-                if character == "-", partial.last == "-" { return }
-                partial.append(character)
-            }
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-            .replacingOccurrences(of: "-", with: "_")
-        let base = slug.isEmpty ? "\(prefix)_\(shortGovernanceIDFragment())" : slug
-        var candidate = base
-        var suffix = 2
-        while existingIDs.contains(candidate) {
-            candidate = "\(base)_\(suffix)"
-            suffix += 1
-        }
-        return candidate
-    }
-
-    private func shortGovernanceIDFragment() -> String {
-        String(UUID().uuidString.lowercased().prefix(8))
-    }
-
-    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String, section: ConnorSettingsSection) {
-        do {
-            let normalizedConfig = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
-            try governanceConfigRepository?.save(normalizedConfig)
-            governanceConfig = normalizedConfig
-            chatSessionRepository?.governanceConfig = normalizedConfig
-            try productOSControlModel.reloadAutomationAfterGovernanceChange(governanceConfig: normalizedConfig)
-            setSettingsMessage(successMessage, for: section)
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        governanceModel.deleteLabel(definition)
     }
 
     func resetRuntimeSettings() {

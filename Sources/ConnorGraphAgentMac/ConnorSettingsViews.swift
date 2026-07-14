@@ -97,9 +97,15 @@ struct ConnorSettingsDetailView: View {
                     case .permissions:
                         SettingsPermissionsSection(model: viewModel.permissionSettingsModel)
                     case .labels:
-                        SettingsLabelsSection(viewModel: viewModel)
+                        SettingsLabelsSection(
+                            model: viewModel.governanceModel,
+                            sessions: viewModel.chatFeatureModel.sessions.allSessions
+                        )
                     case .statuses:
-                        SettingsStatusesSection(viewModel: viewModel)
+                        SettingsStatusesSection(
+                            model: viewModel.governanceModel,
+                            sessions: viewModel.chatFeatureModel.sessions.allSessions
+                        )
                     case .shortcuts:
                         SettingsShortcutsSection(model: viewModel.inputSettingsModel)
                     case .preferences:
