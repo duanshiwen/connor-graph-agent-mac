@@ -50,7 +50,7 @@ static func live() -> AppViewModel {
                 )
             }
             AppStartupPerformance.measure("InitialApprovalPresentation") {
-                viewModel.reloadPromotionCandidates()
+                viewModel.graphDiagnosticsModel.reloadPromotionCandidates()
                 viewModel.reloadPendingApprovals()
             }
             return viewModel

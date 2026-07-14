@@ -2097,17 +2097,18 @@ private struct RSSItemListRow: View {
 struct CraftDetailPaneView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var identityStore: AppUserIdentityStore
+    let graphDiagnosticsModel: GraphDiagnosticsModel
     var selection: SidebarItem
 
     var body: some View {
         Group {
             switch selection {
             case .entities:
-                GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
+                GraphEntitiesView(entities: graphDiagnosticsModel.entities, statements: graphDiagnosticsModel.statements, episodes: graphDiagnosticsModel.episodes)
             case .search:
-                SearchView(viewModel: viewModel)
+                SearchView(model: graphDiagnosticsModel)
             case .observeLog:
-                ObserveLogView(entries: viewModel.observeLogEntries)
+                ObserveLogView(entries: graphDiagnosticsModel.observeLogEntries)
             case .agentChat:
                 if viewModel.selectedChatSessionID == nil {
                     AgentChatNoSelectionDetailView()
@@ -2115,7 +2116,7 @@ struct CraftDetailPaneView: View {
                     AgentChatView(viewModel: viewModel)
                 }
             case .promotionQueue:
-                PromotionQueueView(viewModel: viewModel)
+                PromotionQueueView(model: graphDiagnosticsModel)
             case .pendingApprovals:
                 AgentPendingApprovalReviewView(viewModel: viewModel)
             case .automation, .scheduledTasks:
