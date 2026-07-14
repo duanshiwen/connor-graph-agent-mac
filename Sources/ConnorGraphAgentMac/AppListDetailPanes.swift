@@ -648,8 +648,8 @@ struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.sessionSearchQuery, sourceTitle: "对话历史") {
-                viewModel.sessionSearchQuery = ""
+            ListSearchFilterBanner(query: viewModel.chatFeatureModel.sessions.searchQuery, sourceTitle: "对话历史") {
+                viewModel.chatFeatureModel.sessions.searchQuery = ""
             }
 
             if visibleSessions.isEmpty {
@@ -661,10 +661,10 @@ struct CraftSessionListPane: View {
                         ForEach(visibleSessions) { session in
                             CraftSessionRow(
                                 row: AgentChatSessionPresentation(session: session),
-                                readState: viewModel.sessionReadStates[session.id],
-                                isSelected: session.id == viewModel.selectedChatSessionID,
+                                readState: viewModel.chatFeatureModel.sessions.readStates[session.id],
+                                isSelected: session.id == viewModel.chatFeatureModel.sessions.selectedSessionID,
                                 isRunning: viewModel.isChatSessionSubmitting(session.id),
-                                isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                                isRegeneratingTitle: viewModel.chatFeatureModel.sessions.regeneratingTitleSessionIDs.contains(session.id),
                                 hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
                                 labelDefinitions: viewModel.governanceConfig.labels,
                                 onSelect: {
@@ -695,26 +695,26 @@ struct CraftSessionListPane: View {
     }
 
     private var visibleSessions: [AgentSession] {
-        let query = viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return viewModel.chatSessions }
+        let query = viewModel.chatFeatureModel.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return viewModel.chatFeatureModel.sessions.sessions }
         let terms = listSearchTerms(for: query)
-        guard !terms.isEmpty else { return viewModel.chatSessions }
-        return viewModel.chatSessions.filter { session in
+        guard !terms.isEmpty else { return viewModel.chatFeatureModel.sessions.sessions }
+        return viewModel.chatFeatureModel.sessions.sessions.filter { session in
             listSearchTextMatches(session.title, terms: terms)
                 || session.messages.contains { listSearchTextMatches($0.content, terms: terms) }
         }
     }
 
     private var sessionEmptyTitle: String {
-        viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
+        viewModel.chatFeatureModel.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
     }
 
     private var sessionEmptyDescription: String {
-        viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
+        viewModel.chatFeatureModel.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
     }
 
     private var sessionListTitle: String {
-        switch viewModel.sessionListFilter {
+        switch viewModel.chatFeatureModel.sessions.filter {
         case .all: "全部会话"
         case .status(let status): status.displayName
         case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
@@ -2123,15 +2123,15 @@ struct CraftDetailPaneView: View {
             case .observeLog:
                 ObserveLogView(entries: graphDiagnosticsModel.observeLogEntries)
             case .agentChat:
-                if viewModel.selectedChatSessionID == nil {
+                if viewModel.chatFeatureModel.sessions.selectedSessionID == nil {
                     AgentChatNoSelectionDetailView()
                 } else {
-                    AgentChatView(viewModel: viewModel)
+                    AgentChatView(model: viewModel.chatFeatureModel, chatActions: ChatFeatureActions(orchestration: viewModel))
                 }
             case .promotionQueue:
                 PromotionQueueView(model: graphDiagnosticsModel)
             case .pendingApprovals:
-                AgentPendingApprovalReviewView(viewModel: viewModel)
+                AgentPendingApprovalReviewView(model: viewModel.chatFeatureModel, chatActions: ChatFeatureActions(orchestration: viewModel))
             case .automation, .scheduledTasks:
                 TaskAutomationDetailPane(model: taskAutomationModel, kind: .scheduled)
             case .eventTriggeredTasks:

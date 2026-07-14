@@ -78,7 +78,7 @@ struct ConnorSettingsDetailView: View {
                 Group {
                     switch viewModel.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.allChatSessions)
+                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.chatFeatureModel.sessions.allSessions)
                     case .app:
                         SettingsAppSection(model: viewModel.appSettingsModel, inputModel: viewModel.inputSettingsModel, openProjectHelp: { viewModel.openProjectGitHubHelp() })
                     case .ai:
