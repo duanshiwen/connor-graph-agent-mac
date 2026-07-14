@@ -40,7 +40,7 @@ struct ComposerDraftSynchronizationTests {
             statements: [],
             observeLogEntries: []
         )
-        viewModel.autoSaveDraftsEnabled = false
+        viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
         viewModel.chatInput = ""
 
         viewModel.updateSelectedChatInputDraft("a")
@@ -56,7 +56,7 @@ struct ComposerDraftSynchronizationTests {
             statements: [],
             observeLogEntries: []
         )
-        viewModel.autoSaveDraftsEnabled = false
+        viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
         viewModel.chatInput = "published value"
 
         viewModel.updateSelectedChatInputDraft("a")
@@ -74,7 +74,7 @@ struct ComposerDraftSynchronizationTests {
             statements: [],
             observeLogEntries: []
         )
-        viewModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
         viewModel.chatInput = "stale published value"
         viewModel.updateSelectedChatInputDraft("current manual draft")
 

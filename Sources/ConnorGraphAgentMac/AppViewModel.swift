@@ -165,7 +165,7 @@ final class AppViewModel: NSObject, ObservableObject {
         didSet {
             guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
             updateLiveChatInputDraft(chatInput, for: selectedChatSessionID)
-            if autoSaveDraftsEnabled {
+            if inputSettingsModel.autoSaveDraftsEnabled {
                 chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
             }
         }
@@ -234,46 +234,12 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
-    @Published var desktopNotificationsEnabled: Bool = true
-    @Published var sessionNewMessageNotificationLevel: SessionAttentionLevel = .actionable
-    @Published var keepScreenAwake: Bool = false
-    @Published var httpProxyEnabled: Bool = false
-    @Published var httpProxyURLString: String = ""
-    @Published var appearanceMode: ConnorAppearanceMode = .system
-    @Published var showProviderIcons: Bool = true
-    @Published var richToolDescriptionsEnabled: Bool = true
-    @Published var composerSendShortcut: String = "return"
-    @Published var spellCheckEnabled: Bool = true
-    @Published var autoSaveDraftsEnabled: Bool = true
-    @Published var sessionSpeechTranscriptionEnabled: Bool = false {
-        didSet {
-            guard oldValue != sessionSpeechTranscriptionEnabled, !sessionSpeechTranscriptionEnabled else { return }
-            stopSpeechTranscriptionForDisabledSetting()
-        }
-    }
-    @Published var shortcutSettings: AgentRuntimeShortcutSettings = AgentRuntimeShortcutSettings()
-    @Published var recordingShortcutAction: AgentRuntimeShortcutAction?
+    let appSettingsModel: AppSettingsFeatureModel
+    let inputSettingsModel: InputSettingsFeatureModel
+    let userPreferencesModel: UserPreferencesFeatureModel
+    let workspaceSettingsModel: WorkspaceSettingsFeatureModel
+    let permissionSettingsModel: PermissionSettingsFeatureModel
     @Published var focusTopSearchRequestID: UUID?
-    @Published var defaultPermissionMode: AgentPermissionMode = .askToWrite
-    @Published var requireApprovalForNetwork: Bool = false
-    @Published var requireApprovalForShell: Bool = true
-    @Published var defaultWorkingDirectoryPath: String = ""
-    @Published var workspaceRoots: [WorkspaceRootDraft] = []
-    @Published var recentWorkspacePaths: [String] = []
-    @Published var workspaceRootPathInput: String = ""
-    @Published var userDisplayName: String = ""
-    @Published var userTimezone: String = ""
-    @Published var userPreferredLanguage: String = ""
-    @Published var userGenderIdentity: String = ""
-    @Published var userGenderIdentitySelection: String = ""
-    @Published var userGenderIdentityCustomText: String = ""
-    @Published var userBirthDate: String = ""
-    @Published var userBirthDatePickerDate: Date = Date()
-    @Published var userCity: String = ""
-    @Published var userCountry: String = ""
-    @Published var userPreferenceNotes: String = ""
-    @Published var defaultSearchEngine: DefaultSearchEngine = .default
-    @Published var userLocationStatusMessage: String?
     @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
@@ -288,7 +254,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var storagePaths: AppStoragePaths?
-    private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
+    private let runtimeSettingsCoordinator: RuntimeSettingsPersistenceCoordinator
     private var loadedLoopConfiguration = AgentLoopConfiguration()
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -337,12 +303,10 @@ final class AppViewModel: NSObject, ObservableObject {
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
     private var isLoadingRuntimeSettings = false
-    private var runtimeSettingsAutosaveTask: Task<Void, Never>?
     private var lastSessionNotificationAt: [String: Date] = [:]
     private let sameSessionNotificationCooldown: TimeInterval = 300
     private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
-    private var locationCoordinator: UserLocationCoordinator?
     private var taskSchedulerTimer: Timer?
     private lazy var speechTranscriptionCoordinator = SessionSpeechTranscriptionCoordinator(
         transcriber: SessionSpeechTranscriptionController()
@@ -361,64 +325,10 @@ final class AppViewModel: NSObject, ObservableObject {
         return loadingChatSessionDetailID == selectedChatSessionID
     }
 
-    var runtimeSettingsAutosaveSignature: String {
-        [
-            desktopNotificationsEnabled.description,
-            sessionNewMessageNotificationLevel.rawValue.description,
-            keepScreenAwake.description,
-            httpProxyEnabled.description,
-            httpProxyURLString,
-            appearanceMode.rawValue,
-            showProviderIcons.description,
-            richToolDescriptionsEnabled.description,
-            composerSendShortcut,
-            spellCheckEnabled.description,
-            autoSaveDraftsEnabled.description,
-            sessionSpeechTranscriptionEnabled.description,
-            shortcutSettings.bindings.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.rawValue)=\($0.value.displayText)" }.joined(separator: ","),
-            defaultPermissionMode.rawValue,
-            requireApprovalForNetwork.description,
-            requireApprovalForShell.description,
-            userDisplayName,
-            userTimezone,
-            userPreferredLanguage,
-            userGenderIdentity,
-            userGenderIdentitySelection,
-            userGenderIdentityCustomText,
-            userBirthDate,
-            userBirthDatePickerDate.timeIntervalSince1970.description,
-            userCity,
-            userCountry,
-            userPreferenceNotes,
-            defaultSearchEngine.rawValue
-        ].joined(separator: "\u{1F}")
-    }
-
     var activeChatPendingApprovals: [AgentPendingApproval] {
         let activeSessionID = activeChatSession.id
         return pendingApprovals.filter { approval in
             approval.sessionID == activeSessionID && !shouldAutoApprovePendingApproval(approval)
-        }
-    }
-
-    func shortcut(for action: AgentRuntimeShortcutAction) -> AgentRuntimeKeyboardShortcut {
-        shortcutSettings.shortcut(for: action)
-    }
-
-    func beginRecordingShortcut(for action: AgentRuntimeShortcutAction) {
-        recordingShortcutAction = action
-    }
-
-    func updateShortcut(_ action: AgentRuntimeShortcutAction, shortcut: AgentRuntimeKeyboardShortcut) {
-        shortcutSettings.bindings[action] = shortcut
-        recordingShortcutAction = nil
-        scheduleRuntimeSettingsAutosave()
-    }
-
-    func resetShortcut(_ action: AgentRuntimeShortcutAction) {
-        if let defaultShortcut = AgentRuntimeShortcutSettings.defaultBindings[action] {
-            shortcutSettings.bindings[action] = defaultShortcut
-            scheduleRuntimeSettingsAutosave()
         }
     }
 
@@ -505,7 +415,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func updateSelectedChatInputDraft(_ draft: String) {
         guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
         updateLiveChatInputDraft(draft, for: selectedChatSessionID)
-        if autoSaveDraftsEnabled {
+        if inputSettingsModel.autoSaveDraftsEnabled {
             chatInputDraftsBySessionID[selectedChatSessionID] = draft
         }
         speechTranscriptionCoordinator.noteUserEditedDraft(sessionID: selectedChatSessionID, draft: draft)
@@ -516,7 +426,7 @@ final class AppViewModel: NSObject, ObservableObject {
         if liveChatInputDraftSessionID == selectedChatSessionID {
             return liveChatInputDraft
         }
-        return autoSaveDraftsEnabled ? (chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput) : chatInput
+        return inputSettingsModel.autoSaveDraftsEnabled ? (chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput) : chatInput
     }
 
     func appendToSelectedChatInputDraft(_ addition: String) {
@@ -530,7 +440,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let draft: String
         if let sessionID, liveChatInputDraftSessionID == sessionID {
             draft = liveChatInputDraft
-        } else if let sessionID, autoSaveDraftsEnabled {
+        } else if let sessionID, inputSettingsModel.autoSaveDraftsEnabled {
             draft = chatInputDraftsBySessionID[sessionID] ?? ""
         } else {
             draft = ""
@@ -1182,6 +1092,14 @@ final class AppViewModel: NSObject, ObservableObject {
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
         llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
+        self.appSettingsModel = AppSettingsFeatureModel()
+        self.inputSettingsModel = InputSettingsFeatureModel()
+        self.userPreferencesModel = UserPreferencesFeatureModel()
+        self.workspaceSettingsModel = WorkspaceSettingsFeatureModel()
+        self.permissionSettingsModel = PermissionSettingsFeatureModel()
+        self.runtimeSettingsCoordinator = RuntimeSettingsPersistenceCoordinator(
+            repository: storagePaths.map { AppRuntimeSettingsRepository(configDirectory: $0.configDirectory) }
+        )
         self.graphDiagnosticsModel = GraphDiagnosticsModel(
             entities: entities,
             statements: statements,
@@ -1296,9 +1214,6 @@ final class AppViewModel: NSObject, ObservableObject {
             let chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
             self.chatSessionRepository = chatSessionRepository
             self.activityTimelineCacheWriter = ActivityTimelineCacheWriter(persistor: chatSessionRepository)
-            if let storagePaths {
-                self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
-            }
         }
         if let storagePaths {
             do {
@@ -1396,6 +1311,31 @@ final class AppViewModel: NSObject, ObservableObject {
                 self.navigate(to: .productOS)
             }
         }
+        appSettingsModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        permissionSettingsModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        inputSettingsModel.onSpeechTranscriptionDisabled = { [weak self] in
+            self?.stopSpeechTranscriptionForDisabledSetting()
+        }
+        inputSettingsModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        userPreferencesModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
+            self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
+        }
+        workspaceSettingsModel.onChanged = { [weak self] in
+            self?.objectWillChange.send()
+            self?.scheduleRuntimeSettingsAutosave()
+        }
+        runtimeSettingsCoordinator.onEvent = { [weak self] event in
+            guard let self else { return }
+            switch event {
+            case .loaded:
+                break
+            case .saved(let settings):
+                self.handleRuntimeSettingsSaved(settings)
+            case .failed(let message):
+                self.errorMessage = message
+            }
+        }
         globalSearchFeatureModel.sessionsProvider = { [weak self] in self?.allChatSessions ?? [] }
         globalSearchFeatureModel.fallbackNativeSearchProvider = { [weak self] kind, query, limit in
             self?.fallbackNativeSearchResults(kind: kind, query: query, limit: limit) ?? []
@@ -1404,7 +1344,7 @@ final class AppViewModel: NSObject, ObservableObject {
             await self?.browserFeatureModel.waitForPendingIndexOperations()
         }
         globalSearchFeatureModel.defaultSearchURLProvider = { [weak self] query in
-            self?.defaultSearchEngine.searchURL(for: query)
+            self?.appSettingsModel.defaultSearchEngine.searchURL(for: query)
         }
         globalSearchFeatureModel.onDestination = { [weak self] destination in
             self?.handleGlobalSearchDestination(destination)
@@ -1460,7 +1400,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         sourceRuntimeModel.workingDirectoryURLProvider = { [weak self] in
-            self?.primaryWorkspaceRootDraft
+            self?.workspaceSettingsModel.primaryRoot
                 .map(\.path)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
@@ -1598,8 +1538,8 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         stopTaskSchedulerTimer()
         globalSearchFeatureModel.shutdown()
-        runtimeSettingsAutosaveTask?.cancel()
-        runtimeSettingsAutosaveTask = nil
+        runtimeSettingsCoordinator.shutdown()
+        userPreferencesModel.shutdown()
         rssFeatureModel.shutdown()
         calendarFeatureModel.shutdown()
         contactsFeatureModel.shutdown()
@@ -2390,7 +2330,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     var effectiveLoopConfiguration: AgentLoopConfiguration {
         var configuration = loadedLoopConfiguration
-        configuration.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
+        configuration.permissionMode = permissionSettingsModel.defaultPermissionMode == .allowAll ? .askToWrite : permissionSettingsModel.defaultPermissionMode
         return configuration
     }
 
@@ -2562,181 +2502,108 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func syncWorkspaceDraftsFromSession(_ state: AppSessionStateSnapshot?) {
-        if let workspace = state?.workspace {
-            workspaceRoots = AppWorkspaceRootDraftMapper.drafts(from: workspace)
-            defaultWorkingDirectoryPath = workspace.workingDirectoryPath
-            return
-        }
-        workspaceRoots = []
-        defaultWorkingDirectoryPath = ""
+        workspaceSettingsModel.applySessionState(state)
     }
 
     private func currentSessionIDForWorkspaceDrafts() -> String? {
         selectedChatSessionID ?? activeChatSession.id
     }
 
-    private func sessionWorkspaceReferenceFromDrafts(source: String = "session") -> AppSessionWorkspaceReference? {
-        let roots = sessionWorkspaceRootsFromDrafts()
-        let primary = roots.first(where: \.isPrimary) ?? roots.first
+    private func sessionWorkspaceReference(
+        roots: [WorkspaceRootDraft],
+        defaultWorkingDirectoryPath: String,
+        source: String = "session"
+    ) -> AppSessionWorkspaceReference? {
+        let primaryID = roots.first(where: \.isPrimary)?.id ?? roots.first?.id
+        let references = roots.map { draft in
+            AppSessionWorkspaceRootReference(
+                id: draft.id,
+                displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
+                path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
+                role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
+                isPrimary: draft.id == primaryID
+            )
+        }.filter { !$0.path.isEmpty }
+        let primary = references.first(where: \.isPrimary) ?? references.first
         let workingDirectoryPath = primary?.path ?? defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !workingDirectoryPath.isEmpty || !roots.isEmpty else { return nil }
-        return AppSessionWorkspaceReference(
-            workingDirectoryPath: workingDirectoryPath,
-            source: source,
-            roots: roots
-        )
+        guard !workingDirectoryPath.isEmpty || !references.isEmpty else { return nil }
+        return AppSessionWorkspaceReference(workingDirectoryPath: workingDirectoryPath, source: source, roots: references)
     }
 
-    private func sessionWorkspaceRootsFromDrafts() -> [AppSessionWorkspaceRootReference] {
-        let primaryID = workspaceRoots.first(where: \.isPrimary)?.id ?? workspaceRoots.first?.id
-        return workspaceRoots
-            .map { draft in
-                AppSessionWorkspaceRootReference(
-                    id: draft.id,
-                    displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
-                    path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
-                    role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
-                    isPrimary: draft.id == primaryID
-                )
-            }
-            .filter { !$0.path.isEmpty }
-    }
-
-    private func saveWorkspaceDraftsToCurrentSession() {
+    private func saveWorkspaceDraftsToCurrentSession(
+        roots: [WorkspaceRootDraft],
+        defaultWorkingDirectoryPath: String
+    ) {
         guard let sessionID = currentSessionIDForWorkspaceDrafts() else { return }
         do {
             var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
-            state.workspace = sessionWorkspaceReferenceFromDrafts()
+            state.workspace = sessionWorkspaceReference(roots: roots, defaultWorkingDirectoryPath: defaultWorkingDirectoryPath)
             state.updatedAt = Date()
             sessionStateSnapshotsBySessionID[sessionID] = state
             try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
-            if activeChatSession.id == sessionID || selectedChatSessionID == sessionID {
-                rebuildNativeSessionManagerForActiveSession()
-            }
+            if activeChatSession.id == sessionID || selectedChatSessionID == sessionID { rebuildNativeSessionManagerForActiveSession() }
             setSettingsMessage("当前会话 Workspace 已保存。", for: .app)
             errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        } catch { errorMessage = String(describing: error) }
     }
 
     func loadRuntimeSettings() {
-        do {
-            isLoadingRuntimeSettings = true
-            var shouldPersistSystemPreferenceDefaults = false
-            defer {
-                isLoadingRuntimeSettings = false
-                if hasActivatedRuntimeSettingsSideEffects {
-                    applyRuntimeSettingsSideEffects()
-                }
-                if shouldPersistSystemPreferenceDefaults {
-                    scheduleRuntimeSettingsAutosave()
-                }
-            }
-            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
-            loadedLoopConfiguration = settings.loop
-            defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
-            showProviderIcons = settings.ui.showProviderIcons
-            richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
-            desktopNotificationsEnabled = settings.app.desktopNotificationsEnabled
-            sessionNewMessageNotificationLevel = settings.app.sessionNotificationSettings.newMessageLevel
-            keepScreenAwake = settings.app.keepScreenAwake
-            browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
-            httpProxyEnabled = settings.app.httpProxyEnabled
-            httpProxyURLString = settings.app.httpProxyURLString
-            appearanceMode = ConnorAppearanceMode(rawValue: settings.appearance.mode) ?? .system
-            spellCheckEnabled = settings.input.spellCheckEnabled
-            autoSaveDraftsEnabled = settings.input.autoSaveDraftsEnabled
-            sessionSpeechTranscriptionEnabled = settings.input.sessionSpeechTranscriptionEnabled
-            composerSendShortcut = settings.input.composerSendShortcut
-            shortcutSettings = settings.shortcuts
-            requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
-            requireApprovalForShell = settings.permissions.requireApprovalForShell
-            recentWorkspacePaths = settings.workspace.recentWorkspacePaths
-            if let sessionID = currentSessionIDForWorkspaceDrafts() {
-                syncWorkspaceDraftsFromSession(sessionStateSnapshotsBySessionID[sessionID])
-            } else {
-                defaultWorkingDirectoryPath = ""
-                workspaceRoots = []
-            }
-            shouldPersistSystemPreferenceDefaults = settings.preferences.fillEmptyFields(from: .current())
-            userDisplayName = settings.preferences.displayName
-            userTimezone = settings.preferences.timezone
-            userPreferredLanguage = settings.preferences.preferredLanguage
-            applyLoadedGenderIdentity(settings.preferences.genderIdentity)
-            userBirthDate = settings.preferences.birthDate
-            if let parsedBirthDate = Self.birthDateFormatter.date(from: settings.preferences.birthDate) {
-                userBirthDatePickerDate = parsedBirthDate
-            }
-            userCity = settings.preferences.city
-            userCountry = settings.preferences.country
-            userPreferenceNotes = settings.preferences.notes
-            defaultSearchEngine = settings.preferences.defaultSearchEngine
-            settingsSectionMessageStore = SettingsSectionMessageStore()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
+        guard let settings = runtimeSettingsCoordinator.load() else { return }
+        isLoadingRuntimeSettings = true
+        loadedLoopConfiguration = settings.loop
+        appSettingsModel.apply(settings)
+        inputSettingsModel.apply(settings)
+        permissionSettingsModel.apply(settings)
+        workspaceSettingsModel.applyRecentPaths(settings.workspace.recentWorkspacePaths)
+        if let sessionID = currentSessionIDForWorkspaceDrafts() {
+            workspaceSettingsModel.applySessionState(sessionStateSnapshotsBySessionID[sessionID])
+        } else {
+            workspaceSettingsModel.applySessionState(nil)
         }
+        userPreferencesModel.apply(settings.preferences)
+        let shouldPersistSystemDefaults = userPreferencesModel.fillEmptyFieldsFromSystem()
+        browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
+        settingsSectionMessageStore = SettingsSectionMessageStore()
+        errorMessage = nil
+        isLoadingRuntimeSettings = false
+        if hasActivatedRuntimeSettingsSideEffects { applyRuntimeSettingsSideEffects() }
+        if shouldPersistSystemDefaults { scheduleRuntimeSettingsAutosave() }
     }
 
     func saveRuntimeSettings() {
-        do {
-            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
-            settings.schemaVersion = 4
-            settings.loop.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
-            settings.ui.showProviderIcons = showProviderIcons
-            settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
-            settings.app.desktopNotificationsEnabled = desktopNotificationsEnabled
-            settings.app.sessionNotificationSettings = SessionNotificationSettings(newMessageLevel: sessionNewMessageNotificationLevel)
-            settings.app.keepScreenAwake = keepScreenAwake
-            settings.app.internalBrowserEnabled = browserFeatureModel.internalBrowserEnabled
-            settings.app.httpProxyEnabled = httpProxyEnabled
-            settings.app.httpProxyURLString = httpProxyURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.appearance.mode = appearanceMode.rawValue
-            settings.input.spellCheckEnabled = spellCheckEnabled
-            settings.input.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-            settings.input.sessionSpeechTranscriptionEnabled = sessionSpeechTranscriptionEnabled
-            settings.input.composerSendShortcut = composerSendShortcut
-            settings.shortcuts = shortcutSettings
-            settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
-            settings.permissions.requireApprovalForShell = requireApprovalForShell
-                // Workspace roots are session-scoped and saved into Session Capsule.
-            // Keep runtime-settings.workspace as a legacy fallback/template only.
-            settings.workspace.recentWorkspacePaths = recentWorkspacePaths
-            settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.preferredLanguage = userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.genderIdentity = resolvedUserGenderIdentity().trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.birthDate = userBirthDate.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.defaultSearchEngine = defaultSearchEngine
-            try runtimeSettingsRepository?.save(settings)
-            loadedLoopConfiguration = settings.loop
-            applyRuntimeSettingsSideEffects()
-            if submittingChatSessionIDs.isEmpty {
-                rebuildNativeSessionManagerForActiveSession()
-            } else {
-                nativeSessionManager?.permissionMode = settings.loop.permissionMode
-            }
-            settingsSectionMessageStore = SettingsSectionMessageStore()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        runtimeSettingsCoordinator.save(snapshot: runtimeSettingsSnapshot())
     }
 
     func scheduleRuntimeSettingsAutosave() {
         guard !isLoadingRuntimeSettings else { return }
-        runtimeSettingsAutosaveTask?.cancel()
-        runtimeSettingsAutosaveTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            await MainActor.run {
-                guard let self, !Task.isCancelled else { return }
-                self.saveRuntimeSettings()
-            }
+        runtimeSettingsCoordinator.scheduleAutosave { [weak self] in
+            self?.runtimeSettingsSnapshot() ?? .default
         }
+    }
+
+    private func runtimeSettingsSnapshot() -> AgentRuntimeSettings {
+        var settings = runtimeSettingsCoordinator.baseSnapshot()
+        settings.schemaVersion = 4
+        settings.loop = loadedLoopConfiguration
+        appSettingsModel.apply(to: &settings)
+        inputSettingsModel.apply(to: &settings)
+        permissionSettingsModel.apply(to: &settings)
+        settings.app.internalBrowserEnabled = browserFeatureModel.internalBrowserEnabled
+        settings.workspace.recentWorkspacePaths = workspaceSettingsModel.recentPaths
+        userPreferencesModel.apply(to: &settings)
+        return settings
+    }
+
+    private func handleRuntimeSettingsSaved(_ settings: AgentRuntimeSettings) {
+        loadedLoopConfiguration = settings.loop
+        applyRuntimeSettingsSideEffects()
+        if submittingChatSessionIDs.isEmpty {
+            rebuildNativeSessionManagerForActiveSession()
+        } else {
+            nativeSessionManager?.permissionMode = settings.loop.permissionMode
+        }
+        settingsSectionMessageStore = SettingsSectionMessageStore()
+        errorMessage = nil
     }
 
     func activateRuntimeSettingsSideEffectsAfterLaunch() {
@@ -2751,14 +2618,14 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func requestDesktopNotificationAuthorizationIfNeeded() {
-        guard hasActivatedRuntimeSettingsSideEffects, desktopNotificationsEnabled, canUseUserNotifications else { return }
+        guard hasActivatedRuntimeSettingsSideEffects, appSettingsModel.desktopNotificationsEnabled, canUseUserNotifications else { return }
         DispatchQueue.main.async {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
     }
 
     private func applyKeepScreenAwakeSetting() {
-        if keepScreenAwake && !submittingChatSessionIDs.isEmpty {
+        if appSettingsModel.keepScreenAwake && !submittingChatSessionIDs.isEmpty {
             guard idleSleepAssertionID == 0 else { return }
             var assertionID = IOPMAssertionID(0)
             let reason = "Connor session is running" as CFString
@@ -2772,7 +2639,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func resetSessionNotificationSettings() {
-        sessionNewMessageNotificationLevel = SessionNotificationSettings.default.newMessageLevel
+        appSettingsModel.sessionNewMessageNotificationLevel = SessionNotificationSettings.default.newMessageLevel
     }
 
     func markSessionRead(_ sessionID: String) {
@@ -2805,7 +2672,7 @@ final class AppViewModel: NSObject, ObservableObject {
         preview: String?,
         notificationBody: String
     ) {
-        let level = sessionNewMessageNotificationLevel
+        let level = appSettingsModel.sessionNewMessageNotificationLevel
         if shouldTreatSessionUpdateAsRead(sessionID: sessionID) {
             var state = sessionReadStates[sessionID] ?? .initial()
             state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
@@ -2834,7 +2701,7 @@ final class AppViewModel: NSObject, ObservableObject {
         body: String,
         level: SessionAttentionLevel
     ) {
-        guard desktopNotificationsEnabled, canUseUserNotifications else { return }
+        guard appSettingsModel.desktopNotificationsEnabled, canUseUserNotifications else { return }
         guard level.shouldRequestSystemNotification else { return }
         guard !shouldTreatSessionUpdateAsRead(sessionID: sessionID) else { return }
         let now = Date()
@@ -2912,98 +2779,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var canUseUserNotifications: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
-    }
-
-    func setUserGenderIdentitySelection(_ selection: String) {
-        userGenderIdentitySelection = selection
-        if selection == Self.customGenderIdentitySelection {
-            userGenderIdentity = userGenderIdentityCustomText
-        } else {
-            userGenderIdentityCustomText = ""
-            userGenderIdentity = selection
-        }
-        scheduleRuntimeSettingsAutosave()
-    }
-
-    func setUserGenderIdentityCustomText(_ text: String) {
-        userGenderIdentityCustomText = text
-        if userGenderIdentitySelection == Self.customGenderIdentitySelection {
-            userGenderIdentity = text
-        }
-        scheduleRuntimeSettingsAutosave()
-    }
-
-    private func applyLoadedGenderIdentity(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        userGenderIdentity = trimmed
-        if trimmed.isEmpty {
-            userGenderIdentitySelection = ""
-            userGenderIdentityCustomText = ""
-        } else if Self.genderIdentityPresetValues.contains(trimmed) {
-            userGenderIdentitySelection = trimmed
-            userGenderIdentityCustomText = ""
-        } else {
-            userGenderIdentitySelection = Self.customGenderIdentitySelection
-            userGenderIdentityCustomText = trimmed
-        }
-    }
-
-    private func resolvedUserGenderIdentity() -> String {
-        if userGenderIdentitySelection == Self.customGenderIdentitySelection {
-            return userGenderIdentityCustomText
-        }
-        return userGenderIdentitySelection
-    }
-
-    func setUserBirthDateFromPicker(_ date: Date) {
-        userBirthDatePickerDate = date
-        userBirthDate = Self.birthDateFormatter.string(from: date)
-        scheduleRuntimeSettingsAutosave()
-    }
-
-    func clearUserBirthDate() {
-        userBirthDate = ""
-        scheduleRuntimeSettingsAutosave()
-    }
-
-    func refreshSystemPreferenceDefaults() {
-        let systemDefaults = AgentRuntimePreferenceSystemDefaults.current()
-        if userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userDisplayName = systemDefaults.displayName
-        }
-        if userTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userTimezone = systemDefaults.timezone
-        }
-        if userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userPreferredLanguage = systemDefaults.preferredLanguage
-        }
-        if userCountry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userCountry = systemDefaults.country
-        }
-    }
-
-    func requestUserLocation() {
-        userLocationStatusMessage = "正在请求位置权限…"
-        locationCoordinator = UserLocationCoordinator { [weak self] result in
-            Task { @MainActor in
-                guard let self else { return }
-                switch result {
-                case .success(let placemark):
-                    if let city = placemark.locality ?? placemark.subAdministrativeArea ?? placemark.administrativeArea {
-                        self.userCity = city
-                    }
-                    if let country = placemark.country {
-                        self.userCountry = country
-                    }
-                    self.userLocationStatusMessage = "位置已更新。"
-                    self.scheduleRuntimeSettingsAutosave()
-                case .failure(let error):
-                    self.userLocationStatusMessage = error.localizedDescription
-                }
-                self.locationCoordinator = nil
-            }
-        }
-        locationCoordinator?.requestLocation()
     }
 
     func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
@@ -3140,85 +2915,17 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    var primaryWorkspaceRootDraft: WorkspaceRootDraft? {
-        workspaceRoots.first(where: \.isPrimary) ?? workspaceRoots.first
-    }
-
-    func addWorkspaceRoot(path rawPath: String) {
-        guard AppWorkspaceRootDraftEditor.addRoot(path: rawPath, to: &workspaceRoots, makePrimary: false) else {
-            workspaceRootPathInput = ""
-            return
-        }
-        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
-        workspaceRootPathInput = ""
-        saveWorkspaceDraftsToCurrentSession()
-    }
-
-    func addWorkspaceRootAndSetPrimary(path rawPath: String) {
-        guard AppWorkspaceRootDraftEditor.addRoot(path: rawPath, to: &workspaceRoots, makePrimary: true) else {
-            workspaceRootPathInput = ""
-            return
-        }
-        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
-        workspaceRootPathInput = ""
-        rememberWorkspacePath(defaultWorkingDirectoryPath)
-        saveWorkspaceDraftsToCurrentSession()
-    }
-
-    private func rememberWorkspacePath(_ path: String) {
-        do {
-            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
-            settings.workspace.rememberWorkspacePath(path)
-            recentWorkspacePaths = settings.workspace.recentWorkspacePaths
-            try runtimeSettingsRepository?.save(settings)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func clearRecentWorkspacePaths() {
-        do {
-            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
-            settings.workspace.clearRecentWorkspacePaths()
-            recentWorkspacePaths = settings.workspace.recentWorkspacePaths
-            try runtimeSettingsRepository?.save(settings)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func addWorkspaceRoots(paths: [String]) {
-        for path in paths { addWorkspaceRoot(path: path) }
-    }
-
-    func resetWorkspaceRootsForCurrentSession() {
-        workspaceRoots = []
-        defaultWorkingDirectoryPath = ""
-        workspaceRootPathInput = ""
-        saveWorkspaceDraftsToCurrentSession()
-    }
-
-    func removeWorkspaceRoot(id: String) {
-        AppWorkspaceRootDraftEditor.removeRoot(id: id, from: &workspaceRoots)
-        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
-        saveWorkspaceDraftsToCurrentSession()
-    }
-
-    func setPrimaryWorkspaceRoot(id: String) {
-        AppWorkspaceRootDraftEditor.setPrimaryRoot(id: id, in: &workspaceRoots)
-        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
-        saveWorkspaceDraftsToCurrentSession()
-    }
-
     func resetRuntimeSettings() {
-        do {
-            try runtimeSettingsRepository?.save(.default)
-            loadRuntimeSettings()
-            setSettingsMessage("设置已恢复默认值。", for: .app)
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        guard let settings = runtimeSettingsCoordinator.reset() else { return }
+        loadedLoopConfiguration = settings.loop
+        appSettingsModel.apply(settings)
+        inputSettingsModel.apply(settings)
+        permissionSettingsModel.apply(settings)
+        workspaceSettingsModel.applyRecentPaths(settings.workspace.recentWorkspacePaths)
+        userPreferencesModel.apply(settings.preferences)
+        browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
+        setSettingsMessage("设置已恢复默认值。", for: .app)
+        errorMessage = nil
     }
 
     func reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
@@ -3441,7 +3148,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func beginSpeechTranscriptionForSelectedSession(speechInsertionRange: NSRange? = nil) {
-        guard sessionSpeechTranscriptionEnabled else { return }
+        guard inputSettingsModel.sessionSpeechTranscriptionEnabled else { return }
         let task = speechTranscriptionCoordinator.beginHoldToTalk(
             selectedSessionID: selectedChatSessionID,
             currentDraft: currentSelectedChatInputDraftForSpeech(),
@@ -4619,79 +4326,6 @@ final class AppViewModel: NSObject, ObservableObject {
 extension AppViewModel {
     var hasMemoryOSBackendForTests: Bool {
         memoryOSFacade != nil
-    }
-}
-
-private final class UserLocationCoordinator: NSObject, CLLocationManagerDelegate {
-    private let manager = CLLocationManager()
-    private let geocoder = CLGeocoder()
-    private let completion: @Sendable (Result<CLPlacemark, Error>) -> Void
-
-    init(completion: @escaping @Sendable (Result<CLPlacemark, Error>) -> Void) {
-        self.completion = completion
-        super.init()
-        manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
-    }
-
-    func requestLocation() {
-        switch manager.authorizationStatus {
-        case .notDetermined:
-            manager.requestWhenInUseAuthorization()
-        case .authorizedAlways, .authorizedWhenInUse:
-            manager.requestLocation()
-        case .denied, .restricted:
-            completion(.failure(LocationPreferenceError.permissionDenied))
-        @unknown default:
-            completion(.failure(LocationPreferenceError.permissionDenied))
-        }
-    }
-
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        switch manager.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse:
-            manager.requestLocation()
-        case .denied, .restricted:
-            completion(.failure(LocationPreferenceError.permissionDenied))
-        case .notDetermined:
-            break
-        @unknown default:
-            completion(.failure(LocationPreferenceError.permissionDenied))
-        }
-    }
-
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else {
-            completion(.failure(LocationPreferenceError.locationUnavailable))
-            return
-        }
-        geocoder.reverseGeocodeLocation(location) { [completion] placemarks, error in
-            if let error {
-                completion(.failure(error))
-            } else if let placemark = placemarks?.first {
-                completion(.success(placemark))
-            } else {
-                completion(.failure(LocationPreferenceError.locationUnavailable))
-            }
-        }
-    }
-
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        completion(.failure(error))
-    }
-}
-
-private enum LocationPreferenceError: LocalizedError {
-    case permissionDenied
-    case locationUnavailable
-
-    var errorDescription: String? {
-        switch self {
-        case .permissionDenied:
-            return "定位权限未开启。请在系统设置中允许康纳同学访问位置，或手动填写城市和国家/地区。"
-        case .locationUnavailable:
-            return "暂时无法读取当前位置。你仍可以手动填写城市和国家/地区。"
-        }
     }
 }
 

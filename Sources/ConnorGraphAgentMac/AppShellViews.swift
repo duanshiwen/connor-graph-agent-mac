@@ -204,9 +204,6 @@ struct AppShellView: View {
         .onDisappear {
             removeTopSearchKeyMonitor()
         }
-        .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
-            viewModel.scheduleRuntimeSettingsAutosave()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .connorSessionNotificationActivated)) { notification in
             guard let sessionID = notification.userInfo?["sessionID"] as? String else { return }
             viewModel.openSessionFromNotification(sessionID)
@@ -216,7 +213,7 @@ struct AppShellView: View {
     private func installTopSearchKeyMonitorIfNeeded() {
         guard topSearchKeyMonitor == nil else { return }
         topSearchKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let shortcut = viewModel.shortcut(for: .focusTopSearch)
+            let shortcut = viewModel.inputSettingsModel.shortcut(for: .focusTopSearch)
             guard shortcut.matches(
                 character: event.charactersIgnoringModifiers,
                 isCommandDown: event.modifierFlags.contains(.command),

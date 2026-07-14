@@ -35,8 +35,8 @@ struct AgentChatView: View {
                         chat: BrowserWorkspaceChatActions(
                             selectedSessionID: viewModel.selectedChatSessionID,
                             isSubmitting: viewModel.isSubmittingChat,
-                            defaultSearchEngine: viewModel.defaultSearchEngine,
-                            shortcutSettings: viewModel.shortcutSettings,
+                            defaultSearchEngine: viewModel.appSettingsModel.defaultSearchEngine,
+                            shortcutSettings: viewModel.inputSettingsModel.shortcutSettings,
                             cancelActiveRun: { viewModel.cancelActiveChatRun() },
                             appendToDraft: { viewModel.appendToSelectedChatInputDraft($0) },
                             appendSessionRecord: { kind, title, body, metadata, sessionID in

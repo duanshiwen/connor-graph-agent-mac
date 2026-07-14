@@ -80,7 +80,7 @@ struct ConnorSettingsDetailView: View {
                     case .identity:
                         UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.allChatSessions)
                     case .app:
-                        SettingsAppSection(viewModel: viewModel)
+                        SettingsAppSection(model: viewModel.appSettingsModel, inputModel: viewModel.inputSettingsModel, openProjectHelp: { viewModel.openProjectGitHubHelp() })
                     case .ai:
                         SettingsAISection(viewModel: viewModel)
                     case .calendar:
@@ -90,15 +90,15 @@ struct ConnorSettingsDetailView: View {
                     case .mail:
                         SettingsMailSection(model: viewModel.mailFeatureModel)
                     case .permissions:
-                        SettingsPermissionsSection(viewModel: viewModel)
+                        SettingsPermissionsSection(model: viewModel.permissionSettingsModel)
                     case .labels:
                         SettingsLabelsSection(viewModel: viewModel)
                     case .statuses:
                         SettingsStatusesSection(viewModel: viewModel)
                     case .shortcuts:
-                        SettingsShortcutsSection(viewModel: viewModel)
+                        SettingsShortcutsSection(model: viewModel.inputSettingsModel)
                     case .preferences:
-                        SettingsPreferencesSection(viewModel: viewModel)
+                        SettingsPreferencesSection(model: viewModel.userPreferencesModel)
                     }
                 }
                 .frame(maxWidth: 760)
@@ -261,7 +261,9 @@ private struct CalendarSourceSettingsRow: View {
 }
 
 struct SettingsAppSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: AppSettingsFeatureModel
+    @Bindable var inputModel: InputSettingsFeatureModel
+    var openProjectHelp: () -> Void
 
     private var appVersionDisplay: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -286,12 +288,12 @@ struct SettingsAppSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "通知") {
-                SettingsToggleRow(title: "桌面通知", subtitle: "允许会话新消息发送 macOS 通知。", isOn: $viewModel.desktopNotificationsEnabled)
+                SettingsToggleRow(title: "桌面通知", subtitle: "允许会话新消息发送 macOS 通知。", isOn: $model.desktopNotificationsEnabled)
                 Divider()
                 SettingsPickerRow(
                     title: "会话新消息",
                     subtitle: "Connor 当前只保留这一种通知语义：当不可见会话产生新消息时如何提醒。",
-                    selection: $viewModel.sessionNewMessageNotificationLevel
+                    selection: $model.sessionNewMessageNotificationLevel
                 ) {
                     ForEach(SessionAttentionLevel.allCases) { level in
                         Text(level.displayName).tag(level)
@@ -300,7 +302,7 @@ struct SettingsAppSection: View {
                 Divider()
                 HStack {
                     Spacer()
-                    Button(action: viewModel.resetSessionNotificationSettings) {
+                    Button(action: model.resetSessionNotificationSettings) {
                         Label("恢复默认", systemImage: "arrow.counterclockwise")
                             .font(SettingsListTypography.rowCaptionEmphasized)
                     }
@@ -309,13 +311,16 @@ struct SettingsAppSection: View {
                 }
             }
             SettingsGroup(title: "电源") {
-                SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
+                SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $model.keepScreenAwake)
             }
             SettingsGroup(title: "输入") {
                 SettingsToggleRow(
                     title: "会话页语音转文字",
                     subtitle: "在会话输入栏启用按住说话；关闭后置灰快捷录音入口并停止监听 Option 语音输入。",
-                    isOn: $viewModel.sessionSpeechTranscriptionEnabled
+                    isOn: Binding(
+                        get: { inputModel.sessionSpeechTranscriptionEnabled },
+                        set: { inputModel.setSpeechTranscriptionEnabled($0) }
+                    )
                 )
             }
             SettingsGroup(title: "搜索") {
@@ -328,7 +333,7 @@ struct SettingsAppSection: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Picker("默认搜索引擎", selection: $viewModel.defaultSearchEngine) {
+                    Picker("默认搜索引擎", selection: $model.defaultSearchEngine) {
                         ForEach(DefaultSearchEngine.allCases) { engine in
                             Text(engine.displayName).tag(engine)
                         }
@@ -341,13 +346,13 @@ struct SettingsAppSection: View {
                 .frame(minHeight: SettingsListLayout.rowMinHeight)
             }
             SettingsGroup(title: "页面显示主题") {
-                SettingsAppearanceModeRow(selection: $viewModel.appearanceMode)
+                SettingsAppearanceModeRow(selection: $model.appearanceMode)
             }
             SettingsGroup(title: "网络") {
-                SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $viewModel.httpProxyEnabled)
-                if viewModel.httpProxyEnabled {
+                SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $model.httpProxyEnabled)
+                if model.httpProxyEnabled {
                     Divider()
-                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $viewModel.httpProxyURLString)
+                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $model.httpProxyURLString)
                 }
             }
             SettingsGroup(title: "关于") {
@@ -362,7 +367,7 @@ struct SettingsAppSection: View {
                             .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("打开 GitHub") { viewModel.openProjectGitHubHelp() }
+                    Button("打开 GitHub") { openProjectHelp() }
                         .buttonStyle(.bordered)
                 }
             }
@@ -2479,7 +2484,7 @@ struct AIConnectionEntryRow: View {
 }
 
 struct SettingsPermissionsSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: PermissionSettingsFeatureModel
     @State private var isShowingPolicyDetails = false
 
     var body: some View {
@@ -2493,9 +2498,9 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "新会话默认权限") {
-                PermissionModePickerRow(selection: $viewModel.defaultPermissionMode)
+                PermissionModePickerRow(selection: $model.defaultPermissionMode)
                 Divider()
-                PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
+                PermissionModeSummaryRow(mode: model.defaultPermissionMode)
             }
 
             SettingsGroup(title: "生效范围") {
