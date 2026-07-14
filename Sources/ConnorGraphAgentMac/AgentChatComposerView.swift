@@ -138,17 +138,17 @@ struct AgentChatComposerView: View {
 
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
-                            title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
+                            title: viewModel.browserFeatureModel.isVisible ? "隐藏浏览器" : "浏览器",
                             systemImage: "safari",
-                            tint: viewModel.isBrowserVisible ? composerControlActiveForeground : composerControlForeground,
+                            tint: viewModel.browserFeatureModel.isVisible ? composerControlActiveForeground : composerControlForeground,
                             showsChevron: false,
-                            isActive: viewModel.isBrowserVisible,
+                            isActive: viewModel.browserFeatureModel.isVisible,
                             style: .compact
                         )
                     }
                     .buttonStyle(.plain)
-                    .help(viewModel.isBrowserVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
-                    .accessibilityLabel(viewModel.isBrowserVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+                    .help(viewModel.browserFeatureModel.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+                    .accessibilityLabel(viewModel.browserFeatureModel.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
                     if let inspection = viewModel.lastPromptInspection {
                         promptBudgetLabel(inspection)

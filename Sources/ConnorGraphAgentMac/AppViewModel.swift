@@ -212,13 +212,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
-    @Published var globalSearchQuery: String = ""
-    @Published var isGlobalSearchFieldFocused: Bool = false
-    @Published var isGlobalSearchOverlayPresented: Bool = false
-    @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
-    @Published var globalSearchSelectedItem: GlobalSearchSelectableItem? = .action(.newChat)
-    @Published private(set) var globalSearchTimings: [GlobalSearchSectionTiming] = []
-    @Published private(set) var globalSearchHistoryEntries: [GlobalSearchHistoryEntry] = []
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     let productOSControlModel: ProductOSControlFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
@@ -226,6 +219,8 @@ final class AppViewModel: NSObject, ObservableObject {
     let calendarFeatureModel: CalendarFeatureModel
     let contactsFeatureModel: ContactsFeatureModel
     let mailFeatureModel: MailFeatureModel
+    let browserFeatureModel: BrowserFeatureModel
+    let globalSearchFeatureModel: GlobalSearchFeatureModel
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     @Published var activeSkillSlug: String?
@@ -236,28 +231,12 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var chatSummaryMessage: String?
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
-    @Published var isBrowserVisible: Bool = false
-    @Published var browserWorkspaceSessionID: String?
-    @Published var browserTargetURLString: String = BrowserBuiltInPage.blankURLString
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
-    @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
-    let browserLiveWebViewStore = BrowserLiveWebViewStore()
-    @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
-    @Published var browserAssistedWebFetchRequestsByTaskID: [UUID: BrowserAssistedWebFetchRequest] = [:]
-    @Published var isBrowserBookmarksPanelVisible: Bool = false
-    @Published var browserBookmarkRecords: [BrowserBookmarkRecord] = []
-    @Published var filteredBrowserBookmarkRecords: [BrowserBookmarkRecord] = []
-    @Published var selectedBrowserBookmarkGroupName: String?
-    @Published var isBrowserHistoryPanelVisible: Bool = false
-    @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
-    @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
-    @Published var browserHistorySearchQuery: String = ""
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
     @Published var sessionNewMessageNotificationLevel: SessionAttentionLevel = .actionable
     @Published var keepScreenAwake: Bool = false
-    @Published var internalBrowserEnabled: Bool = true
     @Published var httpProxyEnabled: Bool = false
     @Published var httpProxyURLString: String = ""
     @Published var appearanceMode: ConnorAppearanceMode = .system
@@ -309,8 +288,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var activityTimelineCacheWriter: ActivityTimelineCacheWriter?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var storagePaths: AppStoragePaths?
-    private var browserHistoryStore: BrowserHistoryStore?
-    private var browserBookmarkStore: BrowserBookmarkStore?
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var loadedLoopConfiguration = AgentLoopConfiguration()
     private var llmSettingsRepository: AppLLMSettingsRepository
@@ -319,9 +296,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var providerCapabilityDiscoveryService: AppProviderCapabilityDiscoveryService
     private let llmConnectionSetupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
-    private var sessionSearchIndexService: SessionSearchIndexService?
-    private var globalSearchHistoryRepository: AppGlobalSearchHistoryRepository?
-    private var globalSearchPreviewTask: Task<Void, Never>?
     private var applicationDidFinishLaunchingObserver: NSObjectProtocol?
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var isRunningBackgroundJobs: Bool = false
@@ -358,13 +332,9 @@ final class AppViewModel: NSObject, ObservableObject {
     private var liveChatInputDraft: String = ""
     private var liveChatInputDraftRevision: UInt64 = 0
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
-    private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
-    private var browserAssistedWebFetchTimeoutTasksByID: [UUID: Task<Void, Never>] = [:]
-    private var browserHistoryContentFetchTasksByID: [UUID: Task<Void, Never>] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
-    private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
     private var isLoadingRuntimeSettings = false
     private var runtimeSettingsAutosaveTask: Task<Void, Never>?
@@ -872,15 +842,15 @@ final class AppViewModel: NSObject, ObservableObject {
     private func applyNavigation(to item: ConnorNativeShellItem) {
         switch item {
         case .home:
-            isBrowserVisible = false
+            browserFeatureModel.isVisible = false
             selection = .agentChat
         case .agentChat:
-            isBrowserVisible = false
+            browserFeatureModel.isVisible = false
             selection = .agentChat
         case .browserWorkspace:
-            showBrowserWorkspace()
+            browserFeatureModel.showWorkspace()
         case .graphMemory:
-            isBrowserVisible = false
+            browserFeatureModel.isVisible = false
             selection = .agentChat
         case .search:
             selection = .search
@@ -915,7 +885,7 @@ final class AppViewModel: NSObject, ObservableObject {
             newChatSession()
             navigate(to: .agentChat)
         case .toggleBrowser:
-            toggleBrowserWorkspaceVisibility()
+            browserFeatureModel.toggleWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
         case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openCalendarSources, .openContactsSources, .openMailSources, .openRSSSources, .openSettings:
@@ -926,496 +896,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func openURLInCurrentChatBrowser(_ url: URL) {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
-        let urlString = url.absoluteString
-        let planner = BrowserExternalOpenPlanner()
-        if focusExistingBrowserTabIfPresent(urlString: urlString, preferredSessionID: sessionID, planner: planner) {
-            return
-        }
-        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
-        let plannedSnapshot = planner.openOrFocus(urlString: urlString, in: currentSnapshot)
-        browserTargetURLString = urlString
-        saveBrowserWorkspaceSnapshot(plannedSnapshot, for: sessionID)
-        showBrowserWorkspace(for: sessionID)
-    }
-
-    func activateGlobalSearchField() {
-        isGlobalSearchFieldFocused = true
-        let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            isGlobalSearchOverlayPresented = !globalSearchHistoryEntries.isEmpty
-            globalSearchSelectedItem = globalSearchSelectableItems.first
-            return
-        }
-        isGlobalSearchOverlayPresented = true
-        if globalSearchPreviewState.query != trimmed {
-            scheduleGlobalSearchPreview(for: trimmed)
-        }
-    }
-
-    func deactivateGlobalSearchField() {
-        finishGlobalSearchInteraction(clearQuery: false)
-    }
-
-    func updateGlobalSearchQuery(_ query: String) {
-        globalSearchQuery = query
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        globalSearchPreviewTask?.cancel()
-        guard !trimmed.isEmpty else {
-            globalSearchPreviewState = .empty
-            isGlobalSearchOverlayPresented = isGlobalSearchFieldFocused && !globalSearchHistoryEntries.isEmpty
-            globalSearchSelectedItem = globalSearchSelectableItems.first
-            return
-        }
-        isGlobalSearchOverlayPresented = true
-        globalSearchSelectedItem = .action(.newChat)
-        scheduleGlobalSearchPreview(for: trimmed)
-    }
-
-    func clearGlobalSearch() {
-        finishGlobalSearchInteraction(clearQuery: true)
-        globalSearchPreviewState = .empty
-        globalSearchSelectedItem = .action(.newChat)
-    }
-
-    @discardableResult
-    func dismissGlobalSearchOverlay() -> Bool {
-        finishGlobalSearchInteraction(clearQuery: false)
-    }
-
-    @discardableResult
-    private func finishGlobalSearchInteraction(clearQuery: Bool) -> Bool {
-        let wasInteracting = isGlobalSearchOverlayPresented || isGlobalSearchFieldFocused
-        globalSearchPreviewTask?.cancel()
-        globalSearchPreviewTask = nil
-        if clearQuery { globalSearchQuery = "" }    
-        isGlobalSearchFieldFocused = false
-        isGlobalSearchOverlayPresented = false
-        return wasInteracting
-    }
-
-    private func performAfterGlobalSearchDismiss(_ action: @escaping @MainActor () -> Void) {
-        dismissGlobalSearchOverlay()
-        action()
-    }
-
-    var globalSearchSelectableItems: [GlobalSearchSelectableItem] {
-        let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty && globalSearchPreviewState == .empty {
-            return globalSearchHistoryEntries.prefix(8).map { .recentSearch($0.id) }
-        }
-        var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
-        items.append(contentsOf: globalSearchPreviewState.chatSessionResults.map { .chatSession($0.id) })
-        items.append(contentsOf: globalSearchPreviewState.calendarResults.map { .nativeResult($0.id) })
-        items.append(contentsOf: globalSearchPreviewState.rssResults.map { .nativeResult($0.id) })
-        items.append(contentsOf: globalSearchPreviewState.mailResults.map { .nativeResult($0.id) })
-        items.append(contentsOf: globalSearchPreviewState.browserHistoryResults.prefix(3).map { .nativeResult($0.id) })
-        return items
-    }
-
-    func moveGlobalSearchSelectionDown() {
-        moveGlobalSearchSelection(delta: 1)
-    }
-
-    func moveGlobalSearchSelectionUp() {
-        moveGlobalSearchSelection(delta: -1)
-    }
-
-    private func moveGlobalSearchSelection(delta: Int) {
-        let items = globalSearchSelectableItems
-        guard !items.isEmpty else {
-            globalSearchSelectedItem = nil
-            return
-        }
-        let currentIndex = globalSearchSelectedItem.flatMap { items.firstIndex(of: $0) } ?? 0
-        let nextIndex = (currentIndex + delta + items.count) % items.count
-        globalSearchSelectedItem = items[nextIndex]
-    }
-
-    private func normalizeGlobalSearchSelection() {
-        let items = globalSearchSelectableItems
-        guard !items.isEmpty else {
-            globalSearchSelectedItem = nil
-            return
-        }
-        if let selected = globalSearchSelectedItem, items.contains(selected) { return }
-        globalSearchSelectedItem = items.first
-    }
-
-    func performSelectedGlobalSearchItem() {
-        normalizeGlobalSearchSelection()
-        guard let selected = globalSearchSelectedItem else { return }
-        switch selected {
-        case .recentSearch(let entryID):
-            guard let entry = globalSearchHistoryEntries.first(where: { $0.id == entryID }) else { return }
-            selectGlobalSearchHistoryEntry(entry)
-        case .action(.newChat):
-            performGlobalSearchNewChat()
-        case .action(.webSearch):
-            performGlobalSearchWebSearch()
-        case .chatSession(let sessionID):
-            openGlobalSearchChatSessionResult(sessionID)
-        case .nativeResult(let resultID):
-            let results = globalSearchPreviewState.calendarResults
-                + globalSearchPreviewState.rssResults
-                + globalSearchPreviewState.mailResults
-                + globalSearchPreviewState.browserHistoryResults
-            guard let result = results.first(where: { $0.id == resultID }) else { return }
-            openGlobalSearchResult(result)
-        }
-    }
-
-    func selectGlobalSearchHistoryEntry(_ entry: GlobalSearchHistoryEntry) {
-        recordGlobalSearchHistoryIfNeeded(entry.query)
-        updateGlobalSearchQuery(entry.query)
-    }
-
-    func clearGlobalSearchHistory() {
-        do {
-            try globalSearchHistoryRepository?.clear()
-        } catch {
-            // Search history is a convenience feature; failing to clear persistence
-            // should not interrupt the foreground search interaction.
-        }
-        globalSearchHistoryEntries = []
-        globalSearchSelectedItem = nil
-        if globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            isGlobalSearchOverlayPresented = false
-        }
-    }
-
-    func recordGlobalSearchHistoryForTesting(query: String) {
-        recordGlobalSearchHistoryIfNeeded(query)
-    }
-
-    private func recordGlobalSearchHistoryIfNeeded(_ query: String) {
-        let displayQuery = AppGlobalSearchHistoryRepository.displayQuery(for: query)
-        guard !displayQuery.isEmpty else { return }
-        if let globalSearchHistoryRepository {
-            if let entries = try? globalSearchHistoryRepository.record(query: displayQuery) {
-                globalSearchHistoryEntries = entries
-                return
-            }
-        }
-        let normalizedQuery = AppGlobalSearchHistoryRepository.normalizedQuery(for: displayQuery)
-        guard !normalizedQuery.isEmpty else { return }
-        if let existingIndex = globalSearchHistoryEntries.firstIndex(where: { $0.normalizedQuery == normalizedQuery }) {
-            var entry = globalSearchHistoryEntries.remove(at: existingIndex)
-            entry.query = displayQuery
-            entry.searchedAt = Date()
-            entry.useCount += 1
-            globalSearchHistoryEntries.insert(entry, at: 0)
-        } else {
-            globalSearchHistoryEntries.insert(
-                GlobalSearchHistoryEntry(
-                    id: normalizedQuery,
-                    query: displayQuery,
-                    normalizedQuery: normalizedQuery,
-                    searchedAt: Date(),
-                    useCount: 1
-                ),
-                at: 0
-            )
-        }
-        if globalSearchHistoryEntries.count > 20 {
-            globalSearchHistoryEntries = Array(globalSearchHistoryEntries.prefix(20))
-        }
-    }
-
-    private func scheduleGlobalSearchPreview(for query: String) {
-        globalSearchPreviewTask?.cancel()
-        if globalSearchPreviewState == .empty {
-            globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: false, searchTokens: globalSearchDisplayTokens(for: query))
-        }
-        globalSearchPreviewTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            guard !Task.isCancelled else { return }
-            await self?.refreshGlobalSearchPreview(for: query)
-        }
-    }
-
-    func refreshGlobalSearchPreview(for query: String) async {
-        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let tokens = globalSearchDisplayTokens(for: trimmed)
-        globalSearchTimings = []
-        let chatStartedAt = Date()
-        let chatSessionResults = await searchChatSessions(query: trimmed, limit: 3)
-        recordGlobalSearchTiming(query: trimmed, section: "chatSessions", startedAt: chatStartedAt, returnedCount: chatSessionResults.count, backend: sessionSearchIndexService == nil ? "fallback-scan" : "session-fts")
-        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-        guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-
-        globalSearchPreviewState = GlobalSearchPreviewState(
-            query: trimmed,
-            loadingSections: [.calendar, .rss, .mail, .browserHistory],
-            chatSessionResults: chatSessionResults,
-            searchTokens: tokens,
-            errorMessage: nil
-        )
-        normalizeGlobalSearchSelection()
-
-        let limits: [NativeSearchSourceKind: Int] = [.calendar: 3, .rss: 3, .mail: 3, .browserHistory: 3]
-        await refreshGlobalSearchNativePreviewSections(query: trimmed, tokens: tokens, limitsBySource: limits)
-    }
-
-    nonisolated static func userFacingGlobalSearchErrorMessage(for error: Error) -> String? {
-        if error is GlobalSearchTimeoutError { return nil }
-        return String(describing: error)
-    }
-
-    private func refreshGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int]) async {
-        if let nativeSourceSearchBackend {
-            await refreshIndexedGlobalSearchNativePreviewSections(query: query, tokens: tokens, limitsBySource: limitsBySource, backend: nativeSourceSearchBackend)
-            return
-        }
-
-        for kind in NativeSearchSourceKind.allCases {
-            guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-            let startedAt = Date()
-            let limit = limitsBySource[kind] ?? 3
-            let results = fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
-            recordGlobalSearchTiming(query: query, section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue, startedAt: startedAt, returnedCount: results.count, backend: "fallback")
-            applyGlobalSearchNativeSectionResult(
-                GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil),
-                query: query,
-                tokens: tokens
-            )
-        }
-    }
-
-    private func refreshIndexedGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int], backend: any NativeSourceSearchBackend) async {
-        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-        let health = await backend.health()
-        applyGlobalSearchNativeHealth(health, query: query, tokens: tokens)
-        let coordinator = GlobalSearchPreviewCoordinator(
-            backend: backend,
-            timeoutMilliseconds: 250,
-            errorMessage: Self.userFacingGlobalSearchErrorMessage(for:)
-        )
-        for await sectionResult in coordinator.previewResults(query: query, limitsBySource: limitsBySource) {
-            guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-            globalSearchTimings.append(sectionResult.timing)
-            applyGlobalSearchNativeSectionResult(
-                GlobalSearchNativeSectionResult(
-                    kind: GlobalSearchSectionKind(nativeSourceKind: sectionResult.kind),
-                    results: sectionResult.results,
-                    errorMessage: sectionResult.errorMessage,
-                    timing: sectionResult.timing
-                ),
-                query: query,
-                tokens: tokens
-            )
-        }
-    }
-
-    private func recordGlobalSearchTiming(query: String, section: String, startedAt: Date, returnedCount: Int, backend: String) {
-        globalSearchTimings.append(GlobalSearchSectionTiming(
-            query: query,
-            section: section,
-            startedAt: startedAt,
-            endedAt: Date(),
-            candidateCount: returnedCount,
-            returnedCount: returnedCount,
-            backend: backend
-        ))
-    }
-
-    private func applyGlobalSearchNativeHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String]) {
-        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-        guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-        var state = globalSearchPreviewState
-        state.query = query
-        state.searchTokens = tokens
-        for kind in NativeSearchSourceKind.allCases {
-            let sectionKind = GlobalSearchSectionKind(nativeSourceKind: kind)
-            state.sectionStatusMessages[sectionKind] = Self.globalSearchSectionStatusMessage(for: kind, health: health)
-        }
-        globalSearchPreviewState = state
-    }
-
-    nonisolated static func globalSearchSectionStatusMessage(for kind: NativeSearchSourceKind, health: NativeSourceSearchHealthSnapshot) -> String? {
-        if let lastError = health.lastError, !lastError.isEmpty {
-            return "索引暂不可用"
-        }
-        if health.pendingUpdateCount > 0 {
-            return "后台正在更新索引，先显示已索引结果"
-        }
-        if health.staleSourceKinds.contains(kind) {
-            return "索引可能过期，先显示上次索引结果"
-        }
-        if health.documentCountBySource[kind, default: 0] == 0 {
-            return "尚未建立索引"
-        }
-        return nil
-    }
-
-    private func applyGlobalSearchNativeSectionResult(_ sectionResult: GlobalSearchNativeSectionResult, query: String, tokens: [String]) {
-        guard isGlobalSearchOverlayPresented, !Task.isCancelled else { return }
-        var state = globalSearchPreviewState
-        state.query = query
-        state.searchTokens = tokens
-        state.loadingSections.remove(sectionResult.kind)
-        if let errorMessage = sectionResult.errorMessage, state.errorMessage == nil {
-            state.errorMessage = errorMessage
-        }
-        if !sectionResult.results.isEmpty || sectionResult.errorMessage != nil {
-            state.sectionStatusMessages[sectionResult.kind] = nil
-        }
-        switch sectionResult.kind {
-        case .chatSessions:
-            break
-        case .calendar:
-            state.calendarResults = sectionResult.results
-        case .rss:
-            state.rssResults = sectionResult.results
-        case .mail:
-            state.mailResults = sectionResult.results
-        case .browserHistory:
-            state.browserHistoryResults = sectionResult.results
-        }
-        globalSearchPreviewState = state
-        normalizeGlobalSearchSelection()
-    }
-
-    private func globalSearchDisplayTokens(for query: String) -> [String] {
-        GlobalSearchDisplayTokenBuilder.tokens(for: query)
-    }
-
-    private func searchChatSessions(query: String, limit: Int) async -> [GlobalSearchSessionResult] {
-        if let sessionSearchIndexService,
-           let indexed = try? await sessionSearchIndexService.search(query: query, limit: limit),
-           !indexed.isEmpty {
-            return indexed.map { result in
-                GlobalSearchSessionResult(
-                    id: result.id,
-                    title: result.title,
-                    snippet: result.snippet,
-                    updatedAt: result.updatedAt,
-                    messageCount: result.messageCount
-                )
-            }
-        }
-        let terms = Self.globalSearchMatchTerms(for: query)
-        guard !terms.isEmpty else { return [] }
-        return allChatSessions
-            .compactMap { session -> (result: GlobalSearchSessionResult, score: Double)? in
-                let titleScore = Self.globalSearchMatchScore(text: session.title, terms: terms, weight: 20)
-                var bestMessageScore = 0.0
-                var bestSnippet = session.messages.last?.content ?? session.title
-                for message in session.messages {
-                    let weight: Double = message.role == .user ? 8 : 5
-                    let score = Self.globalSearchMatchScore(text: message.content, terms: terms, weight: weight)
-                    if score > bestMessageScore {
-                        bestMessageScore = score
-                        bestSnippet = Self.globalSearchSnippet(text: message.content, terms: terms)
-                    }
-                }
-                let totalScore = titleScore + bestMessageScore
-                guard totalScore > 0 else { return nil }
-                let snippet = titleScore > 0 && bestMessageScore == 0
-                    ? "最近更新：\(session.updatedAt.connorLocalFormatted(date: .medium, time: .short))"
-                    : bestSnippet
-                return (
-                    GlobalSearchSessionResult(
-                        id: session.id,
-                        title: session.title.isEmpty ? "新对话" : session.title,
-                        snippet: snippet,
-                        updatedAt: session.updatedAt,
-                        messageCount: session.messages.count
-                    ),
-                    totalScore + min(3, Date().timeIntervalSince(session.updatedAt) / -86_400_000)
-                )
-            }
-            .sorted { lhs, rhs in
-                if lhs.score != rhs.score { return lhs.score > rhs.score }
-                return lhs.result.updatedAt > rhs.result.updatedAt
-            }
-            .prefix(limit)
-            .map(\.result)
-    }
-
-    private static func globalSearchMatchTerms(for query: String) -> [String] {
-        let normalized = NativeSearchQueryNormalizer.normalize(query)
-        var seen: Set<String> = []
-        let normalizedTerms = normalized.scoringTokens
-            .map(\.value)
-            .filter { !$0.isEmpty }
-            .filter { $0.count >= 2 || query.count <= 2 }
-            .filter { seen.insert($0).inserted }
-        if !normalizedTerms.isEmpty { return normalizedTerms }
-        return query
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .map(String.init)
-            .filter { !$0.isEmpty }
-    }
-
-    private static func globalSearchMatchScore(text: String, terms: [String], weight: Double) -> Double {
-        let lower = text.lowercased()
-        let matchedTerms = terms.filter { lower.localizedCaseInsensitiveContains($0) }
-        guard !matchedTerms.isEmpty else { return 0 }
-        let requiredMatches = min(max(terms.count, 1), 2)
-        guard matchedTerms.count >= requiredMatches else { return 0 }
-        let coverage = Double(matchedTerms.count) / Double(max(terms.count, 1))
-        let exactBonus = matchedTerms.reduce(0.0) { partial, term in
-            partial + (lower == term.lowercased() ? 2.0 : 0.0)
-        }
-        return weight * (0.75 + coverage) + exactBonus
-    }
-
-    private static func globalSearchSnippet(text: String, terms: [String], maxLength: Int = 120) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-        let lower = trimmed.lowercased()
-        guard let firstTerm = terms.first(where: { lower.localizedCaseInsensitiveContains($0) }),
-              let range = lower.range(of: firstTerm.lowercased()) else {
-            return String(trimmed.prefix(maxLength))
-        }
-        let startDistance = lower.distance(from: lower.startIndex, to: range.lowerBound)
-        let snippetStart = max(0, startDistance - 36)
-        let snippetEnd = min(trimmed.count, snippetStart + maxLength)
-        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: snippetStart)
-        let endIndex = trimmed.index(trimmed.startIndex, offsetBy: snippetEnd)
-        return String(trimmed[startIndex..<endIndex])
-    }
-
-    private func searchBrowserHistory(query: String, limit: Int) -> [BrowserHistoryRecord] {
-        guard let browserHistoryStore else {
-            return browserHistoryRecords
-                .filter { browserHistoryRecord($0, matches: query) }
-                .sorted { $0.visitedAt > $1.visitedAt }
-                .prefix(limit)
-                .map { $0 }
-        }
-        return browserHistoryStore.searchHistory(query: query)
-            .sorted { $0.visitedAt > $1.visitedAt }
-            .prefix(limit)
-            .map { $0 }
-    }
-
-    private func browserHistoryRecord(_ record: BrowserHistoryRecord, matches query: String) -> Bool {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return true }
-        return record.url.lowercased().contains(normalized)
-            || record.title.lowercased().contains(normalized)
-            || record.sessionTitle.lowercased().contains(normalized)
-            || (record.contentMarkdown?.lowercased().contains(normalized) ?? false)
-    }
-
-    private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
-        if let nativeSourceSearchBackend {
-            return try await nativeSourceSearchBackend.search(NativeSearchQuery(
-                text: query,
-                sourceKinds: [kind],
-                limit: limit,
-                includeBodySnippets: true,
-                rankingProfile: .recentFirst
-            ))
-        }
-        return fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
+        browserFeatureModel.openURL(url)
     }
 
     private func fallbackNativeSearchResults(kind: NativeSearchSourceKind, query: String, limit: Int) -> [NativeSearchResult] {
@@ -1516,105 +997,31 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func presentationFallbackBrowserHistoryResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
-        searchBrowserHistory(query: query, limit: limit).map { record in
-            NativeSearchResult(
-                id: "browser-history:\(record.id.uuidString)",
-                sourceKind: .browserHistory,
-                externalID: record.id.uuidString,
-                sourceInstanceID: record.sessionID,
-                title: record.title.isEmpty ? record.url : record.title,
-                snippet: [record.sessionTitle, record.url].filter { !$0.isEmpty }.joined(separator: " · "),
-                score: 1,
-                lexicalScore: 1,
-                freshnessScore: 0,
-                fieldScore: 0,
-                temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
-                resultTimeLabel: record.visitedAt.connorLocalFormatted(date: .medium, time: .short)
-            )
-        }
+        browserFeatureModel.fallbackSearchResults(query: query, now: now, limit: limit)
     }
 
-    func performGlobalSearchNewChat() {
-        let prompt = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
-        recordGlobalSearchHistoryIfNeeded(prompt)
-        finishGlobalSearchInteraction(clearQuery: true)
-        globalSearchPreviewState = .empty
-        globalSearchSelectedItem = .action(.newChat)
-        newChatSession()
-        selection = .agentChat
-        Task { @MainActor in
-            _ = await submitChat(prompt: prompt, clearComposer: false, displayPrompt: prompt)
-        }
-    }
-
-    func defaultSearchURL(for query: String) -> URL? {
-        defaultSearchEngine.searchURL(for: query)
-    }
-
-    func defaultSearchURLString(for query: String) -> String? {
-        defaultSearchEngine.searchURLString(for: query)
-    }
-
-    func performGlobalSearchWebSearch() {
-        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return }
-        guard let url = defaultSearchURL(for: query) else { return }
-        recordGlobalSearchHistoryIfNeeded(query)
-        performAfterGlobalSearchDismiss { [self] in
+    private func handleGlobalSearchDestination(_ destination: GlobalSearchFeatureModel.Destination) {
+        switch destination {
+        case .newChat(let prompt):
+            newChatSession()
+            selection = .agentChat
+            Task { @MainActor in
+                _ = await submitChat(prompt: prompt, clearComposer: false, displayPrompt: prompt)
+            }
+        case .webSearch(let url):
             openURLInCurrentChatBrowser(url)
-        }
-    }
-
-    func openGlobalSearchBrowserHistoryResult(_ record: BrowserHistoryRecord) {
-        performAfterGlobalSearchDismiss { [self] in
-            navigateToHistoryRecord(record)
-        }
-    }
-
-    func openGlobalSearchChatSessionResult(_ sessionID: String) {
-        recordGlobalSearchHistoryIfNeeded(globalSearchQuery)
-        performAfterGlobalSearchDismiss { [self] in
+        case .chatSession(let sessionID):
             selection = .agentChat
             selectChatSession(sessionID)
-        }
-    }
-
-    func openGlobalSearchResult(_ result: NativeSearchResult) {
-        recordGlobalSearchHistoryIfNeeded(globalSearchQuery)
-        performAfterGlobalSearchDismiss { [self] in
-            openGlobalSearchResultAfterDismiss(result)
-        }
-    }
-
-    private func openGlobalSearchResultAfterDismiss(_ result: NativeSearchResult) {
-        switch result.sourceKind {
-        case .calendar:
-            selection = .calendar
-            calendarFeatureModel.selectEvent(id: CalendarEventID(rawValue: result.externalID))
-        case .rss:
-            selection = .rss
-            rssFeatureModel.selectItem(id: RSSItemID(rawValue: result.externalID))
-        case .mail:
-            selection = .mail
-            mailFeatureModel.openSearchResult(result)
-        case .browserHistory:
-            if let id = UUID(uuidString: result.externalID), let record = browserHistoryRecords.first(where: { $0.id == id }) ?? browserHistoryStore?.record(id: id) {
-                navigateToHistoryRecord(record)
-            } else {
-                isBrowserHistoryPanelVisible = true
-                showBrowserWorkspace()
-            }
-        }
-    }
-
-    func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
-        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        performAfterGlobalSearchDismiss { [self] in
+        case .nativeResult(let result):
+            openGlobalSearchNativeResult(result)
+        case .browserHistoryRecord(let record):
+            browserFeatureModel.navigateToHistoryRecord(record)
+        case .showAll(let kind, let query):
             switch kind {
             case .chatSessions:
                 sessionSearchQuery = query
-                isBrowserVisible = false
+                browserFeatureModel.isVisible = false
                 selection = .agentChat
             case .calendar:
                 calendarFeatureModel.searchQuery = query
@@ -1626,11 +1033,27 @@ final class AppViewModel: NSObject, ObservableObject {
                 mailFeatureModel.searchQuery = query
                 selection = .mail
             case .browserHistory:
-                browserHistorySearchQuery = query
-                isBrowserHistoryPanelVisible = true
-                showBrowserWorkspace()
-                loadBrowserHistory()
-                filterBrowserHistory(query: browserHistorySearchQuery)
+                browserFeatureModel.openHistorySearch(query: query)
+            }
+        }
+    }
+
+    private func openGlobalSearchNativeResult(_ result: NativeSearchResult) {
+        switch result.sourceKind {
+        case .calendar:
+            selection = .calendar
+            calendarFeatureModel.selectEvent(id: CalendarEventID(rawValue: result.externalID))
+        case .rss:
+            selection = .rss
+            rssFeatureModel.selectItem(id: RSSItemID(rawValue: result.externalID))
+        case .mail:
+            selection = .mail
+            mailFeatureModel.openSearchResult(result)
+        case .browserHistory:
+            if let id = UUID(uuidString: result.externalID), let record = browserFeatureModel.historyRecord(id: id) {
+                browserFeatureModel.navigateToHistoryRecord(record)
+            } else {
+                browserFeatureModel.openHistorySearch(query: "")
             }
         }
     }
@@ -1651,308 +1074,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func rebuildBrowserHistorySearchIndexIfNeeded() async throws {
-        guard let nativeSourceSearchBackend else { return }
-        let records = browserHistoryStore?.loadHistory() ?? browserHistoryRecords
-        try await nativeSourceSearchBackend.rebuildSource(kind: .browserHistory, sourceInstanceID: nil, documents: records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
-    }
-
-    private func indexBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
-        guard let nativeSourceSearchBackend else { return }
-        Task { @MainActor in
-            try? await nativeSourceSearchBackend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
-        }
-    }
-
-    private func deleteBrowserHistorySearchRecord(id: UUID) {
-        guard let nativeSourceSearchBackend else { return }
-        Task { @MainActor in
-            try? await nativeSourceSearchBackend.delete(documentIDs: ["browser-history:\(id.uuidString)"])
-        }
-    }
-
-    private func clearBrowserHistorySearchIndex() {
-        guard let nativeSourceSearchBackend else { return }
-        Task { @MainActor in
-            try? await nativeSourceSearchBackend.deleteBySource(kind: .browserHistory, sourceInstanceID: nil)
-        }
-    }
-
     func openURLInSystemDefaultBrowser(_ url: URL) {
         NSWorkspace.shared.open(url)
-    }
-
-    @discardableResult
-    private func focusExistingBrowserTabIfPresent(urlString: String, preferredSessionID: String, planner: BrowserExternalOpenPlanner = BrowserExternalOpenPlanner()) -> Bool {
-        guard let existing = existingBrowserTab(for: urlString, preferredSessionID: preferredSessionID, planner: planner) else { return false }
-        var snapshot = existing.snapshot
-        snapshot.updatedAt = Date()
-        snapshot.selectionPopover = nil
-        snapshot.selectedTabID = existing.tabID
-        browserTargetURLString = urlString
-        saveBrowserWorkspaceSnapshot(snapshot, for: existing.sessionID)
-        showBrowserWorkspace(for: existing.sessionID)
-        return true
-    }
-
-    private func existingBrowserTab(for urlString: String, preferredSessionID: String, planner: BrowserExternalOpenPlanner) -> (sessionID: String, tabID: UUID, snapshot: AppBrowserStateSnapshot)? {
-        for sessionID in browserWorkspaceSearchOrder(preferredSessionID: preferredSessionID) {
-            guard let snapshot = browserWorkspaceSnapshotsBySessionID[sessionID],
-                  let tabID = planner.matchingTabID(urlString: urlString, in: snapshot) else { continue }
-            return (sessionID, tabID, snapshot)
-        }
-        return nil
-    }
-
-    private func browserWorkspaceSearchOrder(preferredSessionID: String) -> [String] {
-        var ordered: [String] = []
-        func appendIfNeeded(_ sessionID: String?) {
-            guard let sessionID, !sessionID.isEmpty, !ordered.contains(sessionID) else { return }
-            ordered.append(sessionID)
-        }
-        appendIfNeeded(preferredSessionID)
-        appendIfNeeded(browserWorkspaceSessionID)
-        appendIfNeeded(activeChatSession.id)
-        for sessionID in browserWorkspaceSnapshotsBySessionID.keys.sorted() {
-            appendIfNeeded(sessionID)
-        }
-        return ordered
     }
 
     func openProjectGitHubHelp() {
         guard let url = URL(string: "https://github.com/duanshiwen/connor-graph-agent-mac") else { return }
         openURLInCurrentChatBrowser(url)
-    }
-
-    @discardableResult
-    func startBrowserAssistedSearch(urlString: String, title: String, revealImmediately: Bool = false) -> BrowserAssistedTaskState {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
-        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
-        let request = BrowserAssistedTaskRequest(
-            kind: .search,
-            sessionID: sessionID,
-            urlString: urlString,
-            title: title,
-            visibility: revealImmediately ? .foreground : .background
-        )
-        let plan = BrowserAssistedTaskPlanner().start(request, in: currentSnapshot)
-        browserAssistedTasksByID[plan.task.id] = plan.task
-        browserTargetURLString = urlString
-        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
-        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
-        return plan.task
-    }
-
-    func performBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult? {
-        let task = startBrowserAssistedWebFetch(request)
-        let timeout = max(3_000, min(request.timeoutMilliseconds, 720_000))
-        return await withCheckedContinuation { continuation in
-            browserAssistedWebFetchContinuationsByTaskID[task.id] = continuation
-            browserAssistedWebFetchTimeoutTasksByID[task.id]?.cancel()
-            browserAssistedWebFetchTimeoutTasksByID[task.id] = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled,
-                      let self,
-                      self.browserAssistedWebFetchContinuationsByTaskID[task.id] != nil
-                else { return }
-                let result = BrowserAssistedWebFetchResult(
-                    status: .timedOut,
-                    urlString: request.urlString,
-                    finalURLString: request.urlString,
-                    title: "",
-                    contentText: "",
-                    taskID: task.id.uuidString,
-                    sessionID: task.sessionID,
-                    tabID: task.tabID.uuidString,
-                    errorMessage: "Connor WKWebView web_fetch(js) timed out after \(timeout)ms",
-                    interventionReason: nil,
-                    truncated: false,
-                    originalCharacterCount: 0
-                )
-                if let current = self.browserAssistedTasksByID[task.id] {
-                    self.browserAssistedTasksByID[task.id] = BrowserAssistedTaskPlanner().fail(current, message: result.errorMessage ?? "Timed out")
-                }
-                self.browserAssistedWebFetchContinuationsByTaskID[task.id]?.resume(returning: result)
-                self.browserAssistedWebFetchContinuationsByTaskID[task.id] = nil
-                self.browserAssistedWebFetchRequestsByTaskID[task.id] = nil
-                self.browserAssistedWebFetchTimeoutTasksByID[task.id] = nil
-            }
-        }
-    }
-
-    @discardableResult
-    private func startBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) -> BrowserAssistedTaskState {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
-        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
-        let taskRequest = BrowserAssistedTaskRequest(
-            kind: .fetch,
-            sessionID: sessionID,
-            urlString: request.urlString,
-            title: "Fetch: \(request.urlString)",
-            visibility: request.revealImmediately ? .foreground : .background
-        )
-        let plan = BrowserAssistedTaskPlanner().start(taskRequest, in: currentSnapshot)
-        browserAssistedTasksByID[plan.task.id] = plan.task
-        browserAssistedWebFetchRequestsByTaskID[plan.task.id] = request
-        browserTargetURLString = request.urlString
-        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
-        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
-        return plan.task
-    }
-
-    func completeBrowserAssistedWebFetch(_ taskID: UUID, title: String, finalURLString: String, text: String) {
-        guard let task = browserAssistedTasksByID[taskID], let request = browserAssistedWebFetchRequestsByTaskID[taskID] else { return }
-        let originalCount = text.count
-        let maxCharacters = 100_000
-        let truncated = originalCount > maxCharacters
-        let returnedText = truncated ? String(text.prefix(maxCharacters)) : text
-        let content: String
-        if request.extractMode == "text" {
-            content = returnedText + (truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
-        } else {
-            let heading = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Fetched Page" : title
-            content = """
-            # \(heading)
-            **Source:** \(finalURLString.isEmpty ? request.urlString : finalURLString)
-            **Render mode:** js-wkwebview
-
-            ---
-
-            \(returnedText)\(truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
-            """
-        }
-        let result = BrowserAssistedWebFetchResult(
-            status: .fetched,
-            urlString: request.urlString,
-            finalURLString: finalURLString.isEmpty ? request.urlString : finalURLString,
-            title: title,
-            contentText: content,
-            taskID: task.id.uuidString,
-            sessionID: task.sessionID,
-            tabID: task.tabID.uuidString,
-            errorMessage: nil,
-            interventionReason: nil,
-            truncated: truncated,
-            originalCharacterCount: originalCount
-        )
-        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: "Fetched rendered page content")
-        browserAssistedWebFetchTimeoutTasksByID.removeValue(forKey: taskID)?.cancel()
-        browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
-        browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
-        browserAssistedWebFetchRequestsByTaskID[taskID] = nil
-    }
-
-    func revealBrowserAssistedTask(_ taskID: UUID, reason: String) {
-        guard let task = browserAssistedTasksByID[taskID] else { return }
-        let updated = BrowserAssistedTaskPlanner().requireUserIntervention(task, reason: reason)
-        browserAssistedTasksByID[taskID] = updated
-        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
-            let result = BrowserAssistedWebFetchResult(
-                status: .needsUserIntervention,
-                urlString: request.urlString,
-                finalURLString: updated.urlString,
-                title: updated.title,
-                contentText: "",
-                taskID: updated.id.uuidString,
-                sessionID: updated.sessionID,
-                tabID: updated.tabID.uuidString,
-                errorMessage: nil,
-                interventionReason: reason,
-                truncated: false,
-                originalCharacterCount: 0
-            )
-            browserAssistedWebFetchTimeoutTasksByID.removeValue(forKey: taskID)?.cancel()
-            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
-            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
-            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
-        }
-        focusBrowserTab(updated.tabID, in: updated.sessionID, urlString: updated.urlString)
-        showBrowserWorkspace(for: updated.sessionID)
-    }
-
-    func completeBrowserAssistedTask(_ taskID: UUID, message: String) {
-        guard let task = browserAssistedTasksByID[taskID] else { return }
-        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: message)
-    }
-
-    func failBrowserAssistedTask(_ taskID: UUID, message: String) {
-        guard let task = browserAssistedTasksByID[taskID] else { return }
-        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().fail(task, message: message)
-        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
-            let result = BrowserAssistedWebFetchResult(
-                status: .failed,
-                urlString: request.urlString,
-                finalURLString: task.urlString,
-                title: task.title,
-                contentText: "",
-                taskID: task.id.uuidString,
-                sessionID: task.sessionID,
-                tabID: task.tabID.uuidString,
-                errorMessage: message,
-                interventionReason: nil,
-                truncated: false,
-                originalCharacterCount: 0
-            )
-            browserAssistedWebFetchTimeoutTasksByID.removeValue(forKey: taskID)?.cancel()
-            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
-            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
-            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
-        }
-    }
-
-    private func focusBrowserTab(_ tabID: UUID, in sessionID: String, urlString: String) {
-        var snapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
-        if snapshot.tabs.contains(where: { $0.id == tabID }) {
-            snapshot.selectedTabID = tabID
-        } else {
-            snapshot = BrowserExternalOpenPlanner().open(urlString: urlString, in: snapshot)
-        }
-        browserTargetURLString = urlString
-        saveBrowserWorkspaceSnapshot(snapshot, for: sessionID)
-    }
-
-    func showBrowserWorkspace() {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
-        showBrowserWorkspace(for: sessionID)
-    }
-
-    private func showBrowserWorkspace(for sessionID: String) {
-        browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
-        browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
-        isBrowserVisible = true
-        selection = .agentChat
-        if browserWorkspaceSnapshotsBySessionID[sessionID] == nil {
-            browserTargetURLString = BrowserBuiltInPage.blankURLString
-        }
-        if selectedChatSessionID != sessionID {
-            selectChatSession(sessionID)
-        }
-        rememberWorkspaceMode(.browser, for: sessionID)
-    }
-
-    func returnFromBrowserWorkspace() {
-        let targetSessionID = browserWorkspaceSessionBinding.sessionIDForReturningFromBrowser(
-            currentSelectedSessionID: selectedChatSessionID ?? activeChatSession.id
-        )
-        if let targetSessionID, targetSessionID != selectedChatSessionID {
-            selectChatSession(targetSessionID)
-        }
-        browserWorkspaceSessionID = targetSessionID
-        isBrowserVisible = false
-        selection = .agentChat
-        rememberWorkspaceMode(.conversation, for: targetSessionID)
-    }
-
-    func toggleBrowserWorkspaceVisibility() {
-        if isBrowserVisible {
-            returnFromBrowserWorkspace()
-        } else {
-            showBrowserWorkspace()
-        }
     }
 
     func openDeepLink(_ url: URL) {
@@ -2114,6 +1242,18 @@ final class AppViewModel: NSObject, ObservableObject {
         let resolvedMailStore = injectedMailStore ?? storagePaths.map { FileBackedMailSourceStore(storagePaths: $0, searchService: nativeSourceSearchBackend) }
         let resolvedMailPreferencesStore = injectedMailPreferencesStore ?? storagePaths.map { FileBackedMailPreferencesStore(storagePaths: $0) }
         self.mailFeatureModel = MailFeatureModel(store: resolvedMailStore, preferencesStore: resolvedMailPreferencesStore, credentialStore: mailCredentialStore)
+        self.browserFeatureModel = BrowserFeatureModel(
+            historyStore: storagePaths.map { BrowserHistoryStore(historyURL: $0.browserHistoryURL) },
+            bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
+            nativeSourceSearchBackend: nativeSourceSearchBackend
+        )
+        let resolvedSessionSearchIndexService = storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) }
+        let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
+        self.globalSearchFeatureModel = GlobalSearchFeatureModel(
+            nativeSourceSearchBackend: nativeSourceSearchBackend,
+            sessionSearchIndexService: resolvedSessionSearchIndexService,
+            historyRepository: resolvedGlobalSearchHistoryRepository
+        )
         let resolvedRSSRuntime = rssRuntime ?? storagePaths.map { paths in
             RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: paths),
@@ -2149,13 +1289,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         if let storagePaths {
             self.nativeSourceSearchBackend = nativeSourceSearchBackend
-            self.sessionSearchIndexService = try? SessionSearchIndexService(databaseURL: storagePaths.sessionSearchDatabaseURL)
-            let globalSearchHistoryRepository = AppGlobalSearchHistoryRepository(historyURL: storagePaths.globalSearchHistoryURL)
-            self.globalSearchHistoryRepository = globalSearchHistoryRepository
-            self.globalSearchHistoryEntries = (try? globalSearchHistoryRepository.load()) ?? []
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
-            self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
-            self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
         }
         if let repository {
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
@@ -2188,10 +1322,6 @@ final class AppViewModel: NSObject, ObservableObject {
 #if DEBUG
         mainActorStallMonitor.start()
 #endif
-        browserLiveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
-            guard let self else { return }
-            self.recordBrowserWebViewEviction(key: key, webView: webView, metadata: metadata)
-        }
         applicationDidFinishLaunchingObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didFinishLaunchingNotification,
             object: nil,
@@ -2214,7 +1344,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
-                        let state = self.startBrowserAssistedSearch(
+                        let state = self.browserFeatureModel.startAssistedSearch(
                             urlString: request.urlString,
                             title: request.title,
                             revealImmediately: request.revealImmediately
@@ -2230,7 +1360,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 },
                 browserAssistedWebFetchHandler: { [weak self] request in
                     guard let self else { return nil }
-                    return await self.performBrowserAssistedWebFetch(request)
+                    return await self.browserFeatureModel.performAssistedWebFetch(request)
                 }
             )
         }
@@ -2265,6 +1395,56 @@ final class AppViewModel: NSObject, ObservableObject {
             case .releaseGateChecked:
                 self.navigate(to: .productOS)
             }
+        }
+        globalSearchFeatureModel.sessionsProvider = { [weak self] in self?.allChatSessions ?? [] }
+        globalSearchFeatureModel.fallbackNativeSearchProvider = { [weak self] kind, query, limit in
+            self?.fallbackNativeSearchResults(kind: kind, query: query, limit: limit) ?? []
+        }
+        globalSearchFeatureModel.sourceReadinessProvider = { [weak self] in
+            await self?.browserFeatureModel.waitForPendingIndexOperations()
+        }
+        globalSearchFeatureModel.defaultSearchURLProvider = { [weak self] query in
+            self?.defaultSearchEngine.searchURL(for: query)
+        }
+        globalSearchFeatureModel.onDestination = { [weak self] destination in
+            self?.handleGlobalSearchDestination(destination)
+        }
+        browserFeatureModel.sessionContextProvider = { [weak self] in
+            guard let self else {
+                return BrowserFeatureModel.SessionContext(
+                    selectedSessionID: nil,
+                    activeSessionID: "__fallback__",
+                    sessionTitlesByID: [:]
+                )
+            }
+            let sessions = self.allChatSessions + self.chatSessions
+            return BrowserFeatureModel.SessionContext(
+                selectedSessionID: self.selectedChatSessionID,
+                activeSessionID: self.activeChatSession.id,
+                sessionTitlesByID: Dictionary(sessions.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+            )
+        }
+        browserFeatureModel.persistWorkspaceSnapshot = { [weak self] snapshot, sessionID in
+            self?.persistBrowserWorkspaceSnapshot(snapshot, for: sessionID)
+        }
+        browserFeatureModel.onShowWorkspace = { [weak self] sessionID in
+            guard let self else { return }
+            self.selection = .agentChat
+            if self.selectedChatSessionID != sessionID { self.selectChatSession(sessionID) }
+            self.rememberWorkspaceMode(.browser, for: sessionID)
+        }
+        browserFeatureModel.onReturnFromWorkspace = { [weak self] sessionID in
+            guard let self else { return }
+            if let sessionID, sessionID != self.selectedChatSessionID { self.selectChatSession(sessionID) }
+            self.selection = .agentChat
+            self.rememberWorkspaceMode(.conversation, for: sessionID)
+        }
+        browserFeatureModel.onNavigateHistoryRecord = { [weak self] record, url in
+            self?.openBrowserHistoryRecord(record, url: url)
+        }
+        browserFeatureModel.onEvent = { [weak self] event in
+            self?.objectWillChange.send()
+            if case let .operationFailed(message) = event { self?.errorMessage = message }
         }
         taskAutomationModel.createdBySessionIDProvider = { [weak self] in
             guard let self else { return "" }
@@ -2396,7 +1576,7 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { await contactsFeatureModel.reload() }
         Task { await mailFeatureModel.reload() }
         reloadChatSessions()
-        loadBrowserHistory()
+        browserFeatureModel.loadHistory()
         graphDiagnosticsModel.reloadSchemaHealthReport()
         scheduleMemoryOSSearchIndexRepairIfNeeded()
     }
@@ -2417,52 +1597,15 @@ final class AppViewModel: NSObject, ObservableObject {
             self.applicationDidFinishLaunchingObserver = nil
         }
         stopTaskSchedulerTimer()
-        globalSearchPreviewTask?.cancel()
-        globalSearchPreviewTask = nil
+        globalSearchFeatureModel.shutdown()
         runtimeSettingsAutosaveTask?.cancel()
         runtimeSettingsAutosaveTask = nil
         rssFeatureModel.shutdown()
         calendarFeatureModel.shutdown()
         contactsFeatureModel.shutdown()
         mailFeatureModel.shutdown()
-        cancelBrowserHistoryContentFetchTasks()
-        resumePendingBrowserAssistedWebFetchContinuationsForShutdown()
+        browserFeatureModel.shutdown()
         releaseIdleSleepAssertion()
-    }
-
-    private func cancelBrowserHistoryContentFetchTasks() {
-        for task in browserHistoryContentFetchTasksByID.values {
-            task.cancel()
-        }
-        browserHistoryContentFetchTasksByID.removeAll()
-    }
-
-    private func resumePendingBrowserAssistedWebFetchContinuationsForShutdown() {
-        for timeoutTask in browserAssistedWebFetchTimeoutTasksByID.values {
-            timeoutTask.cancel()
-        }
-        browserAssistedWebFetchTimeoutTasksByID.removeAll()
-        let pendingContinuations = browserAssistedWebFetchContinuationsByTaskID
-        browserAssistedWebFetchContinuationsByTaskID.removeAll()
-        for (taskID, continuation) in pendingContinuations {
-            let request = browserAssistedWebFetchRequestsByTaskID[taskID]
-            let task = browserAssistedTasksByID[taskID]
-            continuation.resume(returning: BrowserAssistedWebFetchResult(
-                status: .failed,
-                urlString: request?.urlString ?? task?.urlString ?? "",
-                finalURLString: task?.urlString ?? request?.urlString ?? "",
-                title: task?.title ?? "",
-                contentText: "",
-                taskID: taskID.uuidString,
-                sessionID: task?.sessionID ?? "",
-                tabID: task?.tabID.uuidString ?? "",
-                errorMessage: "Browser assisted web fetch cancelled during shutdown",
-                interventionReason: nil,
-                truncated: false,
-                originalCharacterCount: 0
-            ))
-        }
-        browserAssistedWebFetchRequestsByTaskID.removeAll()
     }
 
     private func releaseIdleSleepAssertion() {
@@ -2684,7 +1827,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func handleRSSFollowRequest(_ request: RSSFollowRequest) {
         let currentSessionID = selectedChatSessionID ?? activeChatSession.id
-        if focusExistingBrowserTabIfPresent(urlString: request.url.absoluteString, preferredSessionID: currentSessionID) {
+        if browserFeatureModel.focusExistingTab(urlString: request.url.absoluteString, preferredSessionID: currentSessionID) {
             errorMessage = nil
             return
         }
@@ -2694,7 +1837,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let session = try chatSessionRepository.createSession(title: rssFollowSessionTitle(request.title))
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
-            browserWorkspaceSessionID = nil
+            browserFeatureModel.resetWorkspaceBinding()
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
@@ -3498,7 +2641,7 @@ final class AppViewModel: NSObject, ObservableObject {
             desktopNotificationsEnabled = settings.app.desktopNotificationsEnabled
             sessionNewMessageNotificationLevel = settings.app.sessionNotificationSettings.newMessageLevel
             keepScreenAwake = settings.app.keepScreenAwake
-            internalBrowserEnabled = settings.app.internalBrowserEnabled
+            browserFeatureModel.internalBrowserEnabled = settings.app.internalBrowserEnabled
             httpProxyEnabled = settings.app.httpProxyEnabled
             httpProxyURLString = settings.app.httpProxyURLString
             appearanceMode = ConnorAppearanceMode(rawValue: settings.appearance.mode) ?? .system
@@ -3546,7 +2689,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.app.desktopNotificationsEnabled = desktopNotificationsEnabled
             settings.app.sessionNotificationSettings = SessionNotificationSettings(newMessageLevel: sessionNewMessageNotificationLevel)
             settings.app.keepScreenAwake = keepScreenAwake
-            settings.app.internalBrowserEnabled = internalBrowserEnabled
+            settings.app.internalBrowserEnabled = browserFeatureModel.internalBrowserEnabled
             settings.app.httpProxyEnabled = httpProxyEnabled
             settings.app.httpProxyURLString = httpProxyURLString.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.appearance.mode = appearanceMode.rawValue
@@ -4084,8 +3227,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func rebuildSessionSearchIndexSoon(sessions: [AgentSession]) {
-        guard let sessionSearchIndexService else { return }
-        Task { try? await sessionSearchIndexService.rebuild(sessions: sessions) }
+        globalSearchFeatureModel.rebuildSessionIndex(sessions: sessions)
     }
 
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
@@ -4163,8 +3305,8 @@ final class AppViewModel: NSObject, ObservableObject {
         chatSummaryMessage = nil
         lastContext = nil
         lastPromptInspection = nil
-        isBrowserVisible = false
-        browserWorkspaceSessionID = nil
+        browserFeatureModel.isVisible = false
+        browserFeatureModel.resetWorkspaceBinding()
         refreshSelectedSubmittingState()
     }
 
@@ -4179,8 +3321,8 @@ final class AppViewModel: NSObject, ObservableObject {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
-            isBrowserVisible = false
-            browserWorkspaceSessionID = nil
+            browserFeatureModel.isVisible = false
+            browserFeatureModel.resetWorkspaceBinding()
             rememberWorkspaceMode(.conversation, for: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
@@ -4217,8 +3359,8 @@ final class AppViewModel: NSObject, ObservableObject {
             _ = try chatSessionRepository.saveSession(noteSession)
             selectedChatSessionID = noteSession.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
-            isBrowserVisible = false
-            browserWorkspaceSessionID = nil
+            browserFeatureModel.isVisible = false
+            browserFeatureModel.resetWorkspaceBinding()
             rememberWorkspaceMode(.conversation, for: noteSession.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: noteSession.id)
             try loadSessionCapsule(sessionID: noteSession.id)
@@ -4575,264 +3717,27 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
         if let browserState = try chatSessionRepository.loadBrowserState(sessionID: sessionID) {
-            browserWorkspaceSnapshotsBySessionID[sessionID] = browserState
+            browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
         }
         _ = try chatSessionRepository.refreshSessionManifest(sessionID: sessionID)
     }
 
-    private func recordBrowserWebViewEviction(key: BrowserLiveWebViewKey, webView: WKWebView, metadata: BrowserLiveWebViewStore.SnapshotMetadata) {
-        var snapshot = browserWorkspaceSnapshotsBySessionID[key.sessionID] ?? AppBrowserStateSnapshot()
-        guard let index = snapshot.tabs.firstIndex(where: { $0.id == key.tabID }) else { return }
-        var tab = snapshot.tabs[index]
-        tab.title = webView.title ?? tab.title
-        tab.currentURLString = webView.url?.absoluteString ?? tab.currentURLString
-        tab.isLoading = false
-        tab.canGoBack = webView.canGoBack
-        tab.canGoForward = webView.canGoForward
-        tab.lastAccessedAt = Date()
-        tab.scrollX = metadata.scrollX ?? tab.scrollX
-        tab.scrollY = metadata.scrollY ?? tab.scrollY
-        tab.viewportWidth = metadata.viewportWidth ?? tab.viewportWidth
-        tab.viewportHeight = metadata.viewportHeight ?? tab.viewportHeight
-        tab.contentFingerprint = metadata.contentFingerprint ?? tab.contentFingerprint
-        tab.focusedElementHint = metadata.focusedElementHint ?? tab.focusedElementHint
-        tab.restorationStatus = .evicted
-        snapshot.tabs[index] = tab
-        saveBrowserWorkspaceSnapshot(snapshot, for: key.sessionID)
-    }
-
-    func saveBrowserWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
-        var normalized = snapshot
-        normalized.updatedAt = Date()
-        browserWorkspaceSnapshotsBySessionID[sessionID] = normalized
+    private func persistBrowserWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
         do {
-            try chatSessionRepository?.saveBrowserState(normalized, sessionID: sessionID)
+            try chatSessionRepository?.saveBrowserState(snapshot, sessionID: sessionID)
             if let state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) {
                 sessionStateSnapshotsBySessionID[sessionID] = state
             }
             _ = try chatSessionRepository?.refreshSessionManifest(sessionID: sessionID)
-            errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
-    // MARK: - Browser Bookmarks
-
-    func loadBrowserBookmarks() {
-        guard let store = browserBookmarkStore else { return }
-        browserBookmarkRecords = store.loadBookmarks()
-        applyBrowserBookmarkFilter()
-    }
-
-    var browserBookmarkGroupNames: [String] {
-        let names = Set(browserBookmarkRecords.map { $0.groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? BrowserBookmarkRecord.defaultGroupName : $0.groupName })
-        return names.sorted { lhs, rhs in
-            if lhs == BrowserBookmarkRecord.defaultGroupName { return true }
-            if rhs == BrowserBookmarkRecord.defaultGroupName { return false }
-            return lhs.localizedStandardCompare(rhs) == .orderedAscending
-        }
-    }
-
-    func toggleBrowserBookmarksPanel() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isBrowserBookmarksPanelVisible.toggle()
-            if isBrowserBookmarksPanelVisible { isBrowserHistoryPanelVisible = false }
-        }
-        if isBrowserBookmarksPanelVisible { loadBrowserBookmarks() }
-    }
-
-    func addBrowserBookmark(url: String, title: String, groupName: String? = nil) {
-        guard let store = browserBookmarkStore else { return }
-        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedURL.isEmpty,
-              !trimmedURL.hasPrefix("connor://"),
-              !trimmedURL.hasPrefix("about:"),
-              !trimmedURL.hasPrefix("data:")
-        else { return }
-        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedGroup = groupName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let bookmark = BrowserBookmarkRecord(
-            url: trimmedURL,
-            title: trimmedTitle.isEmpty ? (URL(string: trimmedURL)?.host ?? trimmedURL) : trimmedTitle,
-            groupName: resolvedGroup?.isEmpty == false ? resolvedGroup! : BrowserBookmarkRecord.defaultGroupName,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-        store.upsertBookmark(bookmark)
-        loadBrowserBookmarks()
-    }
-
-    func toggleBrowserBookmark(url: String, title: String, groupName: String? = nil) {
-        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedURL.isEmpty else { return }
-        if isBrowserBookmarked(url: trimmedURL) {
-            browserBookmarkStore?.deleteBookmark(url: trimmedURL)
-            loadBrowserBookmarks()
-        } else {
-            addBrowserBookmark(url: trimmedURL, title: title, groupName: groupName)
-        }
-    }
-
-    func isBrowserBookmarked(url: String) -> Bool {
-        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedURL.isEmpty else { return false }
-        return browserBookmarkRecords.contains { $0.url == trimmedURL }
-    }
-
-    func filterBrowserBookmarks(query: String, groupName: String? = nil) {
-        selectedBrowserBookmarkGroupName = groupName
-        applyBrowserBookmarkFilter(query: query)
-    }
-
-    func deleteBrowserBookmark(_ id: UUID) {
-        browserBookmarkStore?.deleteBookmark(id: id)
-        loadBrowserBookmarks()
-    }
-
-    func navigateToBookmark(_ bookmark: BrowserBookmarkRecord) {
-        guard let url = URL(string: bookmark.url) else { return }
-        openURLInCurrentChatBrowser(url)
-    }
-
-    private func applyBrowserBookmarkFilter(query: String = "") {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let selectedGroup = selectedBrowserBookmarkGroupName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        filteredBrowserBookmarkRecords = browserBookmarkRecords.filter { bookmark in
-            let matchesGroup = selectedGroup?.isEmpty != false || bookmark.groupName == selectedGroup
-            let matchesQuery = trimmedQuery.isEmpty
-                || bookmark.url.lowercased().contains(trimmedQuery)
-                || bookmark.title.lowercased().contains(trimmedQuery)
-                || bookmark.groupName.lowercased().contains(trimmedQuery)
-            return matchesGroup && matchesQuery
-        }
-    }
-
-    // MARK: - Browser History
-
-    func loadBrowserHistory() {
-        guard let store = browserHistoryStore else { return }
-        browserHistoryRecords = store.loadHistory()
-        filteredBrowserHistoryRecords = browserHistoryRecords
-        Task { @MainActor in
-            try? await rebuildBrowserHistorySearchIndexIfNeeded()
-        }
-    }
-
-    func recordBrowserHistory(url: String, title: String, sessionID: String) {
-        guard let store = browserHistoryStore else { return }
-        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedURL.isEmpty,
-              !trimmedURL.hasPrefix("connor://"),
-              !trimmedURL.hasPrefix("about:"),
-              !trimmedURL.hasPrefix("data:")
-        else { return }
-        let sessionTitle = sessionTitleForHistory(sessionID: sessionID)
-        let record = BrowserHistoryRecord(
-            url: trimmedURL,
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            sessionID: sessionID,
-            sessionTitle: sessionTitle,
-            contentFetchStatus: .pending
-        )
-        guard let appendedRecord = store.appendRecord(record) else { return }
-        browserHistoryRecords = store.loadHistory()
-        applyBrowserHistoryFilter()
-        indexBrowserHistoryRecord(appendedRecord)
-        fetchContentForBrowserHistoryRecord(appendedRecord)
-    }
-
-    private func fetchContentForBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
-        guard let store = browserHistoryStore else { return }
-        let recordID = record.id
-        guard browserHistoryContentFetchTasksByID[recordID] == nil else { return }
-        let url = record.url
-        let task = Task.detached(priority: .utility) {
-            let tool = NativeWebFetchTool()
-            let arguments = AgentToolArguments(values: [
-                "url": .string(url),
-                "extract_mode": .string("markdown"),
-                "render_mode": .string("auto"),
-                "timeout_ms": .int(60_000)
-            ])
-            let context = AgentToolExecutionContext(
-                runID: "browser-history-content-fetch-\(recordID.uuidString)",
-                sessionID: record.sessionID,
-                groupID: "browser-history",
-                userPrompt: "Fetch browser history page content",
-                toolCallID: UUID().uuidString,
-                policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
-                approvedCapabilities: [.externalNetwork]
-            )
-            do {
-                let result = try await tool.execute(arguments: arguments, context: context)
-                guard !Task.isCancelled else { return }
-                store.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
-            } catch {
-                guard !Task.isCancelled else { return }
-                store.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
-            }
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.browserHistoryContentFetchTasksByID[recordID] = nil
-                self.loadBrowserHistory()
-            }
-        }
-        browserHistoryContentFetchTasksByID[recordID] = task
-    }
-
-    func toggleBrowserHistoryPanel() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isBrowserHistoryPanelVisible.toggle()
-            if isBrowserHistoryPanelVisible { isBrowserBookmarksPanelVisible = false }
-        }
-        if isBrowserHistoryPanelVisible {
-            loadBrowserHistory()
-        }
-    }
-
-    func filterBrowserHistory(query: String) {
-        browserHistorySearchQuery = query
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            filteredBrowserHistoryRecords = browserHistoryRecords
-        } else if let store = browserHistoryStore {
-            filteredBrowserHistoryRecords = store.searchHistory(query: trimmed)
-        } else {
-            filteredBrowserHistoryRecords = browserHistoryRecords.filter { browserHistoryRecord($0, matches: trimmed) }
-        }
-    }
-
-    func deleteBrowserHistoryRecord(_ id: UUID) {
-        browserHistoryStore?.deleteRecord(id: id)
-        deleteBrowserHistorySearchRecord(id: id)
-        loadBrowserHistory()
-    }
-
-    func clearBrowserHistory() {
-        browserHistoryStore?.clearHistory()
-        clearBrowserHistorySearchIndex()
-        browserHistoryRecords = []
-        filteredBrowserHistoryRecords = []
-        browserHistorySearchQuery = ""
-    }
-
-    func navigateToHistoryRecord(_ record: BrowserHistoryRecord) {
-        guard let url = URL(string: record.url) else {
-            errorMessage = "这条浏览历史没有可打开的 URL。"
-            return
-        }
-        let planner = BrowserExternalOpenPlanner()
-        if focusExistingBrowserTabIfPresent(urlString: record.url, preferredSessionID: record.sessionID, planner: planner) {
-            errorMessage = nil
-            return
-        }
+    private func openBrowserHistoryRecord(_ record: BrowserHistoryRecord, url: URL) {
         if browserHistorySessionExists(record.sessionID) {
-            if record.sessionID != selectedChatSessionID {
-                selectChatSession(record.sessionID)
-            }
-            openURLInCurrentChatBrowser(url)
+            if record.sessionID != selectedChatSessionID { selectChatSession(record.sessionID) }
+            browserFeatureModel.openURL(url, preferredSessionID: record.sessionID)
         } else {
             openBrowserHistoryRecordInNewSession(record, url: url)
         }
@@ -4850,7 +3755,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
-            browserWorkspaceSessionID = nil
+            browserFeatureModel.resetWorkspaceBinding()
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
@@ -4880,22 +3785,8 @@ final class AppViewModel: NSObject, ObservableObject {
         return "浏览历史"
     }
 
-    private func sessionTitleForHistory(sessionID: String) -> String {
-        if let session = allChatSessions.first(where: { $0.id == sessionID }) {
-            return session.title
-        }
-        if let session = chatSessions.first(where: { $0.id == sessionID }) {
-            return session.title
-        }
-        return sessionID
-    }
-
-    private func applyBrowserHistoryFilter() {
-        filterBrowserHistory(query: browserHistorySearchQuery)
-    }
-
     private func rememberCurrentWorkspaceMode() {
-        rememberWorkspaceMode(isBrowserVisible ? .browser : .conversation, for: selectedChatSessionID ?? activeChatSession.id)
+        rememberWorkspaceMode(browserFeatureModel.isVisible ? .browser : .conversation, for: selectedChatSessionID ?? activeChatSession.id)
     }
 
     private func rememberWorkspaceMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
@@ -4914,11 +3805,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func restoreWorkspaceMode(for sessionID: String) {
         let mode = chatSessionWorkspaceModes.mode(for: sessionID)
-        isBrowserVisible = mode == .browser
-        browserWorkspaceSessionID = mode == .browser ? sessionID : nil
-        if mode == .browser {
-            browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
-        }
+        browserFeatureModel.restoreWorkspaceMode(isBrowser: mode == .browser, sessionID: sessionID)
         selection = .agentChat
     }
 

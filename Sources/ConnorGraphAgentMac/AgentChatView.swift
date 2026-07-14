@@ -13,7 +13,7 @@ struct AgentChatView: View {
 
     var body: some View {
         Group {
-            if viewModel.selectedChatSessionID == nil && !viewModel.isBrowserVisible {
+            if viewModel.selectedChatSessionID == nil && !viewModel.browserFeatureModel.isVisible {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -29,8 +29,26 @@ struct AgentChatView: View {
     private var activeSessionContent: some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if viewModel.isBrowserVisible {
-                    BrowserWorkspaceView(viewModel: viewModel)
+                if viewModel.browserFeatureModel.isVisible {
+                    BrowserWorkspaceView(
+                        model: viewModel.browserFeatureModel,
+                        chat: BrowserWorkspaceChatActions(
+                            selectedSessionID: viewModel.selectedChatSessionID,
+                            isSubmitting: viewModel.isSubmittingChat,
+                            defaultSearchEngine: viewModel.defaultSearchEngine,
+                            shortcutSettings: viewModel.shortcutSettings,
+                            cancelActiveRun: { viewModel.cancelActiveChatRun() },
+                            appendToDraft: { viewModel.appendToSelectedChatInputDraft($0) },
+                            appendSessionRecord: { kind, title, body, metadata, sessionID in
+                                viewModel.appendSessionRecord(kind: kind, title: title, body: body, metadata: metadata, sessionID: sessionID)
+                            },
+                            submit: { prompt, displayPrompt in
+                                await viewModel.submitChat(prompt: prompt, displayPrompt: displayPrompt)
+                            },
+                            currentErrorMessage: { viewModel.errorMessage },
+                            reportError: { viewModel.errorMessage = $0 }
+                        )
+                    )
                 } else {
                     AgentChatConversationView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
                 }

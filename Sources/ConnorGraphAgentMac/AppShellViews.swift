@@ -111,29 +111,29 @@ struct AppShellView: View {
                         .foregroundStyle(.secondary)
                     TopSearchTextField(
                         text: Binding(
-                            get: { viewModel.globalSearchQuery },
-                            set: { viewModel.updateGlobalSearchQuery($0) }
+                            get: { viewModel.globalSearchFeatureModel.query },
+                            set: { viewModel.globalSearchFeatureModel.updateQuery($0) }
                         ),
                         isFocused: Binding(
-                            get: { viewModel.isGlobalSearchFieldFocused },
+                            get: { viewModel.globalSearchFeatureModel.isFieldFocused },
                             set: { focused in
                                 if focused {
-                                    viewModel.activateGlobalSearchField()
+                                    viewModel.globalSearchFeatureModel.activateField()
                                 } else {
-                                    viewModel.deactivateGlobalSearchField()
+                                    viewModel.globalSearchFeatureModel.deactivateField()
                                 }
                             }
                         ),
                         placeholder: "搜索或发起对话",
                         focusRequestID: viewModel.focusTopSearchRequestID,
-                        onSubmit: { viewModel.performSelectedGlobalSearchItem() },
-                        onMoveUp: { viewModel.moveGlobalSearchSelectionUp() },
-                        onMoveDown: { viewModel.moveGlobalSearchSelectionDown() },
-                        onCancel: { viewModel.dismissGlobalSearchOverlay() }
+                        onSubmit: { viewModel.globalSearchFeatureModel.performSelectedItem() },
+                        onMoveUp: { viewModel.globalSearchFeatureModel.moveSelectionUp() },
+                        onMoveDown: { viewModel.globalSearchFeatureModel.moveSelectionDown() },
+                        onCancel: { viewModel.globalSearchFeatureModel.dismissOverlay() }
                     )
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
-                    if !viewModel.globalSearchQuery.isEmpty {
-                        Button(action: { viewModel.clearGlobalSearch() }) {
+                    if !viewModel.globalSearchFeatureModel.query.isEmpty {
+                        Button(action: { viewModel.globalSearchFeatureModel.clear() }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
                         }
@@ -174,11 +174,11 @@ struct AppShellView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            BrowserBackgroundTaskRunnerView(viewModel: viewModel)
+            BrowserBackgroundTaskRunnerView(model: viewModel.browserFeatureModel)
         }
         .overlay(alignment: .top) {
-            if viewModel.isGlobalSearchOverlayPresented && (!viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.globalSearchHistoryEntries.isEmpty) {
-                AppGlobalSearchOverlayView(viewModel: viewModel)
+            if viewModel.globalSearchFeatureModel.isOverlayPresented && (!viewModel.globalSearchFeatureModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.globalSearchFeatureModel.historyEntries.isEmpty) {
+                AppGlobalSearchOverlayView(model: viewModel.globalSearchFeatureModel)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(20)
@@ -186,8 +186,8 @@ struct AppShellView: View {
         }
         .simultaneousGesture(
             TapGesture().onEnded {
-                if viewModel.isGlobalSearchFieldFocused {
-                    viewModel.deactivateGlobalSearchField()
+                if viewModel.globalSearchFeatureModel.isFieldFocused {
+                    viewModel.globalSearchFeatureModel.deactivateField()
                 }
             }
         )
