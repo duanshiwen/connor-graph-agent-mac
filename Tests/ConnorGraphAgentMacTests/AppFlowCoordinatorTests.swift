@@ -14,11 +14,13 @@ import Testing
 
     coordinator.send(.navigate(.rss))
     coordinator.send(.openSessionNotification("session-1"))
+    coordinator.send(.openCalendarSettings)
     coordinator.send(.followRSSItem(request))
 
     #expect(received == [
         .navigate(.rss),
         .openSessionNotification("session-1"),
+        .openCalendarSettings,
         .followRSSItem(request)
     ])
 }

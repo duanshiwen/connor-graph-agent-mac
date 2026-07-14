@@ -41,12 +41,17 @@ final class AppCompositionRoot: ObservableObject {
                 viewModel.selection = selection
             case let .openSessionNotification(sessionID):
                 viewModel.openSessionFromNotification(sessionID)
+            case .openCalendarSettings:
+                viewModel.selectSettingsSection(.calendar)
             case let .followRSSItem(request):
                 viewModel.handleRSSFollowRequest(request)
             }
         }
         viewModel.rssFeatureModel.onFollowRequest = { request in
             flowCoordinator.send(.followRSSItem(request))
+        }
+        viewModel.calendarFeatureModel.onOpenSettingsRequest = {
+            flowCoordinator.send(.openCalendarSettings)
         }
         let lifecycle = AppLifecycle(
             startTaskScheduler: { [weak viewModel] in
