@@ -19,123 +19,6 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
-enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
-    case queued
-    case running
-    case succeeded
-    case failed
-    case interrupted
-
-    var displayName: String {
-        switch self {
-        case .queued: "排队中"
-        case .running: "运行中"
-        case .succeeded: "已完成"
-        case .failed: "失败"
-        case .interrupted: "已中断"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .queued: "clock"
-        case .running: "arrow.triangle.2.circlepath"
-        case .succeeded: "checkmark.circle.fill"
-        case .failed: "xmark.circle.fill"
-        case .interrupted: "pause.circle.fill"
-        }
-    }
-}
-
-struct AppSessionBackgroundTask: Identifiable, Equatable, Sendable {
-    var id: String = UUID().uuidString
-    var sessionID: String
-    var kind: String = "generic"
-    var title: String
-    var detail: String
-    var status: AppSessionBackgroundTaskStatus = .queued
-    var createdAt: Date = Date()
-    var updatedAt: Date = Date()
-    var errorMessage: String?
-    var payloadJSON: String = "{}"
-
-    init(
-        id: String = UUID().uuidString,
-        sessionID: String,
-        kind: String = "generic",
-        title: String,
-        detail: String,
-        status: AppSessionBackgroundTaskStatus = .queued,
-        createdAt: Date = Date(),
-        updatedAt: Date = Date(),
-        errorMessage: String? = nil,
-        payloadJSON: String = "{}"
-    ) {
-        self.id = id
-        self.sessionID = sessionID
-        self.kind = kind
-        self.title = title
-        self.detail = detail
-        self.status = status
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.errorMessage = errorMessage
-        self.payloadJSON = payloadJSON
-    }
-
-    init(persisted task: PersistedSessionBackgroundTask) {
-        self.init(
-            id: task.id,
-            sessionID: task.sessionID,
-            kind: task.kind,
-            title: task.title,
-            detail: task.detail,
-            status: AppSessionBackgroundTaskStatus(persisted: task.status),
-            createdAt: task.createdAt,
-            updatedAt: task.updatedAt,
-            errorMessage: task.errorMessage,
-            payloadJSON: task.payloadJSON
-        )
-    }
-
-    var persisted: PersistedSessionBackgroundTask {
-        PersistedSessionBackgroundTask(
-            id: id,
-            sessionID: sessionID,
-            kind: kind,
-            title: title,
-            detail: detail,
-            status: status.persisted,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            errorMessage: errorMessage,
-            payloadJSON: payloadJSON
-        )
-    }
-}
-
-private extension AppSessionBackgroundTaskStatus {
-    init(persisted status: PersistedSessionBackgroundTaskStatus) {
-        switch status {
-        case .queued: self = .queued
-        case .running: self = .running
-        case .succeeded: self = .succeeded
-        case .failed: self = .failed
-        case .interrupted: self = .interrupted
-        }
-    }
-
-    var persisted: PersistedSessionBackgroundTaskStatus {
-        switch self {
-        case .queued: .queued
-        case .running: .running
-        case .succeeded: .succeeded
-        case .failed: .failed
-        case .interrupted: .interrupted
-        }
-    }
-}
-
 enum AppViewModelStartupMode: Equatable {
     case immediate
     case deferred
@@ -148,10 +31,18 @@ final class AppViewModel: NSObject, ObservableObject {
 #endif
     private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
-    private let chatSessionDetailLoadCoordinator = ChatSessionDetailLoadCoordinator()
-    private let chatSessionTitleGenerationWorker = ChatSessionTitleGenerationWorker()
-    private var chatSessionSelectionTask: Task<Void, Never>?
-    private var chatSessionSelectionGeneration = 0
+    private lazy var chatSessionCoordinator = ChatSessionCoordinator(
+        model: chatFeatureModel.sessions,
+        repository: chatSessionRepository
+    )
+    lazy var chatAttentionCoordinator = ChatAttentionCoordinator(
+        model: chatFeatureModel.sessions,
+        repository: chatSessionRepository
+    )
+    lazy var chatBackgroundTaskCoordinator = ChatBackgroundTaskCoordinator(
+        model: chatFeatureModel.sessions,
+        repository: chatSessionRepository
+    )
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -249,8 +140,15 @@ final class AppViewModel: NSObject, ObservableObject {
     let globalSearchFeatureModel: GlobalSearchFeatureModel
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
-    @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
-    @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
+    let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
+    var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] {
+        get { chatWorkspaceCoordinator.stateSnapshotsBySessionID }
+        set { chatWorkspaceCoordinator.stateSnapshotsBySessionID = newValue }
+    }
+    var sessionRecordsBySessionID: [String: [AppSessionRecord]] {
+        get { chatWorkspaceCoordinator.recordsBySessionID }
+        set { chatWorkspaceCoordinator.recordsBySessionID = newValue }
+    }
     var selectedSettingsSection: ConnorSettingsSection {
         get { shellFeatureModel.selectedSettingsSection }
         set { shellFeatureModel.selectedSettingsSection = newValue }
@@ -297,7 +195,6 @@ final class AppViewModel: NSObject, ObservableObject {
             return runs.count
         }
     }
-    private var hasLoadedInitialChatSessions = false
     // Product chat path: NativeSessionManager owns Connor session state and talks to replaceable AgentBackend implementations.
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
@@ -314,10 +211,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
-    private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
     private var isLoadingRuntimeSettings = false
-    private var lastSessionNotificationAt: [String: Date] = [:]
-    private let sameSessionNotificationCooldown: TimeInterval = 300
     private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var taskSchedulerTimer: Timer?
@@ -333,10 +227,7 @@ final class AppViewModel: NSObject, ObservableObject {
         nativeSessionManager?.session.messages ?? fallbackChatSession.messages
     }
 
-    var isLoadingSelectedChatSessionDetail: Bool {
-        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID else { return false }
-        return chatFeatureModel.sessions.loadingSessionDetailID == selectedChatSessionID
-    }
+    var isLoadingSelectedChatSessionDetail: Bool { chatSessionCoordinator.isLoadingSelectedDetail }
 
     var activeChatPendingApprovals: [AgentPendingApproval] {
         let activeSessionID = activeChatSession.id
@@ -1526,6 +1417,74 @@ final class AppViewModel: NSObject, ObservableObject {
                 self?.errorMessage = message
             }
         }
+        chatSessionCoordinator.activeSessionIDProvider = { [weak self] in
+            self?.activeChatSession.id ?? ""
+        }
+        chatSessionCoordinator.onSelectionWillChange = { [weak self] previousID, _ in
+            guard let self else { return }
+            if previousID != nil { _ = self.stopSpeechTranscriptionIfRunningForLeavingSession(previousID) }
+            self.rememberCurrentWorkspaceMode()
+        }
+        chatSessionCoordinator.onSelectionStarted = { [weak self] sessionID in
+            guard let self else { return }
+            self.replaceSelectedChatTranscript([])
+            self.chatFeatureModel.run.eventTimeline = self.agentEventTimelinesBySessionID[sessionID] ?? []
+            self.chatFeatureModel.run.latestSummary = nil
+            self.chatFeatureModel.sessions.selectedArtifactDirectories = nil
+            self.refreshSelectedSubmittingState()
+        }
+        chatSessionCoordinator.onSelectionLoaded = { [weak self] snapshot, generation, startedAt in
+            self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
+        }
+        chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode in
+            guard let self, let repository = self.chatSessionRepository else { return }
+            let sessionID = session.id
+            try self.loadSessionCapsule(sessionID: sessionID)
+            try self.chatBackgroundTaskCoordinator.load(sessionID: sessionID)
+            self.fallbackChatSession = session
+            self.nativeSessionManager = self.makeNativeSessionManager(for: session)
+            self.replaceSelectedChatTranscript(session.messages)
+            self.restoreChatInputDraft(for: sessionID)
+            self.refreshSelectedSubmittingState()
+            if let cached = self.agentEventTimelinesBySessionID[sessionID] {
+                self.chatFeatureModel.run.eventTimeline = cached
+            } else {
+                try self.restoreLatestAgentEventTimeline(sessionID: sessionID)
+            }
+            self.chatFeatureModel.run.latestSummary = try repository.loadLatestSummary(sessionID: sessionID)
+            self.chatFeatureModel.sessions.selectedArtifactDirectories = try repository.artifactDirectories(sessionID: sessionID)
+            if shouldRestoreWorkspaceMode { self.restoreWorkspaceMode(for: sessionID) }
+            self.chatFeatureModel.run.summaryMessage = nil
+        }
+        chatSessionCoordinator.onSelectionCleared = { [weak self] in
+            self?.clearSelectedChatRuntime()
+        }
+        chatSessionCoordinator.onSessionsChanged = { [weak self] sessions in
+            self?.rebuildSessionSearchIndexSoon(sessions: sessions)
+            self?.synchronizeSessionReadStates(from: sessions)
+        }
+        chatSessionCoordinator.onError = { [weak self] message in
+            self?.errorMessage = message
+        }
+        chatAttentionCoordinator.selectedNavigation = { [weak self] in self?.selection ?? .agentChat }
+        chatAttentionCoordinator.notificationSettings = { [weak self] in
+            guard let self else { return (false, .none) }
+            return (self.appSettingsModel.desktopNotificationsEnabled, self.appSettingsModel.sessionNewMessageNotificationLevel)
+        }
+        chatAttentionCoordinator.latestSelectedMessageID = { [weak self] in self?.chatFeatureModel.run.transcript.last?.id }
+        chatAttentionCoordinator.canUseUserNotifications = { Bundle.main.bundleURL.pathExtension == "app" }
+        chatAttentionCoordinator.onLoadedReadStateChanged = { [weak self] sessionID, state in
+            guard let self, self.fallbackChatSession.id == sessionID else { return }
+            self.fallbackChatSession.readState = state
+        }
+        chatAttentionCoordinator.onError = { [weak self] message in self?.errorMessage = message }
+        chatBackgroundTaskCoordinator.generateTitle = { [weak self] prompts, sessionID in
+            guard let self else { throw CancellationError() }
+            return try await self.generateTitleFromUserPrompts(prompts, sessionID: sessionID)
+        }
+        chatBackgroundTaskCoordinator.onSessionRenamed = { [weak self] session in self?.synchronizeRenamedChatSession(session) }
+        chatBackgroundTaskCoordinator.onRequestListRefresh = { [weak self] reason in self?.scheduleChatSessionListRefresh(reason: reason) }
+        chatBackgroundTaskCoordinator.onError = { [weak self] message in self?.errorMessage = message }
         if startupMode == .immediate {
             runImmediateStartupWork(initialSession: initialSession)
         }
@@ -1568,12 +1527,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func prepareDemoInteractiveStartup() {
-        hasLoadedInitialChatSessions = true
         let session = fallbackChatSession
-        chatFeatureModel.sessions.sessions = [session]
-        chatFeatureModel.sessions.allSessions = [session]
+        chatSessionCoordinator.installStartupSessions([session], allSessions: [session])
         synchronizeSessionReadStates(from: [session])
-        chatFeatureModel.sessions.selectedSessionID = session.id
+        chatSessionCoordinator.adoptDirectSelection(session.id)
         replaceSelectedChatTranscript(session.messages)
         nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
     }
@@ -1608,19 +1565,16 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func applyInteractiveSessionContent(_ result: StartupDomainResult<InitialSessionContentSnapshot>) {
-        hasLoadedInitialChatSessions = true
         guard let snapshot = result.value else {
             replaceSelectedChatTranscript(activeChatTranscript)
-            chatFeatureModel.sessions.sessions = [activeChatSession]
-            chatFeatureModel.sessions.allSessions = [activeChatSession]
+            chatSessionCoordinator.installStartupSessions([activeChatSession], allSessions: [activeChatSession])
             synchronizeSessionReadStates(from: chatFeatureModel.sessions.allSessions)
-            chatFeatureModel.sessions.selectedSessionID = activeChatSession.id
+            chatSessionCoordinator.adoptDirectSelection(activeChatSession.id)
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: activeChatSession)
             if let failureMessage = result.failureMessage { errorMessage = failureMessage }
             return
         }
-        chatFeatureModel.sessions.sessions = snapshot.sessions
-        chatFeatureModel.sessions.allSessions = snapshot.allSessions
+        chatSessionCoordinator.installStartupSessions(snapshot.sessions, allSessions: snapshot.allSessions)
         rebuildSessionSearchIndexSoon(sessions: snapshot.allSessions)
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {
@@ -1628,20 +1582,19 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         let sessionID = session.id
-        chatFeatureModel.sessions.selectedSessionID = sessionID
+        chatSessionCoordinator.adoptDirectSelection(sessionID)
         if let state = snapshot.state {
             sessionStateSnapshotsBySessionID[sessionID] = state
             syncWorkspaceDraftsFromSession(state)
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
-                chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+                chatWorkspaceCoordinator.setMode(mode, for: sessionID)
             }
         }
         sessionRecordsBySessionID[sessionID] = snapshot.records
         if let browserState = snapshot.browserState {
             browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
         }
-        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID] = snapshot.backgroundTasks
-        chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
+        chatBackgroundTaskCoordinator.install(snapshot.backgroundTasks, sessionID: sessionID)
         fallbackChatSession = session
         nativeSessionManager = makeNativeSessionManager(for: session)
         replaceSelectedChatTranscript(session.messages)
@@ -1732,6 +1685,8 @@ final class AppViewModel: NSObject, ObservableObject {
             self.applicationDidFinishLaunchingObserver = nil
         }
         stopTaskSchedulerTimer()
+        chatSessionCoordinator.shutdown()
+        chatBackgroundTaskCoordinator.shutdown()
         chatFeatureModel.shutdown()
         globalSearchFeatureModel.shutdown()
         runtimeSettingsCoordinator.shutdown()
@@ -1942,7 +1897,7 @@ final class AppViewModel: NSObject, ObservableObject {
             do {
                 let session = try chatSessionRepository.createSession(title: request.title ?? "定时任务会话")
                 reloadChatSessions()
-                chatFeatureModel.sessions.selectedSessionID = session.id
+                chatSessionCoordinator.adoptDirectSelection(session.id)
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
                 _ = await submitChat(prompt: request.message, clearComposer: false)
@@ -1952,7 +1907,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         guard let sessionID = request.sessionID else { return "Missing sessionID" }
-        chatFeatureModel.sessions.selectedSessionID = sessionID
+        chatSessionCoordinator.adoptDirectSelection(sessionID)
         if let session = try? chatSessionRepository?.loadSession(id: sessionID) {
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
@@ -1971,12 +1926,12 @@ final class AppViewModel: NSObject, ObservableObject {
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession(title: rssFollowSessionTitle(request.title))
-            chatFeatureModel.sessions.selectedSessionID = session.id
+            chatSessionCoordinator.adoptDirectSelection(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.resetWorkspaceBinding()
             chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
-            try loadBackgroundTasks(sessionID: session.id)
+            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             replaceSelectedChatTranscript([])
@@ -1988,7 +1943,7 @@ final class AppViewModel: NSObject, ObservableObject {
             chatFeatureModel.run.summaryMessage = nil
             chatFeatureModel.run.lastPromptInspection = nil
             reloadChatSessions(restoreWorkspaceMode: false)
-            chatFeatureModel.sessions.selectedSessionID = session.id
+            chatSessionCoordinator.adoptDirectSelection(session.id)
             openURLInCurrentChatBrowser(request.url)
             errorMessage = nil
         } catch {
@@ -2009,7 +1964,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let title = sanitizedSessionTitle("添加技能：\(request)")
         let session = try chatSessionRepository.createSession(title: title)
         rememberWorkspaceMode(.conversation, for: session.id)
-        try loadBackgroundTasks(sessionID: session.id)
+        try chatBackgroundTaskCoordinator.load(sessionID: session.id)
         reloadChatSessions(restoreWorkspaceMode: false)
         try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
         let createdSlug = try ensureSkillPackageExists(for: request, excluding: knownSkillSlugs)
@@ -2024,7 +1979,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let title = sanitizedSessionTitle("编辑技能：\(card.title)")
         let session = try chatSessionRepository.createSession(title: title)
         rememberWorkspaceMode(.conversation, for: session.id)
-        try loadBackgroundTasks(sessionID: session.id)
+        try chatBackgroundTaskCoordinator.load(sessionID: session.id)
         reloadChatSessions(restoreWorkspaceMode: false)
         try await runSkillRequestInBackgroundSession(
             session: session,
@@ -2683,27 +2638,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func markSessionRead(_ sessionID: String) {
-        guard chatFeatureModel.sessions.readStates[sessionID]?.highestLevel != SessionAttentionLevel.none || chatFeatureModel.sessions.readStates[sessionID]?.unreadCount ?? 0 > 0 else { return }
-        var state = chatFeatureModel.sessions.readStates[sessionID] ?? .initial()
-        state.markRead(messageID: latestMessageID(for: sessionID), at: Date())
-        applySessionReadState(state, sessionID: sessionID, persist: true)
-    }
-
-    private func markSessionUnread(
-        sessionID: String,
-        messageID: String,
-        preview: String?,
-        level: SessionAttentionLevel
-    ) {
-        var state = chatFeatureModel.sessions.readStates[sessionID] ?? .initial()
-        state.markUnread(messageID: messageID, preview: preview, level: level, at: Date())
-        applySessionReadState(state, sessionID: sessionID, persist: true)
-    }
-
-    private func latestMessageID(for sessionID: String) -> String? {
-        if chatFeatureModel.sessions.selectedSessionID == sessionID, let last = chatFeatureModel.run.transcript.last { return last.id }
-        return chatFeatureModel.sessions.sessions.first(where: { $0.id == sessionID })?.messages.last?.id
-            ?? chatFeatureModel.sessions.allSessions.first(where: { $0.id == sessionID })?.messages.last?.id
+        chatAttentionCoordinator.markRead(sessionID)
     }
 
     private func noteSessionUpdate(
@@ -2712,16 +2647,12 @@ final class AppViewModel: NSObject, ObservableObject {
         preview: String?,
         notificationBody: String
     ) {
-        let level = appSettingsModel.sessionNewMessageNotificationLevel
-        if shouldTreatSessionUpdateAsRead(sessionID: sessionID) {
-            var state = chatFeatureModel.sessions.readStates[sessionID] ?? .initial()
-            state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
-            applySessionReadState(state, sessionID: sessionID, persist: true)
-            return
-        }
-        let unreadMessageID = messageID ?? "attention-event-\(UUID().uuidString)"
-        markSessionUnread(sessionID: sessionID, messageID: unreadMessageID, preview: preview, level: level)
-        postSessionNotificationIfNeeded(sessionID: sessionID, body: notificationBody, level: level)
+        chatAttentionCoordinator.noteUpdate(
+            sessionID: sessionID,
+            messageID: messageID,
+            preview: preview,
+            notificationBody: notificationBody
+        )
     }
 
     private func notificationPreview(from content: String) -> String {
@@ -2733,88 +2664,19 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func shouldTreatSessionUpdateAsRead(sessionID: String) -> Bool {
-        selection == .agentChat && chatFeatureModel.sessions.selectedSessionID == sessionID
-    }
-
-    private func postSessionNotificationIfNeeded(
-        sessionID: String,
-        body: String,
-        level: SessionAttentionLevel
-    ) {
-        guard appSettingsModel.desktopNotificationsEnabled, canUseUserNotifications else { return }
-        guard level.shouldRequestSystemNotification else { return }
-        guard !shouldTreatSessionUpdateAsRead(sessionID: sessionID) else { return }
-        let now = Date()
-        if let last = lastSessionNotificationAt[sessionID], now.timeIntervalSince(last) < sameSessionNotificationCooldown {
-            return
-        }
-        lastSessionNotificationAt[sessionID] = now
-        let content = UNMutableNotificationContent()
-        content.title = "康纳同学：主人，有新消息需要你关注"
-        content.body = body
-        content.sound = .default
-        if level == .interruptive {
-            content.interruptionLevel = .timeSensitive
-            content.relevanceScore = 1.0
-        }
-        content.userInfo = [
-            "sessionID": sessionID,
-            "attentionLevel": level.rawValue,
-            "bundlePath": Bundle.main.bundlePath
-        ]
-        let request = UNNotificationRequest(identifier: "session-\(sessionID)-\(UUID().uuidString)", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        chatAttentionCoordinator.shouldTreatUpdateAsRead(sessionID: sessionID)
     }
 
     private func synchronizeSessionReadStates(from sessions: [AgentSession]) {
-        chatFeatureModel.sessions.readStates = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.readState) })
-        refreshDockBadge()
-    }
-
-    private func applySessionReadState(_ state: SessionReadState, sessionID: String, persist: Bool) {
-        chatFeatureModel.sessions.readStates[sessionID] = state
-        updateLoadedSessionReadState(sessionID: sessionID, readState: state)
-        if persist {
-            persistSessionReadState(state, sessionID: sessionID)
-        }
-        refreshDockBadge()
-    }
-
-    private func updateLoadedSessionReadState(sessionID: String, readState: SessionReadState) {
-        if let index = chatFeatureModel.sessions.sessions.firstIndex(where: { $0.id == sessionID }) {
-            chatFeatureModel.sessions.sessions[index].readState = readState
-        }
-        if let index = chatFeatureModel.sessions.allSessions.firstIndex(where: { $0.id == sessionID }) {
-            chatFeatureModel.sessions.allSessions[index].readState = readState
-        }
-        if fallbackChatSession.id == sessionID {
-            fallbackChatSession.readState = readState
-        }
-    }
-
-    private func persistSessionReadState(_ state: SessionReadState, sessionID: String) {
-        do {
-            let updated = try chatSessionRepository?.updateReadState(sessionID: sessionID, readState: state)
-            if let updated {
-                updateLoadedSessionReadState(sessionID: updated.id, readState: updated.readState)
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        chatAttentionCoordinator.synchronize(from: sessions)
     }
 
     private func refreshDockBadge() {
-        let count = chatFeatureModel.sessions.readStates.values.reduce(0) { partial, state in
-            guard state.highestLevel.shouldCountInDockBadge else { return partial }
-            return partial + max(state.unreadCount, 1)
-        }
-        Self.applyDockBadge(count: count, application: NSApp)
+        chatAttentionCoordinator.refreshDockBadge()
     }
 
     static func applyDockBadge(count: Int, application: NSApplication?) {
-        guard let application else { return }
-        application.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+        ChatAttentionCoordinator.applyDockBadge(count: count, application: application)
     }
 
     private var canUseUserNotifications: Bool {
@@ -2855,8 +2717,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
-        guard !hasLoadedInitialChatSessions else { return }
-        reloadChatSessions(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
+        chatSessionCoordinator.reloadIfNeeded(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
     }
 
     private func rebuildSessionSearchIndexSoon(sessions: [AgentSession]) {
@@ -2864,60 +2725,15 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
-        hasLoadedInitialChatSessions = true
-        guard let chatSessionRepository else {
+        if chatSessionRepository == nil {
             replaceSelectedChatTranscript(activeChatTranscript)
             chatFeatureModel.sessions.sessions = [activeChatSession]
             chatFeatureModel.sessions.allSessions = [activeChatSession]
             synchronizeSessionReadStates(from: chatFeatureModel.sessions.allSessions)
-            chatFeatureModel.sessions.selectedSessionID = activeChatSession.id
+            chatSessionCoordinator.adoptDirectSelection(activeChatSession.id)
             return
         }
-        do {
-            var sessions = try chatSessionRepository.loadSessions(filter: chatFeatureModel.sessions.filter)
-            if sessions.isEmpty, chatFeatureModel.sessions.filter == .all {
-                let session = try chatSessionRepository.createSession()
-                sessions = [session]
-            }
-            chatFeatureModel.sessions.sessions = sessions
-            chatFeatureModel.sessions.allSessions = try chatSessionRepository.loadSessions(filter: .all)
-            rebuildSessionSearchIndexSoon(sessions: chatFeatureModel.sessions.allSessions)
-            synchronizeSessionReadStates(from: chatFeatureModel.sessions.allSessions)
-            let selectedID = selectedChatSessionIDVisibleInCurrentFilter(sessions: sessions)
-            chatFeatureModel.sessions.selectedSessionID = selectedID
-            if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
-                try loadSessionCapsule(sessionID: selectedID)
-                try loadBackgroundTasks(sessionID: selectedID)
-                fallbackChatSession = session
-                nativeSessionManager = makeNativeSessionManager(for: session)
-                replaceSelectedChatTranscript(session.messages)
-                restoreChatInputDraft(for: selectedID)
-                refreshSelectedSubmittingState()
-                if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
-                    chatFeatureModel.run.eventTimeline = cachedTimeline
-                } else {
-                    try restoreLatestAgentEventTimeline(sessionID: selectedID)
-                }
-                chatFeatureModel.run.latestSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
-                chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
-                if shouldRestoreWorkspaceMode {
-                    restoreWorkspaceMode(for: selectedID)
-                }
-            } else {
-                clearSelectedChatSessionDetail()
-            }
-            chatFeatureModel.run.summaryMessage = nil
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func selectedChatSessionIDVisibleInCurrentFilter(sessions: [AgentSession]) -> String? {
-        if let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID {
-            return sessions.contains(where: { $0.id == selectedChatSessionID }) ? selectedChatSessionID : nil
-        }
-        return chatFeatureModel.sessions.filter == .all ? sessions.first?.id : nil
+        chatSessionCoordinator.reload(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
     }
 
     private func replaceSelectedChatTranscript(_ messages: [AgentMessage]) {
@@ -2926,10 +2742,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func clearSelectedChatSessionDetail() {
-        chatSessionSelectionTask?.cancel()
-        chatSessionSelectionGeneration += 1
-        chatFeatureModel.sessions.loadingSessionDetailID = nil
-        chatFeatureModel.sessions.selectedSessionID = nil
+        chatSessionCoordinator.clearSelection()
+    }
+
+    private func clearSelectedChatRuntime() {
         nativeSessionManager = nil
         replaceSelectedChatTranscript([])
         chatFeatureModel.run.eventTimeline = []
@@ -2945,21 +2761,18 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func newChatSession() {
         guard let chatSessionRepository else { return }
-        chatSessionSelectionTask?.cancel()
-        chatSessionSelectionGeneration += 1
-        chatFeatureModel.sessions.loadingSessionDetailID = nil
         _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()
-            chatFeatureModel.sessions.selectedSessionID = session.id
+            chatSessionCoordinator.adoptDirectSelection(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.isVisible = false
             browserFeatureModel.resetWorkspaceBinding()
             rememberWorkspaceMode(.conversation, for: session.id)
             chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
-            try loadBackgroundTasks(sessionID: session.id)
+            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             replaceSelectedChatTranscript([])
@@ -2979,9 +2792,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func newNoteSession() {
         guard let chatSessionRepository else { return }
-        chatSessionSelectionTask?.cancel()
-        chatSessionSelectionGeneration += 1
-        chatFeatureModel.sessions.loadingSessionDetailID = nil
         _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
         rememberCurrentWorkspaceMode()
         do {
@@ -2990,14 +2800,14 @@ final class AppViewModel: NSObject, ObservableObject {
             noteSession.governance.kind = .note
             noteSession.title = "未命名的笔记"
             _ = try chatSessionRepository.saveSession(noteSession)
-            chatFeatureModel.sessions.selectedSessionID = noteSession.id
+            chatSessionCoordinator.adoptDirectSelection(noteSession.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.isVisible = false
             browserFeatureModel.resetWorkspaceBinding()
             rememberWorkspaceMode(.conversation, for: noteSession.id)
             chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: noteSession.id)
             try loadSessionCapsule(sessionID: noteSession.id)
-            try loadBackgroundTasks(sessionID: noteSession.id)
+            try chatBackgroundTaskCoordinator.load(sessionID: noteSession.id)
             fallbackChatSession = noteSession
             nativeSessionManager = makeNativeSessionManager(for: noteSession)
             replaceSelectedChatTranscript([])
@@ -3043,9 +2853,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
-        guard let sessionID else { return [] }
-        return chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
-            .sorted { $0.createdAt > $1.createdAt }
+        chatBackgroundTaskCoordinator.tasks(for: sessionID)
     }
 
     var activeSessionBackgroundTasks: [AppSessionBackgroundTask] {
@@ -3057,8 +2865,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func hasRunningBackgroundTask(sessionID: String) -> Bool {
-        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
-            .contains { $0.status == .queued || $0.status == .running }
+        chatBackgroundTaskCoordinator.hasRunningTask(sessionID: sessionID)
     }
 
     var isSpeechTranscriptionRunningForSelectedSession: Bool {
@@ -3140,130 +2947,19 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func upsertSpeechTranscriptionBackgroundTask(_ task: AppSessionBackgroundTask?) {
         guard let task else { return }
-        upsertBackgroundTask(task)
+        chatBackgroundTaskCoordinator.upsert(task)
     }
 
     private func runningBackgroundTasksForDeletionCheck(sessionID: String) throws -> [AppSessionBackgroundTask] {
-        let persistedTasks = try chatSessionRepository?.loadBackgroundTasks(sessionID: sessionID).map(AppSessionBackgroundTask.init(persisted:)) ?? []
-        let memoryTasks = chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
-        return (persistedTasks + memoryTasks).filter { $0.status == .queued || $0.status == .running }
+        try chatBackgroundTaskCoordinator.runningTasksForDeletionCheck(sessionID: sessionID)
     }
 
     func canDeleteChatSession(_ sessionID: String) -> Bool {
         (try? runningBackgroundTasksForDeletionCheck(sessionID: sessionID).isEmpty) ?? !hasRunningBackgroundTask(sessionID: sessionID)
     }
 
-    private func loadBackgroundTasks(sessionID: String) throws {
-        guard let chatSessionRepository else { return }
-        let activeInMemoryTaskIDs = Set(
-            chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
-                .filter { $0.status == .queued || $0.status == .running }
-                .map(\.id)
-        )
-        var tasks = try chatSessionRepository.loadBackgroundTasks(sessionID: sessionID)
-            .map(AppSessionBackgroundTask.init(persisted:))
-        var didInterruptActiveTasks = false
-        for index in tasks.indices where (tasks[index].status == .queued || tasks[index].status == .running) && !activeInMemoryTaskIDs.contains(tasks[index].id) {
-            tasks[index].status = .interrupted
-            tasks[index].updatedAt = Date()
-            tasks[index].errorMessage = "应用重启或会话恢复后，旧后台任务不会自动继续执行。"
-            didInterruptActiveTasks = true
-            try chatSessionRepository.saveBackgroundTask(tasks[index].persisted)
-        }
-        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID] = tasks
-        if didInterruptActiveTasks || !hasRunningTitleTask(sessionID: sessionID) {
-            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
-        }
-    }
-
     func regenerateChatSessionTitle(_ sessionID: String) {
-        guard !hasRunningTitleTask(sessionID: sessionID) else { return }
-        let task = enqueueBackgroundTask(
-            sessionID: sessionID,
-            title: "重新生成会话标题",
-            detail: "根据此会话中的所有用户 Prompt 生成 20 字以内标题。",
-            kind: "title_generation"
-        )
-        runTitleGenerationTask(taskID: task.id, sessionID: sessionID)
-    }
-
-    private func hasRunningTitleTask(sessionID: String) -> Bool {
-        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []].contains { task in
-            task.kind == "title_generation" && (task.status == .queued || task.status == .running)
-        }
-    }
-
-    @discardableResult
-    private func enqueueBackgroundTask(sessionID: String, title: String, detail: String, kind: String = "generic") -> AppSessionBackgroundTask {
-        let task = AppSessionBackgroundTask(sessionID: sessionID, kind: kind, title: title, detail: detail)
-        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []].append(task)
-        do {
-            try chatSessionRepository?.saveBackgroundTask(task.persisted)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-        if kind == "title_generation" { chatFeatureModel.sessions.regeneratingTitleSessionIDs.insert(sessionID) }
-        return task
-    }
-
-    private func updateBackgroundTask(sessionID: String, taskID: String, status: AppSessionBackgroundTaskStatus, detail: String? = nil, errorMessage: String? = nil) {
-        guard var tasks = chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID], let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
-        tasks[index].status = status
-        tasks[index].updatedAt = Date()
-        if let detail { tasks[index].detail = detail }
-        tasks[index].errorMessage = errorMessage
-        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID] = tasks
-        do {
-            try chatSessionRepository?.saveBackgroundTask(tasks[index].persisted)
-        } catch {
-            self.errorMessage = String(describing: error)
-        }
-        if !hasRunningTitleTask(sessionID: sessionID) {
-            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
-        }
-    }
-
-    private func upsertBackgroundTask(_ task: AppSessionBackgroundTask) {
-        var tasks = chatFeatureModel.sessions.backgroundTasksBySessionID[task.sessionID, default: []]
-        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
-            tasks[index] = task
-        } else {
-            tasks.append(task)
-        }
-        chatFeatureModel.sessions.backgroundTasksBySessionID[task.sessionID] = tasks
-        do {
-            try chatSessionRepository?.saveBackgroundTask(task.persisted)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-        if !hasRunningTitleTask(sessionID: task.sessionID) {
-            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(task.sessionID)
-        }
-    }
-
-    private func runTitleGenerationTask(taskID: String, sessionID: String) {
-        updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .running)
-        Task {
-            do {
-                guard let chatSessionRepository else { return }
-                let userPrompts = try await chatSessionTitleGenerationWorker.userPrompts(repository: chatSessionRepository, sessionID: sessionID)
-                guard !userPrompts.isEmpty else {
-                    let updated = try await chatSessionTitleGenerationWorker.renameSession(repository: chatSessionRepository, sessionID: sessionID, title: "新对话")
-                    synchronizeRenamedChatSession(updated)
-                    scheduleChatSessionListRefresh(reason: "titleGenerationCompleted")
-                    updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
-                    return
-                }
-                let title = try await generateTitleFromUserPrompts(userPrompts, sessionID: sessionID)
-                let updated = try await chatSessionTitleGenerationWorker.renameSession(repository: chatSessionRepository, sessionID: sessionID, title: title)
-                synchronizeRenamedChatSession(updated)
-                scheduleChatSessionListRefresh(reason: "titleGenerationCompleted")
-                updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
-            } catch {
-                updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .failed, errorMessage: String(describing: error))
-                errorMessage = String(describing: error)
-            }
-        }
+        chatBackgroundTaskCoordinator.regenerateTitle(sessionID: sessionID)
     }
 
     private func generateTitleFromUserPrompts(_ prompts: [String], sessionID: String) async throws -> String {
@@ -3313,18 +3009,14 @@ final class AppViewModel: NSObject, ObservableObject {
                 return
             }
             try chatSessionRepository.deleteSession(sessionID: sessionID)
-            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
-            chatFeatureModel.sessions.backgroundTasksBySessionID.removeValue(forKey: sessionID)
+            chatBackgroundTaskCoordinator.removeSession(sessionID)
             chatInputDraftsBySessionID.removeValue(forKey: sessionID)
             pendingAttachmentRefsBySessionID.removeValue(forKey: sessionID)
             agentEventTimelinesBySessionID.removeValue(forKey: sessionID)
             agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(sessionID):") }
+            chatWorkspaceCoordinator.removeSession(sessionID)
             if chatFeatureModel.sessions.selectedSessionID == sessionID {
-                chatFeatureModel.sessions.selectedSessionID = nil
-                replaceSelectedChatTranscript([])
-                chatFeatureModel.run.eventTimeline = []
-                chatFeatureModel.run.latestSummary = nil
-                chatFeatureModel.sessions.selectedArtifactDirectories = nil
+                chatSessionCoordinator.clearSelection()
             }
             reloadChatSessions()
             errorMessage = nil
@@ -3340,7 +3032,7 @@ final class AppViewModel: NSObject, ObservableObject {
             sessionStateSnapshotsBySessionID[sessionID] = state
             if chatFeatureModel.sessions.selectedSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
-                chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+                chatWorkspaceCoordinator.setMode(mode, for: sessionID)
             }
         } else {
             let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
@@ -3386,12 +3078,12 @@ final class AppViewModel: NSObject, ObservableObject {
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
-            chatFeatureModel.sessions.selectedSessionID = session.id
+            chatSessionCoordinator.adoptDirectSelection(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.resetWorkspaceBinding()
             chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
-            try loadBackgroundTasks(sessionID: session.id)
+            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             replaceSelectedChatTranscript([])
@@ -3403,7 +3095,7 @@ final class AppViewModel: NSObject, ObservableObject {
             chatFeatureModel.run.summaryMessage = nil
             chatFeatureModel.run.lastPromptInspection = nil
             reloadChatSessions(restoreWorkspaceMode: false)
-            chatFeatureModel.sessions.selectedSessionID = session.id
+            chatSessionCoordinator.adoptDirectSelection(session.id)
             openURLInCurrentChatBrowser(url)
             errorMessage = nil
         } catch {
@@ -3423,7 +3115,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func rememberWorkspaceMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
-        chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+        chatWorkspaceCoordinator.setMode(mode, for: sessionID)
         guard let sessionID else { return }
         do {
             var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -3437,7 +3129,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func restoreWorkspaceMode(for sessionID: String) {
-        let mode = chatSessionWorkspaceModes.mode(for: sessionID)
+        let mode = chatWorkspaceCoordinator.mode(for: sessionID)
         browserFeatureModel.restoreWorkspaceMode(isBrowser: mode == .browser, sessionID: sessionID)
         selection = .agentChat
     }
@@ -3571,63 +3263,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func selectChatSession(_ sessionID: String) {
-        guard let chatSessionRepository else { return }
-        if chatFeatureModel.sessions.selectedSessionID == sessionID,
-           chatFeatureModel.sessions.loadingSessionDetailID == nil,
-           activeChatSession.id == sessionID {
-            return
-        }
-        if chatFeatureModel.sessions.selectedSessionID != sessionID {
-            _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
-        }
-        rememberCurrentWorkspaceMode()
-        chatSessionSelectionTask?.cancel()
-        chatSessionSelectionGeneration += 1
-        let generation = chatSessionSelectionGeneration
-        let coordinator = chatSessionDetailLoadCoordinator
-        let startedAt = ContinuousClock.now
-
-        chatFeatureModel.sessions.selectedSessionID = sessionID
-        chatFeatureModel.sessions.loadingSessionDetailID = sessionID
-        replaceSelectedChatTranscript([])
-        chatFeatureModel.run.eventTimeline = agentEventTimelinesBySessionID[sessionID] ?? []
-        chatFeatureModel.run.latestSummary = nil
-        chatFeatureModel.sessions.selectedArtifactDirectories = nil
-        refreshSelectedSubmittingState()
-        errorMessage = nil
-
-        chatSessionSelectionTask = Task(priority: .userInitiated) { [weak self] in
-            do {
-                guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else {
-                    guard let self,
-                          self.chatSessionSelectionGeneration == generation,
-                          self.chatFeatureModel.sessions.selectedSessionID == sessionID
-                    else { return }
-                    self.errorMessage = "无法加载所选会话。"
-                    self.chatFeatureModel.sessions.loadingSessionDetailID = nil
-                    return
-                }
-                try Task.checkCancellation()
-                guard let self,
-                      self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
-                else { return }
-                self.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
-            } catch is CancellationError {
-                return
-            } catch {
-                guard let self,
-                      self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
-                else { return }
-                self.errorMessage = String(describing: error)
-                self.chatFeatureModel.sessions.loadingSessionDetailID = nil
-            }
-        }
-    }
-
-    private func isCurrentChatSessionSelection(sessionID: String, generation: Int) -> Bool {
-        chatSessionSelectionGeneration == generation
-            && chatFeatureModel.sessions.selectedSessionID == sessionID
-            && chatFeatureModel.sessions.loadingSessionDetailID == sessionID
+        chatSessionCoordinator.select(sessionID)
     }
 
     private func applySelectedChatSessionSnapshot(
@@ -3640,7 +3276,7 @@ final class AppViewModel: NSObject, ObservableObject {
             markSessionRead(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
-            try loadBackgroundTasks(sessionID: session.id)
+            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
             _ = ensureSessionLLMOverride(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
@@ -3656,20 +3292,17 @@ final class AppViewModel: NSObject, ObservableObject {
             chatFeatureModel.run.summaryMessage = nil
             chatFeatureModel.run.lastContext = nil
             chatFeatureModel.run.lastPromptInspection = nil
-            chatFeatureModel.sessions.loadingSessionDetailID = nil
             errorMessage = nil
             let elapsed = startedAt.duration(to: ContinuousClock.now)
             let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
             AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             errorMessage = String(describing: error)
-            chatFeatureModel.sessions.loadingSessionDetailID = nil
         }
     }
 
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
-        chatFeatureModel.sessions.filter = filter
-        reloadChatSessions(restoreWorkspaceMode: restoreWorkspaceMode)
+        chatSessionCoordinator.setFilter(filter, restoreWorkspaceMode: restoreWorkspaceMode)
     }
 
     func setSelectedSessionStatus(_ status: AgentSessionStatus) {
@@ -3683,7 +3316,6 @@ final class AppViewModel: NSObject, ObservableObject {
             let previousStatus = try chatSessionRepository.loadSession(id: sessionID)?.governance.status
             let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
             if chatFeatureModel.sessions.selectedSessionID == sessionID {
-                self.chatFeatureModel.sessions.selectedSessionID = session.id
                 fallbackChatSession = session
             }
             reloadChatSessions()
@@ -4184,7 +3816,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 fallbackChatSession = response.session
                 chatFeatureModel.run.transcript = manager.session.messages
                 chatFeatureModel.run.eventTimeline = manager.eventPresentations
-                chatFeatureModel.sessions.selectedSessionID = response.session.id
+                chatSessionCoordinator.adoptDirectSelection(response.session.id)
                 chatFeatureModel.run.latestSummary = try chatSessionRepository?.loadLatestSummary(sessionID: response.session.id)
                 chatFeatureModel.run.lastContext = nil
                 chatFeatureModel.run.lastPromptInspection = nil
