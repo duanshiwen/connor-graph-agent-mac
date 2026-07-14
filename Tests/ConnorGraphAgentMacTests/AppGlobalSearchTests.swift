@@ -13,82 +13,82 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         fixture.viewModel.sessionSearchQuery = "existing session filter"
-        fixture.viewModel.updateGlobalSearchQuery(" quarterly planning ")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery(" quarterly planning ")
 
-        #expect(fixture.viewModel.globalSearchQuery == " quarterly planning ")
+        #expect(fixture.viewModel.globalSearchFeatureModel.query == " quarterly planning ")
         #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
-        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.globalSearchPreviewState.query == "quarterly planning")
-        #expect(!fixture.viewModel.globalSearchPreviewState.isLoading)
+        #expect(fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.query == "quarterly planning")
+        #expect(!fixture.viewModel.globalSearchFeatureModel.previewState.isLoading)
 
-        fixture.viewModel.clearGlobalSearch()
+        fixture.viewModel.globalSearchFeatureModel.clear()
 
-        #expect(fixture.viewModel.globalSearchQuery.isEmpty)
+        #expect(fixture.viewModel.globalSearchFeatureModel.query.isEmpty)
         #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.globalSearchPreviewState == .empty)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState == .empty)
     }
 
     @Test func focusRestoresOverlayForExistingQueryAndBlurDismissesIt() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.updateGlobalSearchQuery("invoice")
-        fixture.viewModel.dismissGlobalSearchOverlay()
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("invoice")
+        fixture.viewModel.globalSearchFeatureModel.dismissOverlay()
 
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
 
-        fixture.viewModel.activateGlobalSearchField()
+        fixture.viewModel.globalSearchFeatureModel.activateField()
 
-        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
-        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.isFieldFocused)
+        #expect(fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
 
-        fixture.viewModel.deactivateGlobalSearchField()
+        fixture.viewModel.globalSearchFeatureModel.deactivateField()
 
-        #expect(!fixture.viewModel.isGlobalSearchFieldFocused)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.globalSearchQuery == "invoice")
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isFieldFocused)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.query == "invoice")
     }
 
     @Test func focusEmptyGlobalSearchShowsRecentSearches() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.recordGlobalSearchHistoryForTesting(query: "SwiftUI 搜索")
-        fixture.viewModel.globalSearchQuery = ""
+        fixture.viewModel.globalSearchFeatureModel.recordHistoryForTesting(query: "SwiftUI 搜索")
+        fixture.viewModel.globalSearchFeatureModel.query = ""
 
-        fixture.viewModel.activateGlobalSearchField()
+        fixture.viewModel.globalSearchFeatureModel.activateField()
 
-        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
-        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.globalSearchSelectableItems == [.recentSearch("swiftui 搜索")])
+        #expect(fixture.viewModel.globalSearchFeatureModel.isFieldFocused)
+        #expect(fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.selectableItems == [.recentSearch("swiftui 搜索")])
     }
 
     @Test func emptyQueryWithoutHistoryDoesNotShowOverlay() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.activateGlobalSearchField()
+        fixture.viewModel.globalSearchFeatureModel.activateField()
 
-        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.globalSearchSelectableItems.isEmpty)
+        #expect(fixture.viewModel.globalSearchFeatureModel.isFieldFocused)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.selectableItems.isEmpty)
     }
 
     @Test func selectingRecentSearchFillsQueryAndRefreshesPreview() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.recordGlobalSearchHistoryForTesting(query: "Mail sync")
-        let entry = try #require(fixture.viewModel.globalSearchHistoryEntries.first)
+        fixture.viewModel.globalSearchFeatureModel.recordHistoryForTesting(query: "Mail sync")
+        let entry = try #require(fixture.viewModel.globalSearchFeatureModel.historyEntries.first)
 
-        fixture.viewModel.selectGlobalSearchHistoryEntry(entry)
+        fixture.viewModel.globalSearchFeatureModel.selectHistoryEntry(entry)
 
-        #expect(fixture.viewModel.globalSearchQuery == "Mail sync")
-        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.globalSearchPreviewState.query == "Mail sync")
-        #expect(fixture.viewModel.globalSearchHistoryEntries.first?.normalizedQuery == "mail sync")
-        #expect(fixture.viewModel.globalSearchHistoryEntries.first?.useCount == 2)
+        #expect(fixture.viewModel.globalSearchFeatureModel.query == "Mail sync")
+        #expect(fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.query == "Mail sync")
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries.first?.normalizedQuery == "mail sync")
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries.first?.useCount == 2)
     }
 
     @Test func globalSearchActionsRecordDeduplicatedHistory() throws {
@@ -96,31 +96,31 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         fixture.viewModel.defaultSearchEngine = .google
-        fixture.viewModel.updateGlobalSearchQuery("  SwiftUI   Search  ")
-        fixture.viewModel.performGlobalSearchWebSearch()
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("  SwiftUI   Search  ")
+        fixture.viewModel.globalSearchFeatureModel.performWebSearch()
 
-        fixture.viewModel.updateGlobalSearchQuery("swiftui search")
-        fixture.viewModel.performGlobalSearchWebSearch()
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("swiftui search")
+        fixture.viewModel.globalSearchFeatureModel.performWebSearch()
 
-        #expect(fixture.viewModel.globalSearchHistoryEntries.count == 1)
-        #expect(fixture.viewModel.globalSearchHistoryEntries[0].query == "swiftui search")
-        #expect(fixture.viewModel.globalSearchHistoryEntries[0].normalizedQuery == "swiftui search")
-        #expect(fixture.viewModel.globalSearchHistoryEntries[0].useCount == 2)
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries.count == 1)
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries[0].query == "swiftui search")
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries[0].normalizedQuery == "swiftui search")
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries[0].useCount == 2)
     }
 
     @Test func clearGlobalSearchHistoryClearsEntriesAndDismissesZeroStateOverlay() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.recordGlobalSearchHistoryForTesting(query: "SwiftUI 搜索")
-        fixture.viewModel.activateGlobalSearchField()
-        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+        fixture.viewModel.globalSearchFeatureModel.recordHistoryForTesting(query: "SwiftUI 搜索")
+        fixture.viewModel.globalSearchFeatureModel.activateField()
+        #expect(fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
 
-        fixture.viewModel.clearGlobalSearchHistory()
+        fixture.viewModel.globalSearchFeatureModel.clearHistory()
 
-        #expect(fixture.viewModel.globalSearchHistoryEntries.isEmpty)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
-        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(fixture.viewModel.globalSearchFeatureModel.historyEntries.isEmpty)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
+        #expect(fixture.viewModel.globalSearchFeatureModel.isFieldFocused)
     }
 
     @Test func defaultSearchURLUsesSelectedSearchEngine() throws {
@@ -129,7 +129,7 @@ struct AppGlobalSearchTests {
 
         fixture.viewModel.defaultSearchEngine = .google
 
-        let url = try #require(fixture.viewModel.defaultSearchURL(for: "connor search"))
+        let url = try #require(fixture.viewModel.defaultSearchEngine.searchURL(for: "connor search"))
 
         #expect(url.host == "www.google.com")
         #expect(url.path == "/search")
@@ -141,44 +141,44 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         fixture.viewModel.defaultSearchEngine = .baidu
-        fixture.viewModel.updateGlobalSearchQuery("康纳 搜索")
-        fixture.viewModel.performGlobalSearchWebSearch()
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("康纳 搜索")
+        fixture.viewModel.globalSearchFeatureModel.performWebSearch()
 
-        let url = try #require(URL(string: fixture.viewModel.browserTargetURLString))
+        let url = try #require(URL(string: fixture.viewModel.browserFeatureModel.targetURLString))
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
         #expect(url.host == "www.baidu.com")
         #expect(url.path == "/s")
         #expect(components.queryItems?.first(where: { $0.name == "wd" })?.value == "康纳 搜索")
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func showAllGlobalSearchResultsNavigatesToSourceLists() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.updateGlobalSearchQuery("invoice")
-        fixture.viewModel.showAllGlobalSearchResults(kind: .mail)
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("invoice")
+        fixture.viewModel.globalSearchFeatureModel.showAllResults(kind: .mail)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
 
-        fixture.viewModel.updateGlobalSearchQuery("standup")
-        fixture.viewModel.showAllGlobalSearchResults(kind: .calendar)
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("standup")
+        fixture.viewModel.globalSearchFeatureModel.showAllResults(kind: .calendar)
 
         #expect(fixture.viewModel.selection == .calendar)
 
-        fixture.viewModel.updateGlobalSearchQuery("swift")
-        fixture.viewModel.showAllGlobalSearchResults(kind: .rss)
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("swift")
+        fixture.viewModel.globalSearchFeatureModel.showAllResults(kind: .rss)
 
         #expect(fixture.viewModel.selection == .rss)
 
-        fixture.viewModel.updateGlobalSearchQuery("docs")
-        fixture.viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("docs")
+        fixture.viewModel.globalSearchFeatureModel.showAllResults(kind: .browserHistory)
 
         #expect(fixture.viewModel.selection == .agentChat)
-        #expect(fixture.viewModel.isBrowserVisible)
-        #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
+        #expect(fixture.viewModel.browserFeatureModel.isVisible)
+        #expect(fixture.viewModel.browserFeatureModel.isHistoryPanelVisible)
     }
 
     @Test func showAllMailCarriesGlobalSearchQueryIntoMailFilter() throws {
@@ -214,9 +214,9 @@ struct AppGlobalSearchTests {
             mailboxes: [mailbox],
             messages: [other, matching]
         )
-        fixture.viewModel.updateGlobalSearchQuery("外国")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("外国")
 
-        fixture.viewModel.showAllGlobalSearchResults(kind: .mail)
+        fixture.viewModel.globalSearchFeatureModel.showAllResults(kind: .mail)
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.mailFeatureModel.searchQuery == "外国")
@@ -235,9 +235,9 @@ struct AppGlobalSearchTests {
             messages: [other.summary, mail.summary]
         )
         fixture.viewModel.mailFeatureModel.searchQuery = "旧筛选词"
-        fixture.viewModel.isGlobalSearchOverlayPresented = true
+        fixture.viewModel.globalSearchFeatureModel.isOverlayPresented = true
 
-        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+        fixture.viewModel.globalSearchFeatureModel.openResult(mail.searchResult)
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
@@ -245,7 +245,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
         #expect(fixture.viewModel.mailFeatureModel.listMessages(direction: .all).contains { $0.id == mail.summary.id })
         #expect(fixture.viewModel.mailFeatureModel.searchQuery.isEmpty)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func openingMailSearchResultAcceptsPrefixedExternalID() throws {
@@ -261,7 +261,7 @@ struct AppGlobalSearchTests {
         var result = mail.searchResult
         result.externalID = "mail:\(mail.summary.id.rawValue)"
 
-        fixture.viewModel.openGlobalSearchResult(result)
+        fixture.viewModel.globalSearchFeatureModel.openResult(result)
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
@@ -283,7 +283,7 @@ struct AppGlobalSearchTests {
         result.id = "mail:mail-yakii-d-icloud-com-INBOX-100"
         result.externalID = "mail-yakii-d-icloud-com-INBOX-100"
 
-        fixture.viewModel.openGlobalSearchResult(result)
+        fixture.viewModel.globalSearchFeatureModel.openResult(result)
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
@@ -301,21 +301,21 @@ struct AppGlobalSearchTests {
             mailboxes: [mail.mailbox],
             messages: [mail.summary]
         )
-        fixture.viewModel.globalSearchPreviewState = GlobalSearchPreviewState(
+        fixture.viewModel.globalSearchFeatureModel.installPreviewStateForTesting(GlobalSearchPreviewState(
             query: "键盘",
             mailResults: [mail.searchResult],
             searchTokens: ["键盘"]
-        )
-        fixture.viewModel.globalSearchSelectedItem = .nativeResult(mail.searchResult.id)
-        fixture.viewModel.isGlobalSearchOverlayPresented = true
+        ))
+        fixture.viewModel.globalSearchFeatureModel.selectedItem = .nativeResult(mail.searchResult.id)
+        fixture.viewModel.globalSearchFeatureModel.isOverlayPresented = true
 
-        fixture.viewModel.performSelectedGlobalSearchItem()
+        fixture.viewModel.globalSearchFeatureModel.performSelectedItem()
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
         #expect(fixture.viewModel.mailFeatureModel.selectedAccountID == mail.summary.accountID)
         #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func openingMailSearchResultShowsLocatingStateWhileLoadingFromStore() throws {
@@ -324,15 +324,15 @@ struct AppGlobalSearchTests {
 
         let mail = makeMailFixture(messageID: "locating-mail-target", subject: "正在定位的搜索邮件")
         fixture.viewModel.mailFeatureModel.presentation = .empty
-        fixture.viewModel.isGlobalSearchOverlayPresented = true
+        fixture.viewModel.globalSearchFeatureModel.isOverlayPresented = true
 
-        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+        fixture.viewModel.globalSearchFeatureModel.openResult(mail.searchResult)
 
         #expect(fixture.viewModel.selection == .mail)
         #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
         #expect(fixture.viewModel.mailFeatureModel.navigationTargetID == mail.summary.id)
         #expect(fixture.viewModel.mailFeatureModel.navigationMessage == "正在打开搜索结果中的邮件…")
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func openingMailSearchResultLoadsMessageFromStoreWhenPresentationIsStale() async throws {
@@ -347,9 +347,9 @@ struct AppGlobalSearchTests {
         await fixture.viewModel.mailFeatureModel.reload()
         fixture.viewModel.mailFeatureModel.presentation = .empty
         fixture.viewModel.mailFeatureModel.searchQuery = "旧筛选词"
-        fixture.viewModel.isGlobalSearchOverlayPresented = true
+        fixture.viewModel.globalSearchFeatureModel.isOverlayPresented = true
 
-        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+        fixture.viewModel.globalSearchFeatureModel.openResult(mail.searchResult)
         for _ in 0..<20 {
             if fixture.viewModel.mailFeatureModel.presentation.message(id: mail.summary.id) != nil {
                 break
@@ -365,7 +365,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.mailFeatureModel.presentation.message(id: mail.summary.id) != nil)
         #expect(fixture.viewModel.mailFeatureModel.listMessages(direction: .all).contains { $0.id == mail.summary.id })
         #expect(fixture.viewModel.mailFeatureModel.searchQuery.isEmpty)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func selectedMailDetailUsesSearchSelectionSummaryWhenPresentationIsMissing() async throws {
@@ -379,7 +379,7 @@ struct AppGlobalSearchTests {
             messages: [mail.summary]
         )
 
-        fixture.viewModel.openGlobalSearchResult(mail.searchResult)
+        fixture.viewModel.globalSearchFeatureModel.openResult(mail.searchResult)
         fixture.viewModel.mailFeatureModel.presentation = .empty
 
         #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
@@ -396,14 +396,14 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
-        fixture.viewModel.recordBrowserHistory(url: "https://example.com/thailand", title: "泰国签证指南", sessionID: sessionID)
-        fixture.viewModel.recordBrowserHistory(url: "https://example.com/vietnam", title: "越南旅行记录", sessionID: sessionID)
-        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/thailand", title: "泰国签证指南", sessionID: sessionID)
+        fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/vietnam", title: "越南旅行记录", sessionID: sessionID)
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国")
 
-        fixture.viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+        fixture.viewModel.globalSearchFeatureModel.showAllResults(kind: .browserHistory)
 
-        #expect(fixture.viewModel.browserHistorySearchQuery == "泰国")
-        #expect(fixture.viewModel.filteredBrowserHistoryRecords.map(\.title) == ["泰国签证指南"])
+        #expect(fixture.viewModel.browserFeatureModel.historySearchQuery == "泰国")
+        #expect(fixture.viewModel.browserFeatureModel.filteredHistoryRecords.map(\.title) == ["泰国签证指南"])
     }
 
     @Test func globalSearchSectionEmptyTitlesCoverEverySource() {
@@ -418,21 +418,21 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.updateGlobalSearchQuery("泰国数字游民签证")
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国数字游民签证")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国数字游民签证")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "泰国数字游民签证")
 
-        #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国数字游民签证"))
-        #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国"))
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.searchTokens.contains("泰国数字游民签证"))
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.searchTokens.contains("泰国"))
     }
 
     @Test func globalSearchDisplayTokensHideLowValueQuestionFillers() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.updateGlobalSearchQuery("去雅加达玩一个星期需要多少钱")
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "去雅加达玩一个星期需要多少钱")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("去雅加达玩一个星期需要多少钱")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "去雅加达玩一个星期需要多少钱")
 
-        let tokens = fixture.viewModel.globalSearchPreviewState.searchTokens
+        let tokens = fixture.viewModel.globalSearchFeatureModel.previewState.searchTokens
         #expect(tokens.contains("雅加达"))
         #expect(!tokens.contains("一个"))
         #expect(!tokens.contains("星期"))
@@ -444,10 +444,10 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.updateGlobalSearchQuery("西雅图不相信眼泪")
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "西雅图不相信眼泪")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("西雅图不相信眼泪")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "西雅图不相信眼泪")
 
-        let tokens = fixture.viewModel.globalSearchPreviewState.searchTokens
+        let tokens = fixture.viewModel.globalSearchFeatureModel.previewState.searchTokens
         #expect(tokens.contains("西雅图不相信眼泪"))
         #expect(tokens.contains("西雅图"))
         #expect(tokens.contains("相信"))
@@ -475,24 +475,24 @@ struct AppGlobalSearchTests {
     @Test func globalSearchTimeoutErrorsAreNotShownAsUserFacingPreviewErrors() throws {
         let error = GlobalSearchTimeoutError.hardTimeout(milliseconds: 800)
 
-        #expect(AppViewModel.userFacingGlobalSearchErrorMessage(for: error) == nil)
-        #expect(AppViewModel.userFacingGlobalSearchErrorMessage(for: NSError(domain: "test", code: 1)) != nil)
+        #expect(GlobalSearchFeatureModel.userFacingErrorMessage(for: error) == nil)
+        #expect(GlobalSearchFeatureModel.userFacingErrorMessage(for: NSError(domain: "test", code: 1)) != nil)
     }
 
     @Test func globalSearchSectionStatusMessagesReflectIndexHealth() throws {
-        #expect(AppViewModel.globalSearchSectionStatusMessage(
+        #expect(GlobalSearchFeatureModel.sectionStatusMessage(
             for: .mail,
             health: NativeSourceSearchHealthSnapshot(documentCountBySource: [:])
         ) == "尚未建立索引")
-        #expect(AppViewModel.globalSearchSectionStatusMessage(
+        #expect(GlobalSearchFeatureModel.sectionStatusMessage(
             for: .rss,
             health: NativeSourceSearchHealthSnapshot(documentCountBySource: [.rss: 12], pendingUpdateCount: 2)
         ) == "后台正在更新索引，先显示已索引结果")
-        #expect(AppViewModel.globalSearchSectionStatusMessage(
+        #expect(GlobalSearchFeatureModel.sectionStatusMessage(
             for: .browserHistory,
             health: NativeSourceSearchHealthSnapshot(documentCountBySource: [.browserHistory: 4], staleSourceKinds: [.browserHistory])
         ) == "索引可能过期，先显示上次索引结果")
-        #expect(AppViewModel.globalSearchSectionStatusMessage(
+        #expect(GlobalSearchFeatureModel.sectionStatusMessage(
             for: .calendar,
             health: NativeSourceSearchHealthSnapshot(documentCountBySource: [.calendar: 3])
         ) == nil)
@@ -508,11 +508,11 @@ struct AppGlobalSearchTests {
         )
         try fixture.repository.saveSession(session)
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.updateGlobalSearchQuery("帮我找泰国签证")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("帮我找泰国签证")
 
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "帮我找泰国签证")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "帮我找泰国签证")
 
-        let result = try #require(fixture.viewModel.globalSearchPreviewState.chatSessionResults.first { $0.id == session.id })
+        let result = try #require(fixture.viewModel.globalSearchFeatureModel.previewState.chatSessionResults.first { $0.id == session.id })
         #expect(result.snippet.contains("泰国"))
     }
 
@@ -523,12 +523,12 @@ struct AppGlobalSearchTests {
         let session = AgentSession(title: "泰国长期生活计划")
         try fixture.repository.saveSession(session)
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国")
 
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "泰国")
 
-        #expect(fixture.viewModel.globalSearchPreviewState.chatSessionResults.map(\.id).contains(session.id))
-        #expect(fixture.viewModel.globalSearchPreviewState.chatSessionResults.first(where: { $0.id == session.id })?.title == "泰国长期生活计划")
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.chatSessionResults.map(\.id).contains(session.id))
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.chatSessionResults.first(where: { $0.id == session.id })?.title == "泰国长期生活计划")
     }
 
     @Test func globalSearchIncludesChatSessionMessageBodyResults() async throws {
@@ -541,11 +541,11 @@ struct AppGlobalSearchTests {
         )
         try fixture.repository.saveSession(session)
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国")
 
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "泰国")
 
-        let result = try #require(fixture.viewModel.globalSearchPreviewState.chatSessionResults.first { $0.id == session.id })
+        let result = try #require(fixture.viewModel.globalSearchFeatureModel.previewState.chatSessionResults.first { $0.id == session.id })
         #expect(result.snippet.contains("泰国"))
         #expect(result.messageCount == 1)
     }
@@ -558,11 +558,11 @@ struct AppGlobalSearchTests {
         try fixture.repository.saveSession(session)
         fixture.viewModel.reloadChatSessions()
 
-        fixture.viewModel.openGlobalSearchChatSessionResult(session.id)
+        fixture.viewModel.globalSearchFeatureModel.openChatSession(session.id)
 
         #expect(fixture.viewModel.selection == .agentChat)
         #expect(fixture.viewModel.selectedChatSessionID == session.id)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func globalSearchKeyboardSelectionMovesAcrossActionsAndResults() async throws {
@@ -572,16 +572,16 @@ struct AppGlobalSearchTests {
         let session = AgentSession(title: "泰国行程")
         try fixture.repository.saveSession(session)
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.updateGlobalSearchQuery("泰国")
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "泰国")
 
-        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.newChat))
-        fixture.viewModel.moveGlobalSearchSelectionDown()
-        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.webSearch))
-        fixture.viewModel.moveGlobalSearchSelectionDown()
-        #expect(fixture.viewModel.globalSearchSelectedItem == .chatSession(session.id))
-        fixture.viewModel.moveGlobalSearchSelectionUp()
-        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.webSearch))
+        #expect(fixture.viewModel.globalSearchFeatureModel.selectedItem == .action(.newChat))
+        fixture.viewModel.globalSearchFeatureModel.moveSelectionDown()
+        #expect(fixture.viewModel.globalSearchFeatureModel.selectedItem == .action(.webSearch))
+        fixture.viewModel.globalSearchFeatureModel.moveSelectionDown()
+        #expect(fixture.viewModel.globalSearchFeatureModel.selectedItem == .chatSession(session.id))
+        fixture.viewModel.globalSearchFeatureModel.moveSelectionUp()
+        #expect(fixture.viewModel.globalSearchFeatureModel.selectedItem == .action(.webSearch))
     }
 
     @Test func performingSelectedChatSessionSearchItemSelectsSession() async throws {
@@ -591,15 +591,15 @@ struct AppGlobalSearchTests {
         let session = AgentSession(title: "泰国行程")
         try fixture.repository.saveSession(session)
         fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.updateGlobalSearchQuery("泰国")
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
-        fixture.viewModel.moveGlobalSearchSelectionDown()
-        fixture.viewModel.moveGlobalSearchSelectionDown()
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "泰国")
+        fixture.viewModel.globalSearchFeatureModel.moveSelectionDown()
+        fixture.viewModel.globalSearchFeatureModel.moveSelectionDown()
 
-        fixture.viewModel.performSelectedGlobalSearchItem()
+        fixture.viewModel.globalSearchFeatureModel.performSelectedItem()
 
         #expect(fixture.viewModel.selectedChatSessionID == session.id)
-        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
     @Test func globalSearchIncludesMailResultsInFallbackPreview() async throws {
@@ -612,13 +612,13 @@ struct AppGlobalSearchTests {
             mailboxes: [mails[0].mailbox],
             messages: mails.map(\.summary)
         )
-        viewModel.updateGlobalSearchQuery("Phoenix")
+        viewModel.globalSearchFeatureModel.updateQuery("Phoenix")
 
-        await viewModel.refreshGlobalSearchPreview(for: "Phoenix")
+        await viewModel.globalSearchFeatureModel.refreshPreview(for: "Phoenix")
 
-        #expect(viewModel.globalSearchPreviewState.mailResults.count == 3)
-        #expect(viewModel.globalSearchPreviewState.mailResults.allSatisfy { $0.sourceKind == .mail })
-        #expect(viewModel.globalSearchPreviewState.mailResults.allSatisfy { $0.title.contains("Phoenix mail") })
+        #expect(viewModel.globalSearchFeatureModel.previewState.mailResults.count == 3)
+        #expect(viewModel.globalSearchFeatureModel.previewState.mailResults.allSatisfy { $0.sourceKind == .mail })
+        #expect(viewModel.globalSearchFeatureModel.previewState.mailResults.allSatisfy { $0.title.contains("Phoenix mail") })
     }
 
     @Test func globalSearchIncludesBrowserHistoryResults() async throws {
@@ -626,13 +626,13 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
-        fixture.viewModel.recordBrowserHistory(url: "https://example.com/swift-history", title: "Swift History", sessionID: sessionID)
-        fixture.viewModel.updateGlobalSearchQuery("swift-history")
+        fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/swift-history", title: "Swift History", sessionID: sessionID)
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("swift-history")
 
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "swift-history")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "swift-history")
 
-        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 1)
-        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.first?.title == "Swift History")
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.browserHistoryResults.count == 1)
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.browserHistoryResults.first?.title == "Swift History")
     }
 
     @Test func globalSearchKeepsPreviewLimitedBrowserHistoryPages() async throws {
@@ -641,13 +641,13 @@ struct AppGlobalSearchTests {
 
         let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
         for index in 0..<5 {
-            fixture.viewModel.recordBrowserHistory(url: "https://example.com/paged-history-\(index)", title: "Paged History \(index)", sessionID: sessionID)
+            fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/paged-history-\(index)", title: "Paged History \(index)", sessionID: sessionID)
         }
-        fixture.viewModel.updateGlobalSearchQuery("paged-history")
+        fixture.viewModel.globalSearchFeatureModel.updateQuery("paged-history")
 
-        await fixture.viewModel.refreshGlobalSearchPreview(for: "paged-history")
+        await fixture.viewModel.globalSearchFeatureModel.refreshPreview(for: "paged-history")
 
-        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 3)
+        #expect(fixture.viewModel.globalSearchFeatureModel.previewState.browserHistoryResults.count == 3)
     }
 
     @Test func openingBrowserHistoryResultFocusesExistingTab() throws {
@@ -657,7 +657,7 @@ struct AppGlobalSearchTests {
         let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
         let urlString = "https://example.com/open-tab"
         let tabID = UUID()
-        fixture.viewModel.browserWorkspaceSnapshotsBySessionID[sessionID] = AppBrowserStateSnapshot(
+        fixture.viewModel.browserFeatureModel.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(
             tabs: [
                 AppBrowserTabSnapshot(
                     id: tabID,
@@ -667,15 +667,15 @@ struct AppGlobalSearchTests {
                 )
             ],
             selectedTabID: nil
-        )
+        ), for: sessionID)
         let record = BrowserHistoryRecord(url: urlString, title: "Open Tab", sessionID: sessionID, sessionTitle: "Session")
 
-        fixture.viewModel.openGlobalSearchBrowserHistoryResult(record)
+        fixture.viewModel.globalSearchFeatureModel.openBrowserHistoryRecord(record)
 
         #expect(fixture.viewModel.selection == .agentChat)
-        #expect(fixture.viewModel.isBrowserVisible)
-        #expect(fixture.viewModel.browserWorkspaceSessionID == sessionID)
-        #expect(fixture.viewModel.browserWorkspaceSnapshotsBySessionID[sessionID]?.selectedTabID == tabID)
+        #expect(fixture.viewModel.browserFeatureModel.isVisible)
+        #expect(fixture.viewModel.browserFeatureModel.workspaceSessionID == sessionID)
+        #expect(fixture.viewModel.browserFeatureModel.workspaceSnapshotsBySessionID[sessionID]?.selectedTabID == tabID)
     }
 
     @Test func openingBrowserHistoryResultCreatesSessionWhenOriginalSessionIsMissing() throws {
@@ -686,14 +686,14 @@ struct AppGlobalSearchTests {
         let urlString = "https://example.com/deleted-session"
         let record = BrowserHistoryRecord(url: urlString, title: "Deleted Session Page", sessionID: "missing-session", sessionTitle: "Deleted")
 
-        fixture.viewModel.openGlobalSearchBrowserHistoryResult(record)
+        fixture.viewModel.globalSearchFeatureModel.openBrowserHistoryRecord(record)
 
         let newSessionID = try #require(fixture.viewModel.selectedChatSessionID)
         #expect(newSessionID != originalSessionID)
         #expect(fixture.viewModel.selection == .agentChat)
-        #expect(fixture.viewModel.isBrowserVisible)
-        #expect(fixture.viewModel.browserWorkspaceSessionID == newSessionID)
-        #expect(fixture.viewModel.browserWorkspaceSnapshotsBySessionID[newSessionID]?.tabs.contains { $0.currentURLString == urlString || $0.initialURLString == urlString } == true)
+        #expect(fixture.viewModel.browserFeatureModel.isVisible)
+        #expect(fixture.viewModel.browserFeatureModel.workspaceSessionID == newSessionID)
+        #expect(fixture.viewModel.browserFeatureModel.workspaceSnapshotsBySessionID[newSessionID]?.tabs.contains { $0.currentURLString == urlString || $0.initialURLString == urlString } == true)
     }
 
     private func makeFixture() throws -> Fixture {

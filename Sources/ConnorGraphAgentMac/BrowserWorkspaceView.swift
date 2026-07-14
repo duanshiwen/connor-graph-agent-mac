@@ -11,8 +11,23 @@ typealias BrowserSelectionThreadSnapshot = AppBrowserSelectionThreadSnapshot
 typealias BrowserSelectionThreadMessageSnapshot = AppBrowserSelectionThreadMessageSnapshot
 typealias BrowserSelectionRect = AppBrowserSelectionRect
 
+@MainActor
+struct BrowserWorkspaceChatActions {
+    var selectedSessionID: String?
+    var isSubmitting: Bool
+    var defaultSearchEngine: DefaultSearchEngine
+    var shortcutSettings: AgentRuntimeShortcutSettings
+    var cancelActiveRun: () -> Void
+    var appendToDraft: (String) -> Void
+    var appendSessionRecord: (String, String?, String?, [String: String], String?) -> Void
+    var submit: (String, String) async -> String?
+    var currentErrorMessage: () -> String?
+    var reportError: (String) -> Void
+}
+
 struct BrowserWorkspaceView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: BrowserFeatureModel
+    var chat: BrowserWorkspaceChatActions
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
     @State private var isAddressEditing = false
@@ -78,7 +93,7 @@ struct BrowserWorkspaceView: View {
                             popover: popover,
                             thread: activeSession.thread(for: popover.threadID),
                             question: $questionText,
-                            isSubmitting: viewModel.isSubmittingChat,
+                            isSubmitting: chat.isSubmitting,
                             onAsk: {
                                 sendSelectionQuestion(popover)
                             },
@@ -87,7 +102,7 @@ struct BrowserWorkspaceView: View {
                                 sendSelectionQuestion(popover, questionOverride: summaryQuestion)
                             },
                             onCancel: {
-                                viewModel.cancelActiveChatRun()
+                                chat.cancelActiveRun()
                             },
                             onClose: { closeSelectionPopover(policy: .explicitClose) }
                         )
@@ -99,11 +114,11 @@ struct BrowserWorkspaceView: View {
                 }
 
                 // Floating panels overlay on the right side
-                if viewModel.isBrowserBookmarksPanelVisible {
+                if model.isBookmarksPanelVisible {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         BrowserBookmarksPanelView(
-                            viewModel: viewModel,
+                            model: model,
                             currentPageURL: activeTabCanBeBookmarked ? activeTab?.displayURL : nil,
                             currentPageTitle: activeTabCanBeBookmarked ? activeTab?.displayTitle : nil
                         )
@@ -111,10 +126,10 @@ struct BrowserWorkspaceView: View {
                     }
                 }
 
-                if viewModel.isBrowserHistoryPanelVisible {
+                if model.isHistoryPanelVisible {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        BrowserHistoryPanelView(viewModel: viewModel)
+                        BrowserHistoryPanelView(model: model)
                             .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
                     }
                 }
@@ -122,7 +137,7 @@ struct BrowserWorkspaceView: View {
         }
         .onAppear {
             ensureInitialTab()
-            viewModel.loadBrowserBookmarks()
+            model.loadBookmarks()
             markVisibleTabInLiveStore()
             installBrowserKeyMonitorIfNeeded()
         }
@@ -131,15 +146,15 @@ struct BrowserWorkspaceView: View {
             pauseAllBrowserMedia()
             markAllBrowserTabsHidden()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                viewModel.browserLiveWebViewStore.enforceBudget()
+                model.liveWebViewStore.enforceBudget()
             }
             removeBrowserKeyMonitor()
         }
-        .onChange(of: viewModel.browserTargetURLString) { _, newValue in
+        .onChange(of: model.targetURLString) { _, newValue in
             ensureInitialTab()
             navigate(to: newValue)
         }
-        .onChange(of: viewModel.selectedChatSessionID) { _, _ in
+        .onChange(of: chat.selectedSessionID) { _, _ in
             pauseAllBrowserMedia()
             ensureInitialTab()
             isAddressEditing = false
@@ -155,11 +170,11 @@ struct BrowserWorkspaceView: View {
     }
 
     private var activeSessionID: String {
-        viewModel.selectedChatSessionID ?? "__fallback__"
+        chat.selectedSessionID ?? "__fallback__"
     }
 
     private var activeSession: BrowserSessionState {
-        let snapshot = viewModel.browserWorkspaceSnapshotsBySessionID[activeSessionID]
+        let snapshot = model.workspaceSnapshotsBySessionID[activeSessionID]
         return BrowserSessionState(snapshot: snapshot, webViewsByTabID: webViewsByTabID, fallbackURLString: defaultURLString)
     }
 
@@ -181,7 +196,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private var defaultURLString: String {
-        viewModel.browserTargetURLString.isEmpty ? BrowserBuiltInPage.blankURLString : viewModel.browserTargetURLString
+        model.targetURLString.isEmpty ? BrowserBuiltInPage.blankURLString : model.targetURLString
     }
 
     private var activeTabCanBeBookmarked: Bool {
@@ -191,7 +206,7 @@ struct BrowserWorkspaceView: View {
 
     private var activeURLIsBookmarked: Bool {
         guard activeTabCanBeBookmarked, let url = activeTab?.displayURL else { return false }
-        return viewModel.isBrowserBookmarked(url: url)
+        return model.isBookmarked(url: url)
     }
 
     private func liveWebViewKey(for tabID: BrowserTabState.ID) -> BrowserLiveWebViewKey {
@@ -200,7 +215,7 @@ struct BrowserWorkspaceView: View {
 
     private func liveWebView(for tab: BrowserTabState) -> WKWebView {
         let isSelected = tab.id == activeSelectedTabID
-        let lease = viewModel.browserLiveWebViewStore.leaseWebView(
+        let lease = model.liveWebViewStore.leaseWebView(
             key: liveWebViewKey(for: tab.id),
             initialURLString: tab.restoredURLString,
             onNavigationStateChanged: { state in updateNavigationState(state, for: tab.id) },
@@ -227,16 +242,16 @@ struct BrowserWorkspaceView: View {
         for tab in activeTabs {
             let key = liveWebViewKey(for: tab.id)
             if tab.id == selectedID {
-                viewModel.browserLiveWebViewStore.markVisible(key)
+                model.liveWebViewStore.markVisible(key)
             } else {
-                viewModel.browserLiveWebViewStore.markHidden(key)
+                model.liveWebViewStore.markHidden(key)
             }
         }
     }
 
     private func markAllBrowserTabsHidden() {
         for tab in activeTabs {
-            viewModel.browserLiveWebViewStore.markHidden(liveWebViewKey(for: tab.id))
+            model.liveWebViewStore.markHidden(liveWebViewKey(for: tab.id))
         }
     }
 
@@ -271,7 +286,7 @@ struct BrowserWorkspaceView: View {
                 }
                 .frame(width: availableTabWidth, alignment: .leading)
 
-                Button(action: { openNewTab(urlString: viewModel.browserTargetURLString, select: true) }) {
+                Button(action: { openNewTab(urlString: model.targetURLString, select: true) }) {
                     Image(systemName: "plus")
                         .font(BrowserFloatingTypography.toolbarIcon)
                         .foregroundStyle(.secondary)
@@ -324,10 +339,10 @@ struct BrowserWorkspaceView: View {
             )
             .frame(height: 28)
 
-            Button(action: { viewModel.toggleBrowserBookmarksPanel() }) {
+            Button(action: { model.toggleBookmarksPanel() }) {
                 BrowserToolbarIconButtonLabel(
                     systemImage: activeURLIsBookmarked ? "star.fill" : "star",
-                    isActive: viewModel.isBrowserBookmarksPanelVisible || activeURLIsBookmarked,
+                    isActive: model.isBookmarksPanelVisible || activeURLIsBookmarked,
                     iconFont: .system(size: 16, weight: .semibold)
                 )
             }
@@ -335,10 +350,10 @@ struct BrowserWorkspaceView: View {
             .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
             .accessibilityLabel("收藏夹")
 
-            Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
+            Button(action: { model.toggleHistoryPanel() }) {
                 BrowserToolbarIconButtonLabel(
-                    systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                    isActive: viewModel.isBrowserHistoryPanelVisible,
+                    systemImage: model.isHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
+                    isActive: model.isHistoryPanelVisible,
                     iconFont: .system(size: 16, weight: .semibold)
                 )
             }
@@ -355,7 +370,7 @@ struct BrowserWorkspaceView: View {
             .opacity(activeWebView == nil || activeTab?.navigationState.isLoading == true ? 0.48 : 1)
             .help("基于当前网页全文提问")
 
-            Button(action: { viewModel.returnFromBrowserWorkspace() }) {
+            Button(action: { model.returnFromWorkspace() }) {
                 SidebarActionButtonLabel(
                     title: "返回对话",
                     systemImage: "bubble.left.and.bubble.right",
@@ -370,9 +385,9 @@ struct BrowserWorkspaceView: View {
     }
 
     private func ensureInitialTab() {
-        if viewModel.browserWorkspaceSnapshotsBySessionID[activeSessionID] == nil {
+        if model.workspaceSnapshotsBySessionID[activeSessionID] == nil {
             let session = BrowserSessionState.default(urlString: defaultURLString)
-            viewModel.saveBrowserWorkspaceSnapshot(session.snapshot, for: activeSessionID)
+            model.saveWorkspaceSnapshot(session.snapshot, for: activeSessionID)
             addressText = defaultURLString
         }
     }
@@ -380,7 +395,7 @@ struct BrowserWorkspaceView: View {
     private func mutateActiveSession(_ update: (inout BrowserSessionState) -> Void) {
         var session = activeSession
         update(&session)
-        viewModel.saveBrowserWorkspaceSnapshot(session.snapshot, for: activeSessionID)
+        model.saveWorkspaceSnapshot(session.snapshot, for: activeSessionID)
         webViewsByTabID = session.webViewsByTabID
     }
 
@@ -410,7 +425,7 @@ struct BrowserWorkspaceView: View {
         var shouldReturnToConversation = false
         let closingWebView = webViewsByTabID[id]
         prepareWebViewForTabClose(closingWebView)
-        viewModel.browserLiveWebViewStore.remove(liveWebViewKey(for: id))
+        model.liveWebViewStore.remove(liveWebViewKey(for: id))
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
             let wasSelected = session.selectedTabID == id
@@ -432,7 +447,7 @@ struct BrowserWorkspaceView: View {
         }
 
         if shouldReturnToConversation {
-            viewModel.returnFromBrowserWorkspace()
+            model.returnFromWorkspace()
         } else {
             isAddressEditing = false
             syncAddressTextWithActiveTab()
@@ -468,7 +483,7 @@ struct BrowserWorkspaceView: View {
 
         // Record browser history when page finishes loading
         if !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:") {
-            viewModel.recordBrowserHistory(
+            model.recordHistory(
                 url: state.url,
                 title: state.title,
                 sessionID: activeSessionID
@@ -507,7 +522,7 @@ struct BrowserWorkspaceView: View {
         isAddressEditing = false
         let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let urlString = normalizedURLString(from: trimmed) else { return }
-        viewModel.browserTargetURLString = urlString
+        model.targetURLString = urlString
         navigate(to: urlString)
     }
 
@@ -526,7 +541,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func normalizedURLString(from value: String) -> String? {
-        BrowserNavigationURLResolver.normalizedURLString(from: value, defaultSearchEngine: viewModel.defaultSearchEngine)
+        BrowserNavigationURLResolver.normalizedURLString(from: value, defaultSearchEngine: chat.defaultSearchEngine)
     }
 
     private func captureRestorationSnapshotsForLiveTabs() {
@@ -582,7 +597,7 @@ struct BrowserWorkspaceView: View {
         guard let webView = activeWebView, let tabID = activeSelectedTabID else { return }
         webView.evaluateJavaScript(Self.pageContextScript) { result, error in
             if let error {
-                DispatchQueue.main.async { viewModel.errorMessage = error.localizedDescription }
+                DispatchQueue.main.async { chat.reportError(error.localizedDescription) }
                 return
             }
             guard let json = result as? String,
@@ -639,7 +654,7 @@ struct BrowserWorkspaceView: View {
                 isControlDown: event.modifierFlags.contains(.control),
                 isOptionDown: event.modifierFlags.contains(.option),
                 hasSelectionPopover: activeSession.selectionPopover != nil,
-                settings: viewModel.shortcutSettings
+                settings: chat.shortcutSettings
             )
 
             switch shortcut {
@@ -664,10 +679,10 @@ struct BrowserWorkspaceView: View {
                 activeWebView?.goForward()
                 return nil
             case .toggleBookmarks:
-                viewModel.toggleBrowserBookmarksPanel()
+                model.toggleBookmarksPanel()
                 return nil
             case .toggleHistory:
-                viewModel.toggleBrowserHistoryPanel()
+                model.toggleHistoryPanel()
                 return nil
             case nil:
                 return event
@@ -683,7 +698,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func insertSelectionContext(_ context: BrowserSelectionContext) {
-        viewModel.appendToSelectedChatInputDraft(
+        chat.appendToDraft(
             BrowserLLMContextBuilder().makeContextMarkdown(selection: context)
         )
     }
@@ -694,30 +709,30 @@ struct BrowserWorkspaceView: View {
         appendThreadMessage(threadID: popover.threadID, role: .user, text: question)
         let pendingMessageID = appendThreadMessage(threadID: popover.threadID, role: .assistant, text: "", isPending: true)
         let isPageQuestion = popover.context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        viewModel.appendSessionRecord(
-            kind: isPageQuestion ? "browser.page.question" : "browser.selection.question",
-            title: popover.context.page.title.isEmpty ? (isPageQuestion ? "网页提问" : "网页选择提问") : popover.context.page.title,
-            body: question,
-            metadata: [
+        chat.appendSessionRecord(
+            isPageQuestion ? "browser.page.question" : "browser.selection.question",
+            popover.context.page.title.isEmpty ? (isPageQuestion ? "网页提问" : "网页选择提问") : popover.context.page.title,
+            question,
+            [
                 "pageURL": popover.context.page.url,
                 "selectedText": String(popover.context.selectedText.prefix(500)),
                 "contextScope": isPageQuestion ? "page" : "selection",
                 "threadID": popover.threadID.uuidString,
                 "tabID": popover.tabID.uuidString
             ],
-            sessionID: activeSessionID
+            activeSessionID
         )
         let prompt = BrowserLLMContextBuilder().makePrompt(selection: popover.context, question: question)
         let displayPrompt = makeSelectionDisplayPrompt(selection: popover.context, question: question)
         questionText = ""
         Task {
-            let answer = await viewModel.submitChat(prompt: prompt, displayPrompt: displayPrompt)
+            let answer = await chat.submit(prompt, displayPrompt)
             await MainActor.run {
                 replaceThreadMessage(
                     threadID: popover.threadID,
                     messageID: pendingMessageID,
                     role: .assistant,
-                    text: answer ?? viewModel.errorMessage ?? "未能获取回复。",
+                    text: answer ?? chat.currentErrorMessage() ?? "未能获取回复。",
                     isPending: false
                 )
             }

@@ -60,7 +60,7 @@ struct AgentComposerStore {
                 viewModel.setSelectedSessionStatus(status)
             }
         case .toggleBrowserWorkspaceVisibility:
-            viewModel.toggleBrowserWorkspaceVisibility()
+            viewModel.browserFeatureModel.toggleWorkspaceVisibility()
         case .toggleSpeechTranscription:
             viewModel.toggleSpeechTranscriptionForSelectedSession()
         case .beginSpeechTranscription(let speechInsertionRange):

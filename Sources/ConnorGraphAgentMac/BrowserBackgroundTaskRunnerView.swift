@@ -3,10 +3,10 @@ import WebKit
 import ConnorGraphAppSupport
 
 struct BrowserBackgroundTaskRunnerView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: BrowserFeatureModel
 
     private var runningTasks: [BrowserAssistedTaskState] {
-        viewModel.browserAssistedTasksByID.values
+        model.assistedTasksByID.values
             .filter { $0.status == .running }
             .sorted { $0.updatedAt < $1.updatedAt }
     }
@@ -16,10 +16,10 @@ struct BrowserBackgroundTaskRunnerView: View {
             ForEach(runningTasks) { task in
                 BrowserBackgroundTaskWebView(
                     task: task,
-                    onCompleted: { state in viewModel.completeBrowserAssistedTask(state.id, message: "Completed in background") },
-                    onFetched: { state, title, finalURLString, text in viewModel.completeBrowserAssistedWebFetch(state.id, title: title, finalURLString: finalURLString, text: text) },
-                    onNeedsUserIntervention: { state, reason in viewModel.revealBrowserAssistedTask(state.id, reason: reason) },
-                    onFailed: { state, message in viewModel.failBrowserAssistedTask(state.id, message: message) }
+                    onCompleted: { state in model.completeAssistedTask(state.id, message: "Completed in background") },
+                    onFetched: { state, title, finalURLString, text in model.completeAssistedWebFetch(state.id, title: title, finalURLString: finalURLString, text: text) },
+                    onNeedsUserIntervention: { state, reason in model.revealAssistedTask(state.id, reason: reason) },
+                    onFailed: { state, message in model.failAssistedTask(state.id, message: message) }
                 )
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
