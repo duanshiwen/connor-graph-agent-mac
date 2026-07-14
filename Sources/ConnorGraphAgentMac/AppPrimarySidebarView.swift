@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 
 struct CraftPrimarySidebarView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
     @Binding var selection: SidebarItem?
     @State private var sessionsExpanded = true
     @State private var labelsExpanded = true
@@ -110,7 +111,7 @@ struct CraftPrimarySidebarView: View {
                         SidebarRow(title: "日历", systemImage: "calendar", count: viewModel.calendarBrowserPresentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
                         SidebarRow(title: "邮件", systemImage: "envelope", count: mailSidebarCount, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: rssUnreadCount, isSelected: selection == .rss) { select(.rss) }
-                        SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
+                        SidebarRow(title: "MCP", systemImage: "server.rack", count: sourceRuntimeModel.configurations.count, isSelected: selection == .sources) { select(.sources) }
                     }
 
                     SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.commercialSkillManagerPresentation.summary.total, isSelected: selection == .skills) { select(.skills) }

@@ -73,6 +73,7 @@
 		A0000000000000000000003D /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003E /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift */; };
 		A00000000000000000000040 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000041 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift */; };
 		A00000000000000000000042 /* Sources/ConnorGraphAgentMac/MCPSourceListViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000043 /* Sources/ConnorGraphAgentMac/MCPSourceListViews.swift */; };
+		A00000000000000000000044 /* Sources/ConnorGraphAgentMac/SourceRuntimeFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000045 /* Sources/ConnorGraphAgentMac/SourceRuntimeFeatureModel.swift */; };
 		B00000000000000000000001 /* XcodeSwiftPMBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */; };
 		C7A710000000000000000001 /* Sources/ConnorGraphAgentMac/ChatViewport/AgentChatTimelineAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000001 /* Sources/ConnorGraphAgentMac/ChatViewport/AgentChatTimelineAdapter.swift */; };
 		C7A710000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift */; };
@@ -185,6 +186,7 @@
 		A0000000000000000000003E /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift; sourceTree = "<group>"; };
 		A00000000000000000000041 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SkillManagerListViews.swift; sourceTree = "<group>"; };
 		A00000000000000000000043 /* Sources/ConnorGraphAgentMac/MCPSourceListViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MCPSourceListViews.swift; sourceTree = "<group>"; };
+		A00000000000000000000045 /* Sources/ConnorGraphAgentMac/SourceRuntimeFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SourceRuntimeFeatureModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeSwiftPMBridgeTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* ConnorGraphAgentMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConnorGraphAgentMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift; sourceTree = "<group>"; };
@@ -274,6 +276,7 @@
 				A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */,
 				A00000000000000000000041 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift */,
 				A00000000000000000000043 /* Sources/ConnorGraphAgentMac/MCPSourceListViews.swift */,
+				A00000000000000000000045 /* Sources/ConnorGraphAgentMac/SourceRuntimeFeatureModel.swift */,
 				C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */,
 				E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */,
 				E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */,
@@ -531,6 +534,7 @@
 				A00000000000000000000036 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift in Sources */,
 				A00000000000000000000040 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift in Sources */,
 				A00000000000000000000042 /* Sources/ConnorGraphAgentMac/MCPSourceListViews.swift in Sources */,
+				A00000000000000000000044 /* Sources/ConnorGraphAgentMac/SourceRuntimeFeatureModel.swift in Sources */,
 				D00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift in Sources */,
 				E00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift in Sources */,
 				E00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift in Sources */,

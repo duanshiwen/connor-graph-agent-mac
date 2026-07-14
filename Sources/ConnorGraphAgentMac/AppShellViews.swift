@@ -30,7 +30,11 @@ struct AppShellView: View {
             } else {
                 HSplitView {
                     if isPrimarySidebarVisible {
-                        CraftPrimarySidebarView(viewModel: viewModel, selection: selectionBinding)
+                        CraftPrimarySidebarView(
+                            viewModel: viewModel,
+                            sourceRuntimeModel: viewModel.sourceRuntimeModel,
+                            selection: selectionBinding
+                        )
                     .frame(
                         minWidth: AppShellLayout.primarySidebarMinWidth,
                         idealWidth: AppShellLayout.primarySidebarDefaultWidth,
@@ -41,7 +45,11 @@ struct AppShellView: View {
                     .controlSize(.small)
             }
 
-            CraftListPaneView(viewModel: viewModel, selection: selectionBinding)
+            CraftListPaneView(
+                viewModel: viewModel,
+                sourceRuntimeModel: viewModel.sourceRuntimeModel,
+                selection: selectionBinding
+            )
                 .frame(
                     minWidth: AppShellLayout.listColumnMinWidth,
                     idealWidth: AppShellLayout.listColumnDefaultWidth,
@@ -55,6 +63,7 @@ struct AppShellView: View {
                 viewModel: viewModel,
                 identityStore: identityStore,
                 graphDiagnosticsModel: viewModel.graphDiagnosticsModel,
+                sourceRuntimeModel: viewModel.sourceRuntimeModel,
                 selection: viewModel.selection ?? .agentChat
             )
                 .id(viewModel.selection ?? .agentChat)

@@ -3,20 +3,16 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct CraftSourceListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SourceRuntimeFeatureModel
 
     private var presentation: SourceRuntimeUIPresentation {
-        SourceRuntimeUIPresentation.build(
-            sources: viewModel.sourceRuntimeConfigurations,
-            healthRecords: viewModel.sourceRuntimeHealthRecords,
-            auditRecords: viewModel.sourceRuntimeAuditRecordsBySource.values.flatMap { $0 }
-        )
+        model.presentation
     }
 
     var body: some View {
         VStack(spacing: 0) {
             SourceListHeader(
-                onAdd: viewModel.presentAddSourceSheet
+                onAdd: model.presentAddSheet
             )
 
             if presentation.cards.isEmpty {
@@ -25,8 +21,8 @@ struct CraftSourceListPane: View {
                 List(presentation.cards) { card in
                     MCPSourceRow(
                         card: card,
-                        isSelected: card.id == viewModel.selectedSourceRuntimeCardID,
-                        onSelect: { viewModel.selectSourceRuntimeCard(card.id) }
+                        isSelected: card.id == model.selectedCardID,
+                        onSelect: { model.selectCard(card.id) }
                     )
                     .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
                     .listRowSeparator(.hidden)
@@ -37,17 +33,17 @@ struct CraftSourceListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isPresentingAddSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSheet) {
             MCPSourceAddSheet(
-                draft: $viewModel.addSourceDraft,
-                message: viewModel.addSourceMessage,
-                onCancel: viewModel.dismissAddSourceSheet,
-                onSave: viewModel.saveSourceRuntimeDraft
+                draft: $model.addDraft,
+                message: model.addMessage,
+                onCancel: model.dismissAddSheet,
+                onSave: model.saveDraft
             )
         }
         .onAppear {
-            guard viewModel.sourceRuntimeConfigurations.isEmpty else { return }
-            viewModel.reloadSourceRuntimeConfigurations()
+            guard model.configurations.isEmpty else { return }
+            model.reload()
         }
     }
 }
