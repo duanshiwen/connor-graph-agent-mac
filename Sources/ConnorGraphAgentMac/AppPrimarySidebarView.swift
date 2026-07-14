@@ -13,6 +13,7 @@ struct CraftPrimarySidebarView: View {
     @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
     @Bindable var taskAutomationModel: TaskAutomationFeatureModel
     @Bindable var calendarFeatureModel: CalendarFeatureModel
+    @Bindable var contactsFeatureModel: ContactsFeatureModel
     @Bindable var rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
     @State private var sessionsExpanded = true
@@ -109,7 +110,7 @@ struct CraftPrimarySidebarView: View {
                         }
                     }
 
-                    SidebarRow(title: "人际关系", systemImage: "person.2", count: viewModel.contactsBrowserPresentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
+                    SidebarRow(title: "人际关系", systemImage: "person.2", count: contactsFeatureModel.presentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "日历", systemImage: "calendar", count: calendarFeatureModel.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
