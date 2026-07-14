@@ -13,6 +13,7 @@ struct CraftListPaneView: View {
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
     let productOSControlModel: ProductOSControlFeatureModel
+    let calendarFeatureModel: CalendarFeatureModel
     let rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
 
@@ -24,7 +25,7 @@ struct CraftListPaneView: View {
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .calendar:
-                CraftCalendarListPane(viewModel: viewModel)
+                CraftCalendarListPane(model: calendarFeatureModel)
             case .contacts:
                 CraftContactsListPane(viewModel: viewModel)
             case .rss:
@@ -112,7 +113,7 @@ private func listSearchTextMatches(_ text: String, terms: [String]) -> Bool {
 }
 
 struct CraftCalendarListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -121,7 +122,7 @@ struct CraftCalendarListPane: View {
                 Text("日历")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -133,11 +134,11 @@ struct CraftCalendarListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.calendarSearchQuery, sourceTitle: "日历") {
-                viewModel.calendarSearchQuery = ""
+            ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "日历") {
+                model.searchQuery = ""
             }
 
-            if viewModel.calendarBrowserPresentation.daySections.isEmpty {
+            if model.presentation.daySections.isEmpty {
                 ContentUnavailableView("还没有可显示的日程", systemImage: "calendar", description: Text("连接或同步日历后，康纳同学会把近期日程放在这里，方便你从时间安排继续展开工作。"))
                     .padding(.top, 80)
             } else if filteredCalendarSections.isEmpty {
@@ -146,22 +147,22 @@ struct CraftCalendarListPane: View {
             } else {
                 CalendarSectionScrollView(
                     sections: filteredCalendarSections,
-                    selectedID: viewModel.selectedCalendarEventID,
-                    onSelect: { viewModel.selectedCalendarEventID = $0 }
+                    selectedID: model.selectedEventID,
+                    onSelect: { model.selectEvent(id: $0) }
                 )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
+            AddCalendarSourceSheet(model: model)
         }
     }
 
     private var filteredCalendarSections: [NativeCalendarDaySectionPresentation] {
-        let query = viewModel.calendarSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return viewModel.calendarBrowserPresentation.daySections }
+        let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.presentation.daySections }
         let normalized = query.lowercased()
-        return viewModel.calendarBrowserPresentation.daySections.compactMap { section in
+        return model.presentation.daySections.compactMap { section in
             let events = section.events.filter { event in
                 event.title.lowercased().contains(normalized)
                     || event.timeText.lowercased().contains(normalized)
@@ -174,7 +175,7 @@ struct CraftCalendarListPane: View {
 }
 
 struct AddCalendarSourceSheet: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
     @Environment(\.dismiss) private var dismiss
 
     private static let supportedProviders: [CalendarProviderProfile] =
@@ -406,8 +407,7 @@ struct AddCalendarSourceSheet: View {
         HStack(spacing: SettingsListLayout.spaceL) {
             if selectedProvider == .macOSEventKit {
                 Button("前往日历设置") {
-                    viewModel.selectSettingsSection(.calendar)
-                    viewModel.isPresentingAddCalendarSourceSheet = false
+                    model.requestOpenSettings()
                 }
                 .buttonStyle(.bordered)
             }
@@ -421,8 +421,8 @@ struct AddCalendarSourceSheet: View {
                     isSyncingLocal = true
                     feedbackMessage = "正在请求日历权限并同步…"
                     Task { @MainActor in
-                        let succeeded = await viewModel.syncSystemCalendarNow()
-                        feedbackMessage = viewModel.calendarSyncMessage
+                        let succeeded = await model.syncSystemCalendarNow()
+                        feedbackMessage = model.syncMessage
                         isSyncingLocal = false
                         if succeeded { dismiss() }
                     }
@@ -472,8 +472,8 @@ struct AddCalendarSourceSheet: View {
                 username: username,
                 appPassword: appPassword
             )
-            let account = try wizard.buildAccount(existingAccountCount: viewModel.calendarAccounts.count)
-            viewModel.addCalendarSourceFromWizard(account: account, credential: appPassword)
+            let account = try wizard.buildAccount(existingAccountCount: model.accounts.count)
+            model.addSourceFromWizard(account: account, credential: appPassword)
             isSubmitting = false
         } catch {
             isSubmitting = false
@@ -2105,6 +2105,7 @@ struct CraftDetailPaneView: View {
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
     let productOSControlModel: ProductOSControlFeatureModel
+    let calendarFeatureModel: CalendarFeatureModel
     let rssFeatureModel: RSSFeatureModel
     var selection: SidebarItem
 
@@ -2138,7 +2139,7 @@ struct CraftDetailPaneView: View {
                     commercialReadinessDashboard: viewModel.commercialReadinessDashboard
                 )
             case .calendar:
-                CalendarSourceSettingsView(viewModel: viewModel)
+                CalendarSourceSettingsView(model: calendarFeatureModel)
             case .contacts:
                 ContactsSourceSettingsView(viewModel: viewModel)
             case .mail:
@@ -2150,7 +2151,12 @@ struct CraftDetailPaneView: View {
             case .skills:
                 SkillRuntimePanelView(model: skillRuntimeModel)
             case .llmSettings:
-                ConnorSettingsDetailView(viewModel: viewModel, identityStore: identityStore, rssFeatureModel: rssFeatureModel)
+                ConnorSettingsDetailView(
+                    viewModel: viewModel,
+                    identityStore: identityStore,
+                    calendarFeatureModel: calendarFeatureModel,
+                    rssFeatureModel: rssFeatureModel
+                )
             }
         }
     }
@@ -2174,7 +2180,7 @@ private struct AgentChatNoSelectionDetailView: View {
 }
 
 struct CalendarSourceSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         Group {
@@ -2194,22 +2200,22 @@ struct CalendarSourceSettingsView: View {
     }
 
     private var selectedEvent: CalendarEvent? {
-        guard let id = viewModel.selectedCalendarEventID else { return nil }
-        return viewModel.calendarEvents.first { $0.id == id }
+        guard let id = model.selectedEventID else { return nil }
+        return model.events.first { $0.id == id }
     }
 
     private var selectedEventRow: NativeCalendarEventRowPresentation? {
-        guard let id = viewModel.selectedCalendarEventID else { return nil }
-        return viewModel.calendarBrowserPresentation.daySections.flatMap(\.events).first { $0.id == id }
+        guard let id = model.selectedEventID else { return nil }
+        return model.presentation.daySections.flatMap(\.events).first { $0.id == id }
     }
 
     private func calendarName(for calendarID: CalendarID) -> String? {
-        viewModel.calendarCollections.first { $0.id == calendarID }?.displayName
+        model.collections.first { $0.id == calendarID }?.displayName
     }
 
     private func accountName(for calendarID: CalendarID) -> String? {
-        guard let collection = viewModel.calendarCollections.first(where: { $0.id == calendarID }) else { return nil }
-        return viewModel.calendarAccounts.first { $0.id == collection.accountID }?.displayName
+        guard let collection = model.collections.first(where: { $0.id == calendarID }) else { return nil }
+        return model.accounts.first { $0.id == collection.accountID }?.displayName
     }
 }
 

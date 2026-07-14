@@ -12,6 +12,7 @@ struct CraftPrimarySidebarView: View {
     @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
     @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
     @Bindable var taskAutomationModel: TaskAutomationFeatureModel
+    @Bindable var calendarFeatureModel: CalendarFeatureModel
     @Bindable var rssFeatureModel: RSSFeatureModel
     @Binding var selection: SidebarItem?
     @State private var sessionsExpanded = true
@@ -111,7 +112,7 @@ struct CraftPrimarySidebarView: View {
                     SidebarRow(title: "人际关系", systemImage: "person.2", count: viewModel.contactsBrowserPresentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
-                        SidebarRow(title: "日历", systemImage: "calendar", count: viewModel.calendarBrowserPresentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
+                        SidebarRow(title: "日历", systemImage: "calendar", count: calendarFeatureModel.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
                         SidebarRow(title: "邮件", systemImage: "envelope", count: mailSidebarCount, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: rssUnreadCount, isSelected: selection == .rss) { select(.rss) }
                         SidebarRow(title: "MCP", systemImage: "server.rack", count: sourceRuntimeModel.configurations.count, isSelected: selection == .sources) { select(.sources) }

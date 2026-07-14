@@ -49,13 +49,15 @@ enum SettingsListLayout {
 struct ConnorSettingsDetailView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var identityStore: AppUserIdentityStore
+    let calendarFeatureModel: CalendarFeatureModel
     let rssFeatureModel: RSSFeatureModel
     @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
     @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
-    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore, rssFeatureModel: RSSFeatureModel) {
+    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore, calendarFeatureModel: CalendarFeatureModel, rssFeatureModel: RSSFeatureModel) {
         self.viewModel = viewModel
         self.identityStore = identityStore
+        self.calendarFeatureModel = calendarFeatureModel
         self.rssFeatureModel = rssFeatureModel
         let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
         _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
@@ -82,7 +84,7 @@ struct ConnorSettingsDetailView: View {
                     case .ai:
                         SettingsAISection(viewModel: viewModel)
                     case .calendar:
-                        SettingsCalendarSection(viewModel: viewModel)
+                        SettingsCalendarSection(model: calendarFeatureModel)
                     case .rss:
                         SettingsRSSSection(model: rssFeatureModel)
                     case .mail:
@@ -129,30 +131,30 @@ struct ConnorSettingsDetailView: View {
 }
 
 struct SettingsCalendarSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
             SettingsGroup(title: "日历能力") {
                 SettingsValueRow(title: "定位", value: "独立日历数据源")
-                SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
-                SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
-                SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
+                SettingsValueRow(title: "已添加源", value: "\(model.accounts.count) 个")
+                SettingsValueRow(title: "日历", value: "\(model.collections.count) 个")
+                SettingsValueRow(title: "当前事件", value: "\(model.presentation.eventCount) 个")
                 Text("本机日历可通过 EventKit 安全修改；标准 CalDAV、iCloud、Fastmail 与 Nextcloud 可在账户行显式开启修改。ICS/Webcal 始终只读。每次真实写入仍需审批，并使用版本冲突保护。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: SettingsListLayout.spaceS) {
-                    Button(action: { viewModel.syncSystemCalendar() }) {
-                        Label(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历", systemImage: "arrow.triangle.2.circlepath")
+                    Button(action: { model.syncSystemCalendar() }) {
+                        Label(model.isSyncingSystemCalendar ? "同步中…" : "同步本机日历", systemImage: "arrow.triangle.2.circlepath")
                             .font(SettingsListTypography.actionTitle)
                             .padding(.horizontal, SettingsListLayout.spaceM)
                             .padding(.vertical, SettingsListLayout.spaceXS)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isSyncingSystemCalendar)
+                    .disabled(model.isSyncingSystemCalendar)
 
-                    Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                    Button(action: { model.isPresentingAddSourceSheet = true }) {
                         Label("添加日历源", systemImage: "plus")
                             .font(SettingsListTypography.actionTitle)
                             .padding(.horizontal, SettingsListLayout.spaceM)
@@ -160,7 +162,7 @@ struct SettingsCalendarSection: View {
                     }
                     .buttonStyle(.bordered)
                 }
-                if let message = viewModel.calendarSyncMessage {
+                if let message = model.syncMessage {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
@@ -169,28 +171,28 @@ struct SettingsCalendarSection: View {
             }
 
             SettingsGroup(title: "已添加日历源") {
-                if viewModel.calendarAccounts.isEmpty {
+                if model.accounts.isEmpty {
                     Text("暂无日历源。点击“添加日历源”开始。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    ForEach(viewModel.calendarAccounts) { account in
+                    ForEach(model.accounts) { account in
                         CalendarSourceSettingsRow(
                             account: account,
-                            calendarCount: viewModel.calendarCollections.filter { $0.accountID == account.id }.count,
-                            onSyncModeChange: { viewModel.setCalendarSyncMode(accountID: account.id, mode: $0) },
-                            onDelete: { viewModel.deleteCalendarSource(account) }
+                            calendarCount: model.collections.filter { $0.accountID == account.id }.count,
+                            onSyncModeChange: { model.setSyncMode(accountID: account.id, mode: $0) },
+                            onDelete: { model.deleteSource(account) }
                         )
-                        if account.id != viewModel.calendarAccounts.last?.id {
+                        if account.id != model.accounts.last?.id {
                             Divider().opacity(0.6)
                         }
                     }
                 }
             }
         }
-        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
+            AddCalendarSourceSheet(model: model)
         }
     }
 }

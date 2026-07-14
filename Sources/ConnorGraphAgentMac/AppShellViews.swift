@@ -35,6 +35,7 @@ struct AppShellView: View {
                             sourceRuntimeModel: viewModel.sourceRuntimeModel,
                             skillRuntimeModel: viewModel.skillRuntimeModel,
                             taskAutomationModel: viewModel.taskAutomationModel,
+                            calendarFeatureModel: viewModel.calendarFeatureModel,
                             rssFeatureModel: viewModel.rssFeatureModel,
                             selection: selectionBinding
                         )
@@ -54,6 +55,7 @@ struct AppShellView: View {
                 skillRuntimeModel: viewModel.skillRuntimeModel,
                 taskAutomationModel: viewModel.taskAutomationModel,
                 productOSControlModel: viewModel.productOSControlModel,
+                calendarFeatureModel: viewModel.calendarFeatureModel,
                 rssFeatureModel: viewModel.rssFeatureModel,
                 selection: selectionBinding
             )
@@ -74,6 +76,7 @@ struct AppShellView: View {
                 skillRuntimeModel: viewModel.skillRuntimeModel,
                 taskAutomationModel: viewModel.taskAutomationModel,
                 productOSControlModel: viewModel.productOSControlModel,
+                calendarFeatureModel: viewModel.calendarFeatureModel,
                 rssFeatureModel: viewModel.rssFeatureModel,
                 selection: viewModel.selection ?? .agentChat
             )

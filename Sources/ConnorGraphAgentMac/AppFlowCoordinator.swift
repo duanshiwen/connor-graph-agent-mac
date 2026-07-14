@@ -3,6 +3,7 @@ import Foundation
 enum AppFlowIntent: Sendable, Equatable {
     case navigate(SidebarItem)
     case openSessionNotification(String)
+    case openCalendarSettings
     case followRSSItem(RSSFollowRequest)
 }
 

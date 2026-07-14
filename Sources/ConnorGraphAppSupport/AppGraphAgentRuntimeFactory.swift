@@ -27,6 +27,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
     public var groupID: String
     public var storagePaths: AppStoragePaths?
+    public var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
+    public var calendarCredentialStore: AppCalendarCredentialStore?
     public var rssRuntime: RSSRuntime?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -39,6 +41,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository = AppProviderCapabilityEvidenceRepository(),
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
+        calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore? = nil,
+        calendarCredentialStore: AppCalendarCredentialStore? = nil,
         rssRuntime: RSSRuntime? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
@@ -50,6 +54,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.capabilityEvidenceRepository = capabilityEvidenceRepository
         self.groupID = groupID
         self.storagePaths = storagePaths
+        self.calendarRuntimeStore = calendarRuntimeStore
+        self.calendarCredentialStore = calendarCredentialStore
         self.rssRuntime = rssRuntime
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
@@ -177,8 +183,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceTableComputeTool())
         registry.registerTimeAnalysisTool()
         if let storagePaths {
-            let calendarStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
-            let calendarCredentialStore = AppCalendarCredentialStore()
+            let calendarStore = calendarRuntimeStore ?? FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
+            let calendarCredentialStore = calendarCredentialStore ?? AppCalendarCredentialStore()
             let calDAVAdapter = CalDAVCalendarMutationAdapter { account in
                 guard account.configuration.authMode != .none, let username = account.configuration.username else { return nil }
                 let binding = AppCalendarCredentialStore.binding(accountID: account.id, username: username, authMode: account.configuration.authMode)
