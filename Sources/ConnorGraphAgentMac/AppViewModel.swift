@@ -2455,7 +2455,7 @@ final class AppViewModel: NSObject, ObservableObject {
         shutdownRuntimeResources()
     }
 
-    private func shutdownRuntimeResources() {
+    func shutdownRuntimeResources() {
         if let mailCacheChangeObserver {
             NotificationCenter.default.removeObserver(mailCacheChangeObserver)
             self.mailCacheChangeObserver = nil
