@@ -37,6 +37,7 @@ struct AppShellView: View {
                             taskAutomationModel: viewModel.taskAutomationModel,
                             calendarFeatureModel: viewModel.calendarFeatureModel,
                             contactsFeatureModel: viewModel.contactsFeatureModel,
+                            mailFeatureModel: viewModel.mailFeatureModel,
                             rssFeatureModel: viewModel.rssFeatureModel,
                             selection: selectionBinding
                         )
@@ -58,6 +59,7 @@ struct AppShellView: View {
                 productOSControlModel: viewModel.productOSControlModel,
                 calendarFeatureModel: viewModel.calendarFeatureModel,
                 contactsFeatureModel: viewModel.contactsFeatureModel,
+                mailFeatureModel: viewModel.mailFeatureModel,
                 rssFeatureModel: viewModel.rssFeatureModel,
                 selection: selectionBinding
             )
@@ -80,6 +82,7 @@ struct AppShellView: View {
                 productOSControlModel: viewModel.productOSControlModel,
                 calendarFeatureModel: viewModel.calendarFeatureModel,
                 contactsFeatureModel: viewModel.contactsFeatureModel,
+                mailFeatureModel: viewModel.mailFeatureModel,
                 rssFeatureModel: viewModel.rssFeatureModel,
                 selection: viewModel.selection ?? .agentChat
             )

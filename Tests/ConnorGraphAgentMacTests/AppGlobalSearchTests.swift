@@ -209,7 +209,7 @@ struct AppGlobalSearchTests {
             date: Date(timeIntervalSince1970: 1_783_148_401),
             snippet: "西湖店取货提醒"
         )
-        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        fixture.viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [account],
             mailboxes: [mailbox],
             messages: [other, matching]
@@ -219,8 +219,8 @@ struct AppGlobalSearchTests {
         fixture.viewModel.showAllGlobalSearchResults(kind: .mail)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.mailSearchQuery == "外国")
-        #expect(fixture.viewModel.mailListMessages(direction: .all).map(\.id.rawValue) == ["matching-mail"])
+        #expect(fixture.viewModel.mailFeatureModel.searchQuery == "外国")
+        #expect(fixture.viewModel.mailFeatureModel.listMessages(direction: .all).map(\.id.rawValue) == ["matching-mail"])
     }
 
     @Test func openingMailSearchResultSelectsMessageContextAndClearsMailFilter() throws {
@@ -229,22 +229,22 @@ struct AppGlobalSearchTests {
 
         let mail = makeMailFixture(messageID: "global-mail-target", subject: "全国二线中高端岗位")
         let other = makeMailFixture(messageID: "global-mail-other", subject: "Apple Store 订单")
-        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        fixture.viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [mail.account],
             mailboxes: [mail.mailbox],
             messages: [other.summary, mail.summary]
         )
-        fixture.viewModel.mailSearchQuery = "旧筛选词"
+        fixture.viewModel.mailFeatureModel.searchQuery = "旧筛选词"
         fixture.viewModel.isGlobalSearchOverlayPresented = true
 
         fixture.viewModel.openGlobalSearchResult(mail.searchResult)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
-        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
-        #expect(fixture.viewModel.mailListMessages(direction: .all).contains { $0.id == mail.summary.id })
-        #expect(fixture.viewModel.mailSearchQuery.isEmpty)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailFeatureModel.listMessages(direction: .all).contains { $0.id == mail.summary.id })
+        #expect(fixture.viewModel.mailFeatureModel.searchQuery.isEmpty)
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
@@ -253,7 +253,7 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let mail = makeMailFixture(messageID: "prefixed-mail-target", subject: "带前缀的邮件结果")
-        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        fixture.viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [mail.account],
             mailboxes: [mail.mailbox],
             messages: [mail.summary]
@@ -264,9 +264,9 @@ struct AppGlobalSearchTests {
         fixture.viewModel.openGlobalSearchResult(result)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
-        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
     }
 
     @Test func openingMailSearchResultAcceptsLegacySluggedExternalID() throws {
@@ -274,7 +274,7 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let mail = makeMailFixture(messageID: "yakii_d@icloud.com-INBOX-100", subject: "旧索引邮件结果")
-        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        fixture.viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [mail.account],
             mailboxes: [mail.mailbox],
             messages: [mail.summary]
@@ -286,9 +286,9 @@ struct AppGlobalSearchTests {
         fixture.viewModel.openGlobalSearchResult(result)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
-        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
     }
 
     @Test func performingSelectedMailSearchItemSelectsMessageContext() throws {
@@ -296,7 +296,7 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let mail = makeMailFixture(messageID: "keyboard-mail-target", subject: "键盘打开邮件")
-        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        fixture.viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [mail.account],
             mailboxes: [mail.mailbox],
             messages: [mail.summary]
@@ -312,9 +312,9 @@ struct AppGlobalSearchTests {
         fixture.viewModel.performSelectedGlobalSearchItem()
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
-        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
@@ -323,15 +323,15 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let mail = makeMailFixture(messageID: "locating-mail-target", subject: "正在定位的搜索邮件")
-        fixture.viewModel.mailBrowserPresentation = .empty
+        fixture.viewModel.mailFeatureModel.presentation = .empty
         fixture.viewModel.isGlobalSearchOverlayPresented = true
 
         fixture.viewModel.openGlobalSearchResult(mail.searchResult)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.mailNavigationTargetID == mail.summary.id)
-        #expect(fixture.viewModel.mailNavigationMessage == "正在打开搜索结果中的邮件…")
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.navigationTargetID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.navigationMessage == "正在打开搜索结果中的邮件…")
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
@@ -340,31 +340,31 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let mail = makeMailFixture(messageID: "stale-presentation-mail", subject: "缓存中存在但展示未刷新")
-        let store = FileBackedMailSourceStore(storagePaths: fixture.paths)
+        let store = try #require(fixture.viewModel.mailFeatureModel.sharedStoreForTests)
         try await store.saveAccount(mail.account)
         try await store.saveMailbox(mail.mailbox)
         try await store.saveMessage(mail.detail)
-        fixture.viewModel.mailBrowserPresentation = .empty
-        fixture.viewModel.mailSearchQuery = "旧筛选词"
+        await fixture.viewModel.mailFeatureModel.reload()
+        fixture.viewModel.mailFeatureModel.presentation = .empty
+        fixture.viewModel.mailFeatureModel.searchQuery = "旧筛选词"
         fixture.viewModel.isGlobalSearchOverlayPresented = true
 
         fixture.viewModel.openGlobalSearchResult(mail.searchResult)
         for _ in 0..<20 {
-            if fixture.viewModel.selectedMailAccountID == mail.summary.accountID,
-               fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID {
+            if fixture.viewModel.mailFeatureModel.presentation.message(id: mail.summary.id) != nil {
                 break
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailAccountID == mail.summary.accountID)
-        #expect(fixture.viewModel.selectedMailMailboxID == mail.summary.mailboxID)
-        #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
-        #expect(fixture.viewModel.mailBrowserPresentation.message(id: mail.summary.id) != nil)
-        #expect(fixture.viewModel.mailListMessages(direction: .all).contains { $0.id == mail.summary.id })
-        #expect(fixture.viewModel.mailSearchQuery.isEmpty)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedAccountID == mail.summary.accountID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMailboxID == mail.summary.mailboxID)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageForDetail()?.id == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.presentation.message(id: mail.summary.id) != nil)
+        #expect(fixture.viewModel.mailFeatureModel.listMessages(direction: .all).contains { $0.id == mail.summary.id })
+        #expect(fixture.viewModel.mailFeatureModel.searchQuery.isEmpty)
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
@@ -373,22 +373,22 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         let mail = makeMailFixture(messageID: "detail-fallback-mail", subject: "搜索打开后详情可见")
-        fixture.viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        fixture.viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [mail.account],
             mailboxes: [mail.mailbox],
             messages: [mail.summary]
         )
 
         fixture.viewModel.openGlobalSearchResult(mail.searchResult)
-        fixture.viewModel.mailBrowserPresentation = .empty
+        fixture.viewModel.mailFeatureModel.presentation = .empty
 
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageForDetail()?.id == mail.summary.id)
 
-        await fixture.viewModel.reloadMailBrowserPresentation()
+        await fixture.viewModel.mailFeatureModel.reload()
 
-        #expect(fixture.viewModel.selectedMailMessageID == mail.summary.id)
-        #expect(fixture.viewModel.selectedMailMessageForDetail()?.id == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageID == mail.summary.id)
+        #expect(fixture.viewModel.mailFeatureModel.selectedMessageForDetail()?.id == mail.summary.id)
     }
 
     @Test func showAllBrowserHistoryCarriesGlobalSearchQueryIntoHistoryFilter() throws {
@@ -607,7 +607,7 @@ struct AppGlobalSearchTests {
         let mails = (0..<5).map { index in
             makeMailFixture(messageID: "fallback-mail-\(index)", subject: "Phoenix mail \(index)")
         }
-        viewModel.mailBrowserPresentation = NativeMailBrowserPresentation(
+        viewModel.mailFeatureModel.presentation = NativeMailBrowserPresentation(
             accounts: [mails[0].account],
             mailboxes: [mails[0].mailbox],
             messages: mails.map(\.summary)

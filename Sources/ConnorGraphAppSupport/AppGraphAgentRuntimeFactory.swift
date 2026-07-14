@@ -30,6 +30,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     public var calendarCredentialStore: AppCalendarCredentialStore?
     public var personProfileStore: (any PersonProfileStore)?
+    public var mailRuntime: MailRuntime?
     public var rssRuntime: RSSRuntime?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -45,6 +46,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore? = nil,
         calendarCredentialStore: AppCalendarCredentialStore? = nil,
         personProfileStore: (any PersonProfileStore)? = nil,
+        mailRuntime: MailRuntime? = nil,
         rssRuntime: RSSRuntime? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
@@ -59,6 +61,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.calendarRuntimeStore = calendarRuntimeStore
         self.calendarCredentialStore = calendarCredentialStore
         self.personProfileStore = personProfileStore
+        self.mailRuntime = mailRuntime
         self.rssRuntime = rssRuntime
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
@@ -209,8 +212,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
             registry.registerNativeRSSTools(runtime: effectiveRSSRuntime, recorder: nativeSourceReferenceRecorder)
-            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
-            registry.registerNativeMailTools(runtime: MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
+            let effectiveMailRuntime: MailRuntime
+            if let mailRuntime {
+                effectiveMailRuntime = mailRuntime
+            } else {
+                let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+                effectiveMailRuntime = MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths))
+            }
+            registry.registerNativeMailTools(runtime: effectiveMailRuntime, recorder: nativeSourceReferenceRecorder)
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())

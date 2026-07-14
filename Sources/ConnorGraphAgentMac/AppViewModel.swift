@@ -225,17 +225,7 @@ final class AppViewModel: NSObject, ObservableObject {
     let sourceRuntimeModel: SourceRuntimeFeatureModel
     let calendarFeatureModel: CalendarFeatureModel
     let contactsFeatureModel: ContactsFeatureModel
-    @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
-    @Published var mailSearchQuery: String = ""
-    @Published var selectedMailAccountID: MailAccountID?
-    @Published var selectedMailMailboxID: MailMailboxID?
-    @Published var selectedMailMessageID: MailMessageID?
-    @Published var selectedMailMessageSummary: MailMessageSummary?
-    @Published var mailNavigationTargetID: MailMessageID?
-    @Published var mailNavigationMessage: String?
-    @Published var mailPreferences: MailPreferences = MailPreferences()
-    @Published var isPresentingAddMailAccountSheet: Bool = false
-    @Published var mailSyncMessage: String?
+    let mailFeatureModel: MailFeatureModel
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     @Published var activeSkillSlug: String?
@@ -332,9 +322,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var sessionSearchIndexService: SessionSearchIndexService?
     private var globalSearchHistoryRepository: AppGlobalSearchHistoryRepository?
     private var globalSearchPreviewTask: Task<Void, Never>?
-    private var mailStore: FileBackedMailSourceStore?
-    private var mailPreferencesStore: (any MailPreferencesStore)?
-    private var mailCacheChangeObserver: NSObjectProtocol?
     private var applicationDidFinishLaunchingObserver: NSObjectProtocol?
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var isRunningBackgroundJobs: Bool = false
@@ -1499,7 +1486,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func presentationFallbackMailResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
         let normalized = query.lowercased()
-        return mailBrowserPresentation.messages
+        return mailFeatureModel.presentation.messages
             .filter { message in
                 guard !normalized.isEmpty else { return true }
                 return message.subject.lowercased().contains(normalized)
@@ -1609,7 +1596,8 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .rss
             rssFeatureModel.selectItem(id: RSSItemID(rawValue: result.externalID))
         case .mail:
-            openGlobalSearchMailResult(result)
+            selection = .mail
+            mailFeatureModel.openSearchResult(result)
         case .browserHistory:
             if let id = UUID(uuidString: result.externalID), let record = browserHistoryRecords.first(where: { $0.id == id }) ?? browserHistoryStore?.record(id: id) {
                 navigateToHistoryRecord(record)
@@ -1617,119 +1605,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 isBrowserHistoryPanelVisible = true
                 showBrowserWorkspace()
             }
-        }
-    }
-
-    private func openGlobalSearchMailResult(_ result: NativeSearchResult) {
-        selection = .mail
-        mailSearchQuery = ""
-        guard let messageID = mailMessageID(from: result) else {
-            mailSyncMessage = "无法打开这封邮件：搜索结果缺少有效 messageID。"
-            return
-        }
-        if let message = mailBrowserPresentation.message(id: messageID) ?? mailBrowserPresentationMessageMatchingLegacySearchID(messageID) {
-            selectMailMessage(message)
-            return
-        }
-
-        selectedMailMessageID = messageID
-        mailNavigationTargetID = messageID
-        mailNavigationMessage = "正在打开搜索结果中的邮件…"
-        Task { @MainActor in
-            await loadAndSelectMailMessageIfNeeded(messageID)
-        }
-    }
-
-    /// Normalize a mail message ID to match legacy search-index formats.
-    /// Older indexes may store IDs with a `mail-` prefix and replace account separators
-    /// such as `_`, `@`, and `.` with `-` (for example:
-    /// `yakii_d@icloud.com-INBOX-123` → `mail-yakii-d-icloud-com-INBOX-123`).
-    static func normalizeMailIDForSearchIndex(_ rawID: String) -> String {
-        var value = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.hasPrefix("mail:") { value = String(value.dropFirst("mail:".count)) }
-        if value.hasPrefix("mail-") { value = String(value.dropFirst("mail-".count)) }
-        return value
-            .replacingOccurrences(of: "_", with: "-")
-            .replacingOccurrences(of: "@", with: "-")
-            .replacingOccurrences(of: ".", with: "-")
-    }
-
-    private func mailMessageID(from result: NativeSearchResult) -> MailMessageID? {
-        let raw = result.externalID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
-        if raw.hasPrefix("mail:") {
-            let unprefixed = String(raw.dropFirst("mail:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !unprefixed.isEmpty else { return nil }
-            return MailMessageID(rawValue: unprefixed)
-        }
-        return MailMessageID(rawValue: raw)
-    }
-
-    private func mailBrowserPresentationMessageMatchingLegacySearchID(_ messageID: MailMessageID) -> MailMessageSummary? {
-        let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
-        return mailBrowserPresentation.messages.first { message in
-            Self.normalizeMailIDForSearchIndex(message.id.rawValue) == normalizedLookup
-        }
-    }
-
-    func selectMailMessageFromList(_ message: MailMessageSummary) {
-        selectMailMessage(message)
-    }
-
-    func selectedMailMessageForDetail() -> MailMessageSummary? {
-        if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
-            return message
-        }
-        guard selectedMailMessageSummary?.id == selectedMailMessageID else { return nil }
-        return selectedMailMessageSummary
-    }
-
-    private func selectMailMessage(_ message: MailMessageSummary) {
-        selectedMailAccountID = message.accountID
-        selectedMailMailboxID = message.mailboxID
-        selectedMailMessageID = message.id
-        selectedMailMessageSummary = message
-        mailNavigationTargetID = nil
-        mailNavigationMessage = nil
-    }
-
-    private func loadAndSelectMailMessageIfNeeded(_ messageID: MailMessageID) async {
-        guard selectedMailMessageID == messageID else { return }
-        if let message = mailBrowserPresentation.message(id: messageID) {
-            selectMailMessage(message)
-            return
-        }
-        // Fallback: legacy search indexes may store slugified IDs that differ from
-        // the original message IDs in the mail database. Walk the in-memory
-        // presentation to find a match by comparing normalized forms.
-        let normalizedLookup = Self.normalizeMailIDForSearchIndex(messageID.rawValue)
-        if let message = mailBrowserPresentationMessageMatchingLegacySearchID(messageID) {
-            selectMailMessage(message)
-            return
-        }
-        do {
-            guard let detail = try await mailStore?.message(id: messageID) else {
-                let message = "这封邮件可能已从本地缓存移除，请重新同步邮箱。"
-                NSLog("[Connor.Mail] message not found in store: id=%@, normalized=%@, presentationCount=%d", messageID.rawValue, normalizedLookup, mailBrowserPresentation.messages.count)
-                mailSyncMessage = message
-                mailNavigationMessage = message
-                mailNavigationTargetID = nil
-                return
-            }
-            selectMailMessage(detail.summary)
-            await reloadMailBrowserPresentation()
-            if let message = mailBrowserPresentation.message(id: messageID) {
-                selectMailMessage(message)
-            }
-            mailSyncMessage = nil
-            mailNavigationTargetID = nil
-            mailNavigationMessage = nil
-        } catch {
-            let message = "无法打开这封邮件：\(error.localizedDescription)"
-            NSLog("[Connor.Mail] failed to load message: id=%@, error=%@", messageID.rawValue, error.localizedDescription)
-            mailSyncMessage = message
-            mailNavigationMessage = message
-            mailNavigationTargetID = nil
         }
     }
 
@@ -1748,7 +1623,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 rssFeatureModel.searchQuery = query
                 selection = .rss
             case .mail:
-                mailSearchQuery = query
+                mailFeatureModel.searchQuery = query
                 selection = .mail
             case .browserHistory:
                 browserHistorySearchQuery = query
@@ -1758,14 +1633,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 filterBrowserHistory(query: browserHistorySearchQuery)
             }
         }
-    }
-
-    func mailListMessages(direction: MailMessageDirectionFilter = .all) -> [MailMessageSummary] {
-        let query = mailSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
-            return mailBrowserPresentation.unqueriedMessages(direction: direction)
-        }
-        return mailBrowserPresentation.messages(accountID: nil, mailboxID: nil, query: query, direction: direction)
     }
 
     private func rebuildCalendarSearchIndexIfNeeded(events: [CalendarEvent]) async throws {
@@ -2168,6 +2035,9 @@ final class AppViewModel: NSObject, ObservableObject {
         contactsSystemLoader: @escaping ContactsFeatureModel.SystemContactsLoader = {
             try await ContactsSystemAdapter.fetchSystemContacts()
         },
+        injectedMailStore: FileBackedMailSourceStore? = nil,
+        injectedMailPreferencesStore: (any MailPreferencesStore)? = nil,
+        mailCredentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         calendarRemoteAccountSynchronizer: @escaping CalendarFeatureModel.RemoteAccountSynchronizer = { account, credential, runID, runtimeStore in
             let engine = CalendarSourceSyncEngine(
                 connectors: [
@@ -2241,6 +2111,9 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             return NativeSourceSearchService(storagePaths: storagePaths)
         }()
+        let resolvedMailStore = injectedMailStore ?? storagePaths.map { FileBackedMailSourceStore(storagePaths: $0, searchService: nativeSourceSearchBackend) }
+        let resolvedMailPreferencesStore = injectedMailPreferencesStore ?? storagePaths.map { FileBackedMailPreferencesStore(storagePaths: $0) }
+        self.mailFeatureModel = MailFeatureModel(store: resolvedMailStore, preferencesStore: resolvedMailPreferencesStore, credentialStore: mailCredentialStore)
         let resolvedRSSRuntime = rssRuntime ?? storagePaths.map { paths in
             RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: paths),
@@ -2283,8 +2156,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
-            self.mailPreferencesStore = FileBackedMailPreferencesStore(storagePaths: storagePaths)
         }
         if let repository {
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
@@ -2321,11 +2192,6 @@ final class AppViewModel: NSObject, ObservableObject {
             guard let self else { return }
             self.recordBrowserWebViewEviction(key: key, webView: webView, metadata: metadata)
         }
-        mailCacheChangeObserver = NotificationCenter.default.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                await self?.reloadMailBrowserPresentation()
-            }
-        }
         applicationDidFinishLaunchingObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didFinishLaunchingNotification,
             object: nil,
@@ -2343,6 +2209,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 calendarRuntimeStore: calendarFeatureModel.agentRuntimeStore,
                 calendarCredentialStore: calendarCredentialStore,
                 personProfileStore: contactsFeatureModel.agentProfileStore,
+                mailRuntime: mailFeatureModel.agentRuntime,
                 rssRuntime: rssFeatureModel.agentRuntime,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
@@ -2464,6 +2331,16 @@ final class AppViewModel: NSObject, ObservableObject {
                 self.scheduleCalendarSearchIndexRefresh(events: events)
             }
         }
+        mailFeatureModel.sourceSetChanged = { [weak self] in
+            guard let self else { return }
+            try await self.reconcileMailAccountRefreshTasks()
+            self.taskAutomationModel.reload()
+        }
+        mailFeatureModel.onEvent = { [weak self] event in
+            guard let self else { return }
+            self.objectWillChange.send()
+            if case let .operationFailed(message) = event { self.errorMessage = message }
+        }
         contactsFeatureModel.onEvent = { [weak self] event in
             guard let self else { return }
             self.objectWillChange.send()
@@ -2517,7 +2394,7 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { await rssFeatureModel.reload() }
         Task { await calendarFeatureModel.reload() }
         Task { await contactsFeatureModel.reload() }
-        Task { await reloadMailBrowserPresentation() }
+        Task { await mailFeatureModel.reload() }
         reloadChatSessions()
         loadBrowserHistory()
         graphDiagnosticsModel.reloadSchemaHealthReport()
@@ -2535,10 +2412,6 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func shutdownRuntimeResources() {
-        if let mailCacheChangeObserver {
-            NotificationCenter.default.removeObserver(mailCacheChangeObserver)
-            self.mailCacheChangeObserver = nil
-        }
         if let applicationDidFinishLaunchingObserver {
             NotificationCenter.default.removeObserver(applicationDidFinishLaunchingObserver)
             self.applicationDidFinishLaunchingObserver = nil
@@ -2551,6 +2424,7 @@ final class AppViewModel: NSObject, ObservableObject {
         rssFeatureModel.shutdown()
         calendarFeatureModel.shutdown()
         contactsFeatureModel.shutdown()
+        mailFeatureModel.shutdown()
         cancelBrowserHistoryContentFetchTasks()
         resumePendingBrowserAssistedWebFetchContinuationsForShutdown()
         releaseIdleSleepAssertion()
@@ -2700,7 +2574,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let runner = TaskTargetRunner.appRuntime(
             mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
+                return try await self.mailFeatureModel.refreshForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
@@ -2752,8 +2626,9 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func reconcileMailAccountRefreshTasks(now: Date = Date()) async throws {
-        guard let taskManagementRepository = taskAutomationModel.repository, let mailStore else { return }
-        let materializer = MailRefreshTaskMaterializer(taskRepository: taskManagementRepository, mailSourceRepository: mailStore)
+        guard let taskManagementRepository = taskAutomationModel.repository,
+              let repository = mailFeatureModel.sourceRepository else { return }
+        let materializer = MailRefreshTaskMaterializer(taskRepository: taskManagementRepository, mailSourceRepository: repository)
         _ = try await materializer.reconcileMailAccountRefreshTasks(now: now)
     }
 
@@ -2773,74 +2648,6 @@ final class AppViewModel: NSObject, ObservableObject {
         default:
             throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline:\(request.operationName)")
         }
-    }
-
-    private func refreshMailForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
-        guard let mailStore else { return "Mail store unavailable" }
-        let accounts: [MailAccount]
-        if let sourceInstanceID, !sourceInstanceID.isEmpty {
-            guard let account = try await mailStore.account(id: MailAccountID(rawValue: sourceInstanceID)) else {
-                return "Mail account not found: \(sourceInstanceID)"
-            }
-            accounts = [account]
-        } else {
-            accounts = try await mailStore.listAccounts()
-        }
-        guard !accounts.isEmpty else { return "No mail accounts configured" }
-
-        let syncService = MailIMAPInitialSyncService(messageLimit: 0)
-        var syncedMessageCount = 0
-        var summaries: [String] = []
-
-        for account in accounts {
-            let mailboxes = try await mailStore.listMailboxes(accountID: account.id)
-            let storedUIDsByMailboxID = try await storedMailUIDsByMailboxID(for: account.id, mailboxes: mailboxes, in: mailStore)
-            let storedUIDValidityByMailboxID = Dictionary(uniqueKeysWithValues: mailboxes.map { ($0.id, $0.status.syncCursor?.uidValidity) })
-            let hasSyncedMailbox = mailboxes.contains { $0.status.lastSyncedAt != nil }
-            let result: MailInitialSyncResult
-            if !storedUIDsByMailboxID.isEmpty || hasSyncedMailbox {
-                result = try await syncService.syncIncremental(
-                    account: account,
-                    storedUIDsByMailboxID: storedUIDsByMailboxID,
-                    storedUIDValidityByMailboxID: storedUIDValidityByMailboxID
-                )
-            } else {
-                result = try await syncService.sync(account: account)
-            }
-
-            try await mailStore.saveAccount(result.account)
-            for mailbox in result.mailboxes {
-                try await mailStore.saveMailbox(mailbox)
-            }
-            if !result.messages.isEmpty {
-                try await mailStore.saveMessagesBatch(result.messages)
-            }
-            syncedMessageCount += result.messages.count
-            summaries.append("\(result.account.displayName)：\(result.account.health.summary)")
-        }
-
-        await reloadMailBrowserPresentation()
-        let summary = summaries.joined(separator: "；")
-        if let sourceInstanceID, !sourceInstanceID.isEmpty {
-            return "Mail refreshed account \(sourceInstanceID); synced \(syncedMessageCount) message(s). \(summary)"
-        }
-        return "Mail refreshed \(accounts.count) account(s); synced \(syncedMessageCount) message(s). \(summary)"
-    }
-
-    private func storedMailUIDsByMailboxID(for accountID: MailAccountID, mailboxes: [MailMailbox], in mailStore: any MailStoreProtocol) async throws -> [MailMailboxID: Set<String>] {
-        let remoteMailboxes = mailboxes.map { mailbox in
-            RemoteIMAPMailbox(name: mailbox.name, path: mailbox.path, role: mailbox.role)
-        }
-        var result: [MailMailboxID: Set<String>] = [:]
-        let messageIDs = try await mailStore.allMessageIDs()
-        for remoteMailbox in remoteMailboxes {
-            let mailboxID = remoteMailbox.mailboxID(accountID: accountID)
-            let uids = Set(messageIDs.compactMap { remoteMailbox.uid(fromMessageID: $0, accountID: accountID) })
-            if !uids.isEmpty {
-                result[mailboxID] = uids
-            }
-        }
-        return result
     }
 
     private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
@@ -2873,230 +2680,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         _ = await submitChat(prompt: request.message, clearComposer: false)
         return "sent task message to session \(sessionID)"
-    }
-
-    func presentAddMailAccountSheet() {
-        isPresentingAddMailAccountSheet = true
-    }
-
-    func rebuildMailCacheAndRefresh() async -> String {
-        do {
-            guard let mailStore else { return "Mail store unavailable" }
-            try await mailStore.clearCachedMailData()
-            await reloadMailBrowserPresentation()
-            let result = try await refreshMailForScheduledTask(sourceInstanceID: nil, runID: nil)
-            let message = "已清空本地邮件缓存并重新同步。\(result)"
-            mailSyncMessage = message
-            return message
-        } catch {
-            let message = "无法重建邮件缓存：\(error.localizedDescription)"
-            errorMessage = message
-            mailSyncMessage = message
-            return message
-        }
-    }
-
-    func reloadMailBrowserPresentation() async {
-        do {
-            guard let mailStore else { return }
-            mailBrowserPresentation = try await mailStore.presentation()
-            try await reconcileMailDefaultSendPreferences(accounts: mailBrowserPresentation.accounts)
-            if selectedMailAccountID == nil || mailBrowserPresentation.account(id: selectedMailAccountID) == nil {
-                selectedMailAccountID = mailBrowserPresentation.defaultAccountID()
-            }
-            if selectedMailMailboxID == nil || mailBrowserPresentation.mailbox(id: selectedMailMailboxID) == nil {
-                selectedMailMailboxID = mailBrowserPresentation.defaultMailboxID(for: selectedMailAccountID)
-            }
-            if let message = mailBrowserPresentation.message(id: selectedMailMessageID) {
-                selectedMailMessageSummary = message
-            } else {
-                let hasSelectedSummaryFallback = selectedMailMessageSummary?.id == selectedMailMessageID
-                if selectedMailMessageID == nil || !hasSelectedSummaryFallback {
-                    selectedMailMessageID = mailBrowserPresentation.defaultMessageID(accountID: selectedMailAccountID, mailboxID: selectedMailMailboxID)
-                    selectedMailMessageSummary = mailBrowserPresentation.message(id: selectedMailMessageID)
-                }
-            }
-        } catch {
-            errorMessage = "无法加载邮件缓存：\(error.localizedDescription)"
-        }
-    }
-
-    private func reconcileMailDefaultSendPreferences(accounts: [MailAccount]) async throws {
-        guard let mailPreferencesStore else { return }
-        let loaded = try await mailPreferencesStore.load()
-        let reconciled = MailDefaultSendAccountReconciler.reconcile(preferences: loaded, accounts: accounts)
-        mailPreferences = reconciled
-        if reconciled != loaded {
-            try await mailPreferencesStore.save(reconciled)
-        }
-    }
-
-    func setDefaultMailSendAccount(_ accountID: MailAccountID) async {
-        do {
-            guard let account = mailBrowserPresentation.account(id: accountID) else {
-                errorMessage = "无法设置默认发信账户：账户不存在"
-                return
-            }
-            guard let identity = account.identities.first(where: \.canSend) else {
-                errorMessage = "无法设置默认发信账户：该账户没有可发送身份"
-                return
-            }
-            let preferences = MailPreferences(defaultSendAccountID: account.id, defaultSendIdentityID: identity.id)
-            mailPreferences = preferences
-            try await mailPreferencesStore?.save(preferences)
-            errorMessage = nil
-        } catch {
-            errorMessage = "无法保存默认发信账户：\(error.localizedDescription)"
-        }
-    }
-
-    func loadMailBodyDisplay(for messageID: MailMessageID) async -> MailBodyDisplayPresentation {
-        do {
-            guard let detail = try await mailStore?.message(id: messageID) else {
-                return MailBodyDisplayPresentation(kind: .error, text: "无法读取邮件正文：本地缓存中找不到这封邮件")
-            }
-            guard !Task.isCancelled else { return .loading }
-            if MailBodyOnDemandFetchPlanner.hasDisplayableBody(detail) {
-                return await MailBodyDisplayPresentation.preparing(detail: detail)
-            }
-            do {
-                try Task.checkCancellation()
-                let fetched = try await fetchAndCacheMailBodyIfNeeded(detail)
-                try Task.checkCancellation()
-                return await MailBodyDisplayPresentation.preparing(detail: fetched)
-            } catch is CancellationError {
-                return .loading
-            } catch {
-                let message = "无法按需读取邮件正文：\(error.localizedDescription)"
-                errorMessage = message
-                return MailBodyDisplayPresentation.error(message, fallback: detail.summary.snippet)
-            }
-        } catch is CancellationError {
-            return .loading
-        } catch {
-            let message = "无法读取邮件正文：\(error.localizedDescription)"
-            errorMessage = message
-            return MailBodyDisplayPresentation(kind: .error, text: message)
-        }
-    }
-
-    private func fetchAndCacheMailBodyIfNeeded(_ detail: MailMessageDetail) async throws -> MailMessageDetail {
-        try Task.checkCancellation()
-        guard let mailStore else { return detail }
-        guard let account = try await mailStore.account(id: detail.summary.accountID) else {
-            throw NSError(domain: "Connor.MailBody", code: 1, userInfo: [NSLocalizedDescriptionKey: "找不到邮件账户"])
-        }
-        try Task.checkCancellation()
-        guard let uid = MailBodyOnDemandFetchPlanner.imapUID(for: detail) else {
-            throw NSError(domain: "Connor.MailBody", code: 2, userInfo: [NSLocalizedDescriptionKey: "缺少邮件 UID"])
-        }
-        let mailboxes = try await mailStore.listMailboxes(accountID: detail.summary.accountID)
-        try Task.checkCancellation()
-        let mailbox = mailboxes.first { $0.id == detail.summary.mailboxID }
-        let service = MailIMAPInitialSyncService(credentialStore: AppMailCredentialStore(), messageLimit: 0)
-        guard let fetched = try await service.fetchMessageBody(
-            account: account,
-            uid: uid,
-            messageID: detail.id,
-            mailboxID: detail.summary.mailboxID,
-            mailboxPath: mailbox?.path ?? "INBOX",
-            mailboxRole: mailbox?.role ?? .inbox,
-            snippet: detail.summary.snippet
-        ) else {
-            throw NSError(domain: "Connor.MailBody", code: 3, userInfo: [NSLocalizedDescriptionKey: "服务器未返回可显示正文"])
-        }
-        try Task.checkCancellation()
-        guard MailBodyOnDemandFetchPlanner.hasDisplayableBody(fetched) else {
-            throw NSError(domain: "Connor.MailBody", code: 4, userInfo: [NSLocalizedDescriptionKey: "服务器返回的正文为空"])
-        }
-        try Task.checkCancellation()
-        try await mailStore.saveMessage(fetched)
-        try Task.checkCancellation()
-        await reloadMailBrowserPresentation()
-        return fetched
-    }
-
-    func loadMailBodyText(for messageID: MailMessageID) async -> String? {
-        let display = await loadMailBodyDisplay(for: messageID)
-        return display.text
-    }
-
-    func loadMailBodyHTML(for messageID: MailMessageID) async -> String? {
-        let display = await loadMailBodyDisplay(for: messageID)
-        return display.html
-    }
-
-    func addMailAccountAndPrepareSync(preset: MailAccountProviderPreset, displayName: String, email: String, credential: String, incomingHost: String, incomingPort: Int, outgoingHost: String, outgoingPort: Int) async throws {
-        let provider: MailProviderKind = switch preset {
-        case .apple: .genericIMAPSMTP
-        case .qq: .genericIMAPSMTP
-        case .netease: .genericIMAPSMTP
-        case .other: .genericIMAPSMTP
-        }
-        try await addMailAccountAndPrepareSync(
-            displayName: displayName,
-            email: email,
-            provider: provider,
-            incomingHost: incomingHost,
-            incomingPort: incomingPort,
-            incomingSecurity: preset.incomingSecurity,
-            outgoingHost: outgoingHost,
-            outgoingPort: outgoingPort,
-            outgoingSecurity: preset.outgoingSecurity,
-            username: email,
-            password: credential,
-            authMode: preset.authMode
-        )
-    }
-
-    func addMailAccountAndPrepareSync(displayName: String, email: String, provider: MailProviderKind, incomingHost: String, incomingPort: Int, incomingSecurity: MailConnectionSecurity, outgoingHost: String, outgoingPort: Int, outgoingSecurity: MailConnectionSecurity, username: String, password: String, authMode: MailAuthMode) async throws {
-        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let accountID = MailAccountID(rawValue: normalizedEmail)
-        let resolvedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? normalizedEmail : username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-\(accountID.rawValue)"), displayName: displayName, address: MailAddress(name: displayName, email: normalizedEmail))
-        let binding = AppMailCredentialStore.binding(accountID: accountID, email: resolvedUsername, authMode: authMode)
-        let account = MailAccount(
-            id: accountID,
-            provider: provider,
-            displayName: displayName.isEmpty ? email : displayName,
-            identities: [identity],
-            incoming: MailServerEndpoint(host: incomingHost, port: incomingPort, security: incomingSecurity, protocolKind: .imap),
-            outgoing: MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: outgoingSecurity, protocolKind: .smtp),
-            credentialBinding: binding,
-            health: MailAccountHealth(status: .unknown, summary: "Ready to sync")
-        )
-        let inbox = MailMailbox(id: MailMailboxID(rawValue: "\(accountID.rawValue)-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
-        try AppMailCredentialStore().saveCredential(password, binding: binding)
-        try await mailStore?.saveAccount(account)
-        try await mailStore?.saveMailbox(inbox)
-        selectedMailAccountID = accountID
-        selectedMailMailboxID = inbox.id
-        isPresentingAddMailAccountSheet = false
-        mailSyncMessage = "已添加邮箱：\(account.displayName)，正在同步最近邮件…"
-        await reloadMailBrowserPresentation()
-        do {
-            try await reconcileMailAccountRefreshTasks()
-            taskAutomationModel.reload()
-            let summary = try await refreshMailForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil)
-            mailSyncMessage = summary
-            taskAutomationModel.reload()
-        } catch {
-            let message = String(describing: error)
-            mailSyncMessage = "邮箱已添加，但同步失败：\(message)"
-            errorMessage = message
-        }
-    }
-
-    private static func mailPlainText(fromHTML html: String) -> String {
-        var text = html.replacingOccurrences(of: #"<br\s*/?>"#, with: "\n", options: [.regularExpression, .caseInsensitive])
-        text = text.replacingOccurrences(of: #"</p\s*>"#, with: "\n\n", options: [.regularExpression, .caseInsensitive])
-        text = text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
-        text = text.replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-        return text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     func handleRSSFollowRequest(_ request: RSSFollowRequest) {

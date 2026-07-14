@@ -88,7 +88,7 @@ struct ConnorSettingsDetailView: View {
                     case .rss:
                         SettingsRSSSection(model: rssFeatureModel)
                     case .mail:
-                        SettingsMailSection(viewModel: viewModel)
+                        SettingsMailSection(model: viewModel.mailFeatureModel)
                     case .permissions:
                         SettingsPermissionsSection(viewModel: viewModel)
                     case .labels:
