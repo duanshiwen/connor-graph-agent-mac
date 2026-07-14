@@ -486,21 +486,21 @@ private struct SourceSummaryStrip: View {
 }
 
 struct SkillRuntimePanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
 
     private var presentation: SkillManagerPresentation {
-        viewModel.commercialSkillManagerPresentation
+        model.presentation
     }
 
     private var selectedCard: SkillManagerCard? {
-        guard let id = viewModel.selectedSkillManagerCardID else { return nil }
+        guard let id = model.selectedCardID else { return nil }
         return presentation.cards.first(where: { $0.id == id })
     }
 
     var body: some View {
         Group {
             if let card = selectedCard {
-                SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
+                SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: model.reload)
             } else {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

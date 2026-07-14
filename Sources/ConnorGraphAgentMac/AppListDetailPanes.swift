@@ -10,6 +10,7 @@ import ConnorGraphAppSupport
 struct CraftListPaneView: View {
     @ObservedObject var viewModel: AppViewModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
+    let skillRuntimeModel: SkillRuntimeFeatureModel
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -30,7 +31,7 @@ struct CraftListPaneView: View {
             case .sources:
                 CraftSourceListPane(model: sourceRuntimeModel)
             case .skills:
-                CraftSkillListPane(viewModel: viewModel)
+                CraftSkillListPane(model: skillRuntimeModel)
             case .automation, .scheduledTasks:
                 CraftTaskAutomationListPane(viewModel: viewModel, kind: .scheduled)
             case .eventTriggeredTasks:
@@ -2100,6 +2101,7 @@ struct CraftDetailPaneView: View {
     @ObservedObject var identityStore: AppUserIdentityStore
     let graphDiagnosticsModel: GraphDiagnosticsModel
     let sourceRuntimeModel: SourceRuntimeFeatureModel
+    let skillRuntimeModel: SkillRuntimeFeatureModel
     var selection: SidebarItem
 
     var body: some View {
@@ -2138,7 +2140,7 @@ struct CraftDetailPaneView: View {
             case .sources:
                 SourceRuntimePanelView(model: sourceRuntimeModel)
             case .skills:
-                SkillRuntimePanelView(viewModel: viewModel)
+                SkillRuntimePanelView(model: skillRuntimeModel)
             case .llmSettings:
                 ConnorSettingsDetailView(viewModel: viewModel, identityStore: identityStore)
             }
