@@ -48,7 +48,7 @@ struct CraftPrimarySidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
-                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
+                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .all) {
                             viewModel.setSessionListFilter(.all)
                             select(.agentChat)
                         }
@@ -57,7 +57,7 @@ struct CraftPrimarySidebarView: View {
                         }
                         ForEach(viewModel.governanceConfig.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
-                                SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.sessionListFilter == .status(sessionStatus)) {
+                                SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .status(sessionStatus)) {
                                     viewModel.setSessionListFilter(.status(sessionStatus))
                                     select(.agentChat)
                                 }
@@ -95,7 +95,7 @@ struct CraftPrimarySidebarView: View {
                                 }
                         } else {
                             ForEach(viewModel.governanceConfig.labels) { label in
-                                SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
+                                SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .label(label.id)) {
                                     viewModel.setSessionListFilter(.label(label.id))
                                     select(.agentChat)
                                 }
@@ -167,7 +167,7 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var countSourceSessions: [AgentSession] {
-        viewModel.allChatSessions.isEmpty ? viewModel.chatSessions : viewModel.allChatSessions
+        viewModel.chatFeatureModel.sessions.allSessions.isEmpty ? viewModel.chatFeatureModel.sessions.sessions : viewModel.chatFeatureModel.sessions.allSessions
     }
 
     private var allSessionsCount: Int {

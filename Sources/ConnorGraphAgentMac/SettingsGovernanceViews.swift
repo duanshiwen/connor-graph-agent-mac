@@ -68,7 +68,7 @@ struct SettingsLabelsSection: View {
     }
 
     private func countSessions(using labelID: String) -> Int {
-        viewModel.allChatSessions.filter { session in
+        viewModel.chatFeatureModel.sessions.allSessions.filter { session in
             session.governance.labels.contains { $0.id == labelID }
         }.count
     }
@@ -143,7 +143,7 @@ struct SettingsStatusesSection: View {
     }
 
     private func countSessions(using definition: AgentSessionStatusDefinition) -> Int {
-        viewModel.allChatSessions.filter { $0.governance.status.rawValue == definition.id }.count
+        viewModel.chatFeatureModel.sessions.allSessions.filter { $0.governance.status.rawValue == definition.id }.count
     }
 }
 

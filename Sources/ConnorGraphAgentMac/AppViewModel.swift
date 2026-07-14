@@ -161,24 +161,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     @Published var selection: SidebarItem? = .agentChat
     let graphDiagnosticsModel: GraphDiagnosticsModel
-    @Published var chatInput: String = "" {
-        didSet {
-            guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
-            updateLiveChatInputDraft(chatInput, for: selectedChatSessionID)
-            if inputSettingsModel.autoSaveDraftsEnabled {
-                chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
-            }
-        }
-    }
-    @Published var transcript: [AgentMessage] = []
-    @Published var selectedChatTranscriptRevision: Int = 0
-    @Published var lastContext: AgentContext?
-    @Published var lastPromptInspection: AgentChatPromptInspection?
+    let chatFeatureModel: ChatFeatureModel
     @Published var errorMessage: String?
-    @Published var attachmentToast: AgentChatToast?
     @Published var databasePath: String?
-    @Published var pendingApprovals: [AgentPendingApproval] = []
-    @Published var lastPendingApprovalResultSummary: String?
     @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = []
     @Published var llmDefaultConnectionID: String = ""
     @Published var llmConnectionName: String = ""
@@ -200,18 +185,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var showWelcomePlaceholder: Bool = true
-    @Published var chatSessions: [AgentSession] = []
-    @Published var allChatSessions: [AgentSession] = []
-    @Published var selectedChatSessionID: String?
-    @Published private(set) var loadingChatSessionDetailID: String?
-    @Published private(set) var sessionReadStates: [String: SessionReadState] = [:]
-    @Published var regeneratingTitleSessionIDs: Set<String> = []
-    @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
-    @Published var speechTranscriptionStatus: SessionSpeechTranscriptionStatus = .idle
-    @Published var speechProvisionalTranscript: String?
-    @Published var isBackgroundTasksPresented: Bool = false
-    @Published var sessionListFilter: AgentSessionListFilter = .all
-    @Published var sessionSearchQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     let productOSControlModel: ProductOSControlFeatureModel
     let taskAutomationModel: TaskAutomationFeatureModel
@@ -223,14 +196,6 @@ final class AppViewModel: NSObject, ObservableObject {
     let globalSearchFeatureModel: GlobalSearchFeatureModel
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
-    @Published var activeSkillSlug: String?
-    @Published var activeSkillDisplayName: String?
-    @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
-    @Published var latestChatSummary: AgentSessionSummary?
-    @Published var isSummarizingChatSession: Bool = false
-    @Published var chatSummaryMessage: String?
-    @Published var isSubmittingChat: Bool = false
-    @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
@@ -241,8 +206,6 @@ final class AppViewModel: NSObject, ObservableObject {
     let permissionSettingsModel: PermissionSettingsFeatureModel
     @Published var focusTopSearchRequestID: UUID?
     @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
-    @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
-    @Published var attachmentPreviewModel: AttachmentPreviewModel?
     @Published var memoryOSSearchHealthSummary: String?
     @Published private(set) var isMemoryOSSearchIndexRepairing = false
 
@@ -288,7 +251,6 @@ final class AppViewModel: NSObject, ObservableObject {
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
     private var nativeSessionManager: NativeSessionManager?
-    @Published private(set) var submittingChatSessionIDs: Set<String> = []
     private var activeChatRunIDsBySessionID: [String: String] = [:]
     private var activeChatBackendsBySessionID: [String: AnyAgentBackend] = [:]
     private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
@@ -321,13 +283,13 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     var isLoadingSelectedChatSessionDetail: Bool {
-        guard let selectedChatSessionID else { return false }
-        return loadingChatSessionDetailID == selectedChatSessionID
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID else { return false }
+        return chatFeatureModel.sessions.loadingSessionDetailID == selectedChatSessionID
     }
 
     var activeChatPendingApprovals: [AgentPendingApproval] {
         let activeSessionID = activeChatSession.id
-        return pendingApprovals.filter { approval in
+        return chatFeatureModel.approvals.pendingApprovals.filter { approval in
             approval.sessionID == activeSessionID && !shouldAutoApprovePendingApproval(approval)
         }
     }
@@ -351,7 +313,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard mode != .allowAll else { return }
         agentPermissionMode = mode
         nativeSessionManager?.permissionMode = mode
-        persistLLMSettings(rebuildRuntime: submittingChatSessionIDs.isEmpty)
+        persistLLMSettings(rebuildRuntime: chatFeatureModel.run.submittingSessionIDs.isEmpty)
         autoApproveCurrentPolicyPendingApprovals()
     }
 
@@ -373,7 +335,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func autoApproveCurrentPolicyPendingApprovals() {
-        let approvals = pendingApprovals.filter(shouldAutoApprovePendingApproval)
+        let approvals = chatFeatureModel.approvals.pendingApprovals.filter(shouldAutoApprovePendingApproval)
         for approval in approvals {
             Task {
                 await resolvePendingApproval(
@@ -387,7 +349,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func isChatSessionSubmitting(_ sessionID: String) -> Bool {
-        submittingChatSessionIDs.contains(sessionID)
+        chatFeatureModel.run.submittingSessionIDs.contains(sessionID)
     }
 
     private func updateLiveChatInputDraft(_ draft: String, for sessionID: String) {
@@ -408,12 +370,14 @@ final class AppViewModel: NSObject, ObservableObject {
             liveChatInputDraftRevision &+= 1
         }
         isRestoringChatInputDraft = true
-        chatInput = draft
+        chatFeatureModel.composer.input = draft
         isRestoringChatInputDraft = false
     }
 
     func updateSelectedChatInputDraft(_ draft: String) {
-        guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+        guard !isRestoringChatInputDraft,
+              let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID
+        else { return }
         updateLiveChatInputDraft(draft, for: selectedChatSessionID)
         if inputSettingsModel.autoSaveDraftsEnabled {
             chatInputDraftsBySessionID[selectedChatSessionID] = draft
@@ -422,18 +386,19 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func currentSelectedChatInputDraftForSpeech() -> String {
-        guard let selectedChatSessionID else { return chatInput }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID else { return chatFeatureModel.composer.input }
         if liveChatInputDraftSessionID == selectedChatSessionID {
             return liveChatInputDraft
         }
-        return inputSettingsModel.autoSaveDraftsEnabled ? (chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput) : chatInput
+        return inputSettingsModel.autoSaveDraftsEnabled ? (chatInputDraftsBySessionID[selectedChatSessionID] ?? chatFeatureModel.composer.input) : chatFeatureModel.composer.input
     }
 
     func appendToSelectedChatInputDraft(_ addition: String) {
         let updatedDraft = [currentSelectedChatInputDraftForSpeech(), addition]
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n\n")
-        chatInput = updatedDraft
+        updateSelectedChatInputDraft(updatedDraft)
+        chatFeatureModel.composer.applyInput(updatedDraft)
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
@@ -446,38 +411,38 @@ final class AppViewModel: NSObject, ObservableObject {
             draft = ""
         }
         setChatInputDraft(draft, for: sessionID)
-        pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
+        chatFeatureModel.composer.pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
     }
 
     var canSubmitCurrentChat: Bool {
-        !chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingAttachmentRefs.isEmpty
+        !chatFeatureModel.composer.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !chatFeatureModel.composer.pendingAttachmentRefs.isEmpty
     }
 
     func removePendingAttachment(id: String) {
-        pendingAttachmentRefs.removeAll { $0.id == id }
-        if let selectedChatSessionID {
-            pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+        chatFeatureModel.composer.pendingAttachmentRefs.removeAll { $0.id == id }
+        if let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID {
+            pendingAttachmentRefsBySessionID[selectedChatSessionID] = chatFeatureModel.composer.pendingAttachmentRefs
         }
     }
 
     func previewAttachment(_ attachment: AgentMessageAttachmentRef) {
-        guard let selectedChatSessionID, let storagePaths else { return }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return }
         let store = AppSessionAttachmentStore(paths: storagePaths)
-        attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(
+        chatFeatureModel.composer.attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(
             sessionID: selectedChatSessionID,
             attachment: attachment
         )
     }
 
     func localAttachmentFileURL(_ attachment: AgentMessageAttachmentRef) -> URL? {
-        guard let selectedChatSessionID, let storagePaths else { return nil }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return nil }
         return AttachmentPreviewLoader(store: AppSessionAttachmentStore(paths: storagePaths))
             .load(sessionID: selectedChatSessionID, attachment: attachment)
             .sourceFileURL
     }
 
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? {
-        guard let selectedChatSessionID, let storagePaths else { return nil }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return nil }
         return AgentMarkdownPersistentCacheContext(
             store: AgentMarkdownRenderCacheStore(storagePaths: storagePaths),
             sessionID: selectedChatSessionID,
@@ -511,7 +476,7 @@ final class AppViewModel: NSObject, ObservableObject {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.directoryURL = selectedSessionArtifactDirectories?.exports
+        panel.directoryURL = chatFeatureModel.sessions.selectedArtifactDirectories?.exports
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
@@ -575,7 +540,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     @discardableResult
     func importAttachments(urls: [URL]) async -> AttachmentImportBatchResult {
-        guard let selectedChatSessionID, let storagePaths else { return AttachmentImportBatchResult() }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return AttachmentImportBatchResult() }
         let store = AppSessionAttachmentStore(paths: storagePaths)
         var imported: [AgentMessageAttachmentRef] = []
         var rejected: [AttachmentRejectedFile] = []
@@ -597,8 +562,8 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         if !imported.isEmpty {
-            pendingAttachmentRefs.append(contentsOf: imported)
-            pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+            chatFeatureModel.composer.pendingAttachmentRefs.append(contentsOf: imported)
+            pendingAttachmentRefsBySessionID[selectedChatSessionID] = chatFeatureModel.composer.pendingAttachmentRefs
             Task { await runAttachmentExtractionJobs(sessionID: selectedChatSessionID) }
         }
         let result = AttachmentImportBatchResult(accepted: imported, rejected: rejected)
@@ -634,17 +599,17 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func showAttachmentToast(title: String, message: String, systemImage: String = "exclamationmark.triangle") {
         let toast = AgentChatToast(title: title, message: message, systemImage: systemImage)
-        attachmentToast = toast
+        chatFeatureModel.composer.attachmentToast = toast
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 4_500_000_000)
-            if self.attachmentToast?.id == toast.id {
-                self.attachmentToast = nil
+            if self.chatFeatureModel.composer.attachmentToast?.id == toast.id {
+                self.chatFeatureModel.composer.attachmentToast = nil
             }
         }
     }
 
     func retryAttachmentExtraction(attachmentID: String) {
-        guard let selectedChatSessionID, let storagePaths else { return }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return }
         do {
             let manifest = try AppSessionAttachmentStore(paths: storagePaths).loadManifest(sessionID: selectedChatSessionID, attachmentID: attachmentID)
             _ = try AttachmentExtractionJobStore(paths: storagePaths).appendStatus(
@@ -683,11 +648,11 @@ final class AppViewModel: NSObject, ObservableObject {
             (try? store.loadManifest(sessionID: sessionID, attachmentID: ref.id).messageRef) ?? ref
         }
         pendingAttachmentRefsBySessionID[sessionID] = refs
-        if selectedChatSessionID == sessionID {
-            pendingAttachmentRefs = refs
-            if let model = attachmentPreviewModel,
+        if chatFeatureModel.sessions.selectedSessionID == sessionID {
+            chatFeatureModel.composer.pendingAttachmentRefs = refs
+            if let model = chatFeatureModel.composer.attachmentPreviewModel,
                refs.contains(where: { $0.id == model.attachment.id }) {
-                attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(sessionID: sessionID, attachment: model.attachment)
+                chatFeatureModel.composer.attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(sessionID: sessionID, attachment: model.attachment)
             }
         }
     }
@@ -740,7 +705,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func refreshSelectedSubmittingState() {
-        isSubmittingChat = selectedChatSessionID.map { submittingChatSessionIDs.contains($0) } ?? false
+        chatFeatureModel.run.isSubmitting = chatFeatureModel.sessions.selectedSessionID.map { chatFeatureModel.run.submittingSessionIDs.contains($0) } ?? false
     }
 
     func navigate(to item: ConnorNativeShellItem) {
@@ -930,7 +895,7 @@ final class AppViewModel: NSObject, ObservableObject {
         case .showAll(let kind, let query):
             switch kind {
             case .chatSessions:
-                sessionSearchQuery = query
+                chatFeatureModel.sessions.searchQuery = query
                 browserFeatureModel.isVisible = false
                 selection = .agentChat
             case .calendar:
@@ -1005,7 +970,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     var commercialReadinessDashboard: CommercialReadinessDashboard {
         AppCommercialReadinessDashboardBuilder().build(
-            chatSessions: chatSessions,
+            chatSessions: chatFeatureModel.sessions.sessions,
             activeChatSession: activeChatSession,
             governanceConfig: governanceConfig,
             artifactDirectoriesReady: storagePaths != nil,
@@ -1023,10 +988,10 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var chatSummaryPresentation: AppChatSummaryPresentation {
         AppChatSummaryPresentationBuilder().build(
-            latestSummary: latestChatSummary,
+            latestSummary: chatFeatureModel.run.latestSummary,
             activeSession: activeChatSession,
-            isSummarizing: isSummarizingChatSession,
-            hasTranscriptMessages: !transcript.isEmpty
+            isSummarizing: chatFeatureModel.run.isSummarizing,
+            hasTranscriptMessages: !chatFeatureModel.run.transcript.isEmpty
         )
     }
 
@@ -1092,6 +1057,7 @@ final class AppViewModel: NSObject, ObservableObject {
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
         llmConnectionSetupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
     ) {
+        self.chatFeatureModel = ChatFeatureModel()
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
         self.userPreferencesModel = UserPreferencesFeatureModel()
@@ -1284,7 +1250,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         productOSControlModel.sessionIDProvider = { [weak self] in
             guard let self else { return "" }
-            return self.selectedChatSessionID ?? self.activeChatSession.id
+            return self.chatFeatureModel.sessions.selectedSessionID ?? self.activeChatSession.id
         }
         productOSControlModel.onEvent = { [weak self] event in
             guard let self else { return }
@@ -1336,7 +1302,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 self.errorMessage = message
             }
         }
-        globalSearchFeatureModel.sessionsProvider = { [weak self] in self?.allChatSessions ?? [] }
+        globalSearchFeatureModel.sessionsProvider = { [weak self] in self?.chatFeatureModel.sessions.allSessions ?? [] }
         globalSearchFeatureModel.fallbackNativeSearchProvider = { [weak self] kind, query, limit in
             self?.fallbackNativeSearchResults(kind: kind, query: query, limit: limit) ?? []
         }
@@ -1357,9 +1323,9 @@ final class AppViewModel: NSObject, ObservableObject {
                     sessionTitlesByID: [:]
                 )
             }
-            let sessions = self.allChatSessions + self.chatSessions
+            let sessions = self.chatFeatureModel.sessions.allSessions + self.chatFeatureModel.sessions.sessions
             return BrowserFeatureModel.SessionContext(
-                selectedSessionID: self.selectedChatSessionID,
+                selectedSessionID: self.chatFeatureModel.sessions.selectedSessionID,
                 activeSessionID: self.activeChatSession.id,
                 sessionTitlesByID: Dictionary(sessions.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
             )
@@ -1370,12 +1336,12 @@ final class AppViewModel: NSObject, ObservableObject {
         browserFeatureModel.onShowWorkspace = { [weak self] sessionID in
             guard let self else { return }
             self.selection = .agentChat
-            if self.selectedChatSessionID != sessionID { self.selectChatSession(sessionID) }
+            if self.chatFeatureModel.sessions.selectedSessionID != sessionID { self.selectChatSession(sessionID) }
             self.rememberWorkspaceMode(.browser, for: sessionID)
         }
         browserFeatureModel.onReturnFromWorkspace = { [weak self] sessionID in
             guard let self else { return }
-            if let sessionID, sessionID != self.selectedChatSessionID { self.selectChatSession(sessionID) }
+            if let sessionID, sessionID != self.chatFeatureModel.sessions.selectedSessionID { self.selectChatSession(sessionID) }
             self.selection = .agentChat
             self.rememberWorkspaceMode(.conversation, for: sessionID)
         }
@@ -1388,7 +1354,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         taskAutomationModel.createdBySessionIDProvider = { [weak self] in
             guard let self else { return "" }
-            return self.selectedChatSessionID ?? self.activeChatSession.id
+            return self.chatFeatureModel.sessions.selectedSessionID ?? self.activeChatSession.id
         }
         taskAutomationModel.onEvent = { [weak self] event in
             self?.objectWillChange.send()
@@ -1416,7 +1382,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         rssFeatureModel.sessionIDProvider = { [weak self] in
             guard let self else { return nil }
-            return self.selectedChatSessionID ?? self.activeChatSession.id
+            return self.chatFeatureModel.sessions.selectedSessionID ?? self.activeChatSession.id
         }
         rssFeatureModel.sourceSetChanged = { [weak self] scope in
             guard let self else { return }
@@ -1537,6 +1503,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.applicationDidFinishLaunchingObserver = nil
         }
         stopTaskSchedulerTimer()
+        chatFeatureModel.shutdown()
         globalSearchFeatureModel.shutdown()
         runtimeSettingsCoordinator.shutdown()
         userPreferencesModel.shutdown()
@@ -1746,7 +1713,7 @@ final class AppViewModel: NSObject, ObservableObject {
             do {
                 let session = try chatSessionRepository.createSession(title: request.title ?? "定时任务会话")
                 reloadChatSessions()
-                selectedChatSessionID = session.id
+                chatFeatureModel.sessions.selectedSessionID = session.id
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
                 _ = await submitChat(prompt: request.message, clearComposer: false)
@@ -1756,7 +1723,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         guard let sessionID = request.sessionID else { return "Missing sessionID" }
-        selectedChatSessionID = sessionID
+        chatFeatureModel.sessions.selectedSessionID = sessionID
         if let session = try? chatSessionRepository?.loadSession(id: sessionID) {
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
@@ -1766,7 +1733,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func handleRSSFollowRequest(_ request: RSSFollowRequest) {
-        let currentSessionID = selectedChatSessionID ?? activeChatSession.id
+        let currentSessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         if browserFeatureModel.focusExistingTab(urlString: request.url.absoluteString, preferredSessionID: currentSessionID) {
             errorMessage = nil
             return
@@ -1775,10 +1742,10 @@ final class AppViewModel: NSObject, ObservableObject {
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession(title: rssFollowSessionTitle(request.title))
-            selectedChatSessionID = session.id
+            chatFeatureModel.sessions.selectedSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.resetWorkspaceBinding()
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
@@ -1786,13 +1753,13 @@ final class AppViewModel: NSObject, ObservableObject {
             replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
-            agentEventTimeline = []
+            chatFeatureModel.run.eventTimeline = []
             agentEventTimelinesBySessionID[session.id] = []
-            latestChatSummary = nil
-            chatSummaryMessage = nil
-            lastPromptInspection = nil
+            chatFeatureModel.run.latestSummary = nil
+            chatFeatureModel.run.summaryMessage = nil
+            chatFeatureModel.run.lastPromptInspection = nil
             reloadChatSessions(restoreWorkspaceMode: false)
-            selectedChatSessionID = session.id
+            chatFeatureModel.sessions.selectedSessionID = session.id
             openURLInCurrentChatBrowser(request.url)
             errorMessage = nil
         } catch {
@@ -1854,14 +1821,14 @@ final class AppViewModel: NSObject, ObservableObject {
         let sessionID = session.id
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[sessionID] = liveBackend
-        submittingChatSessionIDs.insert(sessionID)
+        chatFeatureModel.run.submittingSessionIDs.insert(sessionID)
         refreshSelectedSubmittingState()
         defer {
             activeChatBackendsBySessionID.removeValue(forKey: sessionID)
             if let runID = activeChatRunIDsBySessionID[sessionID] {
                 activeChatBackendsByRunID.removeValue(forKey: runID)
             }
-            submittingChatSessionIDs.remove(sessionID)
+            chatFeatureModel.run.submittingSessionIDs.remove(sessionID)
             activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
             refreshSelectedSubmittingState()
         }
@@ -1935,12 +1902,12 @@ final class AppViewModel: NSObject, ObservableObject {
                 trigger: record.trigger.rawValue,
                 message: "Automation \(record.ruleName) matched. Actions are recorded for governed review: \(record.actionSummaries.joined(separator: "; "))"
             )
-            agentEventTimeline.insert(AgentEventPresenter().presentation(for: .automationTriggered(payload)), at: 0)
+            chatFeatureModel.run.eventTimeline.insert(AgentEventPresenter().presentation(for: .automationTriggered(payload)), at: 0)
         }
     }
 
     private func appendProductOSRegistryEvent(kind: String, entryID: String, status: ProductOSRegistryEntryStatus, message: String) {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         let payload = AgentProductOSRegistryEvent(
             sessionID: sessionID,
             registryKind: kind,
@@ -1949,7 +1916,7 @@ final class AppViewModel: NSObject, ObservableObject {
             message: message
         )
         let event: AgentEvent = kind == "source" ? .sourceRegistryChanged(payload) : .skillRegistryChanged(payload)
-        agentEventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
+        chatFeatureModel.run.eventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
     }
 
     func loadLLMSettings() {
@@ -2002,7 +1969,7 @@ final class AppViewModel: NSObject, ObservableObject {
         llmSelectedModel = modelID
 
         // Write session-level override (not global)
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         var state = sessionStateSnapshotsBySessionID[sessionID]
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         state.llmOverride = SessionLLMOverride(
@@ -2039,7 +2006,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func selectLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
         llmThinkingLevel = level
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         var state = sessionStateSnapshotsBySessionID[sessionID]
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         let settings = try? llmSettingsRepository.loadSettings()
@@ -2454,7 +2421,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func syncActiveSessionLLMOverride(to connection: AppLLMConnectionConfig) {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         let settings = try? llmSettingsRepository.loadSettings()
         let thinkingLevel = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride?.thinkingLevel
             ?? settings?.defaultThinkingLevel.rawValue
@@ -2477,12 +2444,12 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     var sessionHasLLMOverride: Bool {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         return sessionStateSnapshotsBySessionID[sessionID]?.llmOverride != nil
     }
 
     func clearSessionLLMOverride() {
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         var state = sessionStateSnapshotsBySessionID[sessionID]
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         state.llmOverride = nil
@@ -2506,7 +2473,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func currentSessionIDForWorkspaceDrafts() -> String? {
-        selectedChatSessionID ?? activeChatSession.id
+        chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
     }
 
     private func sessionWorkspaceReference(
@@ -2541,7 +2508,7 @@ final class AppViewModel: NSObject, ObservableObject {
             state.updatedAt = Date()
             sessionStateSnapshotsBySessionID[sessionID] = state
             try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
-            if activeChatSession.id == sessionID || selectedChatSessionID == sessionID { rebuildNativeSessionManagerForActiveSession() }
+            if activeChatSession.id == sessionID || chatFeatureModel.sessions.selectedSessionID == sessionID { rebuildNativeSessionManagerForActiveSession() }
             setSettingsMessage("当前会话 Workspace 已保存。", for: .app)
             errorMessage = nil
         } catch { errorMessage = String(describing: error) }
@@ -2597,7 +2564,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func handleRuntimeSettingsSaved(_ settings: AgentRuntimeSettings) {
         loadedLoopConfiguration = settings.loop
         applyRuntimeSettingsSideEffects()
-        if submittingChatSessionIDs.isEmpty {
+        if chatFeatureModel.run.submittingSessionIDs.isEmpty {
             rebuildNativeSessionManagerForActiveSession()
         } else {
             nativeSessionManager?.permissionMode = settings.loop.permissionMode
@@ -2625,7 +2592,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func applyKeepScreenAwakeSetting() {
-        if appSettingsModel.keepScreenAwake && !submittingChatSessionIDs.isEmpty {
+        if appSettingsModel.keepScreenAwake && !chatFeatureModel.run.submittingSessionIDs.isEmpty {
             guard idleSleepAssertionID == 0 else { return }
             var assertionID = IOPMAssertionID(0)
             let reason = "Connor session is running" as CFString
@@ -2643,8 +2610,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func markSessionRead(_ sessionID: String) {
-        guard sessionReadStates[sessionID]?.highestLevel != SessionAttentionLevel.none || sessionReadStates[sessionID]?.unreadCount ?? 0 > 0 else { return }
-        var state = sessionReadStates[sessionID] ?? .initial()
+        guard chatFeatureModel.sessions.readStates[sessionID]?.highestLevel != SessionAttentionLevel.none || chatFeatureModel.sessions.readStates[sessionID]?.unreadCount ?? 0 > 0 else { return }
+        var state = chatFeatureModel.sessions.readStates[sessionID] ?? .initial()
         state.markRead(messageID: latestMessageID(for: sessionID), at: Date())
         applySessionReadState(state, sessionID: sessionID, persist: true)
     }
@@ -2655,15 +2622,15 @@ final class AppViewModel: NSObject, ObservableObject {
         preview: String?,
         level: SessionAttentionLevel
     ) {
-        var state = sessionReadStates[sessionID] ?? .initial()
+        var state = chatFeatureModel.sessions.readStates[sessionID] ?? .initial()
         state.markUnread(messageID: messageID, preview: preview, level: level, at: Date())
         applySessionReadState(state, sessionID: sessionID, persist: true)
     }
 
     private func latestMessageID(for sessionID: String) -> String? {
-        if selectedChatSessionID == sessionID, let last = transcript.last { return last.id }
-        return chatSessions.first(where: { $0.id == sessionID })?.messages.last?.id
-            ?? allChatSessions.first(where: { $0.id == sessionID })?.messages.last?.id
+        if chatFeatureModel.sessions.selectedSessionID == sessionID, let last = chatFeatureModel.run.transcript.last { return last.id }
+        return chatFeatureModel.sessions.sessions.first(where: { $0.id == sessionID })?.messages.last?.id
+            ?? chatFeatureModel.sessions.allSessions.first(where: { $0.id == sessionID })?.messages.last?.id
     }
 
     private func noteSessionUpdate(
@@ -2674,7 +2641,7 @@ final class AppViewModel: NSObject, ObservableObject {
     ) {
         let level = appSettingsModel.sessionNewMessageNotificationLevel
         if shouldTreatSessionUpdateAsRead(sessionID: sessionID) {
-            var state = sessionReadStates[sessionID] ?? .initial()
+            var state = chatFeatureModel.sessions.readStates[sessionID] ?? .initial()
             state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
             applySessionReadState(state, sessionID: sessionID, persist: true)
             return
@@ -2693,7 +2660,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func shouldTreatSessionUpdateAsRead(sessionID: String) -> Bool {
-        selection == .agentChat && selectedChatSessionID == sessionID
+        selection == .agentChat && chatFeatureModel.sessions.selectedSessionID == sessionID
     }
 
     private func postSessionNotificationIfNeeded(
@@ -2727,12 +2694,12 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func synchronizeSessionReadStates(from sessions: [AgentSession]) {
-        sessionReadStates = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.readState) })
+        chatFeatureModel.sessions.readStates = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.readState) })
         refreshDockBadge()
     }
 
     private func applySessionReadState(_ state: SessionReadState, sessionID: String, persist: Bool) {
-        sessionReadStates[sessionID] = state
+        chatFeatureModel.sessions.readStates[sessionID] = state
         updateLoadedSessionReadState(sessionID: sessionID, readState: state)
         if persist {
             persistSessionReadState(state, sessionID: sessionID)
@@ -2741,11 +2708,11 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func updateLoadedSessionReadState(sessionID: String, readState: SessionReadState) {
-        if let index = chatSessions.firstIndex(where: { $0.id == sessionID }) {
-            chatSessions[index].readState = readState
+        if let index = chatFeatureModel.sessions.sessions.firstIndex(where: { $0.id == sessionID }) {
+            chatFeatureModel.sessions.sessions[index].readState = readState
         }
-        if let index = allChatSessions.firstIndex(where: { $0.id == sessionID }) {
-            allChatSessions[index].readState = readState
+        if let index = chatFeatureModel.sessions.allSessions.firstIndex(where: { $0.id == sessionID }) {
+            chatFeatureModel.sessions.allSessions[index].readState = readState
         }
         if fallbackChatSession.id == sessionID {
             fallbackChatSession.readState = readState
@@ -2765,7 +2732,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func refreshDockBadge() {
-        let count = sessionReadStates.values.reduce(0) { partial, state in
+        let count = chatFeatureModel.sessions.readStates.values.reduce(0) { partial, state in
             guard state.highestLevel.shouldCountInDockBadge else { return partial }
             return partial + max(state.unreadCount, 1)
         }
@@ -2797,7 +2764,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
-        governanceConfig.statuses.count > 1 && !allChatSessions.contains { $0.governance.status.rawValue == definition.id }
+        governanceConfig.statuses.count > 1 && !chatFeatureModel.sessions.allSessions.contains { $0.governance.status.rawValue == definition.id }
     }
 
     func deleteStatusDefinition(_ definition: AgentSessionStatusDefinition) {
@@ -2806,7 +2773,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         do {
-            let sessions = try chatSessionRepository?.loadSessions(filter: .all) ?? allChatSessions
+            let sessions = try chatSessionRepository?.loadSessions(filter: .all) ?? chatFeatureModel.sessions.allSessions
             let sessionsUsingStatus = sessions.filter { $0.governance.status.rawValue == definition.id }
             guard sessionsUsingStatus.isEmpty else {
                 errorMessage = "无法删除状态“\(definition.name)”: 仍有 \(sessionsUsingStatus.count) 个会话处于此状态。"
@@ -2815,7 +2782,7 @@ final class AppViewModel: NSObject, ObservableObject {
             var config = governanceConfig
             config.statuses.removeAll { $0.id == definition.id }
             saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。", section: .statuses)
-            if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
+            if case .status(let selectedStatus) = chatFeatureModel.sessions.filter, selectedStatus.rawValue == definition.id {
                 setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
                 reloadChatSessions(restoreWorkspaceMode: false)
@@ -2858,7 +2825,7 @@ final class AppViewModel: NSObject, ObservableObject {
             var config = governanceConfig
             config.labels.removeAll { $0.id == definition.id }
             saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。", section: .labels)
-            if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
+            if case .label(let selectedLabelID) = chatFeatureModel.sessions.filter, selectedLabelID == definition.id {
                 setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
                 reloadChatSessions(restoreWorkspaceMode: false)
@@ -2941,24 +2908,24 @@ final class AppViewModel: NSObject, ObservableObject {
         hasLoadedInitialChatSessions = true
         guard let chatSessionRepository else {
             replaceSelectedChatTranscript(activeChatTranscript)
-            chatSessions = [activeChatSession]
-            allChatSessions = [activeChatSession]
-            synchronizeSessionReadStates(from: allChatSessions)
-            selectedChatSessionID = activeChatSession.id
+            chatFeatureModel.sessions.sessions = [activeChatSession]
+            chatFeatureModel.sessions.allSessions = [activeChatSession]
+            synchronizeSessionReadStates(from: chatFeatureModel.sessions.allSessions)
+            chatFeatureModel.sessions.selectedSessionID = activeChatSession.id
             return
         }
         do {
-            var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-            if sessions.isEmpty, sessionListFilter == .all {
+            var sessions = try chatSessionRepository.loadSessions(filter: chatFeatureModel.sessions.filter)
+            if sessions.isEmpty, chatFeatureModel.sessions.filter == .all {
                 let session = try chatSessionRepository.createSession()
                 sessions = [session]
             }
-            chatSessions = sessions
-            allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
-            rebuildSessionSearchIndexSoon(sessions: allChatSessions)
-            synchronizeSessionReadStates(from: allChatSessions)
+            chatFeatureModel.sessions.sessions = sessions
+            chatFeatureModel.sessions.allSessions = try chatSessionRepository.loadSessions(filter: .all)
+            rebuildSessionSearchIndexSoon(sessions: chatFeatureModel.sessions.allSessions)
+            synchronizeSessionReadStates(from: chatFeatureModel.sessions.allSessions)
             let selectedID = selectedChatSessionIDVisibleInCurrentFilter(sessions: sessions)
-            selectedChatSessionID = selectedID
+            chatFeatureModel.sessions.selectedSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 try loadSessionCapsule(sessionID: selectedID)
                 try loadBackgroundTasks(sessionID: selectedID)
@@ -2968,19 +2935,19 @@ final class AppViewModel: NSObject, ObservableObject {
                 restoreChatInputDraft(for: selectedID)
                 refreshSelectedSubmittingState()
                 if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
-                    agentEventTimeline = cachedTimeline
+                    chatFeatureModel.run.eventTimeline = cachedTimeline
                 } else {
                     try restoreLatestAgentEventTimeline(sessionID: selectedID)
                 }
-                latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
-                selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
+                chatFeatureModel.run.latestSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
+                chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
                 if shouldRestoreWorkspaceMode {
                     restoreWorkspaceMode(for: selectedID)
                 }
             } else {
                 clearSelectedChatSessionDetail()
             }
-            chatSummaryMessage = nil
+            chatFeatureModel.run.summaryMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -2988,30 +2955,30 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func selectedChatSessionIDVisibleInCurrentFilter(sessions: [AgentSession]) -> String? {
-        if let selectedChatSessionID {
+        if let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID {
             return sessions.contains(where: { $0.id == selectedChatSessionID }) ? selectedChatSessionID : nil
         }
-        return sessionListFilter == .all ? sessions.first?.id : nil
+        return chatFeatureModel.sessions.filter == .all ? sessions.first?.id : nil
     }
 
     private func replaceSelectedChatTranscript(_ messages: [AgentMessage]) {
-        transcript = messages
-        selectedChatTranscriptRevision += 1
+        chatFeatureModel.run.transcript = messages
+        chatFeatureModel.run.transcriptRevision += 1
     }
 
     private func clearSelectedChatSessionDetail() {
         chatSessionSelectionTask?.cancel()
         chatSessionSelectionGeneration += 1
-        loadingChatSessionDetailID = nil
-        selectedChatSessionID = nil
+        chatFeatureModel.sessions.loadingSessionDetailID = nil
+        chatFeatureModel.sessions.selectedSessionID = nil
         nativeSessionManager = nil
         replaceSelectedChatTranscript([])
-        agentEventTimeline = []
-        latestChatSummary = nil
-        selectedSessionArtifactDirectories = nil
-        chatSummaryMessage = nil
-        lastContext = nil
-        lastPromptInspection = nil
+        chatFeatureModel.run.eventTimeline = []
+        chatFeatureModel.run.latestSummary = nil
+        chatFeatureModel.sessions.selectedArtifactDirectories = nil
+        chatFeatureModel.run.summaryMessage = nil
+        chatFeatureModel.run.lastContext = nil
+        chatFeatureModel.run.lastPromptInspection = nil
         browserFeatureModel.isVisible = false
         browserFeatureModel.resetWorkspaceBinding()
         refreshSelectedSubmittingState()
@@ -3021,17 +2988,17 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let chatSessionRepository else { return }
         chatSessionSelectionTask?.cancel()
         chatSessionSelectionGeneration += 1
-        loadingChatSessionDetailID = nil
-        _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
+        chatFeatureModel.sessions.loadingSessionDetailID = nil
+        _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()
-            selectedChatSessionID = session.id
+            chatFeatureModel.sessions.selectedSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.isVisible = false
             browserFeatureModel.resetWorkspaceBinding()
             rememberWorkspaceMode(.conversation, for: session.id)
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
@@ -3039,11 +3006,11 @@ final class AppViewModel: NSObject, ObservableObject {
             replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
-            agentEventTimeline = []
+            chatFeatureModel.run.eventTimeline = []
             agentEventTimelinesBySessionID[session.id] = []
-            latestChatSummary = nil
-            chatSummaryMessage = nil
-            lastPromptInspection = nil
+            chatFeatureModel.run.latestSummary = nil
+            chatFeatureModel.run.summaryMessage = nil
+            chatFeatureModel.run.lastPromptInspection = nil
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -3055,8 +3022,8 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let chatSessionRepository else { return }
         chatSessionSelectionTask?.cancel()
         chatSessionSelectionGeneration += 1
-        loadingChatSessionDetailID = nil
-        _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
+        chatFeatureModel.sessions.loadingSessionDetailID = nil
+        _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()
@@ -3064,12 +3031,12 @@ final class AppViewModel: NSObject, ObservableObject {
             noteSession.governance.kind = .note
             noteSession.title = "未命名的笔记"
             _ = try chatSessionRepository.saveSession(noteSession)
-            selectedChatSessionID = noteSession.id
+            chatFeatureModel.sessions.selectedSessionID = noteSession.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.isVisible = false
             browserFeatureModel.resetWorkspaceBinding()
             rememberWorkspaceMode(.conversation, for: noteSession.id)
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: noteSession.id)
+            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: noteSession.id)
             try loadSessionCapsule(sessionID: noteSession.id)
             try loadBackgroundTasks(sessionID: noteSession.id)
             fallbackChatSession = noteSession
@@ -3077,11 +3044,11 @@ final class AppViewModel: NSObject, ObservableObject {
             replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: noteSession.id)
             refreshSelectedSubmittingState()
-            agentEventTimeline = []
+            chatFeatureModel.run.eventTimeline = []
             agentEventTimelinesBySessionID[noteSession.id] = []
-            latestChatSummary = nil
-            chatSummaryMessage = nil
-            lastPromptInspection = nil
+            chatFeatureModel.run.latestSummary = nil
+            chatFeatureModel.run.summaryMessage = nil
+            chatFeatureModel.run.lastPromptInspection = nil
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -3103,13 +3070,13 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func synchronizeRenamedChatSession(_ updated: AgentSession) {
-        if let index = chatSessions.firstIndex(where: { $0.id == updated.id }) {
-            chatSessions[index] = updated
+        if let index = chatFeatureModel.sessions.sessions.firstIndex(where: { $0.id == updated.id }) {
+            chatFeatureModel.sessions.sessions[index] = updated
         }
-        if let index = allChatSessions.firstIndex(where: { $0.id == updated.id }) {
-            allChatSessions[index] = updated
+        if let index = chatFeatureModel.sessions.allSessions.firstIndex(where: { $0.id == updated.id }) {
+            chatFeatureModel.sessions.allSessions[index] = updated
         }
-        if selectedChatSessionID == updated.id {
+        if chatFeatureModel.sessions.selectedSessionID == updated.id {
             fallbackChatSession = updated
             nativeSessionManager = makeNativeSessionManager(for: updated)
             replaceSelectedChatTranscript(updated.messages)
@@ -3118,12 +3085,12 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
         guard let sessionID else { return [] }
-        return backgroundTasksBySessionID[sessionID, default: []]
+        return chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
             .sorted { $0.createdAt > $1.createdAt }
     }
 
     var activeSessionBackgroundTasks: [AppSessionBackgroundTask] {
-        backgroundTasks(for: selectedChatSessionID)
+        backgroundTasks(for: chatFeatureModel.sessions.selectedSessionID)
     }
 
     var hasRunningActiveSessionBackgroundTask: Bool {
@@ -3131,12 +3098,12 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func hasRunningBackgroundTask(sessionID: String) -> Bool {
-        backgroundTasksBySessionID[sessionID, default: []]
+        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
             .contains { $0.status == .queued || $0.status == .running }
     }
 
     var isSpeechTranscriptionRunningForSelectedSession: Bool {
-        speechTranscriptionCoordinator.isRunning(sessionID: selectedChatSessionID)
+        speechTranscriptionCoordinator.isRunning(sessionID: chatFeatureModel.sessions.selectedSessionID)
     }
 
     func toggleSpeechTranscriptionForSelectedSession() {
@@ -3150,7 +3117,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func beginSpeechTranscriptionForSelectedSession(speechInsertionRange: NSRange? = nil) {
         guard inputSettingsModel.sessionSpeechTranscriptionEnabled else { return }
         let task = speechTranscriptionCoordinator.beginHoldToTalk(
-            selectedSessionID: selectedChatSessionID,
+            selectedSessionID: chatFeatureModel.sessions.selectedSessionID,
             currentDraft: currentSelectedChatInputDraftForSpeech(),
             speechInsertionRange: speechInsertionRange,
             setDraft: { [weak self] sessionID, draft in
@@ -3173,7 +3140,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @discardableResult
     private func stopSpeechTranscriptionIfRunningForLeavingSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
         let task = speechTranscriptionCoordinator.stopIfRunningForLeavingSession(sessionID)
-        if selectedChatSessionID == sessionID { speechProvisionalTranscript = nil }
+        if chatFeatureModel.sessions.selectedSessionID == sessionID { chatFeatureModel.composer.speechProvisionalTranscript = nil }
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
         return task
@@ -3182,34 +3149,34 @@ final class AppViewModel: NSObject, ObservableObject {
     @discardableResult
     private func stopSpeechTranscriptionIfRunningForDeletedSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
         let task = speechTranscriptionCoordinator.stopIfRunningForDeletedSession(sessionID)
-        if selectedChatSessionID == sessionID { speechProvisionalTranscript = nil }
+        if chatFeatureModel.sessions.selectedSessionID == sessionID { chatFeatureModel.composer.speechProvisionalTranscript = nil }
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
         return task
     }
 
     private func stopSpeechTranscriptionForDisabledSetting() {
-        guard speechTranscriptionStatus.isRunning else { return }
+        guard chatFeatureModel.composer.speechTranscriptionStatus.isRunning else { return }
         let task = speechTranscriptionCoordinator.stop(reason: .appLifecycle)
-        speechProvisionalTranscript = nil
+        chatFeatureModel.composer.speechProvisionalTranscript = nil
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
     }
 
     private func setSpeechTranscriptionDraft(_ draft: String, for sessionID: String) {
         chatInputDraftsBySessionID[sessionID] = draft
-        if selectedChatSessionID == sessionID {
+        if chatFeatureModel.sessions.selectedSessionID == sessionID {
             setChatInputDraft(draft, for: sessionID)
         }
     }
 
     private func setSpeechProvisionalTranscript(_ transcript: String?, for sessionID: String) {
-        guard selectedChatSessionID == sessionID else { return }
-        speechProvisionalTranscript = transcript?.isEmpty == true ? nil : transcript
+        guard chatFeatureModel.sessions.selectedSessionID == sessionID else { return }
+        chatFeatureModel.composer.speechProvisionalTranscript = transcript?.isEmpty == true ? nil : transcript
     }
 
     private func syncSpeechTranscriptionState() {
-        speechTranscriptionStatus = speechTranscriptionCoordinator.status
+        chatFeatureModel.composer.speechTranscriptionStatus = speechTranscriptionCoordinator.status
     }
 
     private func upsertSpeechTranscriptionBackgroundTask(_ task: AppSessionBackgroundTask?) {
@@ -3219,7 +3186,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func runningBackgroundTasksForDeletionCheck(sessionID: String) throws -> [AppSessionBackgroundTask] {
         let persistedTasks = try chatSessionRepository?.loadBackgroundTasks(sessionID: sessionID).map(AppSessionBackgroundTask.init(persisted:)) ?? []
-        let memoryTasks = backgroundTasksBySessionID[sessionID, default: []]
+        let memoryTasks = chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
         return (persistedTasks + memoryTasks).filter { $0.status == .queued || $0.status == .running }
     }
 
@@ -3230,7 +3197,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func loadBackgroundTasks(sessionID: String) throws {
         guard let chatSessionRepository else { return }
         let activeInMemoryTaskIDs = Set(
-            backgroundTasksBySessionID[sessionID, default: []]
+            chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []]
                 .filter { $0.status == .queued || $0.status == .running }
                 .map(\.id)
         )
@@ -3244,9 +3211,9 @@ final class AppViewModel: NSObject, ObservableObject {
             didInterruptActiveTasks = true
             try chatSessionRepository.saveBackgroundTask(tasks[index].persisted)
         }
-        backgroundTasksBySessionID[sessionID] = tasks
+        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID] = tasks
         if didInterruptActiveTasks || !hasRunningTitleTask(sessionID: sessionID) {
-            regeneratingTitleSessionIDs.remove(sessionID)
+            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
         }
     }
 
@@ -3262,7 +3229,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func hasRunningTitleTask(sessionID: String) -> Bool {
-        backgroundTasksBySessionID[sessionID, default: []].contains { task in
+        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []].contains { task in
             task.kind == "title_generation" && (task.status == .queued || task.status == .running)
         }
     }
@@ -3270,48 +3237,48 @@ final class AppViewModel: NSObject, ObservableObject {
     @discardableResult
     private func enqueueBackgroundTask(sessionID: String, title: String, detail: String, kind: String = "generic") -> AppSessionBackgroundTask {
         let task = AppSessionBackgroundTask(sessionID: sessionID, kind: kind, title: title, detail: detail)
-        backgroundTasksBySessionID[sessionID, default: []].append(task)
+        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID, default: []].append(task)
         do {
             try chatSessionRepository?.saveBackgroundTask(task.persisted)
         } catch {
             errorMessage = String(describing: error)
         }
-        if kind == "title_generation" { regeneratingTitleSessionIDs.insert(sessionID) }
+        if kind == "title_generation" { chatFeatureModel.sessions.regeneratingTitleSessionIDs.insert(sessionID) }
         return task
     }
 
     private func updateBackgroundTask(sessionID: String, taskID: String, status: AppSessionBackgroundTaskStatus, detail: String? = nil, errorMessage: String? = nil) {
-        guard var tasks = backgroundTasksBySessionID[sessionID], let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        guard var tasks = chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID], let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].status = status
         tasks[index].updatedAt = Date()
         if let detail { tasks[index].detail = detail }
         tasks[index].errorMessage = errorMessage
-        backgroundTasksBySessionID[sessionID] = tasks
+        chatFeatureModel.sessions.backgroundTasksBySessionID[sessionID] = tasks
         do {
             try chatSessionRepository?.saveBackgroundTask(tasks[index].persisted)
         } catch {
             self.errorMessage = String(describing: error)
         }
         if !hasRunningTitleTask(sessionID: sessionID) {
-            regeneratingTitleSessionIDs.remove(sessionID)
+            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
         }
     }
 
     private func upsertBackgroundTask(_ task: AppSessionBackgroundTask) {
-        var tasks = backgroundTasksBySessionID[task.sessionID, default: []]
+        var tasks = chatFeatureModel.sessions.backgroundTasksBySessionID[task.sessionID, default: []]
         if let index = tasks.firstIndex(where: { $0.id == task.id }) {
             tasks[index] = task
         } else {
             tasks.append(task)
         }
-        backgroundTasksBySessionID[task.sessionID] = tasks
+        chatFeatureModel.sessions.backgroundTasksBySessionID[task.sessionID] = tasks
         do {
             try chatSessionRepository?.saveBackgroundTask(task.persisted)
         } catch {
             errorMessage = String(describing: error)
         }
         if !hasRunningTitleTask(sessionID: task.sessionID) {
-            regeneratingTitleSessionIDs.remove(task.sessionID)
+            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(task.sessionID)
         }
     }
 
@@ -3387,18 +3354,18 @@ final class AppViewModel: NSObject, ObservableObject {
                 return
             }
             try chatSessionRepository.deleteSession(sessionID: sessionID)
-            regeneratingTitleSessionIDs.remove(sessionID)
-            backgroundTasksBySessionID.removeValue(forKey: sessionID)
+            chatFeatureModel.sessions.regeneratingTitleSessionIDs.remove(sessionID)
+            chatFeatureModel.sessions.backgroundTasksBySessionID.removeValue(forKey: sessionID)
             chatInputDraftsBySessionID.removeValue(forKey: sessionID)
             pendingAttachmentRefsBySessionID.removeValue(forKey: sessionID)
             agentEventTimelinesBySessionID.removeValue(forKey: sessionID)
             agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(sessionID):") }
-            if selectedChatSessionID == sessionID {
-                selectedChatSessionID = nil
+            if chatFeatureModel.sessions.selectedSessionID == sessionID {
+                chatFeatureModel.sessions.selectedSessionID = nil
                 replaceSelectedChatTranscript([])
-                agentEventTimeline = []
-                latestChatSummary = nil
-                selectedSessionArtifactDirectories = nil
+                chatFeatureModel.run.eventTimeline = []
+                chatFeatureModel.run.latestSummary = nil
+                chatFeatureModel.sessions.selectedArtifactDirectories = nil
             }
             reloadChatSessions()
             errorMessage = nil
@@ -3412,14 +3379,14 @@ final class AppViewModel: NSObject, ObservableObject {
         _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
         if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
             sessionStateSnapshotsBySessionID[sessionID] = state
-            if selectedChatSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
+            if chatFeatureModel.sessions.selectedSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
                 chatSessionWorkspaceModes.setMode(mode, for: sessionID)
             }
         } else {
             let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
             sessionStateSnapshotsBySessionID[sessionID] = state
-            if selectedChatSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
+            if chatFeatureModel.sessions.selectedSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             try chatSessionRepository.saveSessionState(state, sessionID: sessionID)
         }
         sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
@@ -3443,7 +3410,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func openBrowserHistoryRecord(_ record: BrowserHistoryRecord, url: URL) {
         if browserHistorySessionExists(record.sessionID) {
-            if record.sessionID != selectedChatSessionID { selectChatSession(record.sessionID) }
+            if record.sessionID != chatFeatureModel.sessions.selectedSessionID { selectChatSession(record.sessionID) }
             browserFeatureModel.openURL(url, preferredSessionID: record.sessionID)
         } else {
             openBrowserHistoryRecordInNewSession(record, url: url)
@@ -3460,10 +3427,10 @@ final class AppViewModel: NSObject, ObservableObject {
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
-            selectedChatSessionID = session.id
+            chatFeatureModel.sessions.selectedSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             browserFeatureModel.resetWorkspaceBinding()
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
@@ -3471,13 +3438,13 @@ final class AppViewModel: NSObject, ObservableObject {
             replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
-            agentEventTimeline = []
+            chatFeatureModel.run.eventTimeline = []
             agentEventTimelinesBySessionID[session.id] = []
-            latestChatSummary = nil
-            chatSummaryMessage = nil
-            lastPromptInspection = nil
+            chatFeatureModel.run.latestSummary = nil
+            chatFeatureModel.run.summaryMessage = nil
+            chatFeatureModel.run.lastPromptInspection = nil
             reloadChatSessions(restoreWorkspaceMode: false)
-            selectedChatSessionID = session.id
+            chatFeatureModel.sessions.selectedSessionID = session.id
             openURLInCurrentChatBrowser(url)
             errorMessage = nil
         } catch {
@@ -3493,7 +3460,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func rememberCurrentWorkspaceMode() {
-        rememberWorkspaceMode(browserFeatureModel.isVisible ? .browser : .conversation, for: selectedChatSessionID ?? activeChatSession.id)
+        rememberWorkspaceMode(browserFeatureModel.isVisible ? .browser : .conversation, for: chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id)
     }
 
     private func rememberWorkspaceMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
@@ -3517,7 +3484,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func appendSessionRecord(kind: String, title: String? = nil, body: String? = nil, metadata: [String: String] = [:], sessionID: String? = nil) {
-        let targetSessionID = sessionID ?? selectedChatSessionID ?? activeChatSession.id
+        let targetSessionID = sessionID ?? chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         let record = AppSessionRecord(sessionID: targetSessionID, kind: kind, title: title, body: body, metadata: metadata)
         do {
             try chatSessionRepository?.appendSessionRecord(record, sessionID: targetSessionID)
@@ -3535,7 +3502,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
         guard process.state == .completed,
               let chatSessionRepository,
-              let sessionID = selectedChatSessionID
+              let sessionID = chatFeatureModel.sessions.selectedSessionID
         else { return [] }
         let cacheKey = "\(sessionID):\(process.id)"
         if let cached = agentEventTimelinesByProcessKey[cacheKey] { return cached }
@@ -3583,14 +3550,14 @@ final class AppViewModel: NSObject, ObservableObject {
     private func restoreLatestAgentEventTimeline(sessionID: String) throws {
         guard let chatSessionRepository else {
             agentEventTimelinesBySessionID[sessionID] = []
-            agentEventTimeline = []
+            chatFeatureModel.run.eventTimeline = []
             return
         }
 
         let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
         if !cachedTimeline.isEmpty {
             agentEventTimelinesBySessionID[sessionID] = cachedTimeline
-            agentEventTimeline = cachedTimeline
+            chatFeatureModel.run.eventTimeline = cachedTimeline
             return
         }
 
@@ -3604,7 +3571,7 @@ final class AppViewModel: NSObject, ObservableObject {
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
                 scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
-                agentEventTimeline = restored
+                chatFeatureModel.run.eventTimeline = restored
                 return
             }
         }
@@ -3629,30 +3596,30 @@ final class AppViewModel: NSObject, ObservableObject {
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
                 scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: restored)
-                agentEventTimeline = restored
+                chatFeatureModel.run.eventTimeline = restored
                 return
             }
         }
 
         agentEventTimelinesBySessionID[sessionID] = []
-        agentEventTimeline = []
+        chatFeatureModel.run.eventTimeline = []
     }
 
     func openSessionFromNotification(_ sessionID: String) {
         selection = .agentChat
-        sessionSearchQuery = ""
+        chatFeatureModel.sessions.searchQuery = ""
         selectChatSession(sessionID)
     }
 
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
-        if selectedChatSessionID == sessionID,
-           loadingChatSessionDetailID == nil,
+        if chatFeatureModel.sessions.selectedSessionID == sessionID,
+           chatFeatureModel.sessions.loadingSessionDetailID == nil,
            activeChatSession.id == sessionID {
             return
         }
-        if selectedChatSessionID != sessionID {
-            _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
+        if chatFeatureModel.sessions.selectedSessionID != sessionID {
+            _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
         }
         rememberCurrentWorkspaceMode()
         chatSessionSelectionTask?.cancel()
@@ -3661,12 +3628,12 @@ final class AppViewModel: NSObject, ObservableObject {
         let coordinator = chatSessionDetailLoadCoordinator
         let startedAt = ContinuousClock.now
 
-        selectedChatSessionID = sessionID
-        loadingChatSessionDetailID = sessionID
+        chatFeatureModel.sessions.selectedSessionID = sessionID
+        chatFeatureModel.sessions.loadingSessionDetailID = sessionID
         replaceSelectedChatTranscript([])
-        agentEventTimeline = agentEventTimelinesBySessionID[sessionID] ?? []
-        latestChatSummary = nil
-        selectedSessionArtifactDirectories = nil
+        chatFeatureModel.run.eventTimeline = agentEventTimelinesBySessionID[sessionID] ?? []
+        chatFeatureModel.run.latestSummary = nil
+        chatFeatureModel.sessions.selectedArtifactDirectories = nil
         refreshSelectedSubmittingState()
         errorMessage = nil
 
@@ -3675,10 +3642,10 @@ final class AppViewModel: NSObject, ObservableObject {
                 guard let snapshot = try await coordinator.load(repository: chatSessionRepository, sessionID: sessionID) else {
                     guard let self,
                           self.chatSessionSelectionGeneration == generation,
-                          self.selectedChatSessionID == sessionID
+                          self.chatFeatureModel.sessions.selectedSessionID == sessionID
                     else { return }
                     self.errorMessage = "无法加载所选会话。"
-                    self.loadingChatSessionDetailID = nil
+                    self.chatFeatureModel.sessions.loadingSessionDetailID = nil
                     return
                 }
                 try Task.checkCancellation()
@@ -3693,15 +3660,15 @@ final class AppViewModel: NSObject, ObservableObject {
                       self.isCurrentChatSessionSelection(sessionID: sessionID, generation: generation)
                 else { return }
                 self.errorMessage = String(describing: error)
-                self.loadingChatSessionDetailID = nil
+                self.chatFeatureModel.sessions.loadingSessionDetailID = nil
             }
         }
     }
 
     private func isCurrentChatSessionSelection(sessionID: String, generation: Int) -> Bool {
         chatSessionSelectionGeneration == generation
-            && selectedChatSessionID == sessionID
-            && loadingChatSessionDetailID == sessionID
+            && chatFeatureModel.sessions.selectedSessionID == sessionID
+            && chatFeatureModel.sessions.loadingSessionDetailID == sessionID
     }
 
     private func applySelectedChatSessionSnapshot(
@@ -3722,32 +3689,32 @@ final class AppViewModel: NSObject, ObservableObject {
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
             agentEventTimelinesBySessionID[session.id] = snapshot.timeline
-            agentEventTimeline = snapshot.timeline
-            latestChatSummary = snapshot.latestSummary
-            selectedSessionArtifactDirectories = snapshot.artifactDirectories
+            chatFeatureModel.run.eventTimeline = snapshot.timeline
+            chatFeatureModel.run.latestSummary = snapshot.latestSummary
+            chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
             restoreWorkspaceMode(for: session.id)
             syncLLMModelDisplayFromSession(session.id)
-            chatSummaryMessage = nil
-            lastContext = nil
-            lastPromptInspection = nil
-            loadingChatSessionDetailID = nil
+            chatFeatureModel.run.summaryMessage = nil
+            chatFeatureModel.run.lastContext = nil
+            chatFeatureModel.run.lastPromptInspection = nil
+            chatFeatureModel.sessions.loadingSessionDetailID = nil
             errorMessage = nil
             let elapsed = startedAt.duration(to: ContinuousClock.now)
             let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
             AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
         } catch {
             errorMessage = String(describing: error)
-            loadingChatSessionDetailID = nil
+            chatFeatureModel.sessions.loadingSessionDetailID = nil
         }
     }
 
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
-        sessionListFilter = filter
+        chatFeatureModel.sessions.filter = filter
         reloadChatSessions(restoreWorkspaceMode: restoreWorkspaceMode)
     }
 
     func setSelectedSessionStatus(_ status: AgentSessionStatus) {
-        guard let selectedChatSessionID else { return }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID else { return }
         setChatSessionStatus(selectedChatSessionID, status: status)
     }
 
@@ -3756,8 +3723,8 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             let previousStatus = try chatSessionRepository.loadSession(id: sessionID)?.governance.status
             let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
-            if selectedChatSessionID == sessionID {
-                self.selectedChatSessionID = session.id
+            if chatFeatureModel.sessions.selectedSessionID == sessionID {
+                self.chatFeatureModel.sessions.selectedSessionID = session.id
                 fallbackChatSession = session
             }
             reloadChatSessions()
@@ -3798,7 +3765,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func toggleSelectedSessionFlag() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let chatSessionRepository else { return }
         do {
             let session = try chatSessionRepository.toggleFlag(sessionID: selectedChatSessionID)
             reloadChatSessions()
@@ -3810,7 +3777,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func toggleSelectedSessionLabel(_ labelID: String) {
-        guard let selectedChatSessionID else { return }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID else { return }
         toggleChatSessionLabel(selectedChatSessionID, labelID: labelID)
     }
 
@@ -3828,7 +3795,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 didRemove = false
             }
             let updated = try chatSessionRepository.setLabels(sessionID: sessionID, labels: labels)
-            if selectedChatSessionID == sessionID {
+            if chatFeatureModel.sessions.selectedSessionID == sessionID {
                 fallbackChatSession = updated
             }
             reloadChatSessions()
@@ -3841,12 +3808,12 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func appendGovernanceEvent(_ event: AgentEvent) {
-        agentEventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
+        chatFeatureModel.run.eventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
     }
 
     func reloadPendingApprovals() {
         do {
-            pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
+            chatFeatureModel.approvals.pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
             autoApproveCurrentPolicyPendingApprovals()
             errorMessage = nil
         } catch {
@@ -3895,19 +3862,19 @@ final class AppViewModel: NSObject, ObservableObject {
             reloadPendingApprovals()
             switch status {
             case .approved:
-                lastPendingApprovalResultSummary = didSendToLiveBackend
+                chatFeatureModel.approvals.lastResultSummary = didSendToLiveBackend
                     ? "已批准权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 agent run 发送 resume。"
                     : "已批准权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run，未发送 resume。请重试该会话请求。"
             case .denied:
-                lastPendingApprovalResultSummary = didSendToLiveBackend
+                chatFeatureModel.approvals.lastResultSummary = didSendToLiveBackend
                     ? "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 agent run 发送 deny。"
                     : "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run。"
             case .cancelled:
-                lastPendingApprovalResultSummary = didSendToLiveBackend
+                chatFeatureModel.approvals.lastResultSummary = didSendToLiveBackend
                     ? "已取消权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 agent run 发送 cancel/deny。"
                     : "已取消权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run。"
             case .pending:
-                lastPendingApprovalResultSummary = "权限请求 \(approval.requestID) 仍为 pending。"
+                chatFeatureModel.approvals.lastResultSummary = "权限请求 \(approval.requestID) 仍为 pending。"
             }
             errorMessage = nil
         } catch {
@@ -3930,7 +3897,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let draft = BrowserGraphEvidenceBuilder().makeEpisodeDraft(
                 selection: selection,
                 groupID: "default",
-                sessionID: selectedChatSessionID
+                sessionID: chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
             )
             _ = try memoryOSFacade.ingestWebPageEvidence(
                 evidenceID: draft.episode.id,
@@ -3949,7 +3916,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func submitChat() async {
-        let prompt = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = chatFeatureModel.composer.input.trimmingCharacters(in: .whitespacesAndNewlines)
         await submitChat(prompt: prompt, clearComposer: true)
     }
 
@@ -3975,7 +3942,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func scheduleChatSessionListRefresh(reason: String) {
         guard let chatSessionRepository else { return }
-        let filter = sessionListFilter
+        let filter = chatFeatureModel.sessions.filter
         let coordinator = chatSessionListRefreshCoordinator
         Task(priority: .utility) { [weak self] in
             let startedAt = ContinuousClock.now
@@ -3985,8 +3952,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    self.chatSessions = result.visibleSessions
-                    self.allChatSessions = result.allSessions
+                    self.chatFeatureModel.sessions.sessions = result.visibleSessions
+                    self.chatFeatureModel.sessions.allSessions = result.allSessions
                     self.rebuildSessionSearchIndexSoon(sessions: result.allSessions)
                     self.synchronizeSessionReadStates(from: result.allSessions)
                     AppPerformanceLog.chatTurnLogger.info("sessionList.asyncRefresh reason=\(reason, privacy: .public) visible=\(result.visibleSessions.count, privacy: .public) all=\(result.allSessions.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
@@ -3998,8 +3965,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func cancelActiveChatRun() {
-        guard let submittingSessionID = selectedChatSessionID,
-              submittingChatSessionIDs.contains(submittingSessionID)
+        guard let submittingSessionID = chatFeatureModel.sessions.selectedSessionID,
+              chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID)
         else { return }
         let reason = "cancelled by user"
         guard let runID = activeChatRunIDsBySessionID[submittingSessionID] else {
@@ -4020,7 +3987,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func cancelRunningChatRun(sessionID: String, runID: String, reason: String) {
         if let backend = activeChatBackendsByRunID[runID] ?? activeChatBackendsBySessionID[sessionID] {
             backend.abort(runID: runID)
-        } else if var manager = nativeSessionManager, selectedChatSessionID == sessionID {
+        } else if var manager = nativeSessionManager, chatFeatureModel.sessions.selectedSessionID == sessionID {
             manager.cancel(runID: runID, reason: reason)
             nativeSessionManager = manager
         }
@@ -4031,7 +3998,7 @@ final class AppViewModel: NSObject, ObservableObject {
             detail: "已手动终止本轮 agent loop。"
         )
         pendingChatCancellationReasonsBySessionID.removeValue(forKey: sessionID)
-        submittingChatSessionIDs.remove(sessionID)
+        chatFeatureModel.run.submittingSessionIDs.remove(sessionID)
         activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
         refreshSelectedSubmittingState()
         applyKeepScreenAwakeSetting()
@@ -4046,29 +4013,29 @@ final class AppViewModel: NSObject, ObservableObject {
             runID: runID,
             sessionID: sessionID
         )
-        var timeline = agentEventTimelinesBySessionID[sessionID] ?? agentEventTimeline
+        var timeline = agentEventTimelinesBySessionID[sessionID] ?? chatFeatureModel.run.eventTimeline
         timeline.append(cancellation)
         agentEventTimelinesBySessionID[sessionID] = timeline
         scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: timeline)
-        if selectedChatSessionID == sessionID {
-            agentEventTimeline = timeline
+        if chatFeatureModel.sessions.selectedSessionID == sessionID {
+            chatFeatureModel.run.eventTimeline = timeline
         }
     }
 
     func setActiveSkill(slug: String) {
-        activeSkillSlug = slug
-        activeSkillDisplayName = skillRuntimeModel.definitions.first(where: { $0.slug == slug })?.manifest.name
+        chatFeatureModel.composer.activeSkillSlug = slug
+        chatFeatureModel.composer.activeSkillDisplayName = skillRuntimeModel.definitions.first(where: { $0.slug == slug })?.manifest.name
             ?? skillRuntimeModel.presentation.cards.first(where: { $0.id == slug })?.title
             ?? slug
     }
 
     func clearActiveSkill() {
-        activeSkillSlug = nil
-        activeSkillDisplayName = nil
+        chatFeatureModel.composer.activeSkillSlug = nil
+        chatFeatureModel.composer.activeSkillDisplayName = nil
     }
 
     private func resolveActiveSkillInstructions(sessionID: String) -> String? {
-        guard let slug = activeSkillSlug else { return nil }
+        guard let slug = chatFeatureModel.composer.activeSkillSlug else { return nil }
         if let storagePaths {
             let scanner = SkillPackageScanner()
             let snapshot = scanner.scan(storagePaths: storagePaths)
@@ -4129,7 +4096,7 @@ final class AppViewModel: NSObject, ObservableObject {
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attachmentsForSubmission = explicitAttachments ?? pendingAttachmentRefs
+        let attachmentsForSubmission = explicitAttachments ?? chatFeatureModel.composer.pendingAttachmentRefs
         guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
         guard !isLoadingSelectedChatSessionDetail else { return nil }
         guard var manager = nativeSessionManager else {
@@ -4137,29 +4104,29 @@ final class AppViewModel: NSObject, ObservableObject {
             return nil
         }
         let submittingSessionID = manager.session.id
-        guard selectedChatSessionID == nil || selectedChatSessionID == submittingSessionID else { return nil }
-        guard !submittingChatSessionIDs.contains(submittingSessionID) else { return nil }
+        guard chatFeatureModel.sessions.selectedSessionID == nil || chatFeatureModel.sessions.selectedSessionID == submittingSessionID else { return nil }
+        guard !chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) else { return nil }
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[submittingSessionID] = liveBackend
         if clearComposer {
             chatInputDraftsBySessionID[submittingSessionID] = ""
-            if selectedChatSessionID == submittingSessionID { setChatInputDraft("", for: submittingSessionID) }
+            if chatFeatureModel.sessions.selectedSessionID == submittingSessionID { setChatInputDraft("", for: submittingSessionID) }
             pendingAttachmentRefsBySessionID[submittingSessionID] = []
-            if selectedChatSessionID == submittingSessionID { pendingAttachmentRefs = [] }
+            if chatFeatureModel.sessions.selectedSessionID == submittingSessionID { chatFeatureModel.composer.pendingAttachmentRefs = [] }
         }
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
-        agentEventTimeline = []
-        submittingChatSessionIDs.insert(submittingSessionID)
+        chatFeatureModel.run.eventTimeline = []
+        chatFeatureModel.run.submittingSessionIDs.insert(submittingSessionID)
         activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
         refreshSelectedSubmittingState()
         applyKeepScreenAwakeSetting()
-        let optimisticTranscript = transcript
+        let optimisticTranscript = chatFeatureModel.run.transcript
         let baselineMessageCount = manager.session.messages.count
         let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
         let shouldAutoGenerateInitialTitle = baselineUserMessageCount == 0
-        let submittedActiveSkillSlug = activeSkillSlug
-        let submittedActiveSkillDisplayName = activeSkillDisplayName
+        let submittedActiveSkillSlug = chatFeatureModel.composer.activeSkillSlug
+        let submittedActiveSkillDisplayName = chatFeatureModel.composer.activeSkillDisplayName
         let submittedActiveSkillContextSnapshot: String? = {
             let displayName = submittedActiveSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let slug = submittedActiveSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -4173,17 +4140,17 @@ final class AppViewModel: NSObject, ObservableObject {
             attachments: attachmentsForSubmission,
             personReferences: personReferences
         )
-        if selectedChatSessionID == submittingSessionID {
-            transcript = optimisticTranscript + [optimisticUserMessage]
+        if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
+            chatFeatureModel.run.transcript = optimisticTranscript + [optimisticUserMessage]
         }
-        lastContext = nil
-        lastPromptInspection = nil
+        chatFeatureModel.run.lastContext = nil
+        chatFeatureModel.run.lastPromptInspection = nil
         defer {
             activeChatBackendsBySessionID.removeValue(forKey: submittingSessionID)
             if let runID = activeChatRunIDsBySessionID[submittingSessionID] {
                 activeChatBackendsByRunID.removeValue(forKey: runID)
             }
-            submittingChatSessionIDs.remove(submittingSessionID)
+            chatFeatureModel.run.submittingSessionIDs.remove(submittingSessionID)
             activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
             refreshSelectedSubmittingState()
             applyKeepScreenAwakeSetting()
@@ -4223,7 +4190,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 activeSkillDisplayName: resolvedSkillInstructions == nil ? nil : submittedActiveSkillDisplayName,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
-                    if self.submittingChatSessionIDs.contains(submittingSessionID) {
+                    if self.chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) {
                         self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
@@ -4238,8 +4205,8 @@ final class AppViewModel: NSObject, ObservableObject {
                     timeline.append(presentation)
                     self.agentEventTimelinesBySessionID[submittingSessionID] = timeline
                     self.scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: timeline)
-                    if self.selectedChatSessionID == submittingSessionID {
-                        self.agentEventTimeline = timeline
+                    if self.chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
+                        self.chatFeatureModel.run.eventTimeline = timeline
                     }
                     if presentation.kind == AgentEventKind.permissionRequested.rawValue {
                         self.reloadPendingApprovals()
@@ -4253,15 +4220,15 @@ final class AppViewModel: NSObject, ObservableObject {
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
             scheduleActivityTimelineCacheSave(sessionID: submittingSessionID, timeline: manager.eventPresentations)
             await flushActivityTimelineCache(sessionID: submittingSessionID)
-            if selectedChatSessionID == submittingSessionID {
+            if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = response.session
-                transcript = manager.session.messages
-                agentEventTimeline = manager.eventPresentations
-                selectedChatSessionID = response.session.id
-                latestChatSummary = try chatSessionRepository?.loadLatestSummary(sessionID: response.session.id)
-                lastContext = nil
-                lastPromptInspection = nil
+                chatFeatureModel.run.transcript = manager.session.messages
+                chatFeatureModel.run.eventTimeline = manager.eventPresentations
+                chatFeatureModel.sessions.selectedSessionID = response.session.id
+                chatFeatureModel.run.latestSummary = try chatSessionRepository?.loadLatestSummary(sessionID: response.session.id)
+                chatFeatureModel.run.lastContext = nil
+                chatFeatureModel.run.lastPromptInspection = nil
             }
             reloadPendingApprovals()
             scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
@@ -4283,10 +4250,10 @@ final class AppViewModel: NSObject, ObservableObject {
             return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
-            if selectedChatSessionID == submittingSessionID {
+            if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = recoveredSession
-                transcript = recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
+                chatFeatureModel.run.transcript = recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
             }
             reloadPendingApprovals()
             pendingChatCancellationReasonsBySessionID.removeValue(forKey: submittingSessionID)
@@ -4307,15 +4274,15 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func summarizeSelectedChatSession() async {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        isSummarizingChatSession = true
-        defer { isSummarizingChatSession = false }
+        guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let chatSessionRepository else { return }
+        chatFeatureModel.run.isSummarizing = true
+        defer { chatFeatureModel.run.isSummarizing = false }
         do {
             let provider = try sessionLLMProvider(sessionID: selectedChatSessionID)
             let summarizer = AgentSessionSummarizer(provider: provider)
             let summary = try await chatSessionRepository.summarizeSession(id: selectedChatSessionID, using: summarizer)
-            latestChatSummary = summary
-            chatSummaryMessage = latestChatSummaryRefreshState.successMessage
+            chatFeatureModel.run.latestSummary = summary
+            chatFeatureModel.run.summaryMessage = latestChatSummaryRefreshState.successMessage
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)

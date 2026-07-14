@@ -13,10 +13,10 @@ struct ComposerDraftSynchronizationTests {
             observeLogEntries: []
         )
 
-        viewModel.chatInput = "上一轮语音"
+        viewModel.chatFeatureModel.composer.input = "上一轮语音"
         viewModel.updateSelectedChatInputDraft("")
 
-        #expect(viewModel.chatInput == "上一轮语音")
+        #expect(viewModel.chatFeatureModel.composer.input == "上一轮语音")
     }
 
     @Test func speechInputUsesLatestManualDraftInsteadOfPublishedChatInput() {
@@ -27,7 +27,7 @@ struct ComposerDraftSynchronizationTests {
             observeLogEntries: []
         )
 
-        viewModel.chatInput = "上一轮语音"
+        viewModel.chatFeatureModel.composer.input = "上一轮语音"
         viewModel.updateSelectedChatInputDraft("")
 
         #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "")
@@ -41,12 +41,12 @@ struct ComposerDraftSynchronizationTests {
             observeLogEntries: []
         )
         viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
-        viewModel.chatInput = ""
+        viewModel.chatFeatureModel.composer.input = ""
 
         viewModel.updateSelectedChatInputDraft("a")
 
         #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "a")
-        #expect(viewModel.chatInput == "")
+        #expect(viewModel.chatFeatureModel.composer.input == "")
     }
 
     @Test func repeatedManualEditsReplaceLiveDraftWithoutPublishingChatInput() {
@@ -57,13 +57,13 @@ struct ComposerDraftSynchronizationTests {
             observeLogEntries: []
         )
         viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
-        viewModel.chatInput = "published value"
+        viewModel.chatFeatureModel.composer.input = "published value"
 
         viewModel.updateSelectedChatInputDraft("a")
         viewModel.updateSelectedChatInputDraft("ab")
 
         #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "ab")
-        #expect(viewModel.chatInput == "published value")
+        #expect(viewModel.chatFeatureModel.composer.input == "published value")
     }
 
     @Test(arguments: [true, false])
@@ -75,12 +75,12 @@ struct ComposerDraftSynchronizationTests {
             observeLogEntries: []
         )
         viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        viewModel.chatInput = "stale published value"
+        viewModel.chatFeatureModel.composer.input = "stale published value"
         viewModel.updateSelectedChatInputDraft("current manual draft")
 
         viewModel.appendToSelectedChatInputDraft("external browser context")
 
-        #expect(viewModel.chatInput == "current manual draft\n\nexternal browser context")
+        #expect(viewModel.chatFeatureModel.composer.input == "current manual draft\n\nexternal browser context")
         #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "current manual draft\n\nexternal browser context")
     }
 }

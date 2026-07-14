@@ -13,7 +13,7 @@ struct SessionAttentionVisibilityTests {
             observeLogEntries: []
         )
         viewModel.selection = .agentChat
-        viewModel.selectedChatSessionID = "visible-session"
+        viewModel.chatFeatureModel.sessions.selectedSessionID = "visible-session"
 
         #expect(!NSApp.isActive)
         #expect(viewModel.shouldTreatSessionUpdateAsRead(sessionID: "visible-session"))
@@ -27,7 +27,7 @@ struct SessionAttentionVisibilityTests {
             observeLogEntries: []
         )
         viewModel.selection = .agentChat
-        viewModel.selectedChatSessionID = "visible-session"
+        viewModel.chatFeatureModel.sessions.selectedSessionID = "visible-session"
 
         #expect(!viewModel.shouldTreatSessionUpdateAsRead(sessionID: "background-session"))
     }
@@ -40,7 +40,7 @@ struct SessionAttentionVisibilityTests {
             observeLogEntries: []
         )
         viewModel.selection = .search
-        viewModel.selectedChatSessionID = "visible-session"
+        viewModel.chatFeatureModel.sessions.selectedSessionID = "visible-session"
 
         #expect(!viewModel.shouldTreatSessionUpdateAsRead(sessionID: "visible-session"))
     }

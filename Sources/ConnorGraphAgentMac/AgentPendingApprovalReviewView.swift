@@ -8,13 +8,14 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct AgentPendingApprovalReviewView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Button("刷新") { viewModel.reloadPendingApprovals() }
-                if let summary = viewModel.lastPendingApprovalResultSummary {
+                Button("刷新") { chatActions.orchestration.reloadPendingApprovals() }
+                if let summary = model.approvals.lastResultSummary {
                     Text(summary).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -23,12 +24,12 @@ struct AgentPendingApprovalReviewView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if viewModel.pendingApprovals.isEmpty {
+            if model.approvals.pendingApprovals.isEmpty {
                 Text("暂无待审批权限请求。模型管线只能请求工具权限，康纳同学负责审批、审计和 timeline。")
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {
-                List(viewModel.pendingApprovals) { approval in
+                List(model.approvals.pendingApprovals) { approval in
                     let row = AppAgentPendingApprovalPresentation(approval)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline) {
@@ -70,22 +71,22 @@ struct AgentPendingApprovalReviewView: View {
                         }
 
                         HStack {
-                            Button("批准") { viewModel.approvePendingApproval(approval) }
-                            Button("拒绝", role: .destructive) { viewModel.denyPendingApproval(approval) }
-                            Button("取消") { viewModel.cancelPendingApproval(approval) }
+                            Button("批准") { chatActions.orchestration.approvePendingApproval(approval) }
+                            Button("拒绝", role: .destructive) { chatActions.orchestration.denyPendingApproval(approval) }
+                            Button("取消") { chatActions.orchestration.cancelPendingApproval(approval) }
                         }
                     }
                     .padding(.vertical, 8)
                 }
             }
 
-            if let error = viewModel.errorMessage {
+            if let error = chatActions.orchestration.errorMessage {
                 Text(error).foregroundStyle(.red)
             }
         }
         .padding()
         .onAppear {
-            viewModel.reloadPendingApprovals()
+            chatActions.orchestration.reloadPendingApprovals()
         }
     }
 

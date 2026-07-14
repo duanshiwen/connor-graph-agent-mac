@@ -12,11 +12,11 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.sessionSearchQuery = "existing session filter"
+        fixture.viewModel.chatFeatureModel.sessions.searchQuery = "existing session filter"
         fixture.viewModel.globalSearchFeatureModel.updateQuery(" quarterly planning ")
 
         #expect(fixture.viewModel.globalSearchFeatureModel.query == " quarterly planning ")
-        #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
+        #expect(fixture.viewModel.chatFeatureModel.sessions.searchQuery == "existing session filter")
         #expect(fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
         #expect(fixture.viewModel.globalSearchFeatureModel.previewState.query == "quarterly planning")
         #expect(!fixture.viewModel.globalSearchFeatureModel.previewState.isLoading)
@@ -24,7 +24,7 @@ struct AppGlobalSearchTests {
         fixture.viewModel.globalSearchFeatureModel.clear()
 
         #expect(fixture.viewModel.globalSearchFeatureModel.query.isEmpty)
-        #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
+        #expect(fixture.viewModel.chatFeatureModel.sessions.searchQuery == "existing session filter")
         #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
         #expect(fixture.viewModel.globalSearchFeatureModel.previewState == .empty)
     }
@@ -395,7 +395,7 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let sessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID ?? fixture.viewModel.chatFeatureModel.sessions.sessions.first?.id)
         fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/thailand", title: "泰国签证指南", sessionID: sessionID)
         fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/vietnam", title: "越南旅行记录", sessionID: sessionID)
         fixture.viewModel.globalSearchFeatureModel.updateQuery("泰国")
@@ -561,7 +561,7 @@ struct AppGlobalSearchTests {
         fixture.viewModel.globalSearchFeatureModel.openChatSession(session.id)
 
         #expect(fixture.viewModel.selection == .agentChat)
-        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == session.id)
         #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
@@ -598,7 +598,7 @@ struct AppGlobalSearchTests {
 
         fixture.viewModel.globalSearchFeatureModel.performSelectedItem()
 
-        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == session.id)
         #expect(!fixture.viewModel.globalSearchFeatureModel.isOverlayPresented)
     }
 
@@ -625,7 +625,7 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let sessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID ?? fixture.viewModel.chatFeatureModel.sessions.sessions.first?.id)
         fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/swift-history", title: "Swift History", sessionID: sessionID)
         fixture.viewModel.globalSearchFeatureModel.updateQuery("swift-history")
 
@@ -639,7 +639,7 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let sessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID ?? fixture.viewModel.chatFeatureModel.sessions.sessions.first?.id)
         for index in 0..<5 {
             fixture.viewModel.browserFeatureModel.recordHistory(url: "https://example.com/paged-history-\(index)", title: "Paged History \(index)", sessionID: sessionID)
         }
@@ -654,7 +654,7 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let sessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID ?? fixture.viewModel.chatFeatureModel.sessions.sessions.first?.id)
         let urlString = "https://example.com/open-tab"
         let tabID = UUID()
         fixture.viewModel.browserFeatureModel.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(
@@ -682,13 +682,13 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let originalSessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let originalSessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID ?? fixture.viewModel.chatFeatureModel.sessions.sessions.first?.id)
         let urlString = "https://example.com/deleted-session"
         let record = BrowserHistoryRecord(url: urlString, title: "Deleted Session Page", sessionID: "missing-session", sessionTitle: "Deleted")
 
         fixture.viewModel.globalSearchFeatureModel.openBrowserHistoryRecord(record)
 
-        let newSessionID = try #require(fixture.viewModel.selectedChatSessionID)
+        let newSessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID)
         #expect(newSessionID != originalSessionID)
         #expect(fixture.viewModel.selection == .agentChat)
         #expect(fixture.viewModel.browserFeatureModel.isVisible)

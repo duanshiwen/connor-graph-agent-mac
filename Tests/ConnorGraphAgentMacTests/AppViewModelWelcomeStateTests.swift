@@ -388,7 +388,7 @@ private func makeWelcomeStateViewModel(
     viewModel.selectLLMModel("gpt-4o-mini", providerMode: .openAICompatible, connectionID: "legacy-openai")
     #expect(viewModel.sessionHasLLMOverride == true)
 
-    let activeSessionID = try #require(viewModel.selectedChatSessionID)
+    let activeSessionID = try #require(viewModel.chatFeatureModel.sessions.selectedSessionID)
     let before = try #require(viewModel.sessionStateSnapshotsBySessionID[activeSessionID]?.llmOverride)
     #expect(before.connectionID == "legacy-openai")
 

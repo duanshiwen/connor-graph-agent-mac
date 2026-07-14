@@ -11,16 +11,16 @@ struct AgentComposerStore {
             guard let session = selectedSession else { return false }
             guard session.governance.kind == .note else { return false }
             guard session.messages.isEmpty else { return false }
-            guard !viewModel.isSubmittingChat else { return false }
+            guard !viewModel.chatFeatureModel.run.isSubmitting else { return false }
             return true
         }()
         return AgentComposerState(
             input: input,
-            pendingAttachments: viewModel.pendingAttachmentRefs,
-            activeSkillSlug: viewModel.activeSkillSlug,
-            activeSkillDisplayName: viewModel.activeSkillDisplayName,
+            pendingAttachments: viewModel.chatFeatureModel.composer.pendingAttachmentRefs,
+            activeSkillSlug: viewModel.chatFeatureModel.composer.activeSkillSlug,
+            activeSkillDisplayName: viewModel.chatFeatureModel.composer.activeSkillDisplayName,
             canSubmit: canSubmit && !viewModel.isLoadingSelectedChatSessionDetail,
-            isSubmitting: viewModel.isSubmittingChat,
+            isSubmitting: viewModel.chatFeatureModel.run.isSubmitting,
             displayMode: isNoteBeforeFirstMessage ? .note : .normal,
             selectedModel: viewModel.llmSelectedModel,
             sessionHasLLMOverride: viewModel.sessionHasLLMOverride,
@@ -28,8 +28,8 @@ struct AgentComposerStore {
             selectedSessionStatus: selectedSession?.governance.status,
             isSpeechTranscriptionEnabled: viewModel.inputSettingsModel.sessionSpeechTranscriptionEnabled,
             isSpeechTranscriptionRunning: viewModel.isSpeechTranscriptionRunningForSelectedSession,
-            speechTranscriptionStatus: viewModel.speechTranscriptionStatus,
-            speechProvisionalTranscript: viewModel.speechProvisionalTranscript
+            speechTranscriptionStatus: viewModel.chatFeatureModel.composer.speechTranscriptionStatus,
+            speechProvisionalTranscript: viewModel.chatFeatureModel.composer.speechProvisionalTranscript
         )
     }
 
@@ -68,7 +68,7 @@ struct AgentComposerStore {
         case .finishSpeechTranscription:
             viewModel.finishSpeechTranscriptionForSelectedSession()
         case .showBackgroundTasks:
-            viewModel.isBackgroundTasksPresented = true
+            viewModel.chatFeatureModel.sessions.isBackgroundTasksPresented = true
         }
     }
 }
