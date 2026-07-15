@@ -88,6 +88,18 @@ struct AppStartupLightConstructionContractTests {
         #expect(source.contains("AppMemoryOSSearchKernelFactory.healthReport"))
     }
 
+    @Test func skillPresentationIsBuiltDuringContentBootstrapNotRouteAppearance() throws {
+        let bootstrapSource = try projectSource(named: "AppContentBootstrapActor.swift")
+        #expect(bootstrapSource.contains("SkillPackageScanner().scan(storagePaths: paths)"))
+        #expect(bootstrapSource.contains("SkillCommercialUIPresentationBuilder().build"))
+
+        let skillListSource = try projectSource(named: "SkillManagerListViews.swift")
+        #expect(!skillListSource.contains(".onAppear {\n            model.reload()"))
+
+        let composerSource = try projectSource(named: "AgentChatComposerView.swift")
+        #expect(!composerSource.contains(".onAppear {\n            chatActions.dependencies.skills.reload()"))
+    }
+
     private func functionBody(named marker: String, in source: String, endingAt endMarker: String) throws -> String {
         let start = try #require(source.range(of: marker))
         let tail = String(source[start.lowerBound...])
