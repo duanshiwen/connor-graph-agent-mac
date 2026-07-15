@@ -130,7 +130,7 @@ final class AppCompositionRoot: ObservableObject {
                 } else {
                     model.prepareDemoInteractiveStartup()
                 }
-                let noteImportModel = model.makeNoteImportViewModel()
+                let noteImportModel = model.noteImportRuntimeFactory.makeModel()
                 guard self.startupCoordinator.acceptsResults(for: generation) else {
                     model.shutdownRuntimeResources()
                     noteImportModel.stopJobMonitoring()
@@ -154,7 +154,7 @@ final class AppCompositionRoot: ObservableObject {
             },
             startMaintenance: { [weak self] generation in
                 guard let self, self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
-                self.viewModel.startTaskSchedulerTimer()
+                self.viewModel.maintenanceCoordinator.startScheduler()
                 await self.noteImportModel.recoverPersistedJobs()
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
                 await self.identityStore.restoreSession()

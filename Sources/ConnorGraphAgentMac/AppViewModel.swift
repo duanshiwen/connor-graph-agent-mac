@@ -26,10 +26,7 @@ enum AppViewModelStartupMode: Equatable {
 
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
-#if DEBUG
-    private let mainActorStallMonitor = AppMainActorStallMonitor()
-#endif
-    private let memoryOSMaintenanceWorker = AppMemoryOSMaintenanceWorker()
+    let maintenanceCoordinator = AppMaintenanceCoordinator()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
     private lazy var chatSessionCoordinator = ChatSessionCoordinator(
         model: chatFeatureModel.sessions,
@@ -185,10 +182,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var loadedLoopConfiguration = AgentLoopConfiguration()
     private var llmSettingsRepository: AppLLMSettingsRepository { aiConnectionsModel.settingsRepository }
     private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
-    private var applicationDidFinishLaunchingObserver: NSObjectProtocol?
-    private var isRunningBackgroundJobs: Bool = false
-    private var lastMemoryOSDailySweep: Date?
-    private var hasScheduledMemoryOSSearchIndexRepair = false
 
     private var backgroundAIExecutorProvider: BackgroundAIExecutorProvider? {
         guard let factory = chatRunCoordinator.runtimeFactory, let memoryOSFacade else { return nil }
@@ -207,9 +200,7 @@ final class AppViewModel: NSObject, ObservableObject {
     // Product chat path: ChatRunCoordinator owns NativeSessionManager, backends, run IDs and timelines.
     private var fallbackChatSessionStorage: AgentSession
     private var isLoadingRuntimeSettings = false
-    private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
-    private var taskSchedulerTimer: Timer?
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -892,7 +883,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         if startupMode == .immediate {
-            registerMaintenanceObserversIfNeeded()
+            maintenanceCoordinator.startObservers()
         }
         if let repository {
             self.chatRunCoordinator.installRuntimeFactory(AppGraphAgentRuntimeFactory(
@@ -1070,9 +1061,9 @@ final class AppViewModel: NSObject, ObservableObject {
             guard let self else { return }
             switch scope {
             case .rssOnly:
-                try await self.reconcileRSSSourceRefreshTasks()
+                try await self.maintenanceCoordinator.reconcile(.rss)
             case .allSources:
-                try await self.reconcileSourceRefreshTasks()
+                try await self.maintenanceCoordinator.reconcile(.allSources)
             }
             self.taskAutomationModel.reload()
         }
@@ -1084,7 +1075,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         calendarFeatureModel.sourceSetChanged = { [weak self] in
             guard let self else { return }
-            try await self.reconcileCalendarAccountRefreshTasks()
+            try await self.maintenanceCoordinator.reconcile(.calendar)
             self.taskAutomationModel.reload()
         }
         calendarFeatureModel.onEvent = { [weak self] event in
@@ -1101,7 +1092,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         mailFeatureModel.sourceSetChanged = { [weak self] in
             guard let self else { return }
-            try await self.reconcileMailAccountRefreshTasks()
+            try await self.maintenanceCoordinator.reconcile(.mail)
             self.taskAutomationModel.reload()
         }
         mailFeatureModel.onEvent = { [weak self] event in
@@ -1230,7 +1221,36 @@ final class AppViewModel: NSObject, ObservableObject {
         chatRunCoordinator.onTimelineChanged = { [weak self] sessionID, timeline in
             self?.scheduleActivityTimelineCacheSave(sessionID: sessionID, timeline: timeline)
         }
-        chatRunCoordinator.onSubmittingChanged = { [weak self] in self?.applyKeepScreenAwakeSetting() }
+        chatRunCoordinator.onSubmittingChanged = { [weak self] in
+            guard let self else { return }
+            self.maintenanceCoordinator.updateKeepScreenAwake(
+                enabled: self.appSettingsModel.keepScreenAwake,
+                hasActiveRun: self.chatRunCoordinator.isActive
+            )
+        }
+        maintenanceCoordinator.runScheduledTasks = { [weak self] in await self?.performScheduledTaskRun() }
+        maintenanceCoordinator.runBackgroundJobs = { [weak self] in
+            guard let self else { return }
+            await self.maintenanceCoordinator.runMemoryBackgroundJobs(
+                facade: self.memoryOSFacade,
+                aiExecutorProvider: self.backgroundAIExecutorProvider,
+                onError: { [weak self] in self?.errorMessage = $0 }
+            )
+        }
+        maintenanceCoordinator.runDailySweep = { [weak self] in
+            guard let self else { return }
+            await self.maintenanceCoordinator.runMemoryDailySweep(facade: self.memoryOSFacade)
+        }
+        maintenanceCoordinator.onApplicationDidFinishLaunching = { [weak self] in self?.chatAttentionCoordinator.refreshDockBadge() }
+        maintenanceCoordinator.reconcileSources = { [weak self] scope in
+            guard let self else { throw CancellationError() }
+            switch scope {
+            case .allSources: try await self.reconcileSourceRefreshTasks()
+            case .rss: try await self.reconcileRSSSourceRefreshTasks()
+            case .calendar: try await self.reconcileCalendarAccountRefreshTasks()
+            case .mail: try await self.reconcileMailAccountRefreshTasks()
+            }
+        }
         if startupMode == .immediate {
             runImmediateStartupWork(initialSession: initialSession)
         }
@@ -1244,7 +1264,7 @@ final class AppViewModel: NSObject, ObservableObject {
         taskAutomationModel.reload()
         Task { @MainActor in
             do {
-                try await reconcileSourceRefreshTasks()
+                try await maintenanceCoordinator.reconcile(.allSources)
                 taskAutomationModel.reload()
             } catch {
                 errorMessage = String(describing: error)
@@ -1377,14 +1397,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func reconcileStartupRefreshTasks() async {
         do {
-            try await reconcileSourceRefreshTasks()
+            try await maintenanceCoordinator.reconcile(.allSources)
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
     func startStartupMaintenance(snapshot: AppMaintenanceBootstrapSnapshot? = nil) async {
-        registerMaintenanceObserversIfNeeded()
+        maintenanceCoordinator.startObservers()
         if let snapshot {
             taskAutomationModel.applyStartupSnapshot(snapshot.tasks)
             graphDiagnosticsModel.applyStartupMaintenance(
@@ -1400,32 +1420,12 @@ final class AppViewModel: NSObject, ObservableObject {
         scheduleMemoryOSSearchIndexRepairIfNeeded()
     }
 
-    private func registerMaintenanceObserversIfNeeded() {
-#if DEBUG
-        mainActorStallMonitor.start()
-#endif
-        guard applicationDidFinishLaunchingObserver == nil else { return }
-        applicationDidFinishLaunchingObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didFinishLaunchingNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshDockBadge()
-            }
-        }
-    }
-
     func shutdownRuntimeResourcesForTests() {
         shutdownRuntimeResources()
     }
 
     func shutdownRuntimeResources() {
-        if let applicationDidFinishLaunchingObserver {
-            NotificationCenter.default.removeObserver(applicationDidFinishLaunchingObserver)
-            self.applicationDidFinishLaunchingObserver = nil
-        }
-        stopTaskSchedulerTimer()
+        maintenanceCoordinator.shutdown()
         chatSessionCoordinator.shutdown()
         chatApprovalCoordinator.shutdown()
         chatRunCoordinator.shutdown()
@@ -1440,13 +1440,6 @@ final class AppViewModel: NSObject, ObservableObject {
         contactsFeatureModel.shutdown()
         mailFeatureModel.shutdown()
         browserFeatureModel.shutdown()
-        releaseIdleSleepAssertion()
-    }
-
-    private func releaseIdleSleepAssertion() {
-        guard idleSleepAssertionID != 0 else { return }
-        IOPMAssertionRelease(idleSleepAssertionID)
-        idleSleepAssertionID = 0
     }
 
     private func applyPromotedGraphSnapshot(_ snapshot: GraphStoreSnapshot) {
@@ -1458,90 +1451,29 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func scheduleMemoryOSSearchIndexRepairIfNeeded() {
-        guard !hasScheduledMemoryOSSearchIndexRepair else { return }
-        guard let storagePaths else { return }
-        let report = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
-        guard report.status != .healthy else { return }
-        hasScheduledMemoryOSSearchIndexRepair = true
-        isMemoryOSSearchIndexRepairing = true
-        memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复中：\(report.messages.joined(separator: ", "))"
-        Task.detached(priority: .utility) { [storagePaths] in
-            do {
-                let documentCount = try AppMemoryOSSearchKernelFactory.rebuildLiveIndex(paths: storagePaths)
-                let repairedKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.isMemoryOSSearchIndexRepairing = false
-                    self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正常：后台索引已重建（\(documentCount) 条文档）。"
-                    if let store = self.memoryOSStore {
-                        self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: repairedKernel)
-                    }
-                    self.rebuildNativeSessionManagerForActiveSession()
+        maintenanceCoordinator.scheduleMemorySearchRepair(
+            storagePaths: storagePaths,
+            onStarted: { [weak self] messages in
+                self?.isMemoryOSSearchIndexRepairing = true
+                self?.memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复中：\(messages)"
+            },
+            onSucceeded: { [weak self] documentCount, repairedKernel in
+                guard let self else { return }
+                self.isMemoryOSSearchIndexRepairing = false
+                self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正常：后台索引已重建（\(documentCount) 条文档）。"
+                if let store = self.memoryOSStore {
+                    self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: repairedKernel)
                 }
-            } catch {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.isMemoryOSSearchIndexRepairing = false
-                    self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复失败：\(error)"
-                }
+                self.rebuildNativeSessionManagerForActiveSession()
+            },
+            onFailed: { [weak self] message in
+                self?.isMemoryOSSearchIndexRepairing = false
+                self?.memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复失败：\(message)"
             }
-        }
+        )
     }
 
-    func runBackgroundJobs() async {
-        guard !isRunningBackgroundJobs else { return }
-        guard let memoryOSFacade else { return }
-        isRunningBackgroundJobs = true
-        defer { isRunningBackgroundJobs = false }
-        do {
-            let aiExecutorProvider = backgroundAIExecutorProvider
-            let startedAt = ContinuousClock.now
-            let summary = try await memoryOSMaintenanceWorker.runBackgroundJobs(
-                facade: memoryOSFacade,
-                aiExecutorProvider: aiExecutorProvider,
-                now: Date()
-            )
-            let elapsed = startedAt.duration(to: ContinuousClock.now)
-            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-            AppPerformanceLog.chatTurnLogger.info("memoryOS.backgroundJobs.completed projectionRuns=\(summary.projectionRunCount, privacy: .public) aiRuns=\(summary.aiJobRunCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
-        } catch {
-            await MainActor.run { errorMessage = String(describing: error) }
-        }
-    }
-
-    func runDailySweepIfNeeded() async {
-        guard let memoryOSFacade else { return }
-        let now = Date()
-        guard lastMemoryOSDailySweep.map({ now.timeIntervalSince($0) > 86400 }) ?? true else { return }
-        lastMemoryOSDailySweep = now
-        do {
-            let startedAt = ContinuousClock.now
-            let items = try await memoryOSMaintenanceWorker.runDailySweep(facade: memoryOSFacade, now: now)
-            let elapsed = startedAt.duration(to: ContinuousClock.now)
-            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-            AppPerformanceLog.chatTurnLogger.info("memoryOS.dailySweep.completed queued=\(items.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
-        } catch {
-            AppPerformanceLog.chatTurnLogger.warning("memoryOS.dailySweep.failed error=\(String(describing: error), privacy: .public)")
-            // silent failure — does not block main flow
-        }
-    }
-
-    func startTaskSchedulerTimer() {
-        guard taskSchedulerTimer == nil else { return }
-        Task { await runScheduledTasksNow() }
-        taskSchedulerTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.runScheduledTasksNow()
-            }
-        }
-    }
-
-    func stopTaskSchedulerTimer() {
-        taskSchedulerTimer?.invalidate()
-        taskSchedulerTimer = nil
-    }
-
-    func runScheduledTasksNow() async {
+    private func performScheduledTaskRun() async {
         guard taskAutomationModel.beginScheduledTaskRun() else { return }
         guard let taskManagementRepository = taskAutomationModel.repository else {
             taskAutomationModel.endScheduledTaskRun()
@@ -1571,7 +1503,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         do {
-            try await reconcileSourceRefreshTasks()
+            try await maintenanceCoordinator.reconcile(.allSources)
             let scheduler = TaskSchedulerService()
             let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: scheduler, runner: runner)
             _ = try await service.runDueTasks()
@@ -2060,37 +1992,13 @@ final class AppViewModel: NSObject, ObservableObject {
         )
     }
 
-    func makeNoteImportViewModel() -> NoteImportViewModel {
-        guard let databasePath, let chatSessionRepository, let agentRuntimeFactory = chatRunCoordinator.runtimeFactory, let storagePaths else {
-            return NoteImportViewModel(configurationError: "导入运行时不可用，请重新启动应用。")
-        }
-        do {
-            let ledger = try AppNoteImportRepository(databasePath: databasePath)
-            let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
-            let sessionService = HeadlessNoteSessionService(
-                repository: chatSessionRepository,
-                managerFactory: { session in
-                    agentRuntimeFactory.makeNativeSessionManager(session: session, permissionMode: .readOnly)
-                },
-                attachmentStore: attachmentStore
-            )
-            let coordinator = NoteImportCoordinator(
-                ledger: ledger,
-                sessionService: sessionService,
-                attachmentImporter: NoteImportAttachmentImporter(store: attachmentStore),
-                payloadStore: NoteImportPayloadStore(
-                    rootDirectory: storagePaths.artifactsDirectory.appendingPathComponent("note-import-staging", isDirectory: true)
-                )
-            )
-            return NoteImportViewModel(
-                ledger: ledger,
-                coordinator: coordinator,
-                executionSupervisor: NoteImportExecutionSupervisor(coordinator: coordinator),
-                sourceAccessService: NoteImportSourceAccessService()
-            )
-        } catch {
-            return NoteImportViewModel(configurationError: "无法初始化导入功能：\(error.localizedDescription)")
-        }
+    var noteImportRuntimeFactory: NoteImportRuntimeFactory {
+        NoteImportRuntimeFactory(
+            databasePath: databasePath,
+            sessionRepository: chatSessionRepository,
+            runCoordinator: chatRunCoordinator,
+            storagePaths: storagePaths
+        )
     }
 
     private func rebuildNativeSessionManagerForActiveSession() {
@@ -2339,17 +2247,10 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func applyKeepScreenAwakeSetting() {
-        if appSettingsModel.keepScreenAwake && !chatFeatureModel.run.submittingSessionIDs.isEmpty {
-            guard idleSleepAssertionID == 0 else { return }
-            var assertionID = IOPMAssertionID(0)
-            let reason = "Connor session is running" as CFString
-            let result = IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), reason, &assertionID)
-            if result == kIOReturnSuccess {
-                idleSleepAssertionID = assertionID
-            }
-        } else {
-            releaseIdleSleepAssertion()
-        }
+        maintenanceCoordinator.updateKeepScreenAwake(
+            enabled: appSettingsModel.keepScreenAwake,
+            hasActiveRun: chatRunCoordinator.isActive
+        )
     }
 
     func resetSessionNotificationSettings() {
@@ -3029,7 +2930,7 @@ final class AppViewModel: NSObject, ObservableObject {
             )
             errorMessage = nil
             graphDiagnosticsModel.lastPromotionResultSummary = "已保存网页证据到 Memory OS：\(draft.episode.title)"
-            Task { await runBackgroundJobs() }
+            maintenanceCoordinator.scheduleBackgroundJobs()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -3297,8 +3198,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 preview: latestAssistantMessage.map { notificationPreview(from: $0.content) },
                 notificationBody: latestAssistantMessage.map { notificationPreview(from: $0.content) } ?? response.session.title
             )
-            Task { await runBackgroundJobs() }
-            Task { await runDailySweepIfNeeded() }
+            maintenanceCoordinator.scheduleBackgroundJobs()
+            maintenanceCoordinator.scheduleDailySweep()
             return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
