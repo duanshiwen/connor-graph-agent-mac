@@ -31,6 +31,9 @@ struct TopSearchTextField: NSViewRepresentable {
         textField.onMouseDown = { [weak coordinator = context.coordinator] in
             coordinator?.activateFromUserInteraction()
         }
+        textField.onTextChange = { [weak coordinator = context.coordinator] value in
+            coordinator?.publishTextChange(value)
+        }
         return textField
     }
 
@@ -39,10 +42,20 @@ struct TopSearchTextField: NSViewRepresentable {
             nsView.stringValue = text
         }
         nsView.placeholderString = placeholder
-        context.coordinator.isFocused = $isFocused
+        context.coordinator.update(
+            text: $text,
+            isFocused: $isFocused,
+            onSubmit: onSubmit,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            onCancel: onCancel
+        )
         if let textField = nsView as? TopSearchSelectAllOnFocusTextField {
             textField.onMouseDown = { [weak coordinator = context.coordinator] in
                 coordinator?.activateFromUserInteraction()
+            }
+            textField.onTextChange = { [weak coordinator = context.coordinator] value in
+                coordinator?.publishTextChange(value)
             }
         }
         context.coordinator.syncFocusStateIfNeeded(isFocused, in: nsView)
@@ -86,6 +99,22 @@ struct TopSearchTextField: NSViewRepresentable {
             self.onCancel = onCancel
         }
 
+        func update(
+            text: Binding<String>,
+            isFocused: Binding<Bool>,
+            onSubmit: (() -> Void)?,
+            onMoveUp: (() -> Void)?,
+            onMoveDown: (() -> Void)?,
+            onCancel: (() -> Void)?
+        ) {
+            _text = text
+            self.isFocused = isFocused
+            self.onSubmit = onSubmit
+            self.onMoveUp = onMoveUp
+            self.onMoveDown = onMoveDown
+            self.onCancel = onCancel
+        }
+
         @MainActor
         func syncFocusStateIfNeeded(_ desiredFocusState: Bool, in textField: NSTextField) {
             guard desiredFocusState != lastSyncedFocusState else { return }
@@ -119,7 +148,10 @@ struct TopSearchTextField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
-            let updatedText = field.stringValue
+            publishTextChange(field.stringValue)
+        }
+
+        func publishTextChange(_ updatedText: String) {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.text != updatedText else { return }
                 self.text = updatedText
@@ -164,10 +196,15 @@ struct TopSearchTextField: NSViewRepresentable {
 
 final class TopSearchSelectAllOnFocusTextField: NSTextField {
     var onMouseDown: (() -> Void)?
+    var onTextChange: ((String) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         onMouseDown?()
         super.mouseDown(with: event)
     }
-}
 
+    override func textDidChange(_ notification: Notification) {
+        super.textDidChange(notification)
+        onTextChange?(stringValue)
+    }
+}
