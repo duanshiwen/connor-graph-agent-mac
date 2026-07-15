@@ -72,6 +72,28 @@ struct GlobalSearchFeatureModelTests {
         model.shutdown()
     }
 
+    @Test func chatResultsAppearWhileNativeSourcesAreStillSearching() async {
+        let model = GlobalSearchFeatureModel(
+            nativeSourceSearchBackend: SlowNativeSourceSearchBackend(),
+            sessionSearchIndexService: nil,
+            historyRepository: nil
+        )
+        model.sessionsProvider = {
+            [AgentSession(id: "session-1", title: "Swift concurrency", messages: [])]
+        }
+        model.updateQuery("Swift")
+
+        let refreshTask = Task { await model.refreshPreview(for: "Swift") }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(model.previewState.chatSessionResults.map(\.id) == ["session-1"])
+        #expect(model.previewState.isSectionLoading(.mail))
+
+        model.shutdown()
+        refreshTask.cancel()
+        await refreshTask.value
+    }
+
     @Test func shutdownPreventsPendingDebounceFromApplying() async {
         let model = makeModel()
         model.fallbackNativeSearchProvider = { kind, _, _ in
@@ -104,5 +126,21 @@ struct GlobalSearchFeatureModelTests {
             temporal: NativeSearchTemporalMetadata(indexedAt: Date()),
             resultTimeLabel: ""
         )
+    }
+}
+
+private actor SlowNativeSourceSearchBackend: NativeSourceSearchBackend {
+    func upsert(_ documents: [NativeSearchDocument]) async throws {}
+    func delete(documentIDs: [String]) async throws {}
+    func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String?) async throws {}
+    func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws {}
+
+    func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] {
+        try await Task.sleep(for: .milliseconds(400))
+        return []
+    }
+
+    func health() async -> NativeSourceSearchHealthSnapshot {
+        NativeSourceSearchHealthSnapshot()
     }
 }

@@ -164,13 +164,6 @@ struct AppShellView: View {
                     .zIndex(20)
             }
         }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                if graph.globalSearch.isFieldFocused {
-                    graph.globalSearch.deactivateField()
-                }
-            }
-        )
         .background(WindowTitlebarConfigurator())
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
