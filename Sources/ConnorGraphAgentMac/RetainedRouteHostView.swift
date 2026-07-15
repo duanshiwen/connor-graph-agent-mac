@@ -36,6 +36,7 @@ final class RetainedRouteHostController: NSViewController {
     private var routeFactory: RouteFactory
     private var controllers: [SidebarItem: NSHostingController<AnyView>] = [:]
     private var coldRoutesByRecency: [SidebarItem] = []
+    private var presentationGeneration: UInt64 = 0
     private(set) var activeRoute: SidebarItem?
 
     init(
@@ -96,7 +97,6 @@ final class RetainedRouteHostController: NSViewController {
         loadViewIfNeeded()
         if activeRoute == route, let controller = controllers[route] {
             installIfNeeded(controller)
-            controller.view.isHidden = false
             tracker.markActivated(route: route, pane: pane, activationKind: .cacheHit)
             schedulePresented(route: route, controller: controller)
             return
@@ -118,12 +118,10 @@ final class RetainedRouteHostController: NSViewController {
         if let currentRoute = activeRoute,
            currentRoute != route,
            let current = controllers[currentRoute] {
-            current.view.isHidden = true
+            detachFromContainer(current)
         }
 
         installIfNeeded(controller)
-        controller.view.isHidden = false
-        view.addSubview(controller.view, positioned: .above, relativeTo: nil)
         activeRoute = route
         recordRecency(for: route)
         tracker.markActivated(route: route, pane: pane, activationKind: activationKind)
@@ -134,13 +132,17 @@ final class RetainedRouteHostController: NSViewController {
         route: SidebarItem,
         controller: NSHostingController<AnyView>
     ) {
-        controller.view.layoutSubtreeIfNeeded()
+        presentationGeneration &+= 1
+        let generation = presentationGeneration
+        // Never force a synchronous layout here. Activation runs in the input-event
+        // turn; AppKit/SwiftUI must be allowed to commit the selected route first and
+        // perform body/layout work in the normal display cycle.
         DispatchQueue.main.async { [weak self, weak controller] in
             guard let self,
                   let controller,
+                  self.presentationGeneration == generation,
                   self.activeRoute == route,
-                  controller.view.superview === self.view,
-                  !controller.view.isHidden
+                  controller.view.superview === self.view
             else { return }
             self.tracker.markPresented(route: route, pane: self.pane)
         }
@@ -187,7 +189,6 @@ final class RetainedRouteHostController: NSViewController {
         if controller.parent !== self { addChild(controller) }
         let childView = controller.view
         childView.translatesAutoresizingMaskIntoConstraints = false
-        childView.isHidden = true
         view.addSubview(childView)
         NSLayoutConstraint.activate([
             childView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -197,8 +198,16 @@ final class RetainedRouteHostController: NSViewController {
         ])
     }
 
-    private func detach(_ controller: NSHostingController<AnyView>) {
+    /// Keeps the hosting controller and its SwiftUI state cached while removing
+    /// inactive content from the AppKit layout tree. This gives retained routes a
+    /// real visibility lifecycle and prevents hidden pages from participating in
+    /// unrelated layout passes.
+    private func detachFromContainer(_ controller: NSHostingController<AnyView>) {
         controller.view.removeFromSuperview()
+    }
+
+    private func detach(_ controller: NSHostingController<AnyView>) {
+        detachFromContainer(controller)
         if controller.parent === self { controller.removeFromParent() }
     }
 }

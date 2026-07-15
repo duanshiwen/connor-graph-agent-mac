@@ -248,17 +248,49 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(fixture.runtime.chatComposerCoordinator.currentSelectedDraft() == (autoSaveDraftsEnabled ? "first draft" : ""))
     }
 
-    @Test func creatingNewSessionDoesNotEnterDetailLoadingState() throws {
+    @Test func creatingNewSessionSelectsRowAndShowsLoadingBeforePreparationCompletes() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
         fixture.runtime.reloadChatSessions()
+        let previousIDs = fixture.runtime.chatFeatureModel.sessions.allSessions.map(\.id)
         fixture.runtime.newChatSession()
 
-        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID != nil)
+        let selectedID = try #require(fixture.runtime.chatFeatureModel.sessions.selectedSessionID)
+        #expect(fixture.runtime.chatFeatureModel.sessions.allSessions.first?.id == selectedID)
+        #expect(fixture.runtime.chatFeatureModel.sessions.allSessions.dropFirst().map(\.id) == previousIDs)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.first?.id == selectedID)
         #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == selectedID)
+        #expect(fixture.runtime.isLoadingSelectedChatSessionDetail)
+
+        await fixture.runtime.waitForNewSessionPreparation(sessionID: selectedID)
+
         #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
         #expect(!fixture.runtime.isLoadingSelectedChatSessionDetail)
+        #expect(try fixture.repository.loadSession(id: selectedID)?.id == selectedID)
+    }
+
+    @Test func creatingNewSessionRespectsActiveStatusFilterWithoutReloadingList() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.setSessionListFilter(.status(.inProgress))
+        let visibleIDs = fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id)
+
+        fixture.runtime.newChatSession()
+
+        let createdID = try #require(fixture.runtime.chatFeatureModel.sessions.allSessions.first?.id)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id) == visibleIDs)
+        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(createdID))
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == nil)
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedArtifactDirectories == nil)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
+
+        await fixture.runtime.waitForNewSessionPreparation(sessionID: createdID)
+        #expect(try fixture.repository.loadSession(id: createdID)?.id == createdID)
     }
 
     @Test func selectingMissingSessionDoesNotLeaveLoadingStuck() async throws {

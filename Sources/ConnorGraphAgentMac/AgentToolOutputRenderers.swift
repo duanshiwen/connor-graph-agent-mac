@@ -39,7 +39,7 @@ private struct AgentToolInputSection: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             ToolRendererSectionHeader(title: "Input", systemImage: "square.and.pencil", copyValue: invocation.argumentsJSON)
             if let argumentsJSON = invocation.argumentsJSON, !argumentsJSON.isEmpty {
-                codeBlock(prettyJSON(argumentsJSON) ?? argumentsJSON)
+                outputBlock(prettyJSON(argumentsJSON) ?? argumentsJSON)
             } else {
                 emptyText("No structured input captured for this tool event.")
             }
@@ -154,10 +154,11 @@ private struct AgentGenericToolOutputView: View {
     var body: some View {
         let content = VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             ToolRendererSectionHeader(title: title, systemImage: severity == .error ? "xmark.octagon" : "doc.text", copyValue: text ?? resultJSON)
-            if let resultJSON, let pretty = prettyJSON(resultJSON) {
-                labeledCodeBlock("JSON", pretty)
+            if let resultJSON {
+                labeledOutputBlock("JSON", prettyJSON(resultJSON) ?? resultJSON)
             }
-            if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               text != resultJSON {
                 outputBlock(text)
             } else if resultJSON == nil {
                 emptyText("No output captured for this tool event.")
@@ -182,15 +183,17 @@ private struct AgentShellOutputPresentation {
     var isTruncated: Bool
 
     init(invocation: AgentToolInvocationPresentation, policy: AgentToolOutputDisplayPolicy = AgentToolOutputDisplayPolicy()) {
-        self.command = Self.command(from: invocation.argumentsJSON)
-        self.exitCode = Self.exitCode(from: invocation.resultJSON)
+        let arguments = Self.dictionary(from: invocation.argumentsJSON)
+        let result = Self.dictionary(from: invocation.resultJSON)
+        self.command = arguments?["command"] as? String
+        self.exitCode = Self.exitCode(from: result)
         let raw = invocation.outputText ?? invocation.errorText ?? ""
         let display = policy.display(for: raw)
         self.previewText = display.previewText
         self.fullText = raw
         self.isTruncated = display.isTruncated || invocation.isOutputTruncated
 
-        let jsonParts = Self.partsFromResultJSON(invocation.resultJSON)
+        let jsonParts = Self.partsFromResult(result)
         if let jsonParts {
             self.stdout = policy.display(for: jsonParts.stdout).previewText
             self.stderr = policy.display(for: jsonParts.stderr).previewText
@@ -202,13 +205,8 @@ private struct AgentShellOutputPresentation {
         }
     }
 
-    private static func command(from json: String?) -> String? {
-        guard let object = dictionary(from: json) else { return nil }
-        return object["command"] as? String
-    }
-
-    private static func exitCode(from json: String?) -> Int? {
-        guard let object = dictionary(from: json) else { return nil }
+    private static func exitCode(from object: [String: Any]?) -> Int? {
+        guard let object else { return nil }
         if let value = object["exitCode"] as? Int { return value }
         if let value = object["exit_code"] as? Int { return value }
         if let value = object["exitCode"] as? Double { return Int(value) }
@@ -218,11 +216,11 @@ private struct AgentShellOutputPresentation {
         return nil
     }
 
-    private static func partsFromResultJSON(_ json: String?) -> (stdout: String, stderr: String, exitCode: Int?)? {
-        guard let object = dictionary(from: json) else { return nil }
+    private static func partsFromResult(_ object: [String: Any]?) -> (stdout: String, stderr: String, exitCode: Int?)? {
+        guard let object else { return nil }
         let stdout = (object["stdout"] as? String) ?? (object["output"] as? String) ?? ""
         let stderr = (object["stderr"] as? String) ?? (object["error"] as? String) ?? ""
-        let exit = exitCode(from: json)
+        let exit = exitCode(from: object)
         guard !stdout.isEmpty || !stderr.isEmpty || exit != nil else { return nil }
         return (stdout, stderr, exit)
     }
@@ -274,6 +272,15 @@ private func labeledCodeBlock(_ title: String, _ value: String, isError: Bool = 
     }
 }
 
+private func labeledOutputBlock(_ title: String, _ value: String, isError: Bool = false) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+        Text(title)
+            .font(AgentChatTypography.monoMicro.weight(.semibold))
+            .foregroundStyle(isError ? Color.red : Color.secondary)
+        outputBlock(value)
+    }
+}
+
 private func codeBlock(_ value: String) -> some View {
     Text(value)
         .font(AgentChatTypography.monoMeta)
@@ -285,8 +292,12 @@ private func codeBlock(_ value: String) -> some View {
 }
 
 private func diffBlock(_ value: String) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
-        ForEach(Array(value.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, rawLine in
+    let display = AgentToolOutputDisplayPolicy(previewCharacterLimit: 32_000).display(for: value)
+    let allLines = display.previewText.split(separator: "\n", omittingEmptySubsequences: false)
+    let lines = Array(allLines.prefix(500))
+    let omittedLineCount = max(0, allLines.count - lines.count)
+    return VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, rawLine in
             let line = String(rawLine)
             Text(line.isEmpty ? " " : line)
                 .font(AgentChatTypography.monoMeta)
@@ -296,6 +307,12 @@ private func diffBlock(_ value: String) -> some View {
                 .padding(.vertical, 1)
                 .background(diffLineBackground(line))
                 .textSelection(.enabled)
+        }
+        if display.isTruncated || omittedLineCount > 0 {
+            Text("Diff preview truncated; open or copy the original output for the complete change.")
+                .font(AgentChatTypography.micro)
+                .foregroundStyle(.orange)
+                .padding(AgentChatLayout.spaceS)
         }
     }
     .padding(.vertical, AgentChatLayout.spaceS)
@@ -346,7 +363,9 @@ private func statusChip(_ value: String, isError: Bool) -> some View {
 }
 
 private func prettyJSON(_ json: String?) -> String? {
-    guard let json,
+    guard let json else { return nil }
+    let display = AgentToolOutputDisplayPolicy().display(for: json)
+    guard !display.isTruncated,
           let data = json.data(using: .utf8),
           let object = try? JSONSerialization.jsonObject(with: data),
           JSONSerialization.isValidJSONObject(object),

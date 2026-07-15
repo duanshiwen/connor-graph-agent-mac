@@ -3,6 +3,48 @@ import os
 import ConnorGraphAppSupport
 
 @MainActor
+enum AppInteractionPerformance {
+    struct Interval {
+        fileprivate let name: StaticString
+        fileprivate let state: OSSignpostIntervalState
+    }
+
+    private static let signposter = OSSignposter(
+        subsystem: AppPerformanceLog.subsystem,
+        category: "InteractivePerformance"
+    )
+    private static var agentDetailIntervals: [String: Interval] = [:]
+
+    static func begin(_ name: StaticString) -> Interval {
+        Interval(name: name, state: signposter.beginInterval(name))
+    }
+
+    static func end(_ interval: Interval) {
+        signposter.endInterval(interval.name, interval.state)
+    }
+
+    static func measure<T>(_ name: StaticString, operation: () throws -> T) rethrows -> T {
+        let interval = begin(name)
+        defer { end(interval) }
+        return try operation()
+    }
+
+    static func beginAgentDetail(callID: String) {
+        if let previous = agentDetailIntervals.removeValue(forKey: callID) { end(previous) }
+        agentDetailIntervals[callID] = begin("AgentDetail.OpenToFirstFrame")
+    }
+
+    static func endAgentDetail(callID: String) {
+        guard let interval = agentDetailIntervals.removeValue(forKey: callID) else { return }
+        end(interval)
+    }
+
+    static func event(_ name: StaticString) {
+        signposter.emitEvent(name)
+    }
+}
+
+@MainActor
 enum AppStartupPerformance {
     private static let signposter = OSSignposter(
         subsystem: AppPerformanceLog.subsystem,

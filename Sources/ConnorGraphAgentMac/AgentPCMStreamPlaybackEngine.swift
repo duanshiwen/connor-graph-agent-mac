@@ -1,13 +1,22 @@
 import AVFoundation
 import Foundation
+import os
 import ConnorGraphAgent
+import ConnorGraphAppSupport
 
-@MainActor
-final class AgentPCMStreamPlaybackEngine {
+/// Serial audio data plane. PCM allocation, copying, and node scheduling must never
+/// inherit MainActor isolation from the SwiftUI playback controller.
+actor AgentPCMStreamPlaybackEngine {
+    private static let signposter = OSSignposter(
+        subsystem: AppPerformanceLog.subsystem,
+        category: "AudioPerformance"
+    )
+
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var format: AVAudioFormat?
     private(set) var isStarted = false
+    private var lastScheduleTimestamp: UInt64?
 
     init() {
         engine.attach(playerNode)
@@ -30,6 +39,8 @@ final class AgentPCMStreamPlaybackEngine {
     }
 
     func schedule(frame data: Data) throws {
+        let interval = Self.signposter.beginInterval("Audio.FrameArrivalToSchedule")
+        defer { Self.signposter.endInterval("Audio.FrameArrivalToSchedule", interval) }
         guard let format else { throw AgentAudioStreamSessionError.notStarted }
         let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
         guard bytesPerFrame > 0, data.count % bytesPerFrame == 0 else { throw AgentAudioStreamSessionError.incompleteSampleFrame }
@@ -43,6 +54,15 @@ final class AgentPCMStreamPlaybackEngine {
             buffer.mutableAudioBufferList.pointee.mBuffers.mDataByteSize = UInt32(data.count)
         }
         playerNode.scheduleBuffer(buffer)
+
+        let now = DispatchTime.now().uptimeNanoseconds
+        if let previous = lastScheduleTimestamp {
+            let gapMilliseconds = Double(now - previous) / 1_000_000
+            if gapMilliseconds >= 100 {
+                Self.signposter.emitEvent("Audio.ScheduleGap", "duration_ms=\(gapMilliseconds)")
+            }
+        }
+        lastScheduleTimestamp = now
     }
 
     func pause() { playerNode.pause() }
@@ -54,5 +74,6 @@ final class AgentPCMStreamPlaybackEngine {
         engine.disconnectNodeOutput(playerNode)
         format = nil
         isStarted = false
+        lastScheduleTimestamp = nil
     }
 }

@@ -24,6 +24,11 @@ enum AppRuntimeStartupMode: Equatable {
     case deferred
 }
 
+private enum NewSessionPreparationResult: Sendable {
+    case success(artifactDirectories: AgentSessionArtifactDirectories?, manager: NativeSessionManager?)
+    case failure(String)
+}
+
 @MainActor
 final class AppRuntimeLifecycle {
     let maintenanceCoordinator = AppMaintenanceCoordinator()
@@ -143,6 +148,7 @@ final class AppRuntimeLifecycle {
     private var isLoadingRuntimeSettings = false
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var globalSearchRuntimeCoordinator: GlobalSearchRuntimeCoordinator?
+    private var newSessionPreparationTasks: [String: Task<Void, Never>] = [:]
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -328,8 +334,8 @@ final class AppRuntimeLifecycle {
     func performShellCommand(_ commandID: ConnorNativeShellCommandID) {
         switch commandID {
         case .newSession:
-            newChatSession()
             navigate(to: .agentChat)
+            newChatSession()
         case .toggleBrowser:
             browserFeatureModel.toggleWorkspaceVisibility()
         case .checkCommercialReadiness:
@@ -1231,6 +1237,8 @@ final class AppRuntimeLifecycle {
     }
 
     func shutdownRuntimeResources() {
+        for task in newSessionPreparationTasks.values { task.cancel() }
+        newSessionPreparationTasks.removeAll()
         maintenanceCoordinator.shutdown()
         chatSessionCoordinator.shutdown()
         chatApprovalCoordinator.shutdown()
@@ -1881,54 +1889,123 @@ final class AppRuntimeLifecycle {
     }
 
     func newChatSession() {
-        guard let chatSessionRepository else { return }
-        _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
-        rememberCurrentWorkspaceMode()
-        do {
-            let session = try chatSessionRepository.createSession()
-            chatSessionCoordinator.adoptDirectSelection(session.id)
-            chatRunCoordinator.clearProcessTimelines()
-            browserFeatureModel.isVisible = false
-            browserFeatureModel.resetWorkspaceBinding()
-            rememberWorkspaceMode(.conversation, for: session.id)
-            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
-            try loadSessionCapsule(sessionID: session.id)
-            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
-            chatRunCoordinator.prepareNewSession(session, manager: makeNativeSessionManager(for: session))
-            restoreChatInputDraft(for: session.id)
-            reloadChatSessions()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    };
+        createSessionOptimistically(title: "新对话", kind: .chat)
+    }
 
     func newNoteSession() {
+        createSessionOptimistically(title: "未命名的笔记", kind: .note)
+    }
+
+    private func createSessionOptimistically(title: String, kind: AgentSessionKind) {
         guard let chatSessionRepository else { return }
-        _ = stopSpeechTranscriptionIfRunningForLeavingSession(chatFeatureModel.sessions.selectedSessionID)
-        rememberCurrentWorkspaceMode()
-        do {
-            let session = try chatSessionRepository.createSession()
-            var noteSession = session
-            noteSession.governance.kind = .note
-            noteSession.title = "未命名的笔记"
-            _ = try chatSessionRepository.saveSession(noteSession)
-            chatSessionCoordinator.adoptDirectSelection(noteSession.id)
-            chatRunCoordinator.clearProcessTimelines()
-            browserFeatureModel.isVisible = false
-            browserFeatureModel.resetWorkspaceBinding()
-            rememberWorkspaceMode(.conversation, for: noteSession.id)
-            chatFeatureModel.sessions.selectedArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: noteSession.id)
-            try loadSessionCapsule(sessionID: noteSession.id)
-            try chatBackgroundTaskCoordinator.load(sessionID: noteSession.id)
-            chatRunCoordinator.prepareNewSession(noteSession, manager: makeNativeSessionManager(for: noteSession))
-            restoreChatInputDraft(for: noteSession.id)
-            reloadChatSessions()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
+        let interaction = AppInteractionPerformance.begin("NewSession.UserActionToFirstFrame")
+        defer { DispatchQueue.main.async { AppInteractionPerformance.end(interaction) } }
+
+        let previousSessionID = chatFeatureModel.sessions.selectedSessionID
+        _ = stopSpeechTranscriptionIfRunningForLeavingSession(previousSessionID)
+        let previousMode = browserFeatureModel.isVisible ? ChatSessionWorkspaceMode.browser : .conversation
+        let now = Date()
+        var governance = AgentSessionGovernanceMetadata.default
+        governance.kind = kind
+        let session = AgentSession(
+            id: UUID().uuidString,
+            title: title,
+            messages: [],
+            createdAt: now,
+            updatedAt: now,
+            governance: governance
+        )
+
+        // Commit the row selection and clear stale detail synchronously. The existing
+        // AgentChatSessionLoadingView becomes visible on the next frame while storage
+        // and runtime construction continue away from MainActor.
+        let isVisible = AppInteractionPerformance.measure("NewSession.ListProjection") {
+            chatSessionCoordinator.adoptPreparingNewSession(session)
         }
-    };
+        chatRunCoordinator.clearProcessTimelines()
+        browserFeatureModel.isVisible = false
+        browserFeatureModel.resetWorkspaceBinding()
+        installEmptySessionCapsuleState(sessionID: session.id, synchronizeWorkspaceDrafts: isVisible)
+        chatWorkspaceCoordinator.setMode(.conversation, for: session.id)
+        errorMessage = nil
+
+        let runtimeFactory = chatRunCoordinator.runtimeFactory
+        let configuration = effectiveLoopConfiguration
+        let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
+        let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
+            var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
+                ?? AppSessionStateSnapshot(sessionID: sessionID)
+            state.selectedPane = previousMode.rawValue
+            state.updatedAt = now
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+            chatWorkspaceCoordinator.setMode(previousMode, for: sessionID)
+            return state
+        }
+
+        newSessionPreparationTasks[session.id]?.cancel()
+        newSessionPreparationTasks[session.id] = Task { [weak self] in
+            let preparation = Task.detached(priority: .userInitiated) {
+                do {
+                    try Task.checkCancellation()
+                    let directories = try chatSessionRepository.persistNewSession(session)
+                    try Task.checkCancellation()
+                    if let previousSessionID, let previousState {
+                        try chatSessionRepository.saveSessionState(previousState, sessionID: previousSessionID)
+                    }
+                    if let sessionState {
+                        try chatSessionRepository.saveSessionState(sessionState, sessionID: session.id)
+                    }
+                    try Task.checkCancellation()
+                    let manager = isVisible ? runtimeFactory?.makeNativeSessionManager(
+                        session: session,
+                        permissionMode: configuration.permissionMode,
+                        configuration: configuration,
+                        sessionWorkspace: sessionState?.workspace,
+                        sessionLLMOverride: sessionState?.llmOverride
+                    ) : nil
+                    try Task.checkCancellation()
+                    return NewSessionPreparationResult.success(
+                        artifactDirectories: directories,
+                        manager: manager
+                    )
+                } catch {
+                    // Persistence can succeed before artifact/Capsule/runtime preparation
+                    // fails or is cancelled. Remove the partial row so optimistic UI
+                    // rollback cannot leave an invisible orphan session in SQLite.
+                    try? chatSessionRepository.rollbackNewSession(sessionID: session.id)
+                    return NewSessionPreparationResult.failure(String(describing: error))
+                }
+            }
+            let result = await withTaskCancellationHandler {
+                await preparation.value
+            } onCancel: {
+                preparation.cancel()
+            }
+
+            guard let self, !Task.isCancelled else { return }
+            self.newSessionPreparationTasks.removeValue(forKey: session.id)
+            switch result {
+            case let .success(artifactDirectories, manager):
+                if self.chatFeatureModel.sessions.selectedSessionID == session.id {
+                    self.chatFeatureModel.sessions.selectedArtifactDirectories = artifactDirectories
+                    self.chatRunCoordinator.prepareNewSession(session, manager: manager)
+                    self.restoreChatInputDraft(for: session.id)
+                }
+                self.chatSessionCoordinator.completeNewSessionPreparation(sessionID: session.id)
+                self.errorMessage = nil
+            case .failure(let message):
+                self.chatSessionCoordinator.discardPreparingNewSession(sessionID: session.id)
+                self.chatWorkspaceCoordinator.removeSession(session.id)
+                self.chatRunCoordinator.removeSession(session.id)
+                self.errorMessage = message
+            }
+        }
+    }
+
+    func waitForNewSessionPreparation(sessionID: String) async {
+        let task = newSessionPreparationTasks[sessionID]
+        await task?.value
+    }
 
     func renameChatSession(_ sessionID: String, title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2055,6 +2132,16 @@ final class AppRuntimeLifecycle {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func installEmptySessionCapsuleState(
+        sessionID: String,
+        synchronizeWorkspaceDrafts: Bool = true
+    ) {
+        let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date(), selectedPane: ChatSessionWorkspaceMode.conversation.rawValue)
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+        chatWorkspaceCoordinator.recordsBySessionID[sessionID] = []
+        if synchronizeWorkspaceDrafts { syncWorkspaceDraftsFromSession(state) }
     }
 
     private func loadSessionCapsule(sessionID: String) throws {
