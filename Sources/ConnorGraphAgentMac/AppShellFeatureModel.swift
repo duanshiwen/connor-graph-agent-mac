@@ -9,6 +9,11 @@ final class AppShellFeatureModel {
     var selectedSettingsSection: ConnorSettingsSection = .app
     private(set) var focusTopSearchRequestID: UUID?
     private(set) var settingsSectionMessageStore = SettingsSectionMessageStore()
+    let routePerformanceTracker: AppRoutePerformanceTracker
+
+    init(routePerformanceTracker: AppRoutePerformanceTracker = AppRoutePerformanceTracker()) {
+        self.routePerformanceTracker = routePerformanceTracker
+    }
 
     @discardableResult
     func select(_ item: SidebarItem) -> Bool {
@@ -19,9 +24,10 @@ final class AppShellFeatureModel {
             )
             return false
         }
+        let transactionID = routePerformanceTracker.begin(route: item, from: previous)
         let measured = AppPerformanceLog.measure { selection = item }
         AppPerformanceLog.sidebarNavigationLogger.info(
-            "sidebar.route.commit from=\(previous?.rawValue ?? "none", privacy: .public) to=\(item.rawValue, privacy: .public) changed=true duration=\(measured.milliseconds, privacy: .public)ms"
+            "sidebar.route.commit transaction=\(transactionID) from=\(previous?.rawValue ?? "none", privacy: .public) to=\(item.rawValue, privacy: .public) changed=true duration=\(measured.milliseconds, privacy: .public)ms"
         )
         return true
     }

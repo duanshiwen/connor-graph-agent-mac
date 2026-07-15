@@ -45,9 +45,11 @@ struct CraftListPaneView: View {
                 CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
             }
         }
-        .onAppear {
-            AppPerformanceLog.sidebarNavigationLogger.info(
-                "sidebar.route.listAppeared route=\((selection ?? .agentChat).rawValue, privacy: .public)"
+        .background {
+            AppRouteActivationSentinel(
+                route: selection ?? .agentChat,
+                pane: .list,
+                tracker: graph.shell.routePerformanceTracker
             )
         }
     }
@@ -2084,9 +2086,11 @@ struct CraftDetailPaneView: View {
                 )
             }
         }
-        .onAppear {
-            AppPerformanceLog.sidebarNavigationLogger.info(
-                "sidebar.route.detailAppeared route=\(selection.rawValue, privacy: .public)"
+        .background {
+            AppRouteActivationSentinel(
+                route: selection,
+                pane: .detail,
+                tracker: graph.shell.routePerformanceTracker
             )
         }
     }
