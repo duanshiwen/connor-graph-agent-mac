@@ -32,6 +32,16 @@ struct AppRouteViewDependencyTests {
         }
     }
 
+    @Test func routePaneSourceBelongsToXcodeAppTarget() throws {
+        let project = try String(contentsOf: xcodeProjectURL(), encoding: .utf8)
+        let sourcePath = "Sources/ConnorGraphAgentMac/AppRoutePaneViews.swift"
+
+        #expect(project.contains("\(sourcePath) */ = {isa = PBXFileReference"))
+        #expect(project.contains("\(sourcePath) in Sources */ = {isa = PBXBuildFile"))
+        #expect(project.components(separatedBy: "\(sourcePath) */,").count - 1 == 1)
+        #expect(project.components(separatedBy: "\(sourcePath) in Sources */,").count - 1 == 1)
+    }
+
     private func routeCaseName(_ route: SidebarItem) -> String {
         switch route {
         case .entities: "entities"
@@ -55,11 +65,20 @@ struct AppRouteViewDependencyTests {
     }
 }
 
-private func projectSourceURL(named filename: String) -> URL {
+private func projectRootURL() -> URL {
     URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
+}
+
+private func projectSourceURL(named filename: String) -> URL {
+    projectRootURL()
         .appendingPathComponent("Sources/ConnorGraphAgentMac")
         .appendingPathComponent(filename)
+}
+
+private func xcodeProjectURL() -> URL {
+    projectRootURL()
+        .appendingPathComponent("ConnorGraphAgentMac.xcodeproj/project.pbxproj")
 }
