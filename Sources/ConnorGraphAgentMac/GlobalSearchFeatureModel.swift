@@ -35,7 +35,6 @@ final class GlobalSearchFeatureModel {
 
     @ObservationIgnored var sessionsProvider: () -> [AgentSession] = { [] }
     @ObservationIgnored var fallbackNativeSearchProvider: (NativeSearchSourceKind, String, Int) -> [NativeSearchResult] = { _, _, _ in [] }
-    @ObservationIgnored var sourceReadinessProvider: () async -> Void = {}
     @ObservationIgnored var defaultSearchURLProvider: (String) -> URL? = { _ in nil }
     @ObservationIgnored var onDestination: ((Destination) -> Void)?
 
@@ -188,8 +187,6 @@ final class GlobalSearchFeatureModel {
         guard !trimmed.isEmpty else { return }
         refreshGeneration &+= 1
         let generation = refreshGeneration
-        await sourceReadinessProvider()
-        guard canApply(query: trimmed, generation: generation) else { return }
         let tokens = GlobalSearchDisplayTokenBuilder.tokens(for: trimmed)
         timings = []
         let chatStartedAt = Date()
