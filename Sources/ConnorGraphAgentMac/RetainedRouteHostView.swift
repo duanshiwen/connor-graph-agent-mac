@@ -66,9 +66,16 @@ final class RetainedRouteHostController: NSViewController {
 
     var cachedRoutes: Set<SidebarItem> { Set(controllers.keys) }
     var cachedControllerCount: Int { controllers.count }
+    var attachedControllerCount: Int {
+        controllers.values.filter { $0.parent === self && $0.view.superview === view }.count
+    }
 
     func controllerIdentity(for route: SidebarItem) -> ObjectIdentifier? {
         controllers[route].map(ObjectIdentifier.init)
+    }
+
+    func isRouteVisible(_ route: SidebarItem) -> Bool {
+        controllers[route].map { !$0.view.isHidden && $0.view.superview === view } ?? false
     }
 
     func updateContent(
@@ -88,7 +95,8 @@ final class RetainedRouteHostController: NSViewController {
     func activate(_ route: SidebarItem) {
         loadViewIfNeeded()
         if activeRoute == route, let controller = controllers[route] {
-            attachIfNeeded(controller)
+            installIfNeeded(controller)
+            controller.view.isHidden = false
             tracker.markActivated(route: route, pane: pane, activationKind: .cacheHit)
             return
         }
@@ -109,10 +117,12 @@ final class RetainedRouteHostController: NSViewController {
         if let currentRoute = activeRoute,
            currentRoute != route,
            let current = controllers[currentRoute] {
-            detach(current)
+            current.view.isHidden = true
         }
 
-        attachIfNeeded(controller)
+        installIfNeeded(controller)
+        controller.view.isHidden = false
+        view.addSubview(controller.view, positioned: .above, relativeTo: nil)
         activeRoute = route
         recordRecency(for: route)
         tracker.markActivated(route: route, pane: pane, activationKind: activationKind)
@@ -154,11 +164,12 @@ final class RetainedRouteHostController: NSViewController {
         coldRoutesByRecency.append(route)
     }
 
-    private func attachIfNeeded(_ controller: NSHostingController<AnyView>) {
+    private func installIfNeeded(_ controller: NSHostingController<AnyView>) {
         guard controller.view.superview !== view else { return }
         if controller.parent !== self { addChild(controller) }
         let childView = controller.view
         childView.translatesAutoresizingMaskIntoConstraints = false
+        childView.isHidden = true
         view.addSubview(childView)
         NSLayoutConstraint.activate([
             childView.leadingAnchor.constraint(equalTo: view.leadingAnchor),

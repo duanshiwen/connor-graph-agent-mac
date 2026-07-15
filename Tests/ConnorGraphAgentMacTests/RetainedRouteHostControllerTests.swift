@@ -20,6 +20,25 @@ struct RetainedRouteHostControllerTests {
         #expect(host.controllerIdentity(for: .agentChat) == chatIdentity)
         #expect(host.controllerIdentity(for: .mail) == mailIdentity)
         #expect(host.cachedRoutes == [.agentChat, .mail, .rss])
+        #expect(host.attachedControllerCount == 3)
+        #expect(host.isRouteVisible(.mail))
+        #expect(!host.isRouteVisible(.agentChat))
+        #expect(!host.isRouteVisible(.rss))
+    }
+
+    @Test func repeatedHotRouteSwitchingKeepsControllersInstalledAndOnlyLatestVisible() {
+        let host = makeHost()
+        let routes: [SidebarItem] = [.agentChat, .mail, .rss]
+
+        for index in 0..<100 {
+            host.activate(routes[index % routes.count])
+        }
+
+        #expect(host.cachedControllerCount == 3)
+        #expect(host.attachedControllerCount == 3)
+        #expect(host.isRouteVisible(.agentChat))
+        #expect(!host.isRouteVisible(.mail))
+        #expect(!host.isRouteVisible(.rss))
     }
 
     @Test func coldRoutesUseOneEntryMRUWithoutEvictingHotRoutes() {
@@ -34,6 +53,9 @@ struct RetainedRouteHostControllerTests {
         host.activate(.contacts)
         #expect(host.cachedRoutes == [.agentChat, .mail, .rss, .contacts])
         #expect(host.cachedControllerCount == 4)
+        #expect(host.attachedControllerCount == 4)
+        #expect(host.isRouteVisible(.contacts))
+        #expect(!host.isRouteVisible(.calendar))
     }
 
     @Test func repeatedSwitchingNeverExceedsBoundAndLatestRouteWins() {
