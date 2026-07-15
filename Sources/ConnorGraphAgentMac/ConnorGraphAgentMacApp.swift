@@ -20,6 +20,7 @@ enum AppMenuPresentation {
     static let importCenterTitle = "导入中心…"
     static let noteImportWizardWindowID = "note-import-wizard"
     static let noteImportCenterWindowID = "note-import-center"
+    static let knowledgePublicationProgressWindowID = "knowledge-publication-progress"
 }
 
 @main
@@ -142,6 +143,14 @@ struct ConnorGraphAgentMacApp: App {
             NoteImportCenterView(model: root.noteImportModel)
         }
         .defaultSize(width: 900, height: 620)
+
+        Window("知识库发布进度", id: AppMenuPresentation.knowledgePublicationProgressWindowID) {
+            KnowledgePublicationProgressView(
+                store: root.graph.knowledgeCreator,
+                sessions: root.graph.chat.sessions.allSessions
+            )
+        }
+        .defaultSize(width: 860, height: 620)
     }
 }
 

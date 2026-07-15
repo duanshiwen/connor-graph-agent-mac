@@ -110,12 +110,17 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
 
 @MainActor public final class CloudKnowledgeCreatorStore: ObservableObject {
     @Published public private(set) var snapshot: CloudKnowledgeCreatorSnapshot; @Published public private(set) var history: [CloudKnowledgeRevisionSummary] = []; @Published public private(set) var isWorking = false; @Published public private(set) var errorMessage: String?
+    @Published public private(set) var currentConversationID: String?
     private let repository: CloudKnowledgeCreatorSnapshotRepository; private let creatorAPI: (any CloudKnowledgeCreatorAPI)?; private let publicationAPI: (any CloudKnowledgeAPI)?; private var generationTask: Task<Void, Never>?; private var generationDriverID: UUID?; private var localGeneration: CloudKnowledgeLocalGenerationCallback?
     public init(repository: CloudKnowledgeCreatorSnapshotRepository = .init(), creatorAPI: (any CloudKnowledgeCreatorAPI)? = nil, publicationAPI: (any CloudKnowledgeAPI)? = nil) { self.repository = repository; self.creatorAPI = creatorAPI; self.publicationAPI = publicationAPI; self.snapshot = (try? repository.load()) ?? .init() }
     public func updateDraft(_ draft: CloudKnowledgeBaseDraft) { snapshot.draft = draft; persist() }
     public func toggleConversation(_ id: String) { if snapshot.selectedConversationIDs.contains(id) { snapshot.selectedConversationIDs.removeAll { $0 == id } } else { snapshot.selectedConversationIDs.append(id) }; persist() }
     public func advance(to stage: CloudKnowledgeCreatorStage) { snapshot.stage = stage; persist() }
     public func attachRun(id: String) { snapshot.runID = id; snapshot.stage = .generating; persist() }
+    public func installGeneration(_ callback: @escaping CloudKnowledgeLocalGenerationCallback) {
+        localGeneration = callback
+        if snapshot.stage == .generating, snapshot.runID != nil { runRemainingGeneration() }
+    }
     public var currentPublicationStatusLabel: String { snapshot.latestKnowledgeBaseDetail?.publicationStatus ?? (snapshot.knowledgeBaseID == nil ? "草稿" : "未发布") }
     public var currentEnforcementStatusLabel: String { snapshot.latestKnowledgeBaseDetail?.enforcementStatus ?? "clear" }
     public var currentGovernanceVersion: Int { snapshot.latestKnowledgeBaseDetail?.governanceVersion ?? 0 }
@@ -163,6 +168,7 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
             if let detail { self.snapshot.latestKnowledgeBaseDetail = detail; self.persist() }
             let run = try await publicationAPI.createPublicationRun(knowledgeBaseID: knowledgeBaseID, request: .init(clientRunID: self.snapshot.clientRunID, expectedBaseSequence: detail?.currentSequence ?? 0))
             self.attachRun(id: run.id)
+            self.runRemainingGeneration()
         }
     }
     public func noteProcessed(conversationID: String, summary: String) { if !snapshot.processedConversationIDs.contains(conversationID) { snapshot.processedConversationIDs.append(conversationID) }; snapshot.summaries.append(summary); persist() }
@@ -183,25 +189,27 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
             for id in remaining {
                 guard !Task.isCancelled else { return }
                 do {
+                    self.currentConversationID = id
                     let result = try await callback(id)
                     // A successful local callback may already have durable side effects.
                     // Always checkpoint it before honoring cancellation.
                     self.noteProcessed(conversationID: id, summary: result.summary)
                     guard !Task.isCancelled else { return }
-                } catch is CancellationError { return }
-                catch { self.errorMessage = error.localizedDescription; self.snapshot.stage = .paused; self.persist(); return }
+                } catch is CancellationError { self.currentConversationID = nil; return }
+                catch { self.currentConversationID = nil; self.errorMessage = error.localizedDescription; self.snapshot.stage = .paused; self.persist(); return }
             }
             guard self.generationDriverID == driverID else { return }
             self.snapshot.stage = .validating
+            self.currentConversationID = nil
             self.persist()
             self.generationTask = nil
             self.generationDriverID = nil
         }
     }
-    public func pause() { generationTask?.cancel(); snapshot.stage = .paused; persist() }
+    public func pause() { generationTask?.cancel(); currentConversationID = nil; snapshot.stage = .paused; persist() }
     public func resume() { snapshot.stage = .generating; persist(); runRemainingGeneration() }
     public func waitForGenerationCompletion() async { await generationTask?.value }
-    public func cancel() { generationTask?.cancel(); snapshot.stage = .cancelled; persist(); if let runID = snapshot.runID, let publicationAPI { Task { try? await publicationAPI.abandon(runID: runID) } } }
+    public func cancel() { generationTask?.cancel(); currentConversationID = nil; snapshot.stage = .cancelled; persist(); if let runID = snapshot.runID, let publicationAPI { Task { try? await publicationAPI.abandon(runID: runID) } } }
     public func validatePublication() async {
         guard let runID = snapshot.runID, let publicationAPI else { snapshot.stage = .validating; persist(); return }
         await perform { self.applyValidation(try await publicationAPI.validate(runID: runID)) }
@@ -232,7 +240,7 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         }
     }
     public func loadHistory() async { guard let id = snapshot.knowledgeBaseID, let creatorAPI else { return }; await perform { self.history = try await creatorAPI.revisions(knowledgeBaseID: id, limit: 100) } }
-    public func reset() { generationTask?.cancel(); snapshot = .init(); history = []; errorMessage = nil; try? repository.clear() }
+    public func reset() { generationTask?.cancel(); currentConversationID = nil; snapshot = .init(); history = []; errorMessage = nil; try? repository.clear() }
     private func persist() { snapshot.updatedAt = Date(); try? repository.save(snapshot) }
     private func perform(_ action: @escaping () async throws -> Void) async { isWorking = true; errorMessage = nil; defer { isWorking = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }

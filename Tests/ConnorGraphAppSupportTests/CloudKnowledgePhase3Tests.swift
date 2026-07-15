@@ -102,7 +102,7 @@ struct CloudKnowledgePhase3Tests {
 
     @Test func promptAndToolSchemasEnforceLocalOnlySearchBeforeWriteBoundary() async throws {
         let prompt = CloudKnowledgePublishingPrompt.instruction
-        #expect(prompt.contains("Raw local conversations never leave this device"))
+        #expect(prompt.contains("must never be sent to the Connor knowledge backend"))
         #expect(prompt.contains("combined committed + current-run staged view"))
         #expect(prompt.contains("Never invent identity IDs"))
         let api = InMemoryCloudKnowledgeAPI(); let context = CloudKnowledgePublishingContext(knowledgeBaseID: "kb", publicationRunID: "run", ownerUserID: "u", clientRunID: "client")
@@ -115,6 +115,32 @@ struct CloudKnowledgePhase3Tests {
         let schema = write.inputSchema.jsonObject
         let properties = try #require(schema["properties"] as? [String: Any])
         #expect(properties["knowledge_base_id"] == nil); #expect(properties["publication_run_id"] == nil); #expect(properties["owner_user_id"] == nil); #expect(properties["raw_conversation"] == nil)
+    }
+
+    @Test func realModelToolLoopSearchesStagesAndSummarizesConversation() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeScriptedProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "tool-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "conversation-1", title: "Connor knowledge", messages: [AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。")])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner().generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(result.summary == "已完成知识整理")
+        #expect(await api.operations.count == 1)
+        #expect(await api.searchViews == [.combined])
+        #expect(await scripted.requestCount == 3)
+        #expect(await scripted.exposedValidationTool == false)
     }
 
     private static func operation(layer: CloudKnowledgeLayer, contextID: String, terms: [String], payloadText: String = "knowledge") -> CloudKnowledgeOperation {
@@ -139,6 +165,24 @@ private extension JSONDecoder {
 private struct CloudTestCodingKey: CodingKey { var stringValue: String; var intValue: Int? = nil; init?(stringValue: String) { self.stringValue = stringValue }; init?(intValue: Int) { nil } }
 
 private struct StaticCloudCredential: CloudKnowledgeCredentialProvider { func accessToken() async throws -> String { "token" } }
+
+private actor CloudKnowledgeScriptedProvider {
+    var requestCount = 0
+    var exposedValidationTool = false
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        exposedValidationTool = exposedValidationTool || request.tools.contains { $0.name == "cloud_kb_validate_publication" }
+        switch requestCount {
+        case 1:
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "search", name: "cloud_kb_knowledge_context", argumentsJSON: #"{"query":"Connor","limit":20}"#)], finishReason: .toolCalls)
+        case 2:
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor-publishing","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
+        default:
+            return AgentModelResponse(text: "已完成知识整理")
+        }
+    }
+}
 
 private actor CloudKnowledgeHTTPTransport: ConnorBackendHTTPTransport {
     var requests: [URLRequest] = []; var failWithConflict = false

@@ -109,6 +109,7 @@ final class AppRuntimeLifecycle {
     let globalSearchFeatureModel: GlobalSearchFeatureModel
     let knowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
     let knowledgeCreatorStore: CloudKnowledgeCreatorStore
+    let cloudKnowledgeAPI: CloudKnowledgeAPIClient
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
@@ -573,10 +574,12 @@ final class AppRuntimeLifecycle {
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
         let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
+        let cloudKnowledgeAPI = CloudKnowledgeAPIClient(baseURL: backendBaseURL)
+        self.cloudKnowledgeAPI = cloudKnowledgeAPI
         self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(api: CloudKnowledgeMarketplaceAPIClient(baseURL: backendBaseURL))
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: backendBaseURL),
-            publicationAPI: CloudKnowledgeAPIClient(baseURL: backendBaseURL)
+            publicationAPI: cloudKnowledgeAPI
         )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
         let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
@@ -723,6 +726,10 @@ final class AppRuntimeLifecycle {
                     return await self.browserFeatureModel.performAssistedWebFetch(request)
                 }
             ))
+            self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
+                guard let self else { throw CancellationError() }
+                return try await self.generateCloudKnowledge(conversationID: conversationID)
+            }
         }
         graphDiagnosticsModel.onPromotedSnapshot = { [weak self] snapshot in
             self?.applyPromotedGraphSnapshot(snapshot)
@@ -1647,6 +1654,24 @@ final class AppRuntimeLifecycle {
             throw OpenAICompatibleProviderError.missingAPIKey
         }
         return provider
+    }
+
+    private func generateCloudKnowledge(conversationID: String) async throws -> CloudKnowledgeLocalGenerationResult {
+        guard let knowledgeBaseID = knowledgeCreatorStore.snapshot.knowledgeBaseID,
+              let publicationRunID = knowledgeCreatorStore.snapshot.runID
+        else { throw CloudKnowledgeError.invalidResponse }
+        guard let session = try chatSessionRepository?.loadSession(id: conversationID) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(conversationID)
+        }
+        let provider = try sessionAgentModelProvider(sessionID: conversationID)
+        return try await CloudKnowledgeLLMGenerationRunner().generate(
+            session: session,
+            knowledgeBaseID: knowledgeBaseID,
+            publicationRunID: publicationRunID,
+            clientRunID: knowledgeCreatorStore.snapshot.clientRunID,
+            api: cloudKnowledgeAPI,
+            provider: provider
+        )
     }
 
     private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
