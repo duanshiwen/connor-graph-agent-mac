@@ -194,8 +194,7 @@ struct CraftPrimarySidebarView: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            selection = item
-            graph.shell.select(item)
+            _ = graph.shell.select(item)
         }
     }
 

@@ -31,6 +31,32 @@ import ConnorGraphAppSupport
 }
 
 @MainActor
+@Test func shellSelectionIgnoresRepeatedRoute() {
+    let model = AppShellFeatureModel()
+
+    #expect(model.select(.agentChat) == false)
+    #expect(model.selection == .agentChat)
+    #expect(model.select(.mail) == true)
+    #expect(model.selection == .mail)
+    #expect(model.select(.mail) == false)
+    #expect(model.selection == .mail)
+}
+
+@Test func primarySidebarUsesShellAsItsSingleSelectionWriter() throws {
+    let source = try String(
+        contentsOf: projectSourceURL(named: "AppPrimarySidebarView.swift"),
+        encoding: .utf8
+    )
+    let selectionMethod = try #require(source.range(of: "private func select(_ item: SidebarItem)"))
+    let suffix = source[selectionMethod.lowerBound...]
+    let methodEnd = try #require(suffix.range(of: "\n    }"))
+    let methodSource = suffix[..<methodEnd.upperBound]
+
+    #expect(methodSource.contains("graph.shell.select(item)"))
+    #expect(!methodSource.contains("selection = item"))
+}
+
+@MainActor
 @Test func shellSettingsAndFocusHaveNarrowStateOwnership() {
     let model = AppShellFeatureModel()
 
@@ -74,4 +100,13 @@ import ConnorGraphAppSupport
         .openCalendarSettings,
         .followRSSItem(request)
     ])
+}
+
+private func projectSourceURL(named filename: String) -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Sources/ConnorGraphAgentMac")
+        .appendingPathComponent(filename)
 }
