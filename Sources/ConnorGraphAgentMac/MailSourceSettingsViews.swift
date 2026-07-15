@@ -901,7 +901,6 @@ private struct MailMessageDetailPane: View {
     var mailbox: MailMailbox?
     var message: MailMessageSummary
     @Bindable var model: MailFeatureModel
-    private static let preparedHTMLCache = MailHTMLRenderCache(capacity: 8)
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var preparedHTMLBody: MailPreparedHTMLBodyPresentation?
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
@@ -995,7 +994,7 @@ private struct MailMessageDetailPane: View {
                 return
             }
             bodyWebLayout = .initial
-            if let cached = Self.preparedHTMLCache.value(for: request) {
+            if let cached = model.preparedHTMLCache.value(for: request) {
                 mailBodyRenderingLogger.info("mailBody.sanitize.cacheHit htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
                 preparedHTMLBody = cached
                 return
@@ -1012,7 +1011,7 @@ private struct MailMessageDetailPane: View {
             let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
             mailBodyRenderingLogger.info("mailBody.sanitize.end outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             let prepared = MailPreparedHTMLBodyPresentation(result)
-            Self.preparedHTMLCache.insert(prepared, for: request)
+            model.preparedHTMLCache.insert(prepared, for: request)
             preparedHTMLBody = prepared
         }
     }
