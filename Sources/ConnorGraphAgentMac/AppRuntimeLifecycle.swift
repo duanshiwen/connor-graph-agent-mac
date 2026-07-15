@@ -481,6 +481,10 @@ final class AppRuntimeLifecycle {
             settingsRepository: llmSettingsRepository,
             setupServiceFactory: llmConnectionSetupServiceFactory
         )
+        if let existingSettings = try? llmSettingsRepository.loadSettings(),
+           !existingSettings.connections.isEmpty {
+            self.aiConnectionsModel.showsWelcome = false
+        }
         self.chatFeatureModel = ChatFeatureModel()
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
