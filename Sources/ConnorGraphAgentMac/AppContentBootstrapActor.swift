@@ -29,11 +29,16 @@ struct SourceRuntimeContentSnapshot: Sendable {
     let auditRecordsBySource: [String: [MCPSourceRuntimeAuditRecord]]
 }
 
+struct SkillRuntimeContentSnapshot: Sendable {
+    let definitions: [SkillRuntimeDefinition]
+    let presentation: SkillManagerPresentation
+}
+
 struct AppContentBootstrapSnapshot: Sendable {
     let productOS: StartupDomainResult<ProductOSContentSnapshot>
     let tasks: StartupDomainResult<TaskManagementUIPresentation>
     let sources: StartupDomainResult<SourceRuntimeContentSnapshot>
-    let skills: StartupDomainResult<[SkillRuntimeDefinition]>
+    let skills: StartupDomainResult<SkillRuntimeContentSnapshot>
     let browserHistory: StartupDomainResult<[BrowserHistoryRecord]>
 }
 
@@ -97,9 +102,16 @@ actor AppContentBootstrapActor {
         } catch { return .failure(error) }
     }
 
-    private nonisolated static func loadSkills(paths: AppStoragePaths) -> StartupDomainResult<[SkillRuntimeDefinition]> {
-        do { return .success(try AppSkillRuntimeRepository(storagePaths: paths).list()) }
-        catch { return .failure(error) }
+    private nonisolated static func loadSkills(paths: AppStoragePaths) -> StartupDomainResult<SkillRuntimeContentSnapshot> {
+        do {
+            let definitions = try AppSkillRuntimeRepository(storagePaths: paths).list()
+            let scanSnapshot = SkillPackageScanner().scan(storagePaths: paths)
+            let presentation = SkillCommercialUIPresentationBuilder().build(snapshot: scanSnapshot)
+            return .success(SkillRuntimeContentSnapshot(
+                definitions: definitions,
+                presentation: presentation
+            ))
+        } catch { return .failure(error) }
     }
 
     private nonisolated static func loadBrowserHistory(paths: AppStoragePaths) -> StartupDomainResult<[BrowserHistoryRecord]> {

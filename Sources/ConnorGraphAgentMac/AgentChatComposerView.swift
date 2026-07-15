@@ -232,9 +232,6 @@ struct AgentChatComposerView: View {
                 speechKeyboardMonitor = nil
             }
         }
-        .onAppear {
-            chatActions.dependencies.skills.reload()
-        }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):

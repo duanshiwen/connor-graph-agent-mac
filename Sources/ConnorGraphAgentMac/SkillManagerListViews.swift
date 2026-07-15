@@ -24,9 +24,6 @@ struct CraftSkillListPane: View {
             EditSkillRequestDialog(model: model)
         }
         .modifier(SkillDeleteConfirmationModifier(model: model))
-        .onAppear {
-            model.reload()
-        }
     }
 }
 
