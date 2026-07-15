@@ -18,6 +18,11 @@ public enum CloudKnowledgeLLMGenerationError: Error, Sendable, Equatable, Locali
     }
 }
 
+private struct CloudKnowledgeSearchMetadata: Sendable {
+    var terms: [String]
+    var toolName: String
+}
+
 public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     public var maximumIterations: Int
     public var maximumToolCallsPerIteration: Int
@@ -63,7 +68,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         var lastSignature: String?
         var repeatedSignatureCount = 0
         var lastToolError = "模型重复提交了相同的无效工具调用。"
-        var searchTermsByContextID: [String: [String]] = [:]
+        var searchMetadataByContextID: [String: CloudKnowledgeSearchMetadata] = [:]
 
         for _ in 0..<maximumIterations {
             try Task.checkCancellation()
@@ -96,11 +101,12 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     policyEngine: policy
                 )
                 do {
-                    let executableCall = normalizedWriteCall(call, searchTermsByContextID: searchTermsByContextID)
+                    try validateSearchChannel(call, searchMetadataByContextID: searchMetadataByContextID)
+                    let executableCall = normalizedWriteCall(call, searchMetadataByContextID: searchMetadataByContextID)
                     let result = try await registry.execute(executableCall, context: executionContext)
                     if call.name == "cloud_kb_recent_context" || call.name == "cloud_kb_knowledge_context" {
                         searchCount += 1
-                        recordSearchTerms(call: call, result: result, into: &searchTermsByContextID)
+                        recordSearchMetadata(call: call, result: result, into: &searchMetadataByContextID)
                     }
                     if call.name.hasPrefix("cloud_kb_l") || call.name == "cloud_kb_update_relations" || call.name == "cloud_kb_retract_knowledge" { decisionCount += 1 }
                     consecutiveErrors = 0
@@ -147,10 +153,10 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         """
     }
 
-    private func recordSearchTerms(
+    private func recordSearchMetadata(
         call: AgentToolCall,
         result: AgentToolResult,
-        into termsByContextID: inout [String: [String]]
+        into metadataByContextID: inout [String: CloudKnowledgeSearchMetadata]
     ) {
         guard let arguments = try? AgentToolArguments(json: call.argumentsJSON),
               let query = arguments.string("query"),
@@ -158,23 +164,26 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
               let data = contentJSON.data(using: .utf8),
               let response = try? JSONDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
         else { return }
-        termsByContextID[response.searchContextID] = CloudKnowledgePublishingTraceValidator.normalizedTerms(query)
+        metadataByContextID[response.searchContextID] = CloudKnowledgeSearchMetadata(
+            terms: CloudKnowledgePublishingTraceValidator.normalizedTerms(query),
+            toolName: call.name
+        )
     }
 
     private func normalizedWriteCall(
         _ call: AgentToolCall,
-        searchTermsByContextID: [String: [String]]
+        searchMetadataByContextID: [String: CloudKnowledgeSearchMetadata]
     ) -> AgentToolCall {
         guard isWriteTool(call.name),
               let data = call.argumentsJSON.data(using: .utf8),
               var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let contextID = object["search_context_id"] as? String,
-              let searchTerms = searchTermsByContextID[contextID],
-              !searchTerms.isEmpty
+              let metadata = searchMetadataByContextID[contextID],
+              !metadata.terms.isEmpty
         else { return call }
         var semanticTerms = object["semantic_terms"] as? [String] ?? []
         let normalizedSemanticTerms = Set(semanticTerms.flatMap(CloudKnowledgePublishingTraceValidator.normalizedTerms))
-        semanticTerms.append(contentsOf: searchTerms.filter { !normalizedSemanticTerms.contains($0) })
+        semanticTerms.append(contentsOf: metadata.terms.filter { !normalizedSemanticTerms.contains($0) })
         object["semantic_terms"] = semanticTerms
         guard let normalizedData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let normalizedJSON = String(data: normalizedData, encoding: .utf8)
@@ -182,6 +191,25 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         var normalized = call
         normalized.argumentsJSON = normalizedJSON
         return normalized
+    }
+
+    private func validateSearchChannel(
+        _ call: AgentToolCall,
+        searchMetadataByContextID: [String: CloudKnowledgeSearchMetadata]
+    ) throws {
+        guard isWriteTool(call.name),
+              let arguments = try? AgentToolArguments(json: call.argumentsJSON),
+              let contextID = arguments.string("search_context_id"),
+              let metadata = searchMetadataByContextID[contextID]
+        else { return }
+        let requiresRecentContext = call.name == "cloud_kb_l2_update_entities"
+            || (call.name == "cloud_kb_retract_knowledge" && arguments.string("layer") == "l2")
+        let requiredTool = requiresRecentContext ? "cloud_kb_recent_context" : "cloud_kb_knowledge_context"
+        guard metadata.toolName == requiredTool else {
+            throw AgentToolError.invalidArguments(
+                "search_context_id came from \(metadata.toolName), but \(call.name) requires a new \(requiredTool) search for this semantic group"
+            )
+        }
     }
 
     private func isWriteTool(_ name: String) -> Bool {
