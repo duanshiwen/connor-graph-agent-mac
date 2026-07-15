@@ -7,65 +7,6 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-struct CraftListPaneView: View {
-    let graph: AppFeatureGraph
-    @Binding var selection: SidebarItem?
-
-    var body: some View {
-        let route = selection ?? .agentChat
-        RetainedRouteHostView(
-            route: route,
-            pane: .list,
-            tracker: graph.shell.routePerformanceTracker,
-            contentOwner: ObjectIdentifier(graph),
-            routeFactory: { route in
-                AnyView(listRouteView(route).background(
-                    AppRouteActivationSentinel(
-                        route: route,
-                        pane: .list,
-                        tracker: graph.shell.routePerformanceTracker
-                    )
-                    .frame(width: 0, height: 0)
-                ))
-            }
-        )
-    }
-
-    private func listRouteView(_ route: SidebarItem) -> AnyView {
-        switch route {
-        case .agentChat:
-            AnyView(ChatListRouteView(
-                model: graph.chat,
-                governanceModel: graph.governance,
-                sessionActions: graph.chatActions.session,
-                rowActions: graph.chatSessionListActions
-            ))
-        case .llmSettings:
-            AnyView(CraftSettingsListPane(shellModel: graph.shell, selection: $selection))
-        case .calendar:
-            AnyView(CraftCalendarListPane(model: graph.calendar))
-        case .contacts:
-            AnyView(CraftContactsListPane(model: graph.contacts))
-        case .rss:
-            AnyView(RSSListRouteView(model: graph.rss))
-        case .mail:
-            AnyView(MailListRouteView(model: graph.mail))
-        case .sources:
-            AnyView(CraftSourceListPane(model: graph.sources))
-        case .skills:
-            AnyView(CraftSkillListPane(model: graph.skills))
-        case .automation, .scheduledTasks:
-            AnyView(CraftTaskAutomationListPane(model: graph.tasks, governanceConfig: graph.governance.config, kind: .scheduled))
-        case .eventTriggeredTasks:
-            AnyView(CraftTaskAutomationListPane(model: graph.tasks, governanceConfig: graph.governance.config, kind: .eventTriggered))
-        case .productOS:
-            AnyView(CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: graph.productOS.registry.sources.map(\.displayName) + graph.productOS.registry.skills.map(\.displayName)))
-        default:
-            AnyView(CraftSimpleListPane(title: route.rawValue, subtitle: "康纳同学工作区", rows: []))
-        }
-    }
-}
-
 private struct ListSearchFilterBanner: View {
     var query: String
     var sourceTitle: String
@@ -1103,7 +1044,7 @@ private struct RSSHintCard: View {
     }
 }
 
-private enum TaskAutomationKind {
+enum TaskAutomationKind {
     case scheduled
     case eventTriggered
 
@@ -1150,7 +1091,7 @@ private enum TaskAutomationKind {
     }
 }
 
-private struct CraftTaskAutomationListPane: View {
+struct CraftTaskAutomationListPane: View {
     @Bindable var model: TaskAutomationFeatureModel
     var governanceConfig: AppSessionGovernanceConfig
     var kind: TaskAutomationKind
@@ -2048,72 +1989,6 @@ private struct RSSItemListRow: View {
     }
 }
 
-struct CraftDetailPaneView: View {
-    let graph: AppFeatureGraph
-    @ObservedObject var identityStore: AppUserIdentityStore
-    var selection: SidebarItem
-
-    var body: some View {
-        RetainedRouteHostView(
-            route: selection,
-            pane: .detail,
-            tracker: graph.shell.routePerformanceTracker,
-            contentOwner: ObjectIdentifier(graph),
-            routeFactory: { route in
-                AnyView(detailRouteView(route).background(
-                    AppRouteActivationSentinel(
-                        route: route,
-                        pane: .detail,
-                        tracker: graph.shell.routePerformanceTracker
-                    )
-                    .frame(width: 0, height: 0)
-                ))
-            }
-        )
-    }
-
-    private func detailRouteView(_ route: SidebarItem) -> AnyView {
-        switch route {
-        case .entities:
-            AnyView(GraphEntitiesView(entities: graph.graphDiagnostics.entities, statements: graph.graphDiagnostics.statements, episodes: graph.graphDiagnostics.episodes))
-        case .search:
-            AnyView(SearchView(model: graph.graphDiagnostics))
-        case .observeLog:
-            AnyView(ObserveLogView(entries: graph.graphDiagnostics.observeLogEntries))
-        case .agentChat:
-            AnyView(ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions))
-        case .promotionQueue:
-            AnyView(PromotionQueueView(model: graph.graphDiagnostics))
-        case .pendingApprovals:
-            AnyView(AgentPendingApprovalReviewView(model: graph.chat, chatActions: graph.chatActions))
-        case .automation, .scheduledTasks:
-            AnyView(TaskAutomationDetailPane(model: graph.tasks, kind: .scheduled))
-        case .eventTriggeredTasks:
-            AnyView(TaskAutomationDetailPane(model: graph.tasks, kind: .eventTriggered))
-        case .productOS:
-            AnyView(ProductOSRegistryView(
-                model: graph.productOS,
-                governanceConfig: graph.governance.config,
-                commercialReadinessDashboard: graph.commercialReadinessDashboard()
-            ))
-        case .calendar:
-            AnyView(CalendarSourceSettingsView(model: graph.calendar))
-        case .contacts:
-            AnyView(ContactsSourceSettingsView(model: graph.contacts))
-        case .mail:
-            AnyView(MailDetailRouteView(model: graph.mail))
-        case .rss:
-            AnyView(RSSDetailRouteView(model: graph.rss))
-        case .sources:
-            AnyView(SourceRuntimePanelView(model: graph.sources))
-        case .skills:
-            AnyView(SkillRuntimePanelView(model: graph.skills))
-        case .llmSettings:
-            AnyView(ConnorSettingsDetailView(graph: graph, identityStore: identityStore))
-        }
-    }
-}
-
 struct AgentChatNoSelectionDetailView: View {
     var body: some View {
         VStack(alignment: .center, spacing: AppShellLayout.spaceL) {
@@ -2731,7 +2606,7 @@ private struct PersonProfileStatusPill: View {
     }
 }
 
-private struct TaskAutomationDetailPane: View {
+struct TaskAutomationDetailPane: View {
     @Bindable var model: TaskAutomationFeatureModel
     var kind: TaskAutomationKind
 

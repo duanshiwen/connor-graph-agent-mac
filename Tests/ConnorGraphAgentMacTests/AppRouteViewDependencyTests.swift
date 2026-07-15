@@ -16,14 +16,17 @@ struct AppRouteViewDependencyTests {
         #expect(!source.contains("AnyView"))
     }
 
-    @Test func paneRoutingDoesNotForceSelectionIdentity() throws {
-        let source = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+    @Test func paneRoutingUsesNativeSwiftUIWithoutForcedIdentity() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppRoutePaneViews.swift"), encoding: .utf8)
+        #expect(!source.contains("RetainedRouteHostView"))
+        #expect(!source.contains("NSHostingController"))
+        #expect(!source.contains("AnyView"))
         #expect(!source.contains(".id(selection)"))
         #expect(!source.contains(".id(graph.shell.selection)"))
     }
 
     @Test func listAndDetailSwitchesCoverEverySidebarRoute() throws {
-        let source = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let source = try String(contentsOf: projectSourceURL(named: "AppRoutePaneViews.swift"), encoding: .utf8)
         for route in SidebarItem.allCases {
             #expect(source.contains(".\(routeCaseName(route))"))
         }
