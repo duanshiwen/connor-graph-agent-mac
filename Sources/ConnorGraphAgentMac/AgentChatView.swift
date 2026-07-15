@@ -7,13 +7,14 @@ import ConnorGraphSearch
 import ConnorGraphAppSupport
 
 struct AgentChatView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
     @State private var isSessionInfoPresented = false
 
 
     var body: some View {
         Group {
-            if viewModel.selectedChatSessionID == nil && !viewModel.isBrowserVisible {
+            if model.sessions.selectedSessionID == nil && !chatActions.dependencies.browser.isVisible {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -21,24 +22,42 @@ struct AgentChatView: View {
             }
         }
         .onAppear {
-            viewModel.reloadChatSessionsIfNeededAfterInitialLoad()
-            viewModel.reloadPendingApprovals()
+            chatActions.session.reloadChatSessionsIfNeededAfterInitialLoad()
+            chatActions.approval.reloadPendingApprovals()
         }
     }
 
     private var activeSessionContent: some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if viewModel.isBrowserVisible {
-                    BrowserWorkspaceView(viewModel: viewModel)
+                if chatActions.dependencies.browser.isVisible {
+                    BrowserWorkspaceView(
+                        model: chatActions.dependencies.browser,
+                        chat: BrowserWorkspaceChatActions(
+                            selectedSessionID: model.sessions.selectedSessionID,
+                            isSubmitting: model.run.isSubmitting,
+                            defaultSearchEngine: chatActions.dependencies.appSettings.defaultSearchEngine,
+                            shortcutSettings: chatActions.dependencies.inputSettings.shortcutSettings,
+                            cancelActiveRun: { chatActions.run.cancelActiveChatRun() },
+                            appendToDraft: { chatActions.composer.appendToSelectedChatInputDraft($0) },
+                            appendSessionRecord: { kind, title, body, metadata, sessionID in
+                                chatActions.workspace.appendSessionRecord(kind: kind, title: title, body: body, metadata: metadata, sessionID: sessionID)
+                            },
+                            submit: { prompt, displayPrompt in
+                                await chatActions.run.submitChat(prompt: prompt, displayPrompt: displayPrompt)
+                            },
+                            currentErrorMessage: { chatActions.errors.errorMessage },
+                            reportError: { chatActions.errors.errorMessage = $0 }
+                        )
+                    )
                 } else {
-                    AgentChatConversationView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
+                    AgentChatConversationView(model: model, chatActions: chatActions, isSessionInfoPresented: $isSessionInfoPresented)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if isSessionInfoPresented {
-                AgentChatInspectorView(viewModel: viewModel, isPresented: $isSessionInfoPresented)
+                AgentChatInspectorView(model: model, chatActions: chatActions, isPresented: $isSessionInfoPresented)
                     .frame(width: 360, height: 420)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
                     .overlay(
@@ -51,9 +70,9 @@ struct AgentChatView: View {
                     .padding(.trailing, AgentChatLayout.spaceL)
             }
 
-            if let toast = viewModel.attachmentToast {
+            if let toast = model.composer.attachmentToast {
                 AgentChatToastView(toast: toast) {
-                    viewModel.attachmentToast = nil
+                    model.composer.attachmentToast = nil
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(8)
@@ -61,28 +80,28 @@ struct AgentChatView: View {
                 .padding(.trailing, AgentChatLayout.spaceL)
             }
 
-            if let model = viewModel.attachmentPreviewModel {
+            if let previewModel = model.composer.attachmentPreviewModel {
                 AgentAttachmentPreviewOverlay(
-                    model: model,
-                    onDownloadImage: { viewModel.downloadPreviewImage(model) },
-                    onRetryExtraction: { viewModel.retryAttachmentExtraction(attachmentID: model.attachment.id) },
-                    onClose: { viewModel.attachmentPreviewModel = nil }
+                    model: previewModel,
+                    onDownloadImage: { chatActions.run.downloadPreviewImage(previewModel) },
+                    onRetryExtraction: { chatActions.composer.retryAttachmentExtraction(attachmentID: previewModel.attachment.id) },
+                    onClose: { model.composer.attachmentPreviewModel = nil }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 .zIndex(10)
             }
 
-            if viewModel.isBackgroundTasksPresented {
+            if model.sessions.isBackgroundTasksPresented {
                 AgentBackgroundTaskOverlay(
-                    tasks: viewModel.activeSessionBackgroundTasks,
-                    onClose: { viewModel.isBackgroundTasksPresented = false }
+                    tasks: chatActions.run.activeSessionBackgroundTasks,
+                    onClose: { model.sessions.isBackgroundTasksPresented = false }
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 .zIndex(11)
             }
         }
         .environment(\.openURL, OpenURLAction { url in
-            viewModel.openURLInCurrentChatBrowser(url)
+            chatActions.workspace.openURLInCurrentChatBrowser(url)
             return .handled
         })
     }
@@ -330,11 +349,12 @@ private struct AgentBackgroundTaskOverlay: View {
 }
 
 private struct AgentChatSessionListView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
 
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
-            Button(action: { viewModel.newChatSession() }) {
+            Button(action: { chatActions.session.newChatSession() }) {
                 SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
@@ -344,7 +364,7 @@ private struct AgentChatSessionListView: View {
                     Text("会话")
                         .font(AgentChatTypography.sectionTitle)
                     Spacer()
-                    Button(action: { viewModel.reloadChatSessions() }) {
+                    Button(action: { chatActions.session.reloadChatSessions() }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
                             .symbolRenderingMode(.hierarchical)
@@ -353,21 +373,21 @@ private struct AgentChatSessionListView: View {
                     .buttonStyle(.borderless)
                     .help("重新加载会话")
                 }
-                AgentSessionFilterBar(viewModel: viewModel)
+                AgentSessionFilterBar(model: model, chatActions: chatActions)
             }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    ForEach(viewModel.chatSessions) { session in
+                    ForEach(model.sessions.sessions) { session in
                         let row = AgentChatSessionPresentation(session: session)
                         AgentChatSessionRow(
                             row: row,
-                            isSelected: session.id == viewModel.selectedChatSessionID
+                            isSelected: session.id == model.sessions.selectedSessionID
                         ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
-                                viewModel.selectChatSession(session.id)
+                                chatActions.session.selectChatSession(session.id)
                             }
                         }
                     }
@@ -427,7 +447,8 @@ private struct AgentChatSessionRow: View {
 }
 
 private struct AgentChatConversationView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
     @State private var selectedToolInvocation: AgentToolInvocationPresentation?
@@ -461,23 +482,23 @@ private struct AgentChatConversationView: View {
     }
 
     private var visibleTranscript: [AgentMessage] {
-        guard viewModel.transcript.count > visibleMessageLimit else { return viewModel.transcript }
-        return Array(viewModel.transcript.suffix(visibleMessageLimit))
+        guard model.run.transcript.count > visibleMessageLimit else { return model.run.transcript }
+        return Array(model.run.transcript.suffix(visibleMessageLimit))
     }
 
     private var hasOlderMessages: Bool {
-        visibleMessageLimit < viewModel.transcript.count
+        visibleMessageLimit < model.run.transcript.count
     }
 
     private var expandedApproval: AgentPendingApproval? {
         guard let expandedApprovalID else { return nil }
-        return viewModel.activeChatPendingApprovals.first { $0.id == expandedApprovalID }
+        return chatActions.approval.activeChatPendingApprovals.first { $0.id == expandedApprovalID }
     }
 
     @ViewBuilder
     private var expandedApprovalOverlay: some View {
         if let approval = expandedApproval {
-            AgentPermissionExpandedReviewOverlay(approval: approval, viewModel: viewModel) {
+            AgentPermissionExpandedReviewOverlay(approval: approval, model: model, chatActions: chatActions) {
                 expandedApprovalID = nil
             }
             .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
@@ -523,9 +544,9 @@ private struct AgentChatConversationView: View {
     }
 
     private var shouldPreserveOpenProcess: Bool {
-        guard !viewModel.isSubmittingChat,
-              !viewModel.agentEventTimeline.isEmpty,
-              viewModel.transcript.last?.role == .user
+        guard !model.run.isSubmitting,
+              !model.run.eventTimeline.isEmpty,
+              model.run.transcript.last?.role == .user
         else { return false }
         return true
     }
@@ -538,17 +559,17 @@ private struct AgentChatConversationView: View {
             result &*= 31
             result &+= message.citations.count
         }
-        let contextSignature = (viewModel.lastContext?.query.hashValue ?? 0) ^ (viewModel.lastContext?.items.reduce(into: 0) { result, item in
+        let contextSignature = (model.run.lastContext?.query.hashValue ?? 0) ^ (model.run.lastContext?.items.reduce(into: 0) { result, item in
             result &+= item.sourceID.hashValue
             result &*= 31
             result &+= item.content.count
         } ?? 0)
         return TimelineCache.Key(
-            sessionID: viewModel.selectedChatSessionID,
+            sessionID: model.sessions.selectedSessionID,
             messageCount: visibleTranscript.count,
             messageSignature: messageSignature,
             contextSignature: contextSignature,
-            isSubmitting: viewModel.isSubmittingChat,
+            isSubmitting: model.run.isSubmitting,
             preservesOpenProcess: shouldPreserveOpenProcess
         )
     }
@@ -557,8 +578,8 @@ private struct AgentChatConversationView: View {
         TimelineCache.shared.items(
             key: timelineCacheKey,
             messages: visibleTranscript,
-            lastContext: viewModel.lastContext,
-            isSubmitting: viewModel.isSubmittingChat,
+            lastContext: model.run.lastContext,
+            isSubmitting: model.run.isSubmitting,
             preservesOpenProcess: shouldPreserveOpenProcess
         )
     }
@@ -578,7 +599,7 @@ private struct AgentChatConversationView: View {
         else { return }
 
         let previousLimit = visibleMessageLimit
-        let nextLimit = min(viewModel.transcript.count, previousLimit + Self.messagePageSize)
+        let nextLimit = min(model.run.transcript.count, previousLimit + Self.messagePageSize)
         guard nextLimit > previousLimit else { return }
 
         isLoadingOlderMessages = true
@@ -592,10 +613,10 @@ private struct AgentChatConversationView: View {
     }
 
     private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
-        if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
-            return viewModel.agentEventTimeline
+        if process.id == latestProcessID, !model.run.eventTimeline.isEmpty {
+            return model.run.eventTimeline
         }
-        let restoredEvents = viewModel.restoredAgentEventTimeline(for: process)
+        let restoredEvents = chatActions.run.restoredAgentEventTimeline(for: process)
         if !restoredEvents.isEmpty {
             return restoredEvents
         }
@@ -607,18 +628,18 @@ private struct AgentChatConversationView: View {
         if let message = item.message {
             AgentChatMessageRow(
                 row: message,
-                persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
+                persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
                 localAttachmentFileURL: { attachment in
-                    viewModel.localAttachmentFileURL(attachment)
+                    chatActions.composer.localAttachmentFileURL(attachment)
                 },
                 onPreviewAttachment: { attachment in
-                    viewModel.previewAttachment(attachment)
+                    chatActions.composer.previewAttachment(attachment)
                 },
                 onCopyAssistantMessage: { message in
-                    viewModel.copyAssistantMessageToPasteboard(message)
+                    chatActions.run.copyAssistantMessageToPasteboard(message)
                 },
                 onExportAssistantMessage: { message in
-                    viewModel.exportAssistantMessageToFile(message)
+                    chatActions.run.exportAssistantMessageToFile(message)
                 }
             )
         } else if let process = item.process {
@@ -641,11 +662,11 @@ private struct AgentChatConversationView: View {
     }
 
     private var isNoteModeBeforeFirstMessage: Bool {
-        guard let sessionID = viewModel.selectedChatSessionID else { return false }
-        let session = viewModel.chatSessions.first { $0.id == sessionID }
+        guard let sessionID = model.sessions.selectedSessionID else { return false }
+        let session = model.sessions.sessions.first { $0.id == sessionID }
         guard session?.governance.kind == .note else { return false }
         // 正在提交或已有消息 → 退出笔记全屏模式
-        return (session?.messages.isEmpty ?? true) && !viewModel.isSubmittingChat
+        return (session?.messages.isEmpty ?? true) && !model.run.isSubmitting
     }
 
     var body: some View {
@@ -653,14 +674,14 @@ private struct AgentChatConversationView: View {
         let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot, insertsDateSeparators: true)
         let latestProcessID = timelineSnapshot.last(where: { $0.process != nil })?.process?.id
         let chatDataSetID = ChatViewportDataSetID.agentChatSession(
-            sessionID: viewModel.selectedChatSessionID,
-            revision: viewModel.selectedChatTranscriptRevision
+            sessionID: model.sessions.selectedSessionID,
+            revision: model.run.transcriptRevision
         )
         let noteFullscreen = isNoteModeBeforeFirstMessage
 
         VStack(spacing: 0) {
             if !noteFullscreen {
-                AgentChatConversationHeader(viewModel: viewModel)
+                AgentChatConversationHeader(model: model, chatActions: chatActions)
                     .padding(.horizontal, AgentChatLayout.spaceL)
                     .padding(.top, AgentChatLayout.spaceS)
                     .padding(.bottom, AgentChatLayout.spaceL)
@@ -672,7 +693,7 @@ private struct AgentChatConversationView: View {
                         .frame(maxWidth: .infinity, maxHeight: 0)
                         .clipped()
                         .allowsHitTesting(false)
-                } else if viewModel.isLoadingSelectedChatSessionDetail {
+                } else if chatActions.session.isLoadingSelectedChatSessionDetail {
                     AgentChatSessionLoadingView()
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
                 } else if chatItems.isEmpty {
@@ -704,16 +725,16 @@ private struct AgentChatConversationView: View {
             .padding(.vertical, noteFullscreen ? 0 : AgentChatLayout.chatViewportVerticalInset)
             .onAppear {
                 resetVisibleMessageWindow()
-                lastObservedSessionID = viewModel.selectedChatSessionID
-                lastObservedTranscriptCount = viewModel.transcript.count
+                lastObservedSessionID = model.sessions.selectedSessionID
+                lastObservedTranscriptCount = model.run.transcript.count
             }
-            .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
+            .onChange(of: model.sessions.selectedSessionID) { _, newSessionID in
                 resetVisibleMessageWindow()
                 lastObservedSessionID = newSessionID
-                lastObservedTranscriptCount = viewModel.transcript.count
+                lastObservedTranscriptCount = model.run.transcript.count
             }
-            .onChange(of: viewModel.transcript.count) { oldCount, newCount in
-                let currentSessionID = viewModel.selectedChatSessionID
+            .onChange(of: model.run.transcript.count) { oldCount, newCount in
+                let currentSessionID = model.sessions.selectedSessionID
                 defer {
                     lastObservedSessionID = currentSessionID
                     lastObservedTranscriptCount = newCount
@@ -734,14 +755,16 @@ private struct AgentChatConversationView: View {
                 self.pendingPrependCorrection = nil
                 isLoadingOlderMessages = false
             }
-            .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
+            .onChange(of: model.run.isSubmitting) { _, isSubmitting in
                 guard isSubmitting else { return }
                 chatViewportController.scrollToBottom()
             }
 
 
             AgentChatComposerView(
-                viewModel: viewModel,
+                model: model,
+                chatActions: chatActions,
+                contactsFeatureModel: chatActions.dependencies.contacts,
                 isSessionInfoPresented: $isSessionInfoPresented,
                 onExpandApprovalReview: { approval in
                     expandedApprovalID = approval.id
@@ -774,7 +797,7 @@ private struct AgentChatConversationView: View {
         .overlay {
             expandedApprovalOverlay
         }
-        .onChange(of: viewModel.activeChatPendingApprovals.map(\.id)) { _, activeIDs in
+        .onChange(of: chatActions.approval.activeChatPendingApprovals.map(\.id)) { _, activeIDs in
             if let expandedApprovalID, !activeIDs.contains(expandedApprovalID) {
                 self.expandedApprovalID = nil
             }
@@ -801,7 +824,8 @@ private struct AgentChatTranscriptViewportHeightKey: PreferenceKey {
 }
 
 private struct AgentChatConversationHeader: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
     @State private var isEditingTitle = false
     @State private var titleDraft = ""
     @FocusState private var isTitleFocused: Bool
@@ -811,30 +835,30 @@ private struct AgentChatConversationHeader: View {
     }
 
     private var selectedSession: AgentSession? {
-        guard let selectedID = viewModel.selectedChatSessionID else { return nil }
-        return viewModel.allChatSessions.first { $0.id == selectedID }
-            ?? viewModel.chatSessions.first { $0.id == selectedID }
+        guard let selectedID = model.sessions.selectedSessionID else { return nil }
+        return model.sessions.allSessions.first { $0.id == selectedID }
+            ?? model.sessions.sessions.first { $0.id == selectedID }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             titleView
 
-            if let summary = viewModel.latestChatSummary {
+            if let summary = model.run.latestSummary {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                         Text(summary.content)
                             .font(AgentChatTypography.callout)
                             .textSelection(.enabled)
-                        if let freshness = viewModel.latestChatSummaryFreshness {
+                        if let freshness = chatActions.run.latestChatSummaryFreshness {
                             Text("覆盖 \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) 条消息 · 更新于 \(summary.updatedAt.connorLocalStandardDateTime())")
                                 .font(AgentChatTypography.meta)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(viewModel.latestChatSummaryContextMessage)
+                        Text(chatActions.run.latestChatSummaryContextMessage)
                             .font(AgentChatTypography.meta)
-                            .foregroundColor(viewModel.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
-                        if let message = viewModel.chatSummaryMessage {
+                            .foregroundColor(chatActions.run.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
+                        if let message = model.run.summaryMessage {
                             Text(message)
                                 .font(AgentChatTypography.meta)
                                 .foregroundStyle(.green)
@@ -854,7 +878,7 @@ private struct AgentChatConversationHeader: View {
             guard !isEditingTitle else { return }
             titleDraft = newTitle
         }
-        .onChange(of: viewModel.selectedChatSessionID) { _, _ in
+        .onChange(of: model.sessions.selectedSessionID) { _, _ in
             isEditingTitle = false
             isTitleFocused = false
             titleDraft = selectedTitle
@@ -897,7 +921,7 @@ private struct AgentChatConversationHeader: View {
     }
 
     private func beginTitleEdit() {
-        guard viewModel.selectedChatSessionID != nil else { return }
+        guard model.sessions.selectedSessionID != nil else { return }
         titleDraft = selectedTitle
         isEditingTitle = true
         isTitleFocused = true
@@ -907,27 +931,28 @@ private struct AgentChatConversationHeader: View {
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         isEditingTitle = false
         isTitleFocused = false
-        guard let selectedID = viewModel.selectedChatSessionID, !trimmed.isEmpty, trimmed != selectedTitle else {
+        guard let selectedID = model.sessions.selectedSessionID, !trimmed.isEmpty, trimmed != selectedTitle else {
             titleDraft = selectedTitle
             return
         }
-        viewModel.renameChatSession(selectedID, title: trimmed)
+        chatActions.session.renameChatSession(selectedID, title: trimmed)
     }
 }
 
 private struct AgentSessionFilterBar: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             HStack(spacing: AgentChatLayout.spaceS) {
-                FilterButton(title: "All", isSelected: viewModel.sessionListFilter == .all) { viewModel.setSessionListFilter(.all) }
+                FilterButton(title: "All", isSelected: model.sessions.filter == .all) { chatActions.session.setSessionListFilter(.all) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
-                        FilterButton(title: status.displayName, isSelected: viewModel.sessionListFilter == .status(status)) {
-                            viewModel.setSessionListFilter(.status(status))
+                        FilterButton(title: status.displayName, isSelected: model.sessions.filter == .status(status)) {
+                            chatActions.session.setSessionListFilter(.status(status))
                         }
                     }
                 }
@@ -1008,13 +1033,14 @@ private struct AgentLabelPill: View {
 }
 
 private struct AgentChatInspectorView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
     @Binding var isPresented: Bool
 
     private var selectedSession: AgentSession? {
-        guard let selectedID = viewModel.selectedChatSessionID else { return nil }
-        return viewModel.allChatSessions.first { $0.id == selectedID }
-            ?? viewModel.chatSessions.first { $0.id == selectedID }
+        guard let selectedID = model.sessions.selectedSessionID else { return nil }
+        return model.sessions.allSessions.first { $0.id == selectedID }
+            ?? model.sessions.sessions.first { $0.id == selectedID }
     }
 
     var body: some View {
@@ -1076,7 +1102,7 @@ private struct AgentChatInspectorView: View {
                 get: { session.governance.status },
                 set: { newValue in
                     DispatchQueue.main.async {
-                        viewModel.setSelectedSessionStatus(newValue)
+                        chatActions.session.setSelectedSessionStatus(newValue)
                     }
                 }
             )) {
@@ -1087,7 +1113,7 @@ private struct AgentChatInspectorView: View {
             .pickerStyle(.menu)
 
             HStack(spacing: AgentChatLayout.spaceS) {
-                Button(session.governance.isFlagged ? "取消标记" : "标记") { viewModel.toggleSelectedSessionFlag() }
+                Button(session.governance.isFlagged ? "取消标记" : "标记") { chatActions.session.toggleSelectedSessionFlag() }
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
@@ -1131,9 +1157,9 @@ private struct AgentChatInspectorView: View {
                     .font(AgentChatTypography.metaEmphasis)
                     .foregroundStyle(.secondary)
 
-                ForEach(viewModel.governanceConfig.labels) { definition in
+                ForEach(chatActions.dependencies.governance.config.labels) { definition in
                     Button {
-                        viewModel.toggleSelectedSessionLabel(definition.id)
+                        chatActions.session.toggleSelectedSessionLabel(definition.id)
                     } label: {
                         HStack {
                             Image(systemName: session.governance.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
@@ -1152,14 +1178,14 @@ private struct AgentChatInspectorView: View {
     }
 
     private func displayText(for label: AgentSessionLabel) -> String {
-        viewModel.governanceConfig.definition(for: label.id)?.name ?? label.id
+        chatActions.dependencies.governance.config.definition(for: label.id)?.name ?? label.id
     }
 
     private var artifacts: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             Text("会话文件")
                 .font(AgentChatTypography.calloutEmphasis)
-            if let dirs = viewModel.selectedSessionArtifactDirectories {
+            if let dirs = model.sessions.selectedArtifactDirectories {
                 ArtifactPathRow(label: "plans", path: dirs.plans.path)
                 ArtifactPathRow(label: "data", path: dirs.data.path)
                 ArtifactPathRow(label: "attachments", path: dirs.attachments.path)

@@ -2,8 +2,8 @@ import Foundation
 
 // LEGACY COMPATIBILITY SHIM:
 // The formal Connor background-task architecture is now TaskManagementDomain.
-// These ProductOSAutomation types remain temporarily for existing AppViewModel,
-// readiness, and UI compatibility until those call sites are migrated to the
+// These ProductOSAutomation types remain temporarily for runtime readiness
+// and UI compatibility until those call sites are migrated to the
 // abstract Task Management Stack.
 
 public enum ProductOSAutomationTriggerKind: String, Codable, Sendable, Equatable, CaseIterable {

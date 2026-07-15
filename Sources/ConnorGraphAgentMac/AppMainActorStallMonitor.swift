@@ -2,6 +2,88 @@ import Foundation
 import os
 import ConnorGraphAppSupport
 
+@MainActor
+enum AppInteractionPerformance {
+    struct Interval {
+        fileprivate let name: StaticString
+        fileprivate let state: OSSignpostIntervalState
+    }
+
+    private static let signposter = OSSignposter(
+        subsystem: AppPerformanceLog.subsystem,
+        category: "InteractivePerformance"
+    )
+    private static var agentDetailIntervals: [String: Interval] = [:]
+
+    static func begin(_ name: StaticString) -> Interval {
+        Interval(name: name, state: signposter.beginInterval(name))
+    }
+
+    static func end(_ interval: Interval) {
+        signposter.endInterval(interval.name, interval.state)
+    }
+
+    static func measure<T>(_ name: StaticString, operation: () throws -> T) rethrows -> T {
+        let interval = begin(name)
+        defer { end(interval) }
+        return try operation()
+    }
+
+    static func beginAgentDetail(callID: String) {
+        if let previous = agentDetailIntervals.removeValue(forKey: callID) { end(previous) }
+        agentDetailIntervals[callID] = begin("AgentDetail.OpenToFirstFrame")
+    }
+
+    static func endAgentDetail(callID: String) {
+        guard let interval = agentDetailIntervals.removeValue(forKey: callID) else { return }
+        end(interval)
+    }
+
+    static func event(_ name: StaticString) {
+        signposter.emitEvent(name)
+    }
+}
+
+@MainActor
+enum AppStartupPerformance {
+    private static let signposter = OSSignposter(
+        subsystem: AppPerformanceLog.subsystem,
+        category: "AppStartup"
+    )
+
+    static func measure<T>(_ name: StaticString, operation: () throws -> T) rethrows -> T {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let state = signposter.beginInterval(name)
+        defer {
+            signposter.endInterval(name, state)
+            emitDiagnosticMetricIfEnabled(name: name, startedAt: startedAt)
+        }
+        return try operation()
+    }
+
+    static func measure<T>(_ name: StaticString, operation: () async throws -> T) async rethrows -> T {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let state = signposter.beginInterval(name)
+        defer {
+            signposter.endInterval(name, state)
+            emitDiagnosticMetricIfEnabled(name: name, startedAt: startedAt)
+        }
+        return try await operation()
+    }
+
+    static func event(_ name: StaticString) {
+        signposter.emitEvent(name)
+    }
+
+    private static func emitDiagnosticMetricIfEnabled(name: StaticString, startedAt: UInt64) {
+        guard ProcessInfo.processInfo.environment["CONNOR_STARTUP_METRICS"] == "1" else { return }
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+        let formattedElapsed = String(format: "%.3f", elapsed)
+        let line = "CONNOR_STARTUP_METRIC \(name) \(formattedElapsed)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+}
+
 final class AppMainActorStallMonitor {
     struct Configuration: Sendable, Equatable {
         var intervalNanoseconds: UInt64

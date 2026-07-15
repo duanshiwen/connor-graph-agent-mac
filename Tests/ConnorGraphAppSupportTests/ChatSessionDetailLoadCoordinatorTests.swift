@@ -41,6 +41,8 @@ struct ChatSessionDetailLoadCoordinatorTests {
         #expect(snapshot.session.messages.map(\.content) == ["Hello"])
         #expect(snapshot.timeline == cached)
         #expect(snapshot.artifactDirectories != nil)
+        #expect(snapshot.sessionRecords.isEmpty)
+        #expect(snapshot.backgroundTasks.isEmpty)
     }
 
     @Test func loadReturnsNilForMissingSession() async throws {
@@ -54,6 +56,50 @@ struct ChatSessionDetailLoadCoordinatorTests {
         )
 
         #expect(snapshot == nil)
+    }
+
+    @Test func loadReconcilesOnlyOrphanedBackgroundTasks() async throws {
+        let store = try SQLiteGraphKernelStore(path: temporaryDatabaseURL().path)
+        try store.migrate()
+        let repository = AppChatSessionRepository(store: store)
+        let session = try repository.createSession(title: "Tasks")
+        let now = Date()
+        let orphaned = PersistedSessionBackgroundTask(
+            id: "orphaned",
+            sessionID: session.id,
+            kind: "test",
+            title: "Orphaned",
+            detail: "",
+            status: .running,
+            createdAt: now,
+            updatedAt: now
+        )
+        let active = PersistedSessionBackgroundTask(
+            id: "active",
+            sessionID: session.id,
+            kind: "test",
+            title: "Active",
+            detail: "",
+            status: .running,
+            createdAt: now,
+            updatedAt: now
+        )
+        try repository.saveBackgroundTask(orphaned)
+        try repository.saveBackgroundTask(active)
+
+        let snapshot = try #require(await ChatSessionDetailLoadCoordinator().load(
+            repository: repository,
+            sessionID: session.id,
+            activeBackgroundTaskIDs: [active.id]
+        ))
+
+        let loadedOrphanedStatus = snapshot.backgroundTasks.first { $0.id == "orphaned" }?.status
+        let loadedActiveStatus = snapshot.backgroundTasks.first { $0.id == "active" }?.status
+        let persistedTasks = try repository.loadBackgroundTasks(sessionID: session.id)
+        let persistedOrphanedStatus = persistedTasks.first { $0.id == "orphaned" }?.status
+        #expect(loadedOrphanedStatus == .interrupted)
+        #expect(loadedActiveStatus == .running)
+        #expect(persistedOrphanedStatus == .interrupted)
     }
 
     private func temporaryDatabaseURL() -> URL {

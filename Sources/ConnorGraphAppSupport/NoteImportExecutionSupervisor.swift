@@ -81,6 +81,11 @@ public actor NoteImportExecutionSupervisor {
         tasks[jobID] != nil
     }
 
+    public func waitUntilFinished(jobID: String) async {
+        let task = tasks[jobID]
+        await task?.value
+    }
+
     private func shouldRecover(_ job: NoteImportJobRecord) -> Bool {
         if job.cancelRequestedAt != nil || job.status == .cancelling { return true }
         guard job.pauseRequestedAt == nil, job.status != .paused else { return false }

@@ -5,7 +5,8 @@ import ConnorGraphAppSupport
 
 struct AgentChatPermissionRequestCard: View {
     var approval: AgentPendingApproval
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
     var onExpandReview: (() -> Void)? = nil
     @State private var isPayloadExpanded = false
 
@@ -134,7 +135,7 @@ struct AgentChatPermissionRequestCard: View {
             .help("放大查看完整权限请求细节；缩小或按 Esc 不会批准或拒绝。")
 
             Button {
-                viewModel.approvePendingApproval(approval)
+                chatActions.approval.approvePendingApproval(approval)
             } label: {
                 Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")
             }
@@ -143,7 +144,7 @@ struct AgentChatPermissionRequestCard: View {
 
             if approvalPresentation.allowsAlwaysAllow {
                 Button {
-                    viewModel.alwaysAllowPendingApproval(approval)
+                    chatActions.approval.alwaysAllowPendingApproval(approval)
                 } label: {
                     Label("Always Allow", systemImage: "arrow.triangle.2.circlepath")
                 }
@@ -153,7 +154,7 @@ struct AgentChatPermissionRequestCard: View {
             }
 
             Button(role: .destructive) {
-                viewModel.denyPendingApproval(approval)
+                chatActions.approval.denyPendingApproval(approval)
             } label: {
                 Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
             }
@@ -178,7 +179,8 @@ struct AgentChatPermissionRequestCard: View {
 
 struct AgentPermissionExpandedReviewOverlay: View {
     var approval: AgentPendingApproval
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    var chatActions: ChatFeatureActions
     var onCollapse: () -> Void
 
     private var mailApproval: AppMailSendApprovalPresentation {
@@ -267,7 +269,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             Spacer(minLength: AgentChatLayout.spaceM)
 
             Button(role: .destructive) {
-                viewModel.denyPendingApproval(approval)
+                chatActions.approval.denyPendingApproval(approval)
                 onCollapse()
             } label: {
                 Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
@@ -276,7 +278,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             .controlSize(.large)
 
             Button {
-                viewModel.approvePendingApproval(approval)
+                chatActions.approval.approvePendingApproval(approval)
                 onCollapse()
             } label: {
                 Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")

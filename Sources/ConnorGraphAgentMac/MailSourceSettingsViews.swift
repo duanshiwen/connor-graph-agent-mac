@@ -134,10 +134,10 @@ struct MailSettingsSummaryPresentation: Equatable {
 }
 
 struct SettingsMailSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
 
     private var presentation: NativeMailBrowserPresentation {
-        viewModel.mailBrowserPresentation
+        model.presentation
     }
 
     private var summary: MailSettingsSummaryPresentation {
@@ -153,8 +153,8 @@ struct SettingsMailSection: View {
             securitySection
             protocolSection
         }
-        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddAccountSheet) {
+            AddMailAccountSheet(model: model)
         }
     }
 
@@ -171,7 +171,7 @@ struct SettingsMailSection: View {
     private var accountsSection: some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             if presentation.accounts.isEmpty {
-                MailSettingsEmptyStateCard(onAdd: { viewModel.presentAddMailAccountSheet() })
+                MailSettingsEmptyStateCard(onAdd: { model.presentAddAccountSheet() })
             } else {
                 VStack(spacing: 0) {
                     ForEach(presentation.accounts) { account in
@@ -179,7 +179,7 @@ struct SettingsMailSection: View {
                             account: account,
                             mailboxCount: presentation.mailboxes(accountID: account.id).count,
                             unreadCount: presentation.mailboxes(accountID: account.id).reduce(0) { $0 + $1.status.unreadCount },
-                            onAdd: { viewModel.presentAddMailAccountSheet() }
+                            onAdd: { model.presentAddAccountSheet() }
                         )
                         if account.id != presentation.accounts.last?.id {
                             Divider().padding(.leading, 32)
@@ -192,7 +192,7 @@ struct SettingsMailSection: View {
                 .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
                 .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-                Button(action: { viewModel.presentAddMailAccountSheet() }) {
+                Button(action: { model.presentAddAccountSheet() }) {
                     Label("添加邮件账户", systemImage: "plus")
                         .font(SettingsListTypography.actionTitle)
                         .padding(.horizontal, SettingsListLayout.spaceM)
@@ -206,16 +206,16 @@ struct SettingsMailSection: View {
     private var sendingSection: some View {
         SettingsGroup(title: "发信设置") {
             if presentation.accounts.isEmpty {
-                SettingsValueRow(title: "默认发信账户", value: summary.defaultSendAccountText(preferences: viewModel.mailPreferences))
+                SettingsValueRow(title: "默认发信账户", value: summary.defaultSendAccountText(preferences: model.preferences))
             } else {
                 MailDefaultSendAccountRow(
                     accounts: presentation.accounts,
-                    selectedAccountID: viewModel.mailPreferences.defaultSendAccountID ?? presentation.defaultAccountID(),
+                    selectedAccountID: model.preferences.defaultSendAccountID ?? presentation.defaultAccountID(),
                     titleFor: defaultAccountPickerTitle(for:),
-                    onSelect: { accountID in Task { @MainActor in await viewModel.setDefaultMailSendAccount(accountID) } }
+                    onSelect: { accountID in Task { @MainActor in await model.setDefaultSendAccount(accountID) } }
                 )
                 Divider()
-                SettingsValueRow(title: "默认发件身份", value: summary.defaultSendIdentityText(preferences: viewModel.mailPreferences))
+                SettingsValueRow(title: "默认发件身份", value: summary.defaultSendIdentityText(preferences: model.preferences))
                 Divider()
                 SettingsValueRow(title: "发送确认", value: "Compose 审批卡会显示实际 From，允许后才发送")
             }
@@ -242,7 +242,7 @@ struct SettingsMailSection: View {
             }
             Divider()
             SettingsValueRow(title: "默认策略", value: "添加后立即同步最近 50 封，后台定时刷新")
-            if let message = viewModel.mailSyncMessage {
+            if let message = model.syncMessage {
                 Divider()
                 Text(message)
                     .font(SettingsListTypography.rowCaption)
@@ -350,42 +350,42 @@ private struct MailDefaultSendAccountRow: View {
 }
 
 struct MailSourceDetailView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
 
     private var presentation: NativeMailBrowserPresentation {
-        viewModel.mailBrowserPresentation
+        model.presentation
     }
 
     private var selectedAccount: MailAccount? {
-        presentation.account(id: viewModel.selectedMailAccountID)
+        presentation.account(id: model.selectedAccountID)
     }
 
     private var selectedMailbox: MailMailbox? {
-        presentation.mailbox(id: viewModel.selectedMailMailboxID)
+        presentation.mailbox(id: model.selectedMailboxID)
     }
 
     private var selectedMessage: MailMessageSummary? {
-        viewModel.selectedMailMessageForDetail()
+        model.selectedMessageForDetail()
     }
 
     var body: some View {
         Group {
             if let selectedMessage {
-                MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, viewModel: viewModel)
+                MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage, model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 MailDetailEmptyState(
-                    state: viewModel.mailNavigationTargetID == nil ? .idle : .locating,
-                    message: viewModel.mailNavigationMessage,
+                    state: model.navigationTargetID == nil ? .idle : .locating,
+                    message: model.navigationMessage,
                     hasAccounts: !presentation.accounts.isEmpty,
-                    onAdd: { viewModel.presentAddMailAccountSheet() }
+                    onAdd: { model.presentAddAccountSheet() }
                 )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddAccountSheet) {
+            AddMailAccountSheet(model: model)
         }
     }
 }
@@ -627,13 +627,18 @@ struct MailPreparedHTMLBodyPresentation: Equatable {
     var html: String
     var blockedRemoteImageCount: Int
 
+    init(html: String, blockedRemoteImageCount: Int) {
+        self.html = html
+        self.blockedRemoteImageCount = blockedRemoteImageCount
+    }
+
     init(_ result: MailHTMLBodySanitizationResult) {
         html = result.html
         blockedRemoteImageCount = result.blockedRemoteImageCount
     }
 }
 
-struct MailHTMLSanitizationRequest: Equatable {
+struct MailHTMLSanitizationRequest: Equatable, Hashable {
     var messageID: MailMessageID
     var htmlFingerprint: Int
     var htmlLength: Int
@@ -780,12 +785,9 @@ private struct MailHTMLBodyView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> MailHTMLPassthroughScrollWebView {
-        let config = WKWebViewConfiguration()
-        // Disable JavaScript for security (email HTML should not execute scripts)
-        let preferences = WKWebpagePreferences()
-        preferences.allowsContentJavaScript = false
-        config.defaultWebpagePreferences = preferences
-        let view = MailHTMLPassthroughScrollWebView(frame: .zero, configuration: config)
+        let configuration = MailWebViewConfigurationProvider.shared.makeConfiguration()
+        let view = MailHTMLPassthroughScrollWebView(frame: .zero, configuration: configuration)
+        mailBodyRenderingLogger.info("mailBody.webView.create")
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
@@ -823,7 +825,7 @@ private struct MailHTMLBodyView: NSViewRepresentable {
             guard loadState.shouldReload(identity: identity) else { return false }
             measurementGeneration += 1
             loadStartedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) messageID=\(identity.messageID.rawValue, privacy: .public) htmlLength=\(identity.htmlLength, privacy: .public) allowsRemoteImages=\(identity.allowsRemoteImages, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) htmlLength=\(identity.htmlLength, privacy: .public) allowsRemoteImages=\(identity.allowsRemoteImages, privacy: .public)")
             return true
         }
 
@@ -898,7 +900,7 @@ private struct MailMessageDetailPane: View {
     var account: MailAccount?
     var mailbox: MailMailbox?
     var message: MailMessageSummary
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var preparedHTMLBody: MailPreparedHTMLBodyPresentation?
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
@@ -971,17 +973,17 @@ private struct MailMessageDetailPane: View {
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
             let startedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.load.start messageID=\(token.messageID.rawValue, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.load.start")
             allowRemoteImagesForMessage = false
             preparedHTMLBody = nil
             bodyWebLayout = .initial
             bodyDisplay = .loading
             await Task.yield()
-            let display = await viewModel.loadMailBodyDisplay(for: token.messageID)
+            let display = await model.loadBodyDisplay(for: token.messageID)
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
             let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
-            mailBodyRenderingLogger.info("mailBody.load.end messageID=\(token.messageID.rawValue, privacy: .public) kind=\(String(describing: display.kind), privacy: .public) htmlLength=\(display.html?.count ?? 0, privacy: .public) textLength=\(display.text.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+            mailBodyRenderingLogger.info("mailBody.load.end kind=\(String(describing: display.kind), privacy: .public) htmlLength=\(display.html?.count ?? 0, privacy: .public) textLength=\(display.text.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             bodyDisplay = display
         }
         .task(id: htmlSanitizationRequest) {
@@ -991,19 +993,26 @@ private struct MailMessageDetailPane: View {
                 preparedHTMLBody = nil
                 return
             }
-            preparedHTMLBody = nil
             bodyWebLayout = .initial
+            if let cached = model.preparedHTMLCache.value(for: request) {
+                mailBodyRenderingLogger.info("mailBody.sanitize.cacheHit htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
+                preparedHTMLBody = cached
+                return
+            }
+            preparedHTMLBody = nil
             let policy = MailHTMLDisplayPolicy(remoteContentMode: request.allowsRemoteImages ? .allowForMessage : .block)
             let startedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.sanitize.start messageID=\(request.messageID.rawValue, privacy: .public) htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.sanitize.start htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
             let result = await Task.detached(priority: .userInitiated) {
                 MailHTMLBodySanitizer().prepareHTML(html, policy: policy)
             }.value
             guard !Task.isCancelled else { return }
             guard htmlSanitizationRequest == request else { return }
             let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
-            mailBodyRenderingLogger.info("mailBody.sanitize.end messageID=\(request.messageID.rawValue, privacy: .public) outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
-            preparedHTMLBody = MailPreparedHTMLBodyPresentation(result)
+            mailBodyRenderingLogger.info("mailBody.sanitize.end outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+            let prepared = MailPreparedHTMLBodyPresentation(result)
+            model.preparedHTMLCache.insert(prepared, for: request)
+            preparedHTMLBody = prepared
         }
     }
 }
@@ -1122,7 +1131,7 @@ struct AddMailAccountSheet: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: MailFeatureModel
     @State private var selectedPreset: MailAccountProviderPreset = .apple
     @State private var displayName: String = ""
     @State private var email: String = ""
@@ -1352,7 +1361,7 @@ struct AddMailAccountSheet: View {
         setupError = nil
         setupMessage = "正在添加账户…"
         do {
-            try await viewModel.addMailAccountAndPrepareSync(
+            try await model.addAccountAndPrepareSync(
                 preset: selectedPreset,
                 displayName: displayName,
                 email: email,

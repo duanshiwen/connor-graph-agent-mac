@@ -3,24 +3,20 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct SourceRuntimePanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SourceRuntimeFeatureModel
 
     private var presentation: SourceRuntimeUIPresentation {
-        SourceRuntimeUIPresentation.build(
-            sources: viewModel.sourceRuntimeConfigurations,
-            healthRecords: viewModel.sourceRuntimeHealthRecords,
-            auditRecords: viewModel.sourceRuntimeAuditRecordsBySource.values.flatMap { $0 }
-        )
+        model.presentation
     }
 
     private var selectedCard: SourceRuntimeUICard? {
-        guard let id = viewModel.selectedSourceRuntimeCardID else { return nil }
+        guard let id = model.selectedCardID else { return nil }
         return presentation.cards.first(where: { $0.id == id })
     }
 
     private var selectedConfiguration: MCPSourceRuntimeConfiguration? {
-        guard let id = viewModel.selectedSourceRuntimeCardID else { return nil }
-        return viewModel.sourceRuntimeConfigurations.first(where: { $0.sourceID == id })
+        guard let id = model.selectedCardID else { return nil }
+        return model.configurations.first(where: { $0.sourceID == id })
     }
 
     var body: some View {
@@ -30,20 +26,20 @@ struct SourceRuntimePanelView: View {
                     card: card,
                     configuration: configuration,
                     summary: presentation.summary,
-                    tools: viewModel.sourceRuntimeToolCatalogs[card.id, default: []],
-                    auditRecords: viewModel.sourceRuntimeAuditRecordsBySource[card.id, default: []],
-                    isTesting: viewModel.testingSourceRuntimeIDs.contains(card.id),
-                    testMessage: viewModel.sourceRuntimeTestMessages[card.id],
-                    onEdit: { viewModel.presentEditSourceSheet(sourceID: card.id) },
+                    tools: model.toolCatalogs[card.id, default: []],
+                    auditRecords: model.auditRecordsBySource[card.id, default: []],
+                    isTesting: model.testingSourceIDs.contains(card.id),
+                    testMessage: model.testMessages[card.id],
+                    onEdit: { model.presentEditSheet(sourceID: card.id) },
                     onToggleEnabled: {
-                        viewModel.setSourceRuntimeStatus(
+                        model.setStatus(
                             sourceID: card.id,
                             status: configuration.status == .enabled ? .disabled : .enabled
                         )
                     },
-                    onArchive: { viewModel.archiveSourceRuntime(sourceID: card.id) },
-                    onDelete: { viewModel.requestDeleteSourceRuntime(sourceID: card.id) },
-                    onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
+                    onArchive: { model.archive(sourceID: card.id) },
+                    onDelete: { model.requestDelete(sourceID: card.id) },
+                    onTest: { Task { await model.testSource(sourceID: card.id) } }
                 )
             } else {
                 Color.clear
@@ -54,22 +50,22 @@ struct SourceRuntimePanelView: View {
         .confirmationDialog(
             "Delete MCP Source?",
             isPresented: Binding(
-                get: { viewModel.pendingSourceRuntimeDeletionID != nil },
-                set: { if !$0 { viewModel.cancelDeleteSourceRuntime() } }
+                get: { model.pendingDeletionID != nil },
+                set: { if !$0 { model.cancelDelete() } }
             ),
             titleVisibility: .visible
         ) {
             Button("Delete Source", role: .destructive) {
-                viewModel.confirmDeleteSourceRuntime()
+                model.confirmDelete()
             }
             Button("Cancel", role: .cancel) {
-                viewModel.cancelDeleteSourceRuntime()
+                model.cancelDelete()
             }
         } message: {
-            Text("This permanently deletes \(viewModel.pendingSourceRuntimeDeletionName ?? "this source") and its persisted health, catalog, and audit files. Archive instead if you need to preserve history.")
+            Text("This permanently deletes \(model.pendingDeletionName ?? "this source") and its persisted health, catalog, and audit files. Archive instead if you need to preserve history.")
         }
         .onAppear {
-            viewModel.reloadSourceRuntimeConfigurations()
+            model.reload()
         }
     }
 }
@@ -490,21 +486,21 @@ private struct SourceSummaryStrip: View {
 }
 
 struct SkillRuntimePanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: SkillRuntimeFeatureModel
 
     private var presentation: SkillManagerPresentation {
-        viewModel.commercialSkillManagerPresentation
+        model.presentation
     }
 
     private var selectedCard: SkillManagerCard? {
-        guard let id = viewModel.selectedSkillManagerCardID else { return nil }
+        guard let id = model.selectedCardID else { return nil }
         return presentation.cards.first(where: { $0.id == id })
     }
 
     var body: some View {
         Group {
             if let card = selectedCard {
-                SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
+                SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: model.reload)
             } else {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -813,10 +809,10 @@ private struct SkillPill: View {
 }
 
 struct AutomationRuntimePanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
 
     private var presentation: TaskManagementUIPresentation {
-        viewModel.taskManagementPresentation
+        model.presentation
     }
 
     var body: some View {
@@ -832,10 +828,10 @@ struct AutomationRuntimePanelView: View {
                 ("事件", "\(presentation.summary.eventTriggeredTaskCount)")
             ],
             onRefresh: {
-                viewModel.reloadTaskManagementPresentation()
+                model.reload()
             }
         ) {
-            if viewModel.isRunningScheduledTasks {
+            if model.isRunningScheduledTasks {
                 Label("正在执行到期任务…", systemImage: "clock.arrow.circlepath")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -848,7 +844,7 @@ struct AutomationRuntimePanelView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(presentation.scheduledTasks) { card in
-                TaskRuntimeCard(card: card, viewModel: viewModel)
+                TaskRuntimeCard(card: card, model: model)
             }
 
             SectionHeader(title: "事件触发")
@@ -858,18 +854,18 @@ struct AutomationRuntimePanelView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(presentation.eventTriggeredTasks) { card in
-                TaskRuntimeCard(card: card, viewModel: viewModel)
+                TaskRuntimeCard(card: card, model: model)
             }
         }
         .onAppear {
-            viewModel.reloadTaskManagementPresentation()
+            model.reload()
         }
     }
 }
 
 private struct TaskRuntimeCard: View {
     var card: TaskManagementUICard
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
 
     var body: some View {
         RuntimePanelCard(
@@ -883,17 +879,17 @@ private struct TaskRuntimeCard: View {
             HStack(spacing: 8) {
                 if card.canStop {
                     TaskRuntimeCardActionButton(title: "暂停", systemImage: "pause.fill") {
-                        viewModel.stopTask(card.id)
+                        model.stopTask(card.id)
                     }
                 }
                 if card.canRestore {
                     TaskRuntimeCardActionButton(title: "恢复", systemImage: "play.fill") {
-                        viewModel.restoreTask(card.id)
+                        model.restoreTask(card.id)
                     }
                 }
                 if card.canDelete {
                     TaskRuntimeCardActionButton(title: "删除", systemImage: "trash", role: .destructive) {
-                        viewModel.deleteTask(card.id)
+                        model.deleteTask(card.id)
                     }
                 }
             }

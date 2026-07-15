@@ -7,42 +7,6 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-struct CraftListPaneView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @Binding var selection: SidebarItem?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            switch selection ?? .agentChat {
-            case .agentChat:
-                CraftSessionListPane(viewModel: viewModel)
-            case .llmSettings:
-                CraftSettingsListPane(viewModel: viewModel, selection: $selection)
-            case .calendar:
-                CraftCalendarListPane(viewModel: viewModel)
-            case .contacts:
-                CraftContactsListPane(viewModel: viewModel)
-            case .rss:
-                CraftRSSListPane(viewModel: viewModel)
-            case .mail:
-                CraftMailListPane(viewModel: viewModel)
-            case .sources:
-                CraftSourceListPane(viewModel: viewModel)
-            case .skills:
-                CraftSkillListPane(viewModel: viewModel)
-            case .automation, .scheduledTasks:
-                CraftTaskAutomationListPane(viewModel: viewModel, kind: .scheduled)
-            case .eventTriggeredTasks:
-                CraftTaskAutomationListPane(viewModel: viewModel, kind: .eventTriggered)
-            case .productOS:
-                CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
-            default:
-                CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
-            }
-        }
-    }
-}
-
 private struct ListSearchFilterBanner: View {
     var query: String
     var sourceTitle: String
@@ -107,7 +71,7 @@ private func listSearchTextMatches(_ text: String, terms: [String]) -> Bool {
 }
 
 struct CraftCalendarListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,7 +80,7 @@ struct CraftCalendarListPane: View {
                 Text("日历")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -128,11 +92,11 @@ struct CraftCalendarListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.calendarSearchQuery, sourceTitle: "日历") {
-                viewModel.calendarSearchQuery = ""
+            ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "日历") {
+                model.searchQuery = ""
             }
 
-            if viewModel.calendarBrowserPresentation.daySections.isEmpty {
+            if model.presentation.daySections.isEmpty {
                 ContentUnavailableView("还没有可显示的日程", systemImage: "calendar", description: Text("连接或同步日历后，康纳同学会把近期日程放在这里，方便你从时间安排继续展开工作。"))
                     .padding(.top, 80)
             } else if filteredCalendarSections.isEmpty {
@@ -141,22 +105,22 @@ struct CraftCalendarListPane: View {
             } else {
                 CalendarSectionScrollView(
                     sections: filteredCalendarSections,
-                    selectedID: viewModel.selectedCalendarEventID,
-                    onSelect: { viewModel.selectedCalendarEventID = $0 }
+                    selectedID: model.selectedEventID,
+                    onSelect: { model.selectEvent(id: $0) }
                 )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
+            AddCalendarSourceSheet(model: model)
         }
     }
 
     private var filteredCalendarSections: [NativeCalendarDaySectionPresentation] {
-        let query = viewModel.calendarSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return viewModel.calendarBrowserPresentation.daySections }
+        let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.presentation.daySections }
         let normalized = query.lowercased()
-        return viewModel.calendarBrowserPresentation.daySections.compactMap { section in
+        return model.presentation.daySections.compactMap { section in
             let events = section.events.filter { event in
                 event.title.lowercased().contains(normalized)
                     || event.timeText.lowercased().contains(normalized)
@@ -169,7 +133,7 @@ struct CraftCalendarListPane: View {
 }
 
 struct AddCalendarSourceSheet: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
     @Environment(\.dismiss) private var dismiss
 
     private static let supportedProviders: [CalendarProviderProfile] =
@@ -401,8 +365,7 @@ struct AddCalendarSourceSheet: View {
         HStack(spacing: SettingsListLayout.spaceL) {
             if selectedProvider == .macOSEventKit {
                 Button("前往日历设置") {
-                    viewModel.selectSettingsSection(.calendar)
-                    viewModel.isPresentingAddCalendarSourceSheet = false
+                    model.requestOpenSettings()
                 }
                 .buttonStyle(.bordered)
             }
@@ -416,8 +379,8 @@ struct AddCalendarSourceSheet: View {
                     isSyncingLocal = true
                     feedbackMessage = "正在请求日历权限并同步…"
                     Task { @MainActor in
-                        let succeeded = await viewModel.syncSystemCalendarNow()
-                        feedbackMessage = viewModel.calendarSyncMessage
+                        let succeeded = await model.syncSystemCalendarNow()
+                        feedbackMessage = model.syncMessage
                         isSyncingLocal = false
                         if succeeded { dismiss() }
                     }
@@ -467,8 +430,8 @@ struct AddCalendarSourceSheet: View {
                 username: username,
                 appPassword: appPassword
             )
-            let account = try wizard.buildAccount(existingAccountCount: viewModel.calendarAccounts.count)
-            viewModel.addCalendarSourceFromWizard(account: account, credential: appPassword)
+            let account = try wizard.buildAccount(existingAccountCount: model.accounts.count)
+            model.addSourceFromWizard(account: account, credential: appPassword)
             isSubmitting = false
         } catch {
             isSubmitting = false
@@ -536,7 +499,7 @@ private struct CalendarEventButton: View {
 }
 
 struct CraftContactsListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ContactsFeatureModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -544,7 +507,7 @@ struct CraftContactsListPane: View {
                 Text("人际关系")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.presentNewPersonProfileEditor() }) {
+                Button(action: { model.presentNewProfileEditor() }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -556,11 +519,11 @@ struct CraftContactsListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            if viewModel.contactsBrowserPresentation.rows.isEmpty {
+            if model.presentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
-                ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
+                ContactsRowsScrollView(rows: model.presentation.rows, selectedID: model.selectedContactID, onSelect: { model.selectedContactID = $0 })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -631,7 +594,10 @@ private struct ContactRowButton: View {
 }
 
 struct CraftSessionListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
+    @Bindable var governanceModel: GovernanceFeatureModel
+    let sessionActions: any ChatSessionCommanding
+    let rowActions: ChatSessionListActions
 
     var body: some View {
         VStack(spacing: 0) {
@@ -641,8 +607,8 @@ struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.sessionSearchQuery, sourceTitle: "对话历史") {
-                viewModel.sessionSearchQuery = ""
+            ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
+                model.sessions.searchQuery = ""
             }
 
             if visibleSessions.isEmpty {
@@ -652,28 +618,7 @@ struct CraftSessionListPane: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(visibleSessions) { session in
-                            CraftSessionRow(
-                                row: AgentChatSessionPresentation(session: session),
-                                readState: viewModel.sessionReadStates[session.id],
-                                isSelected: session.id == viewModel.selectedChatSessionID,
-                                isRunning: viewModel.isChatSessionSubmitting(session.id),
-                                isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
-                                hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
-                                labelDefinitions: viewModel.governanceConfig.labels,
-                                onSelect: {
-                                    var transaction = Transaction()
-                                    transaction.disablesAnimations = true
-                                    withTransaction(transaction) {
-                                        viewModel.selectChatSession(session.id)
-                                    }
-                                },
-                                onRename: { title in viewModel.renameChatSession(session.id, title: title) },
-                                onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
-                                onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
-                                onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
-                                onDelete: { viewModel.deleteChatSession(session.id) }
-                            )
-                            .id(session.id)
+                            sessionRow(session)
                         }
                     }
                     .padding(.horizontal, 8)
@@ -684,33 +629,58 @@ struct CraftSessionListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task { viewModel.reloadChatSessions() }
+    }
+
+    private func sessionRow(_ session: AgentSession) -> some View {
+        CraftSessionRow(
+            row: AgentChatSessionPresentation(session: session),
+            readState: model.sessions.readStates[session.id],
+            isSelected: session.id == model.sessions.selectedSessionID,
+            isRunning: rowActions.isSubmitting(session.id),
+            isRegeneratingTitle: model.sessions.regeneratingTitleSessionIDs.contains(session.id),
+            hasRunningBackgroundTask: !rowActions.canDelete(session.id),
+            labelDefinitions: governanceModel.config.labels,
+            onSelect: { selectSession(id: session.id) },
+            onRename: { title in rowActions.rename(session.id, title) },
+            onSetStatus: { status in rowActions.setStatus(session.id, status) },
+            onToggleLabel: { labelID in rowActions.toggleLabel(session.id, labelID) },
+            onRegenerateTitle: { rowActions.regenerateTitle(session.id) },
+            onDelete: { rowActions.delete(session.id) }
+        )
+    }
+
+    private func selectSession(id: String) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            sessionActions.selectChatSession(id)
+        }
     }
 
     private var visibleSessions: [AgentSession] {
-        let query = viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return viewModel.chatSessions }
+        let query = model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.sessions.sessions }
         let terms = listSearchTerms(for: query)
-        guard !terms.isEmpty else { return viewModel.chatSessions }
-        return viewModel.chatSessions.filter { session in
+        guard !terms.isEmpty else { return model.sessions.sessions }
+        return model.sessions.sessions.filter { session in
             listSearchTextMatches(session.title, terms: terms)
                 || session.messages.contains { listSearchTextMatches($0.content, terms: terms) }
         }
     }
 
     private var sessionEmptyTitle: String {
-        viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
+        model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
     }
 
     private var sessionEmptyDescription: String {
-        viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
+        model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
     }
 
     private var sessionListTitle: String {
-        switch viewModel.sessionListFilter {
+        switch model.sessions.filter {
         case .all: "全部会话"
         case .status(let status): status.displayName
-        case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
+        case .label(let labelID): governanceModel.config.labels.first(where: { $0.id == labelID })?.name ?? labelID
         }
     }
 }
@@ -1073,7 +1043,7 @@ private struct RSSHintCard: View {
     }
 }
 
-private enum TaskAutomationKind {
+enum TaskAutomationKind {
     case scheduled
     case eventTriggered
 
@@ -1120,13 +1090,14 @@ private enum TaskAutomationKind {
     }
 }
 
-private struct CraftTaskAutomationListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+struct CraftTaskAutomationListPane: View {
+    @Bindable var model: TaskAutomationFeatureModel
+    var governanceConfig: AppSessionGovernanceConfig
     var kind: TaskAutomationKind
     @State private var isPresentingCreateSheet = false
 
     private var cards: [TaskManagementUICard] {
-        kind.cards(from: viewModel.taskManagementPresentation)
+        kind.cards(from: model.presentation)
     }
 
     var body: some View {
@@ -1154,8 +1125,8 @@ private struct CraftTaskAutomationListPane: View {
                 List(cards) { card in
                     TaskAutomationListRow(
                         card: card,
-                        isSelected: card.id == viewModel.selectedTaskAutomationID,
-                        onSelect: { viewModel.selectedTaskAutomationID = card.id }
+                        isSelected: card.id == model.selectedTaskID,
+                        onSelect: { model.selectTask(card.id) }
                     )
                     .nativeListRowStyle()
                 }
@@ -1166,10 +1137,10 @@ private struct CraftTaskAutomationListPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $isPresentingCreateSheet) {
-            AddTaskAutomationSheet(kind: kind, governanceConfig: viewModel.governanceConfig) { request in
+            AddTaskAutomationSheet(kind: kind, governanceConfig: governanceConfig) { request in
                 switch request.kind {
                 case .scheduled:
-                    try viewModel.createScheduledSessionMessageTask(
+                    try model.createScheduledSessionMessageTask(
                         name: request.name,
                         runAt: request.runAt,
                         recurrence: request.recurrence,
@@ -1178,7 +1149,7 @@ private struct CraftTaskAutomationListPane: View {
                         rationale: request.rationale
                     )
                 case .eventTriggered:
-                    try viewModel.createSessionStatusMessageTask(
+                    try model.createSessionStatusMessageTask(
                         name: request.name,
                         toStatus: request.toStatus,
                         message: request.message,
@@ -1189,7 +1160,7 @@ private struct CraftTaskAutomationListPane: View {
             }
         }
         .task {
-            viewModel.reloadTaskManagementPresentation()
+            model.reload()
         }
     }
 }
@@ -1542,20 +1513,13 @@ private struct AddTaskAutomationSheet: View {
 }
 
 struct CraftMailListPane: View {
-    @ObservedObject var viewModel: AppViewModel
-    @State private var directionFilter: MailMessageDirectionFilter = .all
-    @State private var filteredMessagesCache: [MailMessageSummary] = []
-    @State private var visibleMessagesCache: [MailMessageSummary] = []
-    @State private var visibleMessageIDCache: Set<MailMessageID> = []
-    @State private var visibleMessagesCacheKey = MailVisibleMessagesCacheKey.empty
-    @State private var visibleMessagesLimit = Self.initialVisibleMessagesLimit
+    @Bindable var model: MailFeatureModel
 
-    private static let initialVisibleMessagesLimit = 500
-    private static let visibleMessagesBatchSize = 500
+    private static let visibleMessagesBatchSize = 100
 
-    private var presentation: NativeMailBrowserPresentation { viewModel.mailBrowserPresentation }
-    private var visibleMessages: [MailMessageSummary] { visibleMessagesCache }
-    private var hiddenFilteredMessageCount: Int { max(filteredMessagesCache.count - visibleMessagesCache.count, 0) }
+    private var presentation: NativeMailBrowserPresentation { model.presentation }
+    private var visibleMessages: [MailMessageSummary] { model.visibleListMessages }
+    private var hiddenFilteredMessageCount: Int { model.hiddenFilteredListMessageCount }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1563,7 +1527,7 @@ struct CraftMailListPane: View {
                 Text("邮件")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.presentAddMailAccountSheet() }) {
+                Button(action: { model.presentAddAccountSheet() }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -1575,8 +1539,8 @@ struct CraftMailListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
-                viewModel.mailSearchQuery = ""
+            ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "邮件") {
+                model.searchQuery = ""
             }
 
             if presentation.accounts.isEmpty {
@@ -1589,7 +1553,7 @@ struct CraftMailListPane: View {
                 ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else {
-                MailDirectionFilterChips(selection: $directionFilter)
+                MailDirectionFilterChips(selection: $model.listDirectionFilter)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 6)
 
@@ -1604,7 +1568,7 @@ struct CraftMailListPane: View {
                                     message: message,
                                     account: presentation.account(id: message.accountID),
                                     mailbox: presentation.mailbox(id: message.mailboxID),
-                                    isSelected: message.id == viewModel.selectedMailMessageID,
+                                    isSelected: message.id == model.selectedMessageID,
                                     onSelect: { selectMessage(message) }
                                 )
                                 .equatable()
@@ -1614,7 +1578,7 @@ struct CraftMailListPane: View {
                                 MailListLoadMoreRow(
                                     hiddenCount: hiddenFilteredMessageCount,
                                     batchSize: Self.visibleMessagesBatchSize,
-                                    onLoadMore: loadMoreVisibleMessages
+                                    onLoadMore: model.loadMoreListMessages
                                 )
                                 .nativeListRowStyle()
                             }
@@ -1625,10 +1589,10 @@ struct CraftMailListPane: View {
                         .onAppear {
                             scrollToSelectedMessage(with: proxy)
                         }
-                        .onChange(of: viewModel.selectedMailMessageID) { _, _ in
+                        .onChange(of: model.selectedMessageID) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
-                        .onChange(of: visibleMessagesCacheKey) { _, _ in
+                        .onChange(of: model.listProjectionRevision) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
                     }
@@ -1636,110 +1600,39 @@ struct CraftMailListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear(perform: refreshVisibleMessagesCacheIfNeeded)
-        .onChange(of: directionFilter) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
-        .onChange(of: viewModel.mailSearchQuery) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
-        .onChange(of: mailPresentationListSignature) { _, _ in refreshVisibleMessagesCache(force: true) }
-        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddAccountSheet) {
+            AddMailAccountSheet(model: model)
         }
-    }
-
-    private func refreshVisibleMessagesCacheIfNeeded() {
-        refreshVisibleMessagesCache(force: false)
-    }
-
-    private func refreshVisibleMessagesCache(force: Bool) {
-        let key = MailVisibleMessagesCacheKey(
-            messageCount: viewModel.mailBrowserPresentation.messages.count,
-            firstMessageID: viewModel.mailBrowserPresentation.messages.first?.id,
-            lastMessageID: viewModel.mailBrowserPresentation.messages.last?.id,
-            query: viewModel.mailSearchQuery,
-            direction: directionFilter
-        )
-        guard force || key != visibleMessagesCacheKey else { return }
-        if key.query != visibleMessagesCacheKey.query
-            || key.direction != visibleMessagesCacheKey.direction
-            || key.messageCount != visibleMessagesCacheKey.messageCount
-            || key.firstMessageID != visibleMessagesCacheKey.firstMessageID
-            || key.lastMessageID != visibleMessagesCacheKey.lastMessageID {
-            visibleMessagesLimit = Self.initialVisibleMessagesLimit
-        }
-        let messages = viewModel.mailListMessages(direction: directionFilter)
-        visibleMessagesCacheKey = key
-        filteredMessagesCache = messages
-        rebuildVisibleMessagesWindow()
-    }
-
-    private func loadMoreVisibleMessages() {
-        visibleMessagesLimit += Self.visibleMessagesBatchSize
-        rebuildVisibleMessagesWindow()
-    }
-
-    private func rebuildVisibleMessagesWindow() {
-        let windowedMessages = Array(filteredMessagesCache.prefix(visibleMessagesLimit))
-        visibleMessagesCache = windowedMessages
-        visibleMessageIDCache = Set(windowedMessages.map(\.id))
-    }
-
-    private var mailPresentationListSignature: MailPresentationListSignature {
-        MailPresentationListSignature(
-            messageCount: viewModel.mailBrowserPresentation.messages.count,
-            firstMessageID: viewModel.mailBrowserPresentation.messages.first?.id,
-            lastMessageID: viewModel.mailBrowserPresentation.messages.last?.id
-        )
     }
 
     private var isFilteringBySearch: Bool {
-        !viewModel.mailSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var mailEmptyListTitle: String {
-        isFilteringBySearch ? "没有找到匹配的邮件" : directionFilter.emptyListTitle
+        isFilteringBySearch ? "没有找到匹配的邮件" : model.listDirectionFilter.emptyListTitle
     }
 
     private var mailEmptyListDescription: String {
-        isFilteringBySearch ? "换个关键词试试，或者清除筛选查看全部邮件。" : directionFilter.emptyListDescription
+        isFilteringBySearch ? "换个关键词试试，或者清除筛选查看全部邮件。" : model.listDirectionFilter.emptyListDescription
     }
 
     private var mailEmptyListSystemImage: String {
-        isFilteringBySearch ? "envelope.badge.magnifyingglass" : directionFilter.emptyListSystemImage
+        isFilteringBySearch ? "envelope.badge.magnifyingglass" : model.listDirectionFilter.emptyListSystemImage
     }
 
     private func selectMessage(_ message: MailMessageSummary) {
-        viewModel.selectMailMessageFromList(message)
+        model.selectMessageFromList(message)
     }
 
     private func scrollToSelectedMessage(with proxy: ScrollViewProxy) {
-        guard let selectedID = viewModel.selectedMailMessageID,
-              visibleMessageIDCache.contains(selectedID) else { return }
+        guard let selectedID = model.selectedMessageID,
+              model.visibleListMessageIDs.contains(selectedID) else { return }
         Task { @MainActor in
             await Task.yield()
             proxy.scrollTo(selectedID, anchor: .center)
         }
     }
-}
-
-private struct MailVisibleMessagesCacheKey: Equatable {
-    var messageCount: Int
-    var firstMessageID: MailMessageID?
-    var lastMessageID: MailMessageID?
-    var query: String
-    var direction: MailMessageDirectionFilter
-
-    static let empty = MailVisibleMessagesCacheKey(
-        messageCount: -1,
-        firstMessageID: nil,
-        lastMessageID: nil,
-        query: "",
-        direction: .all
-    )
-}
-
-private struct MailPresentationListSignature: Equatable {
-    var messageCount: Int
-    var firstMessageID: MailMessageID?
-    var lastMessageID: MailMessageID?
 }
 
 extension MailMessageDirectionFilter {
@@ -1975,10 +1868,11 @@ private struct MailMessageListRow: View, Equatable {
 }
 
 struct CraftRSSListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: RSSFeatureModel
 
-    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: viewModel.rssSearchQuery) }
+    private var presentation: NativeRSSBrowserPresentation { model.presentation }
+    private var visibleItems: [RSSItemSummary] { model.visibleItems }
+    private var visibleWindowItems: [RSSItemSummary] { model.visibleWindowItems }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1986,7 +1880,7 @@ struct CraftRSSListPane: View {
                 Text("RSS 阅读")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.isPresentingAddRSSSourceSheet = true }) {
+                Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -1998,8 +1892,8 @@ struct CraftRSSListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.rssSearchQuery, sourceTitle: "RSS") {
-                viewModel.rssSearchQuery = ""
+            ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "RSS") {
+                model.searchQuery = ""
             }
 
             if presentation.sources.isEmpty {
@@ -2012,14 +1906,17 @@ struct CraftRSSListPane: View {
                 ContentUnavailableView("没有找到匹配的 RSS 文章", systemImage: "newspaper", description: Text("换个关键词试试，或者清除筛选查看全部订阅文章。"))
                     .padding(.top, 80)
             } else {
-                List(visibleItems) { item in
+                List(visibleWindowItems) { item in
                     RSSItemListRow(
                         item: item,
                         source: presentation.source(id: item.sourceID),
-                        isSelected: item.id == viewModel.selectedRSSItemID,
+                        isSelected: item.id == model.selectedItemID,
                         onSelect: { selectItem(item) }
                     )
                     .nativeListRowStyle()
+                    .onAppear {
+                        model.loadMoreVisibleItemsIfNeeded(currentItemID: item.id)
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -2027,18 +1924,15 @@ struct CraftRSSListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
-                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+                try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
     }
 
     private func selectItem(_ item: RSSItemSummary) {
-        viewModel.selectedRSSSourceID = item.sourceID
-        viewModel.selectedRSSItemID = item.id
-        guard !item.state.isRead else { return }
-        viewModel.markRSSItemsRead([item.id], isRead: true)
+        model.selectItem(item)
     }
 }
 
@@ -2094,56 +1988,7 @@ private struct RSSItemListRow: View {
     }
 }
 
-struct CraftDetailPaneView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var identityStore: AppUserIdentityStore
-    var selection: SidebarItem
-
-    var body: some View {
-        Group {
-            switch selection {
-            case .entities:
-                GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
-            case .search:
-                SearchView(viewModel: viewModel)
-            case .observeLog:
-                ObserveLogView(entries: viewModel.observeLogEntries)
-            case .agentChat:
-                if viewModel.selectedChatSessionID == nil {
-                    AgentChatNoSelectionDetailView()
-                } else {
-                    AgentChatView(viewModel: viewModel)
-                }
-            case .promotionQueue:
-                PromotionQueueView(viewModel: viewModel)
-            case .pendingApprovals:
-                AgentPendingApprovalReviewView(viewModel: viewModel)
-            case .automation, .scheduledTasks:
-                TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
-            case .eventTriggeredTasks:
-                TaskAutomationDetailPane(viewModel: viewModel, kind: .eventTriggered)
-            case .productOS:
-                ProductOSRegistryView(viewModel: viewModel)
-            case .calendar:
-                CalendarSourceSettingsView(viewModel: viewModel)
-            case .contacts:
-                ContactsSourceSettingsView(viewModel: viewModel)
-            case .mail:
-                MailSourceDetailView(viewModel: viewModel)
-            case .rss:
-                RSSSourceSettingsView(viewModel: viewModel)
-            case .sources:
-                SourceRuntimePanelView(viewModel: viewModel)
-            case .skills:
-                SkillRuntimePanelView(viewModel: viewModel)
-            case .llmSettings:
-                ConnorSettingsDetailView(viewModel: viewModel, identityStore: identityStore)
-            }
-        }
-    }
-}
-
-private struct AgentChatNoSelectionDetailView: View {
+struct AgentChatNoSelectionDetailView: View {
     var body: some View {
         VStack(alignment: .center, spacing: AppShellLayout.spaceL) {
             Spacer(minLength: 80)
@@ -2161,7 +2006,7 @@ private struct AgentChatNoSelectionDetailView: View {
 }
 
 struct CalendarSourceSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         Group {
@@ -2181,22 +2026,22 @@ struct CalendarSourceSettingsView: View {
     }
 
     private var selectedEvent: CalendarEvent? {
-        guard let id = viewModel.selectedCalendarEventID else { return nil }
-        return viewModel.calendarEvents.first { $0.id == id }
+        guard let id = model.selectedEventID else { return nil }
+        return model.events.first { $0.id == id }
     }
 
     private var selectedEventRow: NativeCalendarEventRowPresentation? {
-        guard let id = viewModel.selectedCalendarEventID else { return nil }
-        return viewModel.calendarBrowserPresentation.daySections.flatMap(\.events).first { $0.id == id }
+        guard let id = model.selectedEventID else { return nil }
+        return model.presentation.daySections.flatMap(\.events).first { $0.id == id }
     }
 
     private func calendarName(for calendarID: CalendarID) -> String? {
-        viewModel.calendarCollections.first { $0.id == calendarID }?.displayName
+        model.collections.first { $0.id == calendarID }?.displayName
     }
 
     private func accountName(for calendarID: CalendarID) -> String? {
-        guard let collection = viewModel.calendarCollections.first(where: { $0.id == calendarID }) else { return nil }
-        return viewModel.calendarAccounts.first { $0.id == collection.accountID }?.displayName
+        guard let collection = model.collections.first(where: { $0.id == calendarID }) else { return nil }
+        return model.accounts.first { $0.id == collection.accountID }?.displayName
     }
 }
 
@@ -2456,7 +2301,7 @@ private extension CalendarAttendeeResponseStatus {
 }
 
 struct ContactsSourceSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ContactsFeatureModel
 
     var body: some View {
         Group {
@@ -2465,9 +2310,9 @@ struct ContactsSourceSettingsView: View {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                         PersonProfileDetailHero(
                             row: selected,
-                            onEdit: { viewModel.presentEditPersonProfile(selected.id) },
-                            onAddRelationship: { viewModel.presentNewPersonRelationshipEditor(sourcePersonID: selected.id) },
-                            onDelete: { viewModel.pendingPersonProfileDeletionID = selected.id }
+                            onEdit: { model.presentEditProfile(selected.id) },
+                            onAddRelationship: { model.presentNewRelationshipEditor(sourcePersonID: selected.id) },
+                            onDelete: { model.pendingProfileDeletionID = selected.id }
                         )
 
                         PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
@@ -2483,8 +2328,8 @@ struct ContactsSourceSettingsView: View {
 
                         let relationshipRows = PersonRelationshipPresentation.rows(
                             for: selected.id,
-                            relationships: viewModel.personRelationships,
-                            displayTitle: { viewModel.displayTitle(for: $0) }
+                            relationships: model.relationships,
+                            displayTitle: { model.displayTitle(for: $0) }
                         )
                         if !relationshipRows.isEmpty {
                             PersonProfileInfoSection(title: "关系", systemImage: "person.2") {
@@ -2508,53 +2353,86 @@ struct ContactsSourceSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .sheet(isPresented: $viewModel.isPresentingPersonProfileEditor) {
-            if let draft = Binding($viewModel.editingPersonProfileDraft) {
-                PersonProfileEditorView(
-                    draft: draft,
-                    onCancel: {
-                        viewModel.isPresentingPersonProfileEditor = false
-                        viewModel.editingPersonProfileDraft = nil
-                    },
-                    onSave: { draft in
-                        Task { @MainActor in await viewModel.savePersonProfileDraft(draft) }
-                    }
-                )
+        .sheet(isPresented: $model.isPresentingProfileEditor) {
+            if let initialDraft = model.editingProfileDraft {
+                ProfileEditorSheet(draft: initialDraft, model: model)
             }
         }
-        .sheet(isPresented: $viewModel.isPresentingPersonRelationshipEditor) {
-            if let draft = Binding($viewModel.editingPersonRelationshipDraft) {
-                PersonRelationshipEditorView(
-                    draft: draft,
+        .sheet(isPresented: $model.isPresentingRelationshipEditor) {
+            if let initialDraft = model.editingRelationshipDraft {
+                RelationshipEditorSheet(
+                    draft: initialDraft,
                     sourceDisplayName: selectedContactRow?.displayName ?? "此人物",
-                    candidateProfiles: viewModel.personProfiles,
-                    onCancel: {
-                        viewModel.isPresentingPersonRelationshipEditor = false
-                        viewModel.editingPersonRelationshipDraft = nil
-                    },
-                    onSave: { draft in
-                        Task { @MainActor in await viewModel.savePersonRelationshipDraft(draft) }
-                    }
+                    candidateProfiles: model.profiles,
+                    model: model
                 )
             }
         }
         .confirmationDialog("删除人物档案？", isPresented: Binding(
-            get: { viewModel.pendingPersonProfileDeletionID != nil },
-            set: { if !$0 { viewModel.pendingPersonProfileDeletionID = nil } }
+            get: { model.pendingProfileDeletionID != nil },
+            set: { if !$0 { model.pendingProfileDeletionID = nil } }
         )) {
             Button("删除", role: .destructive) {
-                guard let id = viewModel.pendingPersonProfileDeletionID else { return }
-                Task { @MainActor in await viewModel.deletePersonProfile(id) }
+                guard let id = model.pendingProfileDeletionID else { return }
+                Task { @MainActor in await model.deleteProfile(id) }
             }
-            Button("取消", role: .cancel) { viewModel.pendingPersonProfileDeletionID = nil }
+            Button("取消", role: .cancel) { model.pendingProfileDeletionID = nil }
         } message: {
             Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
         }
     }
 
     private var selectedContactRow: NativeContactRowPresentation? {
-        guard let id = viewModel.selectedContactID else { return nil }
-        return viewModel.contactsBrowserPresentation.rows.first { $0.id == id }
+        guard let id = model.selectedContactID else { return nil }
+        return model.presentation.rows.first { $0.id == id }
+    }
+}
+
+private struct ProfileEditorSheet: View {
+    @State var draft: PersonProfileDraft
+    @Bindable var model: ContactsFeatureModel
+
+    var body: some View {
+        PersonProfileEditorView(
+            draft: $draft,
+            onCancel: {
+                model.isPresentingProfileEditor = false
+                model.editingProfileDraft = nil
+            },
+            onSave: { savedDraft in
+                model.isPresentingProfileEditor = false
+                model.editingProfileDraft = nil
+                Task { @MainActor in
+                    await model.saveProfileDraft(savedDraft)
+                }
+            }
+        )
+    }
+}
+
+private struct RelationshipEditorSheet: View {
+    @State var draft: PersonRelationshipDraft
+    var sourceDisplayName: String
+    var candidateProfiles: [PersonProfile]
+    @Bindable var model: ContactsFeatureModel
+
+    var body: some View {
+        PersonRelationshipEditorView(
+            draft: $draft,
+            sourceDisplayName: sourceDisplayName,
+            candidateProfiles: candidateProfiles,
+            onCancel: {
+                model.isPresentingRelationshipEditor = false
+                model.editingRelationshipDraft = nil
+            },
+            onSave: { savedDraft in
+                model.isPresentingRelationshipEditor = false
+                model.editingRelationshipDraft = nil
+                Task { @MainActor in
+                    await model.saveRelationshipDraft(savedDraft)
+                }
+            }
+        )
     }
 }
 
@@ -2727,16 +2605,16 @@ private struct PersonProfileStatusPill: View {
     }
 }
 
-private struct TaskAutomationDetailPane: View {
-    @ObservedObject var viewModel: AppViewModel
+struct TaskAutomationDetailPane: View {
+    @Bindable var model: TaskAutomationFeatureModel
     var kind: TaskAutomationKind
 
     private var cards: [TaskManagementUICard] {
-        kind.cards(from: viewModel.taskManagementPresentation)
+        kind.cards(from: model.presentation)
     }
 
     private var selectedCard: TaskManagementUICard? {
-        guard let selectedID = viewModel.selectedTaskAutomationID else { return nil }
+        guard let selectedID = model.selectedTaskID else { return nil }
         return cards.first { $0.id == selectedID }
     }
 
@@ -2773,7 +2651,7 @@ private struct TaskAutomationDetailPane: View {
                                 }
                             }
                         }
-                        TaskAutomationActionSection(card: selectedCard, viewModel: viewModel)
+                        TaskAutomationActionSection(card: selectedCard, model: model)
                     }
                     .padding(.horizontal, AgentChatLayout.spaceXL)
                     .padding(.vertical, AgentChatLayout.spaceL)
@@ -2787,7 +2665,7 @@ private struct TaskAutomationDetailPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .task { viewModel.reloadTaskManagementPresentation() }
+        .task { model.reload() }
     }
 }
 
@@ -2889,24 +2767,24 @@ private struct TaskAutomationMetadataLine: View {
 
 private struct TaskAutomationActionSection: View {
     var card: TaskManagementUICard
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: TaskAutomationFeatureModel
 
     var body: some View {
         TaskAutomationDetailSection(title: "操作", systemImage: "slider.horizontal.3") {
             HStack(spacing: AgentChatLayout.spaceS) {
                 if card.canStop {
                     TaskAutomationActionButton(title: "暂停", systemImage: "pause.fill") {
-                        viewModel.stopTask(card.id)
+                        model.stopTask(card.id)
                     }
                 }
                 if card.canRestore {
                     TaskAutomationActionButton(title: "恢复", systemImage: "play.fill") {
-                        viewModel.restoreTask(card.id)
+                        model.restoreTask(card.id)
                     }
                 }
                 if card.canDelete {
                     TaskAutomationActionButton(title: "删除", systemImage: "trash", role: .destructive) {
-                        viewModel.deleteTask(card.id)
+                        model.deleteTask(card.id)
                     }
                 }
                 if !card.canStop && !card.canRestore && !card.canDelete {
@@ -2968,11 +2846,11 @@ private struct TaskAutomationStatusPill: View {
 }
 
 struct RSSSourceSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: RSSFeatureModel
 
-    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var selectedSource: RSSSource? { presentation.source(id: viewModel.selectedRSSSourceID) }
-    private var selectedItem: RSSItemSummary? { presentation.item(id: viewModel.selectedRSSItemID) }
+    private var presentation: NativeRSSBrowserPresentation { model.presentation }
+    private var selectedSource: RSSSource? { presentation.source(id: model.selectedSourceID) }
+    private var selectedItem: RSSItemSummary? { presentation.item(id: model.selectedItemID) }
 
     var body: some View {
         Group {
@@ -2980,7 +2858,7 @@ struct RSSSourceSettingsView: View {
                 RSSItemDetailPane(
                     source: selectedSource ?? presentation.source(id: selectedItem.sourceID),
                     item: selectedItem,
-                    onFollow: { viewModel.followRSSItemInNewSession(selectedItem) }
+                    onFollow: { model.followItem(selectedItem) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
@@ -2989,9 +2867,9 @@ struct RSSSourceSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
-                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+                try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
     }
@@ -3602,7 +3480,7 @@ struct CraftSessionRow: View {
 
 
 struct CraftSettingsListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var shellModel: AppShellFeatureModel
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -3617,10 +3495,10 @@ struct CraftSettingsListPane: View {
                         title: section.title,
                         subtitle: section.subtitle,
                         systemImage: section.systemImage,
-                        isSelected: viewModel.selectedSettingsSection == section
+                        isSelected: shellModel.selectedSettingsSection == section
                     ) {
                         selection = .llmSettings
-                        viewModel.selectSettingsSection(section)
+                        shellModel.selectSettingsSection(section)
                     }
                 }
             }

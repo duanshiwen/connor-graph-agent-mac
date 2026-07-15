@@ -5,16 +5,18 @@ import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 struct WelcomeLLMView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: AIConnectionsFeatureModel
+    var openURL: (URL) -> Void
     @State private var setupOption: AIConnectionOnboardingOption?
 
     var body: some View {
         if let option = setupOption {
             AIConnectionSetupView(
-                viewModel: viewModel,
+                aiModel: model,
                 option: option,
+                openURL: openURL,
                 complete: {
-                    viewModel.handleSuccessfulLLMSetup()
+                    model.handleSuccessfulSetup()
                 },
                 back: {
                     setupOption = nil

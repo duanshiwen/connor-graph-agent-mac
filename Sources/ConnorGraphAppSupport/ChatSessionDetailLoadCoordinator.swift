@@ -1,22 +1,35 @@
 import Foundation
 import ConnorGraphCore
+import ConnorGraphStore
 
 public struct ChatSessionDetailLoadSnapshot: Sendable, Equatable {
     public var session: AgentSession
     public var timeline: [AgentEventPresentation]
     public var latestSummary: AgentSessionSummary?
     public var artifactDirectories: AgentSessionArtifactDirectories?
+    public var sessionState: AppSessionStateSnapshot?
+    public var sessionRecords: [AppSessionRecord]
+    public var browserState: AppBrowserStateSnapshot?
+    public var backgroundTasks: [PersistedSessionBackgroundTask]
 
     public init(
         session: AgentSession,
         timeline: [AgentEventPresentation],
         latestSummary: AgentSessionSummary?,
-        artifactDirectories: AgentSessionArtifactDirectories?
+        artifactDirectories: AgentSessionArtifactDirectories?,
+        sessionState: AppSessionStateSnapshot? = nil,
+        sessionRecords: [AppSessionRecord] = [],
+        browserState: AppBrowserStateSnapshot? = nil,
+        backgroundTasks: [PersistedSessionBackgroundTask] = []
     ) {
         self.session = session
         self.timeline = timeline
         self.latestSummary = latestSummary
         self.artifactDirectories = artifactDirectories
+        self.sessionState = sessionState
+        self.sessionRecords = sessionRecords
+        self.browserState = browserState
+        self.backgroundTasks = backgroundTasks
     }
 }
 
@@ -42,16 +55,43 @@ public actor ChatSessionDetailLoadCoordinator {
 
     public func load(
         repository: AppChatSessionRepository,
-        sessionID: String
+        sessionID: String,
+        activeBackgroundTaskIDs: Set<String> = []
     ) throws -> ChatSessionDetailLoadSnapshot? {
         guard let session = try repository.loadSession(id: sessionID) else { return nil }
         let timeline = try loadTimeline(repository: repository, sessionID: sessionID)
+        let backgroundTasks = try reconcileBackgroundTasks(
+            repository: repository,
+            sessionID: sessionID,
+            activeIDs: activeBackgroundTaskIDs
+        )
         return ChatSessionDetailLoadSnapshot(
             session: session,
             timeline: timeline,
             latestSummary: try repository.loadLatestSummary(sessionID: sessionID),
-            artifactDirectories: try repository.artifactDirectories(sessionID: sessionID)
+            artifactDirectories: try repository.artifactDirectories(sessionID: sessionID),
+            sessionState: try repository.loadSessionState(sessionID: sessionID),
+            sessionRecords: try repository.loadSessionRecords(sessionID: sessionID, limit: nil),
+            browserState: try repository.loadBrowserState(sessionID: sessionID),
+            backgroundTasks: backgroundTasks
         )
+    }
+
+    private func reconcileBackgroundTasks(
+        repository: AppChatSessionRepository,
+        sessionID: String,
+        activeIDs: Set<String>
+    ) throws -> [PersistedSessionBackgroundTask] {
+        var tasks = try repository.loadBackgroundTasks(sessionID: sessionID)
+        for index in tasks.indices
+        where (tasks[index].status == .queued || tasks[index].status == .running)
+            && !activeIDs.contains(tasks[index].id) {
+            tasks[index].status = .interrupted
+            tasks[index].updatedAt = Date()
+            tasks[index].errorMessage = "应用重启或会话恢复后，旧后台任务不会自动继续执行。"
+            try repository.saveBackgroundTask(tasks[index])
+        }
+        return tasks
     }
 
     private func loadTimeline(

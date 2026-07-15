@@ -295,6 +295,24 @@ import ConnorGraphAppSupport
     #expect(rows.allSatisfy { $0.runID == "run-1" && $0.sessionID == "session-1" })
 }
 
+@Test func agentEventPresenterBoundsLargeToolOutputInTimelineDetail() {
+    let content = String(repeating: "x", count: 10_000)
+    let result = AgentToolResult(
+        runID: "run-1",
+        sessionID: "session-1",
+        toolCallID: "tool-1",
+        toolName: "Read",
+        contentText: content
+    )
+
+    let row = AgentEventPresenter().presentation(for: .toolFinished(result))
+
+    #expect(row.detail.hasPrefix("Call tool-1 · "))
+    #expect(row.detail.hasSuffix("…"))
+    #expect(row.detail.count < 300)
+    #expect(!row.detail.contains(content))
+}
+
 @Test func agentEventPresenterSummarizesPermissionResolvedTimelineEvents() {
     let presenter = AgentEventPresenter()
     let approved = AgentPermissionDecision(

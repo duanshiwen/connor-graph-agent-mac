@@ -4,71 +4,71 @@ import ConnorGraphAgent
 
 @MainActor
 struct AgentComposerStore {
-    unowned var viewModel: AppViewModel
+    let model: ChatFeatureModel
+    let actions: ChatFeatureActions
 
     func state(input: String, canSubmit: Bool, selectedSession: AgentSession?) -> AgentComposerState {
         let isNoteBeforeFirstMessage: Bool = {
-            guard let session = selectedSession else { return false }
-            guard session.governance.kind == .note else { return false }
-            guard session.messages.isEmpty else { return false }
-            guard !viewModel.isSubmittingChat else { return false }
+            guard let session = selectedSession,
+                  session.governance.kind == .note,
+                  session.messages.isEmpty,
+                  !model.run.isSubmitting
+            else { return false }
             return true
         }()
         return AgentComposerState(
             input: input,
-            pendingAttachments: viewModel.pendingAttachmentRefs,
-            activeSkillSlug: viewModel.activeSkillSlug,
-            activeSkillDisplayName: viewModel.activeSkillDisplayName,
-            canSubmit: canSubmit && !viewModel.isLoadingSelectedChatSessionDetail,
-            isSubmitting: viewModel.isSubmittingChat,
+            pendingAttachments: model.composer.pendingAttachmentRefs,
+            activeSkillSlug: model.composer.activeSkillSlug,
+            activeSkillDisplayName: model.composer.activeSkillDisplayName,
+            canSubmit: canSubmit && !actions.session.isLoadingSelectedChatSessionDetail,
+            isSubmitting: model.run.isSubmitting,
             displayMode: isNoteBeforeFirstMessage ? .note : .normal,
-            selectedModel: viewModel.llmSelectedModel,
-            sessionHasLLMOverride: viewModel.sessionHasLLMOverride,
-            permissionMode: viewModel.agentPermissionMode,
+            selectedModel: actions.dependencies.aiConnections.selectedModel,
+            sessionHasLLMOverride: actions.dependencies.sessionHasLLMOverride(),
+            permissionMode: actions.dependencies.permissionMode(),
             selectedSessionStatus: selectedSession?.governance.status,
-            isSpeechTranscriptionEnabled: viewModel.sessionSpeechTranscriptionEnabled,
-            isSpeechTranscriptionRunning: viewModel.isSpeechTranscriptionRunningForSelectedSession,
-            speechTranscriptionStatus: viewModel.speechTranscriptionStatus,
-            speechProvisionalTranscript: viewModel.speechProvisionalTranscript
+            isSpeechTranscriptionEnabled: actions.dependencies.inputSettings.sessionSpeechTranscriptionEnabled,
+            isSpeechTranscriptionRunning: actions.composer.isSpeechTranscriptionRunningForSelectedSession,
+            speechTranscriptionStatus: model.composer.speechTranscriptionStatus,
+            speechProvisionalTranscript: model.composer.speechProvisionalTranscript
         )
     }
 
     func send(_ action: AgentComposerAction) {
         switch action {
         case .inputChanged(let value):
-            viewModel.updateSelectedChatInputDraft(value)
+            actions.composer.updateSelectedChatInputDraft(value)
         case .submit:
             break
         case .cancelActiveRun:
-            viewModel.cancelActiveChatRun()
+            actions.run.cancelActiveChatRun()
         case .importFiles(let urls):
-            Task { await viewModel.importAttachments(urls: urls) }
+            actions.composer.enqueueAttachmentImport(urls: urls)
         case .showAttachmentImportError(let message):
-            viewModel.showAttachmentToast(title: "粘贴图片失败", message: message, systemImage: "xmark.circle")
+            actions.composer.showAttachmentToast(title: "粘贴图片失败", message: message, systemImage: "xmark.circle")
         case .removeAttachment(let id):
-            viewModel.removePendingAttachment(id: id)
+            actions.composer.removePendingAttachment(id: id)
         case .previewAttachment(let attachment):
-            viewModel.previewAttachment(attachment)
+            actions.composer.previewAttachment(attachment)
         case .selectSkill(let slug):
-            viewModel.setActiveSkill(slug: slug)
+            actions.composer.setActiveSkill(slug: slug)
         case .clearSkill:
-            viewModel.clearActiveSkill()
+            actions.composer.clearActiveSkill()
         case .setPermissionMode(let mode):
-            viewModel.setAgentPermissionMode(mode)
+            actions.run.setAgentPermissionMode(mode)
         case .setSessionStatus(let status):
-            DispatchQueue.main.async {
-                viewModel.setSelectedSessionStatus(status)
-            }
+            DispatchQueue.main.async { actions.session.setSelectedSessionStatus(status) }
         case .toggleBrowserWorkspaceVisibility:
-            viewModel.toggleBrowserWorkspaceVisibility()
+            actions.dependencies.browser.toggleWorkspaceVisibility()
         case .toggleSpeechTranscription:
-            viewModel.toggleSpeechTranscriptionForSelectedSession()
-        case .beginSpeechTranscription(let speechInsertionRange):
-            viewModel.beginSpeechTranscriptionForSelectedSession(speechInsertionRange: speechInsertionRange)
+            actions.composer.toggleSpeechTranscriptionForSelectedSession()
+        case .beginSpeechTranscription(let range):
+            actions.composer.beginSpeechTranscriptionForSelectedSession(speechInsertionRange: range)
         case .finishSpeechTranscription:
-            viewModel.finishSpeechTranscriptionForSelectedSession()
+            actions.composer.finishSpeechTranscriptionForSelectedSession()
         case .showBackgroundTasks:
-            viewModel.isBackgroundTasksPresented = true
+            model.sessions.isBackgroundTasksPresented = true
         }
     }
 }

@@ -5,7 +5,7 @@ import ConnorGraphAppSupport
 // MARK: - History Panel
 
 struct BrowserBookmarksPanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: BrowserFeatureModel
     var currentPageURL: String?
     var currentPageTitle: String?
     @State private var searchText: String = ""
@@ -22,7 +22,7 @@ struct BrowserBookmarksPanelView: View {
             groupInputBar
             Divider()
 
-            if viewModel.filteredBrowserBookmarkRecords.isEmpty {
+            if model.filteredBookmarkRecords.isEmpty {
                 emptyState
             } else {
                 bookmarksList
@@ -34,8 +34,8 @@ struct BrowserBookmarksPanelView: View {
         .frame(width: 300)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            viewModel.loadBrowserBookmarks()
-            viewModel.filterBrowserBookmarks(query: searchText, groupName: viewModel.selectedBrowserBookmarkGroupName)
+            model.loadBookmarks()
+            model.filterBookmarks(query: searchText, groupName: model.selectedBookmarkGroupName)
         }
     }
 
@@ -62,7 +62,7 @@ struct BrowserBookmarksPanelView: View {
             .opacity(canBookmarkCurrentPage ? 1 : 0.48)
             .help(currentPageIsBookmarked ? "当前页已在收藏夹中" : "将当前页添加到收藏夹")
 
-            Button(action: { viewModel.toggleBrowserBookmarksPanel() }) {
+            Button(action: { model.toggleBookmarksPanel() }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -84,17 +84,17 @@ struct BrowserBookmarksPanelView: View {
 
     private var currentPageIsBookmarked: Bool {
         guard canBookmarkCurrentPage, let url = currentPageURL else { return false }
-        return viewModel.isBrowserBookmarked(url: url)
+        return model.isBookmarked(url: url)
     }
 
     private func addCurrentPageToBookmarks() {
         guard canBookmarkCurrentPage, let url = currentPageURL else { return }
-        viewModel.addBrowserBookmark(
+        model.addBookmark(
             url: url,
             title: currentPageTitle ?? "",
-            groupName: viewModel.selectedBrowserBookmarkGroupName
+            groupName: model.selectedBookmarkGroupName
         )
-        viewModel.filterBrowserBookmarks(query: searchText, groupName: viewModel.selectedBrowserBookmarkGroupName)
+        model.filterBookmarks(query: searchText, groupName: model.selectedBookmarkGroupName)
     }
 
     // MARK: - Search
@@ -108,12 +108,12 @@ struct BrowserBookmarksPanelView: View {
                 .textFieldStyle(.plain)
                 .font(BrowserFloatingTypography.input)
                 .onChange(of: searchText) { _, newValue in
-                    viewModel.filterBrowserBookmarks(query: newValue, groupName: viewModel.selectedBrowserBookmarkGroupName)
+                    model.filterBookmarks(query: newValue, groupName: model.selectedBookmarkGroupName)
                 }
             if !searchText.isEmpty {
                 Button(action: {
                     searchText = ""
-                    viewModel.filterBrowserBookmarks(query: "", groupName: viewModel.selectedBrowserBookmarkGroupName)
+                    model.filterBookmarks(query: "", groupName: model.selectedBookmarkGroupName)
                 }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
@@ -134,7 +134,7 @@ struct BrowserBookmarksPanelView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 groupChip(title: "全部", groupName: nil)
-                ForEach(viewModel.browserBookmarkGroupNames, id: \.self) { group in
+                ForEach(model.bookmarkGroupNames, id: \.self) { group in
                     groupChip(title: group, groupName: group)
                 }
             }
@@ -144,9 +144,9 @@ struct BrowserBookmarksPanelView: View {
     }
 
     private func groupChip(title: String, groupName: String?) -> some View {
-        let isSelected = viewModel.selectedBrowserBookmarkGroupName == groupName
+        let isSelected = model.selectedBookmarkGroupName == groupName
         return Button(action: {
-            viewModel.filterBrowserBookmarks(query: searchText, groupName: groupName)
+            model.filterBookmarks(query: searchText, groupName: groupName)
         }) {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
@@ -169,12 +169,12 @@ struct BrowserBookmarksPanelView: View {
                 .onSubmit {
                     let trimmed = groupText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
-                    viewModel.filterBrowserBookmarks(query: searchText, groupName: trimmed)
+                    model.filterBookmarks(query: searchText, groupName: trimmed)
                     groupText = ""
                 }
-            if viewModel.selectedBrowserBookmarkGroupName != nil {
+            if model.selectedBookmarkGroupName != nil {
                 Button("清除") {
-                    viewModel.filterBrowserBookmarks(query: searchText, groupName: nil)
+                    model.filterBookmarks(query: searchText, groupName: nil)
                 }
                 .font(.system(size: 11, weight: .medium))
                 .buttonStyle(.plain)
@@ -212,7 +212,7 @@ struct BrowserBookmarksPanelView: View {
     // MARK: - List
 
     private var groupedRecords: [BrowserBookmarkGroup] {
-        BrowserBookmarkGrouper().group(viewModel.filteredBrowserBookmarkRecords)
+        BrowserBookmarkGrouper().group(model.filteredBookmarkRecords)
     }
 
     private var bookmarksList: some View {
@@ -222,10 +222,10 @@ struct BrowserBookmarksPanelView: View {
                     sectionHeader(group.label)
                     ForEach(group.records) { record in
                         BrowserBookmarkRow(record: record) {
-                            viewModel.navigateToBookmark(record)
+                            model.navigateToBookmark(record)
                         } onDelete: {
-                            viewModel.deleteBrowserBookmark(record.id)
-                            viewModel.filterBrowserBookmarks(query: searchText, groupName: viewModel.selectedBrowserBookmarkGroupName)
+                            model.deleteBookmark(record.id)
+                            model.filterBookmarks(query: searchText, groupName: model.selectedBookmarkGroupName)
                         }
                     }
                 }
@@ -248,11 +248,11 @@ struct BrowserBookmarksPanelView: View {
 
     private var footerBar: some View {
         HStack {
-            Text("\(viewModel.filteredBrowserBookmarkRecords.count) 个收藏")
+            Text("\(model.filteredBookmarkRecords.count) 个收藏")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             Spacer()
-            Text(viewModel.selectedBrowserBookmarkGroupName ?? "全部分组")
+            Text(model.selectedBookmarkGroupName ?? "全部分组")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }

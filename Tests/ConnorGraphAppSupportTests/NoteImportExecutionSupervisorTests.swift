@@ -14,7 +14,7 @@ struct NoteImportExecutionSupervisorTests {
         let supervisor = NoteImportExecutionSupervisor(coordinator: fixture.coordinator)
 
         await supervisor.recoverPersistedJobs()
-        await fixture.waitUntilTerminal()
+        await supervisor.waitUntilFinished(jobID: "job")
 
         #expect(try fixture.ledger.job(id: "job")?.status == .cancelled)
         #expect(try fixture.ledger.item(id: "item")?.status == .cancelled)
@@ -28,7 +28,7 @@ struct NoteImportExecutionSupervisorTests {
         let supervisor = NoteImportExecutionSupervisor(coordinator: fixture.coordinator)
 
         await supervisor.recoverPersistedJobs()
-        await fixture.waitUntilTerminal()
+        await supervisor.waitUntilFinished(jobID: "job")
 
         #expect(try fixture.ledger.job(id: "job")?.status == .completed)
         #expect(try fixture.ledger.item(id: "item")?.status == .completed)
@@ -56,7 +56,7 @@ struct NoteImportExecutionSupervisorTests {
 
         await supervisor.ensureRunning(jobID: "job")
         await supervisor.ensureRunning(jobID: "job")
-        await fixture.waitUntilTerminal()
+        await supervisor.waitUntilFinished(jobID: "job")
 
         #expect(try fixture.ledger.job(id: "job")?.status == .completed)
         #expect(await !supervisor.isRunning(jobID: "job"))
@@ -119,16 +119,6 @@ private final class SupervisorFixture: @unchecked Sendable {
             normalizedTextHash: note.normalizedTextHash,
             metadata: ["imported_note_payload": try encoder.encode(note).base64EncodedString()]
         ))
-    }
-
-    func waitUntilTerminal(timeout: Duration = .seconds(5)) async {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while clock.now < deadline {
-            if (try? ledger.job(id: "job")?.status.isTerminal) == true { return }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        Issue.record("Timed out waiting for note import job to become terminal")
     }
 
     deinit { try? FileManager.default.removeItem(at: directory) }

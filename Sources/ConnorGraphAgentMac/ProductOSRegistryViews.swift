@@ -8,7 +8,9 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct ProductOSRegistryView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ProductOSControlFeatureModel
+    var governanceConfig: AppSessionGovernanceConfig
+    var commercialReadinessDashboard: CommercialReadinessDashboard
 
     var body: some View {
         ScrollView {
@@ -22,28 +24,28 @@ struct ProductOSRegistryView: View {
                     }
                     Spacer()
                     Button("重新加载") {
-                        viewModel.reloadProductOSRegistry()
-                        viewModel.reloadAutomationConfig()
+                        model.reloadRegistry()
+                        model.reloadAutomation(governanceConfig: governanceConfig)
                     }
                 }
 
-                if let message = viewModel.productOSRegistryMessage {
+                if let message = model.message {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                ProductOSRegistrySummary(snapshot: viewModel.productOSRegistry, automationConfig: viewModel.automationConfig, triggerRecords: viewModel.automationTriggerRecords)
+                ProductOSRegistrySummary(snapshot: model.registry, automationConfig: model.automationConfig, triggerRecords: model.automationTriggerRecords)
 
                 CommercialReadinessProductOSSection(
-                    dashboard: viewModel.commercialReadinessDashboard,
-                    releaseGateResult: viewModel.commercialReleaseGateResult,
-                    onCheck: { viewModel.runCommercialReadinessReleaseGate() }
+                    dashboard: commercialReadinessDashboard,
+                    releaseGateResult: model.commercialReleaseGateResult,
+                    onCheck: { model.runCommercialReadinessReleaseGate(dashboard: commercialReadinessDashboard) }
                 )
 
                 GroupBox("Statuses") {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(viewModel.governanceConfig.statuses) { status in
+                        ForEach(governanceConfig.statuses) { status in
                             HStack {
                                 Label(status.name, systemImage: status.systemImage)
                                 Spacer()
@@ -58,7 +60,7 @@ struct ProductOSRegistryView: View {
 
                 GroupBox("Labels") {
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(viewModel.governanceConfig.labels) { label in
+                        ForEach(governanceConfig.labels) { label in
                             HStack {
                                 Text(label.name).font(.headline)
                                 Text(label.id).font(.caption).foregroundStyle(.secondary)
@@ -72,9 +74,9 @@ struct ProductOSRegistryView: View {
 
                 GroupBox("Automations") {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(viewModel.automationConfig.rules) { rule in
+                        ForEach(model.automationConfig.rules) { rule in
                             ProductOSAutomationRuleRow(rule: rule) { enabled in
-                                viewModel.setAutomationRuleEnabled(id: rule.id, isEnabled: enabled)
+                                model.setAutomationRuleEnabled(id: rule.id, isEnabled: enabled, governanceConfig: governanceConfig)
                             }
                             Divider()
                         }
@@ -84,11 +86,11 @@ struct ProductOSRegistryView: View {
 
                 GroupBox("Automation Trigger Log") {
                     VStack(alignment: .leading, spacing: 10) {
-                        if viewModel.automationTriggerRecords.isEmpty {
+                        if model.automationTriggerRecords.isEmpty {
                             Text("暂无触发记录。状态/标签/Source/Skill 变更后会在这里留下可审计记录。")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(viewModel.automationTriggerRecords.prefix(8)) { record in
+                            ForEach(model.automationTriggerRecords.prefix(8)) { record in
                                 ProductOSAutomationRecordRow(record: record)
                             }
                         }
@@ -98,9 +100,9 @@ struct ProductOSRegistryView: View {
 
                 GroupBox("Sources") {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(viewModel.productOSRegistry.sources) { source in
+                        ForEach(model.registry.sources) { source in
                             ProductOSSourceRow(source: source) { status in
-                                viewModel.setSourceRegistryStatus(id: source.id, status: status)
+                                model.setSourceRegistryStatus(id: source.id, status: status)
                             }
                             Divider()
                         }
@@ -110,9 +112,9 @@ struct ProductOSRegistryView: View {
 
                 GroupBox("Skills") {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(viewModel.productOSRegistry.skills) { skill in
+                        ForEach(model.registry.skills) { skill in
                             ProductOSSkillRow(skill: skill) { status in
-                                viewModel.setSkillRegistryStatus(id: skill.id, status: status)
+                                model.setSkillRegistryStatus(id: skill.id, status: status)
                             }
                             Divider()
                         }

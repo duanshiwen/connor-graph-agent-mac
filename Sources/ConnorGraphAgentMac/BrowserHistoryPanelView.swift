@@ -5,13 +5,13 @@ import ConnorGraphAppSupport
 // MARK: - History Panel
 
 struct BrowserHistoryPanelView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: BrowserFeatureModel
     @State private var clearConfirmation: Bool = false
 
     private var searchText: Binding<String> {
         Binding(
-            get: { viewModel.browserHistorySearchQuery },
-            set: { viewModel.filterBrowserHistory(query: $0) }
+            get: { model.historySearchQuery },
+            set: { model.filterHistory(query: $0) }
         )
     }
 
@@ -45,7 +45,7 @@ struct BrowserHistoryPanelView: View {
             Text("浏览历史")
                 .font(BrowserFloatingTypography.popoverTitle)
             Spacer()
-            Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
+            Button(action: { model.toggleHistoryPanel() }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -70,9 +70,9 @@ struct BrowserHistoryPanelView: View {
             TextField("搜索网址、标题或正文", text: searchText)
                 .textFieldStyle(.plain)
                 .font(BrowserFloatingTypography.input)
-            if !viewModel.browserHistorySearchQuery.isEmpty {
+            if !model.historySearchQuery.isEmpty {
                 Button(action: {
-                    viewModel.filterBrowserHistory(query: "")
+                    model.filterHistory(query: "")
                 }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
@@ -90,7 +90,7 @@ struct BrowserHistoryPanelView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        let isSearching = !viewModel.browserHistorySearchQuery.isEmpty
+        let isSearching = !model.historySearchQuery.isEmpty
 
         return VStack(spacing: 8) {
             Spacer()
@@ -114,7 +114,7 @@ struct BrowserHistoryPanelView: View {
     // MARK: - List
 
     private var groupedRecords: [BrowserHistoryDateGroup] {
-        BrowserHistoryGrouper().group(viewModel.filteredBrowserHistoryRecords)
+        BrowserHistoryGrouper().group(model.filteredHistoryRecords)
     }
 
     private var historyList: some View {
@@ -124,9 +124,9 @@ struct BrowserHistoryPanelView: View {
                     sectionHeader(group.label)
                     ForEach(group.records) { record in
                         BrowserHistoryRow(record: record) {
-                            viewModel.navigateToHistoryRecord(record)
+                            model.navigateToHistoryRecord(record)
                         } onDelete: {
-                            viewModel.deleteBrowserHistoryRecord(record.id)
+                            model.deleteHistoryRecord(record.id)
                         }
                     }
                 }
@@ -149,7 +149,7 @@ struct BrowserHistoryPanelView: View {
 
     private var footerBar: some View {
         HStack {
-            Text("\(viewModel.filteredBrowserHistoryRecords.count) 条记录")
+            Text("\(model.filteredHistoryRecords.count) 条记录")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -159,14 +159,14 @@ struct BrowserHistoryPanelView: View {
                     .foregroundStyle(.red)
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.browserHistoryRecords.isEmpty)
+            .disabled(model.historyRecords.isEmpty)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .confirmationDialog("确认清空所有浏览历史？", isPresented: $clearConfirmation, titleVisibility: .visible) {
             Button("清空所有历史", role: .destructive) {
-                viewModel.clearBrowserHistory()
-                viewModel.filterBrowserHistory(query: "")
+                model.clearHistory()
+                model.filterHistory(query: "")
             }
             Button("取消", role: .cancel) {}
         } message: {
