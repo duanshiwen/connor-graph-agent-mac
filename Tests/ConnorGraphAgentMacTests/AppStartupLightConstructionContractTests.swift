@@ -23,7 +23,7 @@ struct AppStartupLightConstructionContractTests {
     }
 
     @Test func stagedContentAndMaintenanceUseActorSnapshots() throws {
-        let viewModelSource = try projectSource(named: "AppRuntimeOrchestrator.swift")
+        let viewModelSource = try projectSource(named: "AppRuntimeLifecycle.swift")
         let content = try functionBody(named: "func loadStartupContent", in: viewModelSource, endingAt: "    func reconcileStartupRefreshTasks")
         #expect(content.contains("applyStartupSnapshot"))
         #expect(content.contains("applyStartupHistory"))
