@@ -19,6 +19,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case rss = "RSS"
     case sources = "Sources"
     case skills = "Skills"
+    case knowledgeMarketplace = "知识市场"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }

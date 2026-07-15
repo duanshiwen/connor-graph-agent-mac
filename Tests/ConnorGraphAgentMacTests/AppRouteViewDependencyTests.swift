@@ -82,6 +82,7 @@ struct AppRouteViewDependencyTests {
         case .rss: "rss"
         case .sources: "sources"
         case .skills: "skills"
+        case .knowledgeMarketplace: "knowledgeMarketplace"
         case .llmSettings: "llmSettings"
         }
     }

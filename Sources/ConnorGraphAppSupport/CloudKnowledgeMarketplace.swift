@@ -9,7 +9,29 @@ public struct CloudMarketplaceCategory: Decodable, Sendable, Equatable, Identifi
     private static func localized(_ names: [String: String]) -> String? { let locale = Locale.current.identifier.replacingOccurrences(of: "_", with: "-"); return names[locale] ?? names[String(locale.prefix(2))] ?? names["zh-CN"] ?? names["en"] ?? names.values.first }
 }
 public struct CloudMarketplaceBanner: Codable, Sendable, Equatable, Identifiable { public var id: String; public var title: String; public var subtitle: String?; public var imageURL: String?; public var actionURL: String?; public init(id: String, title: String, subtitle: String? = nil, imageURL: String? = nil, actionURL: String? = nil) { self.id = id; self.title = title; self.subtitle = subtitle; self.imageURL = imageURL; self.actionURL = actionURL } }
-public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Identifiable { public var id: String; public var name: String; public var description: String?; public var categoryID: String?; public var subscriberCount: Int; public var subscribed: Bool; public var publicationStatus: String?; public init(id: String, name: String, description: String? = nil, categoryID: String? = nil, subscriberCount: Int = 0, subscribed: Bool = false, publicationStatus: String? = nil) { self.id = id; self.name = name; self.description = description; self.categoryID = categoryID; self.subscriberCount = subscriberCount; self.subscribed = subscribed; self.publicationStatus = publicationStatus } }
+public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var description: String?
+    public var categoryID: String?
+    public var subscriberCount: Int
+    public var subscribed: Bool
+    public var owned: Bool
+    public var ownerID: UInt?
+    public var ownerName: String?
+    public var publicationStatus: String?
+
+    public init(id: String, name: String, description: String? = nil, categoryID: String? = nil, subscriberCount: Int = 0, subscribed: Bool = false, owned: Bool = false, ownerID: UInt? = nil, ownerName: String? = nil, publicationStatus: String? = nil) {
+        self.id = id; self.name = name; self.description = description; self.categoryID = categoryID
+        self.subscriberCount = subscriberCount; self.subscribed = subscribed; self.owned = owned
+        self.ownerID = ownerID; self.ownerName = ownerName; self.publicationStatus = publicationStatus
+    }
+}
+public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
+    public var subscribed: [CloudMarketplaceKnowledgeBase]
+    public var owned: [CloudMarketplaceKnowledgeBase]
+    public init(subscribed: [CloudMarketplaceKnowledgeBase] = [], owned: [CloudMarketplaceKnowledgeBase] = []) { self.subscribed = subscribed; self.owned = owned }
+}
 public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifiable {
     public var id: String; public var title: String; public var layout: String; public var knowledgeBases: [CloudMarketplaceKnowledgeBase]
     public init(id: String, title: String, layout: String, knowledgeBases: [CloudMarketplaceKnowledgeBase]) { self.id = id; self.title = title; self.layout = layout; self.knowledgeBases = knowledgeBases }
@@ -31,11 +53,16 @@ public struct CloudKnowledgeAnswerResponse: Codable, Sendable, Equatable {
 public protocol CloudKnowledgeMarketplaceAPI: Sendable {
     func home() async throws -> CloudMarketplaceHome
     func categories() async throws -> [CloudMarketplaceCategory]
+    func library() async throws -> CloudMarketplaceLibrary
     func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase]
     func detail(id: String) async throws -> CloudMarketplaceKnowledgeBase
     func subscribe(id: String) async throws
     func unsubscribe(id: String) async throws
     func answer(_ request: CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse
+}
+
+public extension CloudKnowledgeMarketplaceAPI {
+    func library() async throws -> CloudMarketplaceLibrary { .init() }
 }
 
 public struct CloudKnowledgeAnswerCacheEntry: Sendable, Equatable {
@@ -56,15 +83,32 @@ public actor CloudKnowledgeAuthorizationCache {
 
 @MainActor public final class CloudKnowledgeMarketplaceStore: ObservableObject {
     @Published public private(set) var home = CloudMarketplaceHome(categories: [], banners: [], sections: [])
-    @Published public private(set) var searchResults: [CloudMarketplaceKnowledgeBase] = []; @Published public private(set) var selected: CloudMarketplaceKnowledgeBase?; @Published public private(set) var isLoading = false; @Published public private(set) var errorMessage: String?
+    @Published public private(set) var library = CloudMarketplaceLibrary()
+    @Published public private(set) var searchResults: [CloudMarketplaceKnowledgeBase] = []
+    @Published public private(set) var selected: CloudMarketplaceKnowledgeBase?
+    @Published public private(set) var showsPublisher = false
+    @Published public private(set) var isLoading = false
+    @Published public private(set) var errorMessage: String?
     private let api: any CloudKnowledgeMarketplaceAPI; private let cache: CloudKnowledgeAuthorizationCache
     public init(api: any CloudKnowledgeMarketplaceAPI, cache: CloudKnowledgeAuthorizationCache = .init()) { self.api = api; self.cache = cache }
-    public func loadHome() async { await perform { self.home = try await self.api.home(); for base in self.home.sections.flatMap(\.knowledgeBases) where base.subscribed { await self.cache.authorize(base.id) } } }
+    public func load() async {
+        await perform {
+            async let home = self.api.home()
+            async let library = self.api.library()
+            self.home = try await home
+            self.library = try await library
+            for base in self.library.subscribed { await self.cache.authorize(base.id) }
+        }
+    }
+    public func loadHome() async { await load() }
     public func search(query: String, categoryID: String? = nil) async { await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
-    public func loadDetail(id: String) async { await perform { self.selected = try await self.api.detail(id: id) } }
-    public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true } } }
-    public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id) } catch { errorMessage = error.localizedDescription } }
-    public func clearSession() async { home = .init(categories: [], banners: [], sections: []); searchResults = []; selected = nil; errorMessage = nil; await cache.clear() }
+    public func showHome() { selected = nil; showsPublisher = false }
+    public func showPublisher() { selected = nil; showsPublisher = true }
+    public func loadDetail(id: String) async { showsPublisher = false; await perform { self.selected = try await self.api.detail(id: id) } }
+    public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library() } }
+    public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library() } catch { errorMessage = error.localizedDescription } }
+    public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { (try? await api.search(.init(query: query, limit: 6))) ?? [] }
+    public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear() }
     private func perform(_ action: @escaping () async throws -> Void) async { isLoading = true; errorMessage = nil; defer { isLoading = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }
 

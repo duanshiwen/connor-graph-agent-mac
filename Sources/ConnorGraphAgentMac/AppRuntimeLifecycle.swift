@@ -107,6 +107,8 @@ final class AppRuntimeLifecycle {
     let mailFeatureModel: MailFeatureModel
     let browserFeatureModel: BrowserFeatureModel
     let globalSearchFeatureModel: GlobalSearchFeatureModel
+    let knowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
+    let knowledgeCreatorStore: CloudKnowledgeCreatorStore
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
@@ -570,6 +572,12 @@ final class AppRuntimeLifecycle {
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
+        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
+        self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(api: CloudKnowledgeMarketplaceAPIClient(baseURL: backendBaseURL))
+        self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
+            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: backendBaseURL),
+            publicationAPI: CloudKnowledgeAPIClient(baseURL: backendBaseURL)
+        )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
         let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
         self.globalSearchFeatureModel = GlobalSearchFeatureModel(
@@ -810,6 +818,7 @@ final class AppRuntimeLifecycle {
             calendar: calendarFeatureModel,
             rss: rssFeatureModel,
             mail: mailFeatureModel,
+            knowledgeMarketplace: knowledgeMarketplaceStore,
             appSettings: appSettingsModel
         )
         self.globalSearchRuntimeCoordinator = globalSearchRuntimeCoordinator
@@ -3103,6 +3112,8 @@ extension AppRuntimeLifecycle {
             mail: model.mailFeatureModel,
             browser: model.browserFeatureModel,
             globalSearch: model.globalSearchFeatureModel,
+            knowledgeMarketplace: model.knowledgeMarketplaceStore,
+            knowledgeCreator: model.knowledgeCreatorStore,
             rss: model.rssFeatureModel,
             skills: model.skillRuntimeModel,
             appSettings: model.appSettingsModel,
