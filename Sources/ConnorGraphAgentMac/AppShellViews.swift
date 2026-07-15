@@ -8,29 +8,37 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct AppShellView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
     @ObservedObject var noteImportModel: NoteImportViewModel
+    var sendCommand: (AppCommand) -> Void
     @Environment(\.openWindow) private var openWindow
     @State private var isPrimarySidebarVisible = true
     @State private var isIdentityPopoverPresented = false
 
     private var selectionBinding: Binding<SidebarItem?> {
         Binding(
-            get: { viewModel.selection ?? .agentChat },
-            set: { viewModel.selection = $0 ?? .agentChat }
+            get: { graph.shell.selection ?? .agentChat },
+            set: { graph.shell.selection = $0 ?? .agentChat }
         )
     }
     @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
         Group {
-            if viewModel.showWelcomePlaceholder {
-                WelcomeLLMView(viewModel: viewModel)
+            if graph.aiConnections.showsWelcome {
+                WelcomeLLMView(
+                    model: graph.aiConnections,
+                    openURL: graph.shellActions.openURL
+                )
             } else {
                 HSplitView {
                     if isPrimarySidebarVisible {
-                        CraftPrimarySidebarView(viewModel: viewModel, selection: selectionBinding)
+                        CraftPrimarySidebarView(
+                            graph: graph,
+                            selection: selectionBinding,
+                            sendCommand: sendCommand
+                        )
                     .frame(
                         minWidth: AppShellLayout.primarySidebarMinWidth,
                         idealWidth: AppShellLayout.primarySidebarDefaultWidth,
@@ -41,7 +49,10 @@ struct AppShellView: View {
                     .controlSize(.small)
             }
 
-            CraftListPaneView(viewModel: viewModel, selection: selectionBinding)
+            CraftListPaneView(
+                graph: graph,
+                selection: selectionBinding
+            )
                 .frame(
                     minWidth: AppShellLayout.listColumnMinWidth,
                     idealWidth: AppShellLayout.listColumnDefaultWidth,
@@ -51,8 +62,11 @@ struct AppShellView: View {
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
                 .controlSize(.small)
 
-            CraftDetailPaneView(viewModel: viewModel, identityStore: identityStore, selection: viewModel.selection ?? .agentChat)
-                .id(viewModel.selection ?? .agentChat)
+            CraftDetailPaneView(
+                graph: graph,
+                identityStore: identityStore,
+                selection: graph.shell.selection ?? .agentChat
+            )
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
@@ -77,29 +91,29 @@ struct AppShellView: View {
                         .foregroundStyle(.secondary)
                     TopSearchTextField(
                         text: Binding(
-                            get: { viewModel.globalSearchQuery },
-                            set: { viewModel.updateGlobalSearchQuery($0) }
+                            get: { graph.globalSearch.query },
+                            set: { graph.globalSearch.updateQuery($0) }
                         ),
                         isFocused: Binding(
-                            get: { viewModel.isGlobalSearchFieldFocused },
+                            get: { graph.globalSearch.isFieldFocused },
                             set: { focused in
                                 if focused {
-                                    viewModel.activateGlobalSearchField()
+                                    graph.globalSearch.activateField()
                                 } else {
-                                    viewModel.deactivateGlobalSearchField()
+                                    graph.globalSearch.deactivateField()
                                 }
                             }
                         ),
                         placeholder: "搜索或发起对话",
-                        focusRequestID: viewModel.focusTopSearchRequestID,
-                        onSubmit: { viewModel.performSelectedGlobalSearchItem() },
-                        onMoveUp: { viewModel.moveGlobalSearchSelectionUp() },
-                        onMoveDown: { viewModel.moveGlobalSearchSelectionDown() },
-                        onCancel: { viewModel.dismissGlobalSearchOverlay() }
+                        focusRequestID: graph.shell.focusTopSearchRequestID,
+                        onSubmit: { graph.globalSearch.performSelectedItem() },
+                        onMoveUp: { graph.globalSearch.moveSelectionUp() },
+                        onMoveDown: { graph.globalSearch.moveSelectionDown() },
+                        onCancel: { graph.globalSearch.dismissOverlay() }
                     )
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
-                    if !viewModel.globalSearchQuery.isEmpty {
-                        Button(action: { viewModel.clearGlobalSearch() }) {
+                    if !graph.globalSearch.query.isEmpty {
+                        Button(action: { graph.globalSearch.clear() }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
                         }
@@ -134,17 +148,17 @@ struct AppShellView: View {
                 .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
                     UserIdentityPopoverView(identityStore: identityStore) {
                         isIdentityPopoverPresented = false
-                        viewModel.selectSettingsSection(.identity)
+                        graph.shell.selectSettingsSection(.identity)
                     }
                 }
             }
         }
         .overlay(alignment: .topLeading) {
-            BrowserBackgroundTaskRunnerView(viewModel: viewModel)
+            BrowserBackgroundTaskRunnerView(model: graph.browser)
         }
         .overlay(alignment: .top) {
-            if viewModel.isGlobalSearchOverlayPresented && (!viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.globalSearchHistoryEntries.isEmpty) {
-                AppGlobalSearchOverlayView(viewModel: viewModel)
+            if graph.globalSearch.isOverlayPresented && (!graph.globalSearch.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !graph.globalSearch.historyEntries.isEmpty) {
+                AppGlobalSearchOverlayView(model: graph.globalSearch)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(20)
@@ -152,37 +166,34 @@ struct AppShellView: View {
         }
         .simultaneousGesture(
             TapGesture().onEnded {
-                if viewModel.isGlobalSearchFieldFocused {
-                    viewModel.deactivateGlobalSearchField()
+                if graph.globalSearch.isFieldFocused {
+                    graph.globalSearch.deactivateField()
                 }
             }
         )
         .background(WindowTitlebarConfigurator())
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
-            if viewModel.selection == nil {
-                viewModel.selection = .agentChat
+            if graph.shell.selection == nil {
+                graph.shell.selection = .agentChat
             }
-            viewModel.reloadChatSessionsIfNeededAfterInitialLoad()
+            graph.chatActions.session.reloadChatSessionsIfNeededAfterInitialLoad()
             installTopSearchKeyMonitorIfNeeded()
-            viewModel.activateRuntimeSettingsSideEffectsAfterLaunch()
+            graph.shellActions.activateSettingsSideEffects()
         }
         .onDisappear {
             removeTopSearchKeyMonitor()
         }
-        .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
-            viewModel.scheduleRuntimeSettingsAutosave()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .connorSessionNotificationActivated)) { notification in
             guard let sessionID = notification.userInfo?["sessionID"] as? String else { return }
-            viewModel.openSessionFromNotification(sessionID)
+            sendCommand(.openSessionNotification(sessionID))
         }
     }
 
     private func installTopSearchKeyMonitorIfNeeded() {
         guard topSearchKeyMonitor == nil else { return }
         topSearchKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let shortcut = viewModel.shortcut(for: .focusTopSearch)
+            let shortcut = graph.inputSettings.shortcut(for: .focusTopSearch)
             guard shortcut.matches(
                 character: event.charactersIgnoringModifiers,
                 isCommandDown: event.modifierFlags.contains(.command),
@@ -192,7 +203,7 @@ struct AppShellView: View {
             ) else {
                 return event
             }
-            viewModel.performShortcutAction(.focusTopSearch)
+            graph.shell.requestTopSearchFocus()
             return nil
         }
     }

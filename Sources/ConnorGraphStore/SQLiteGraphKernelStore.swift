@@ -166,6 +166,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private let databaseLock = NSRecursiveLock()
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let iso8601Formatter = ISO8601DateFormatter()
+    private let iso8601FormatterLock = NSLock()
 
     public init(path: String) throws {
         self.encoder = JSONEncoder()
@@ -716,6 +718,14 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
     }
 
+    public func recentSessionMetadata(limit: Int = 50, includeDeleted: Bool = false) throws -> [AgentSession] {
+        var conditions: [String] = []
+        if !includeDeleted { conditions.append("deleted_at IS NULL") }
+        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
+        return try query(sql: "SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)")
+            .map(decodeSessionMetadata)
+    }
+
     public func sessions(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, includeDeleted: Bool = false, limit: Int = 100) throws -> [AgentSession] {
         var conditions: [String] = []
         if let status { conditions.append("status = \(quote(status.rawValue))") }
@@ -806,6 +816,28 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             createdAt: try date(row[3]), updatedAt: try date(row[4]),
             governance: governance,
             readState: readState
+        )
+    }
+
+    private func decodeSessionMetadata(_ row: [String]) throws -> AgentSession {
+        let updatedAt = try date(row[3])
+        let governance = AgentSessionGovernanceMetadata(
+            status: AgentSessionStatus(rawValue: row[safe: 4] ?? "") ?? .todo,
+            kind: AgentSessionKind(rawValue: row[safe: 5] ?? "chat") ?? .chat,
+            labels: try decode([AgentSessionLabel].self, row[safe: 6] ?? "[]"),
+            isArchived: (Int(row[safe: 7] ?? "0") ?? 0) != 0,
+            isFlagged: (Int(row[safe: 8] ?? "0") ?? 0) != 0,
+            archivedAt: try optionalDate(row[safe: 9] ?? ""),
+            deletedAt: try optionalDate(row[safe: 10] ?? "")
+        )
+        return AgentSession(
+            id: row[0],
+            title: row[1],
+            messages: [],
+            createdAt: try date(row[2]),
+            updatedAt: updatedAt,
+            governance: governance,
+            readState: try decodeSessionReadState(row[safe: 11] ?? "{}", fallbackUpdatedAt: updatedAt)
         )
     }
 
@@ -1291,10 +1323,16 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         do { return try decoder.decode(type, from: data) } catch { throw SQLiteGraphKernelStoreError.decodeFailed(String(describing: error)) }
     }
 
-    private func iso(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+    private func iso(_ date: Date) -> String {
+        iso8601FormatterLock.lock()
+        defer { iso8601FormatterLock.unlock() }
+        return iso8601Formatter.string(from: date)
+    }
 
     private func date(_ string: String) throws -> Date {
-        guard let date = ISO8601DateFormatter().date(from: string) else { throw SQLiteGraphKernelStoreError.decodeFailed("Invalid date: \(string)") }
+        iso8601FormatterLock.lock()
+        defer { iso8601FormatterLock.unlock() }
+        guard let date = iso8601Formatter.date(from: string) else { throw SQLiteGraphKernelStoreError.decodeFailed("Invalid date: \(string)") }
         return date
     }
 

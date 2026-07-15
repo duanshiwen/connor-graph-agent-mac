@@ -25,39 +25,34 @@ enum AppMenuPresentation {
 @main
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorApplicationDelegate.self) private var applicationDelegate
-    @StateObject private var viewModel: AppViewModel
-    @StateObject private var identityStore: AppUserIdentityStore
-    @StateObject private var noteImportModel: NoteImportViewModel
-    private let featureFlags: AppFeatureFlags
+    @StateObject private var root: AppCompositionRoot
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
-        let liveViewModel = AppViewModel.live()
-        _viewModel = StateObject(wrappedValue: liveViewModel)
-        _identityStore = StateObject(wrappedValue: AppUserIdentityStore())
-        _noteImportModel = StateObject(wrappedValue: liveViewModel.makeNoteImportViewModel())
-        featureFlags = AppFeatureFlags.load()
+        _root = StateObject(wrappedValue: AppCompositionRoot.live())
     }
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
             AppShellView(
-                viewModel: viewModel,
-                identityStore: identityStore,
-                noteImportModel: noteImportModel
+                graph: root.graph,
+                identityStore: root.identityStore,
+                noteImportModel: root.noteImportModel,
+                sendCommand: { root.sendWhenInteractive($0) }
             )
-                .preferredColorScheme(viewModel.appearanceMode.colorScheme)
+                .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
-                    viewModel.startTaskSchedulerTimer()
-                    await noteImportModel.recoverPersistedJobs()
-                    await identityStore.restoreSession()
+                    await root.startupCoordinator.startIfNeeded()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    root.startupCoordinator.shutdown()
                 }
         }
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
         .commands {
-            NoteImportFileCommands(viewModel: viewModel)
+            NoteImportFileCommands(root: root)
 
             CommandGroup(replacing: .undoRedo) {
                 Button("撤销") {
@@ -117,19 +112,19 @@ struct ConnorGraphAgentMacApp: App {
 
             CommandMenu(AppMenuPresentation.actionMenuTitle) {
                 Button("切换浏览器") {
-                    viewModel.performShortcutAction(.toggleBrowser)
+                    root.sendWhenInteractive(.shortcut(.toggleBrowser))
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
                 Button("聚焦搜索") {
-                    viewModel.performShortcutAction(.focusTopSearch)
+                    root.sendWhenInteractive(.shortcut(.focusTopSearch))
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
                 Divider()
 
                 Button("打开设置") {
-                    viewModel.performShortcutAction(.openSettings)
+                    root.sendWhenInteractive(.shortcut(.openSettings))
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -137,32 +132,32 @@ struct ConnorGraphAgentMacApp: App {
 
         Window("导入笔记", id: AppMenuPresentation.noteImportWizardWindowID) {
             NoteImportWizardView(
-                model: noteImportModel,
-                importExecutionEnabled: featureFlags.noteImportEnabled
+                model: root.noteImportModel,
+                importExecutionEnabled: root.featureFlags.noteImportEnabled
             )
         }
         .defaultSize(width: 720, height: 560)
 
         Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
-            NoteImportCenterView(model: noteImportModel)
+            NoteImportCenterView(model: root.noteImportModel)
         }
         .defaultSize(width: 900, height: 620)
     }
 }
 
 private struct NoteImportFileCommands: Commands {
-    @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var root: AppCompositionRoot
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button(AppMenuPresentation.newSessionTitle) {
-                viewModel.performShortcutAction(.newSession)
+                root.sendWhenInteractive(.shortcut(.newSession))
             }
             .keyboardShortcut("n", modifiers: .command)
 
             Button(AppMenuPresentation.newNoteTitle) {
-                viewModel.newNoteSession()
+                root.sendWhenInteractive(.newNote)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
 

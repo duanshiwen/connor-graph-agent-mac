@@ -278,7 +278,7 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
     private static func normalized(_ statement: MemoryOSL2StatementUpdate) throws -> MemoryOSL2StatementUpdate {
         MemoryOSL2StatementUpdate(
             text: statement.text,
-            relation: try normalizeRelation(statement.relation),
+            relation: normalizeRelation(statement.relation),
             factType: try normalizeFactType(statement.factType)
         )
     }

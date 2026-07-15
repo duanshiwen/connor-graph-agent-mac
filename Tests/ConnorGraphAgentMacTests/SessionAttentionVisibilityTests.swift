@@ -1,4 +1,3 @@
-import AppKit
 import Testing
 @testable import ConnorGraphAgentMac
 
@@ -6,42 +5,31 @@ import Testing
 @Suite("Session Attention Visibility Tests")
 struct SessionAttentionVisibilityTests {
     @Test func selectedAgentChatSessionTreatsUpdatesAsReadEvenWhenAppIsNotActive() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
-        viewModel.selection = .agentChat
-        viewModel.selectedChatSessionID = "visible-session"
+        let fixture = makeFixture(selection: .agentChat, selectedSessionID: "visible-session")
 
-        #expect(!NSApp.isActive)
-        #expect(viewModel.shouldTreatSessionUpdateAsRead(sessionID: "visible-session"))
+        #expect(fixture.coordinator.shouldTreatUpdateAsRead(sessionID: "visible-session"))
     }
 
     @Test func nonSelectedSessionDoesNotTreatUpdatesAsRead() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
-        viewModel.selection = .agentChat
-        viewModel.selectedChatSessionID = "visible-session"
+        let fixture = makeFixture(selection: .agentChat, selectedSessionID: "visible-session")
 
-        #expect(!viewModel.shouldTreatSessionUpdateAsRead(sessionID: "background-session"))
+        #expect(!fixture.coordinator.shouldTreatUpdateAsRead(sessionID: "background-session"))
     }
 
     @Test func selectedSessionOutsideChatViewDoesNotTreatUpdatesAsRead() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
-        viewModel.selection = .search
-        viewModel.selectedChatSessionID = "visible-session"
+        let fixture = makeFixture(selection: .search, selectedSessionID: "visible-session")
 
-        #expect(!viewModel.shouldTreatSessionUpdateAsRead(sessionID: "visible-session"))
+        #expect(!fixture.coordinator.shouldTreatUpdateAsRead(sessionID: "visible-session"))
+    }
+
+    private func makeFixture(
+        selection: SidebarItem,
+        selectedSessionID: String
+    ) -> (model: ChatSessionListModel, coordinator: ChatAttentionCoordinator) {
+        let model = ChatSessionListModel()
+        model.selectedSessionID = selectedSessionID
+        let coordinator = ChatAttentionCoordinator(model: model, repository: nil)
+        coordinator.selectedNavigation = { selection }
+        return (model, coordinator)
     }
 }

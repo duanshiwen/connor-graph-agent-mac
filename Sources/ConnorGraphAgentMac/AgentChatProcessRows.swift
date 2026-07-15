@@ -10,16 +10,10 @@ struct AgentChatTurnProcessRow: View {
     @State private var isExpanded: Bool = false
     @State private var startedAt: Date = Date()
 
-    private var visibleEvents: [AgentEventPresentation] {
-        events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
-    }
-
-    private var summary: AgentTurnActivitySummaryPresentation {
-        AgentTurnActivitySummaryBuilder().summary(process: process, events: visibleEvents)
-    }
-
     var body: some View {
-        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
+        let visibleEvents = events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
+        let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: visibleEvents)
+        return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 Button(action: { withAnimation(.easeOut(duration: 0.16)) { isExpanded.toggle() } }) {
                     activityHeader(summary)
@@ -106,7 +100,8 @@ struct AgentTurnActivitySummaryDetailView: View {
     @State private var showsRawEvents = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+        let toolInvocations = AgentToolInvocationAssembler().invocations(from: events)
+        return VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
             if !summary.toolSummaries.isEmpty {
                 detailLine(icon: "wrench.and.screwdriver", text: "工具：\(toolSummaryText)")
             }
@@ -125,6 +120,7 @@ struct AgentTurnActivitySummaryDetailView: View {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                     ForEach(toolInvocations) { invocation in
                         AgentToolActivityRow(activity: activityPresentation(for: invocation)) {
+                            AppInteractionPerformance.beginAgentDetail(callID: invocation.callID)
                             onOpenToolInvocation(invocation)
                         }
                     }
@@ -155,10 +151,6 @@ struct AgentTurnActivitySummaryDetailView: View {
             .tint(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var toolInvocations: [AgentToolInvocationPresentation] {
-        AgentToolInvocationAssembler().invocations(from: events)
     }
 
     private func activityPresentation(for invocation: AgentToolInvocationPresentation) -> AgentToolActivityPresentation {

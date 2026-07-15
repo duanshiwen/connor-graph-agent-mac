@@ -21,18 +21,32 @@ struct NoteImportSceneContractTests {
 
     @Test("App creates one shared import model for every scene")
     func sharedImportModel() throws {
-        let source = try appSource()
-        #expect(source.components(separatedBy: "@StateObject private var noteImportModel").count - 1 == 1)
-        #expect(source.components(separatedBy: "NoteImportCenterView(model: noteImportModel)").count - 1 == 1)
-        #expect(source.contains("noteImportModel: noteImportModel"))
+        let appSource = try appSource()
+        let compositionSource = try compositionRootSource()
+        #expect(appSource.components(separatedBy: "@StateObject private var root: AppCompositionRoot").count - 1 == 1)
+        #expect(compositionSource.components(separatedBy: "runtime.makeNoteImportModel()").count - 1 == 1)
+        #expect(!compositionSource.contains("noteImportRuntimeFactory"))
+        #expect(!compositionSource.contains("makeNoteImportViewModel()"))
+        #expect(compositionSource.components(separatedBy: "NoteImportViewModel(configurationError: \"导入功能正在准备中…\")").count - 1 == 1)
+        #expect(appSource.components(separatedBy: "root.noteImportModel").count - 1 == 3)
+        #expect(appSource.contains("NoteImportCenterView(model: root.noteImportModel)"))
+        #expect(appSource.contains("noteImportModel: root.noteImportModel"))
     }
 
     private func appSource() throws -> String {
+        try projectSource(named: "ConnorGraphAgentMacApp.swift")
+    }
+
+    private func compositionRootSource() throws -> String {
+        try projectSource(named: "AppCompositionRoot.swift")
+    }
+
+    private func projectSource(named filename: String) throws -> String {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift")
+            .appendingPathComponent("Sources/ConnorGraphAgentMac/\(filename)")
         return try String(contentsOf: sourceURL, encoding: .utf8)
     }
 }

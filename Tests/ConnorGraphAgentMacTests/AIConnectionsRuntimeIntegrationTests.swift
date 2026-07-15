@@ -30,19 +30,23 @@ private final class WelcomeStateFakeSettingsStore: LLMSettingsStore, @unchecked 
 }
 
 @MainActor
-private func makeWelcomeStateViewModel(
+private func makeRuntime(
     settingsStore: WelcomeStateFakeSettingsStore = WelcomeStateFakeSettingsStore(),
     credentialStore: WelcomeStateFakeCredentialStore = WelcomeStateFakeCredentialStore(),
+    runtimeSettings: AgentRuntimeSettings? = nil,
     llmConnectionSetupServiceFactory: @escaping @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService = { AppLLMConnectionSetupService(settingsRepository: $0) }
-) throws -> AppViewModel {
+) throws -> AppRuntimeLifecycle {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-app-vm-welcome-state-\(UUID().uuidString)", isDirectory: true)
     let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
     try paths.ensureDirectoryHierarchy(fileManager: .default)
+    if let runtimeSettings {
+        try AppRuntimeSettingsRepository(configDirectory: paths.configDirectory).save(runtimeSettings)
+    }
     let repository = try AppGraphRepository.bootstrap(paths: paths)
     let llmRepository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
-    return AppViewModel(
+    return AppRuntimeLifecycle(
         entities: [],
         statements: [],
         observeLogEntries: [],
@@ -55,17 +59,37 @@ private func makeWelcomeStateViewModel(
 }
 
 @MainActor
-@Test func appViewModelShowsWelcomeWhenNoLLMConnectionExists() throws {
-    let viewModel = try makeWelcomeStateViewModel()
+@Test func runtimeUsesDisabledToolErrorFuseByDefault() throws {
+    let runtime = try makeRuntime()
 
-    viewModel.loadLLMSettings()
-    viewModel.updateWelcomeState()
-
-    #expect(viewModel.showWelcomePlaceholder == true)
+    #expect(runtime.effectiveLoopConfiguration.maxConsecutiveToolResultErrors == 0)
 }
 
 @MainActor
-@Test func appViewModelHidesWelcomeWhenAnyConnectionExists() throws {
+@Test func runtimePreservesLoadedLoopConfigurationWithoutEnablingToolErrorFuse() throws {
+    var settings = AgentRuntimeSettings.default
+    settings.loop.maxToolIterations = 17
+    settings.loop.maxConsecutiveToolResultErrors = 0
+    let runtime = try makeRuntime(runtimeSettings: settings)
+
+    runtime.loadRuntimeSettings()
+
+    #expect(runtime.effectiveLoopConfiguration.maxToolIterations == 17)
+    #expect(runtime.effectiveLoopConfiguration.maxConsecutiveToolResultErrors == 0)
+}
+
+@MainActor
+@Test func runtimeShowsWelcomeWhenNoLLMConnectionExists() throws {
+    let runtime = try makeRuntime()
+
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsModel.updateWelcomeState()
+
+    #expect(runtime.aiConnectionsModel.showsWelcome == true)
+}
+
+@MainActor
+@Test func runtimeHidesWelcomeWhenAnyConnectionExists() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -80,15 +104,15 @@ private func makeWelcomeStateViewModel(
     )
     try repository.save(settings: AppLLMSettings(connections: [shell], defaultConnectionID: shell.id), apiKey: nil)
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
-    viewModel.updateWelcomeState()
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsModel.updateWelcomeState()
 
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
-@Test func appViewModelHidesWelcomeWhenConfiguredConnectionExists() throws {
+@Test func runtimeHidesWelcomeWhenConfiguredConnectionExists() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -103,15 +127,15 @@ private func makeWelcomeStateViewModel(
     )
     try repository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: "real-key")
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
-    viewModel.updateWelcomeState()
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsModel.updateWelcomeState()
 
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
-@Test func appViewModelHidesWelcomeWhenStoredConnectionHydratesAPIKeyFromCredentialStore() throws {
+@Test func runtimeHidesWelcomeWhenStoredConnectionHydratesAPIKeyFromCredentialStore() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -126,16 +150,16 @@ private func makeWelcomeStateViewModel(
     )
     try repository.save(settings: AppLLMSettings(connections: [persistedShell], defaultConnectionID: persistedShell.id), apiKey: "real-key")
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
-    viewModel.updateWelcomeState()
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsModel.updateWelcomeState()
 
-    #expect(viewModel.llmConnectionConfigs.first?.hasAPIKey == true)
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.connectionConfigs.first?.hasAPIKey == true)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
-@Test func appViewModelHidesWelcomeImmediatelyAfterFirstConnectionBecomesSelected() throws {
+@Test func runtimeHidesWelcomeImmediatelyAfterFirstConnectionBecomesSelected() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -150,10 +174,10 @@ private func makeWelcomeStateViewModel(
     )
     try repository.save(settings: AppLLMSettings(connections: [shell], defaultConnectionID: shell.id), apiKey: "real-key")
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.selectDefaultLLMConnection("first")
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.selectDefaultConnection("first")
 
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
@@ -165,10 +189,10 @@ private func makeWelcomeStateViewModel(
     let second = AppLLMConnectionConfig(id: "second", name: "Second", providerMode: .openAICompatible, baseURLString: "https://second.example/v1", model: "model-b", selectedModel: "model-b", hasAPIKey: true)
     try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "first-key")
     try repository.saveAPIKey("second-key", connectionID: second.id)
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
 
-    viewModel.deleteLLMConnection(second.id)
+    runtime.aiConnectionsModel.deleteConnection(second.id)
 
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == first.id)
@@ -190,19 +214,19 @@ private func makeWelcomeStateViewModel(
     try evidenceRepository.save(AppProviderCapabilitySnapshot(connectionID: second.id, evidence: [
         AppProviderCapabilityEvidence(capability: .responses, status: .verified, endpointFamily: "openai_responses", modelID: "model-b", bindingFingerprint: binding)
     ]))
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
 
-    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
+    #expect(runtime.aiConnectionsModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
 
-    viewModel.renameLLMConnection(second.id, name: "Renamed")
+    runtime.aiConnectionsModel.renameConnection(second.id, name: "Renamed")
 
-    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.connectionName == "Renamed")
-    #expect(viewModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
+    #expect(runtime.aiConnectionsModel.capabilityDetailPresentation(for: second.id)?.connectionName == "Renamed")
+    #expect(runtime.aiConnectionsModel.capabilityDetailPresentation(for: second.id)?.capabilities.first?.status == .verified)
 
-    viewModel.deleteLLMConnection(second.id)
+    runtime.aiConnectionsModel.deleteConnection(second.id)
 
-    #expect(viewModel.capabilityDetailPresentation(for: second.id) == nil)
+    #expect(runtime.aiConnectionsModel.capabilityDetailPresentation(for: second.id) == nil)
     #expect(evidenceRepository.loadAll().first { $0.connectionID == second.id }?.evidence.isEmpty == true)
 }
 
@@ -233,13 +257,13 @@ private func makeWelcomeStateViewModel(
     try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: "real-key")
     try repository.saveAPIKey("other-key", connectionID: second.id)
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
-    viewModel.selectDefaultLLMConnection("second")
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsModel.selectDefaultConnection("second")
 
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "second")
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
@@ -258,9 +282,9 @@ private func makeWelcomeStateViewModel(
         ),
         openAICompatibleHealthCheck: { _ in LLMProviderHealthCheckResult(ok: true, model: "model-a", message: "OK") }
     )
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: store, credentialStore: credentials, llmConnectionSetupServiceFactory: { _ in service })
+    let runtime = try makeRuntime(settingsStore: store, credentialStore: credentials, llmConnectionSetupServiceFactory: { _ in service })
 
-    let result = try await viewModel.setupLLMConnection(AppLLMConnectionSetupInput(
+    let result = try await runtime.aiConnectionsModel.setupConnection(AppLLMConnectionSetupInput(
         id: "new-connection",
         kind: .openAICompatible,
         name: "New",
@@ -269,9 +293,9 @@ private func makeWelcomeStateViewModel(
         apiKey: "secret"
     ))
 
-    #expect(viewModel.lastAddedLLMConnectionID == result.id)
-    #expect(viewModel.lastAddedLLMCapabilityEvidence.count == 3)
-    #expect(viewModel.llmSettingsMessage?.contains("已发现") == true)
+    #expect(runtime.aiConnectionsModel.lastAddedConnectionID == result.id)
+    #expect(runtime.aiConnectionsModel.lastAddedCapabilityEvidence.count == 3)
+    #expect(runtime.aiConnectionsModel.settingsMessage?.contains("已发现") == true)
 }
 
 @MainActor
@@ -297,14 +321,14 @@ private func makeWelcomeStateViewModel(
 
     _ = try await service.setupConnection(input)
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    viewModel.loadLLMSettings()
-    viewModel.updateWelcomeState()
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsModel.updateWelcomeState()
 
     let loaded = try repository.loadSettings()
     #expect(loaded.defaultConnectionID == "provider-setup")
     #expect(loaded.defaultConnection?.id == "provider-setup")
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
@@ -313,8 +337,8 @@ private func makeWelcomeStateViewModel(
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
 
-    let viewModel = try makeWelcomeStateViewModel(settingsStore: settingsStore, credentialStore: credentialStore)
-    #expect(viewModel.showWelcomePlaceholder == true)
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    #expect(runtime.aiConnectionsModel.showsWelcome == true)
 
     let connection = AppLLMConnectionConfig(
         id: "usable",
@@ -327,9 +351,9 @@ private func makeWelcomeStateViewModel(
     )
     try repository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: "real-key")
 
-    viewModel.handleSuccessfulLLMSetup()
+    runtime.aiConnectionsModel.handleSuccessfulSetup()
 
-    #expect(viewModel.showWelcomePlaceholder == false)
+    #expect(runtime.aiConnectionsModel.showsWelcome == false)
 }
 
 @MainActor
@@ -349,7 +373,7 @@ private func makeWelcomeStateViewModel(
     )
     try repository.save(settings: AppLLMSettings(connections: [legacyConnection], defaultConnectionID: legacyConnection.id), apiKey: "legacy-secret")
 
-    let viewModel = try makeWelcomeStateViewModel(
+    let runtime = try makeRuntime(
         settingsStore: settingsStore,
         credentialStore: credentialStore,
         llmConnectionSetupServiceFactory: { repo in
@@ -361,14 +385,14 @@ private func makeWelcomeStateViewModel(
             )
         }
     )
-    viewModel.selectLLMModel("gpt-4o-mini", providerMode: .openAICompatible, connectionID: "legacy-openai")
-    #expect(viewModel.sessionHasLLMOverride == true)
+    runtime.aiConnectionsRuntimeCoordinator.selectModel("gpt-4o-mini", providerMode: .openAICompatible, connectionID: "legacy-openai")
+    #expect(runtime.aiConnectionsRuntimeCoordinator.sessionHasOverride == true)
 
-    let activeSessionID = try #require(viewModel.selectedChatSessionID)
-    let before = try #require(viewModel.sessionStateSnapshotsBySessionID[activeSessionID]?.llmOverride)
+    let activeSessionID = try #require(runtime.chatFeatureModel.sessions.selectedSessionID)
+    let before = try #require(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[activeSessionID]?.llmOverride)
     #expect(before.connectionID == "legacy-openai")
 
-    _ = try await viewModel.setupLLMConnection(AppLLMConnectionSetupInput(
+    _ = try await runtime.aiConnectionsModel.setupConnection(AppLLMConnectionSetupInput(
         id: "anthropic-compatible-new",
         kind: .anthropicCompatible,
         name: "Anthropic Compatible",
@@ -378,7 +402,7 @@ private func makeWelcomeStateViewModel(
         apiKey: "anthropic-secret"
     ))
 
-    let override = try #require(viewModel.sessionStateSnapshotsBySessionID[activeSessionID]?.llmOverride)
+    let override = try #require(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[activeSessionID]?.llmOverride)
     #expect(override.connectionID == "anthropic-compatible-new")
     #expect(override.providerMode == AppLLMProviderMode.anthropicMessages.rawValue)
     #expect(override.model == "claude-sonnet-4-5")

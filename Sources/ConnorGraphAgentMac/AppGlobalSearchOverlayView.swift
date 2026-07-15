@@ -3,7 +3,7 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct AppGlobalSearchOverlayView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: GlobalSearchFeatureModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var browserHistoryPage: Int = 0
     @State private var contentHeight: CGFloat = 0
@@ -14,8 +14,8 @@ struct AppGlobalSearchOverlayView: View {
     }
 
     private let browserHistoryPageSize = 3
-    private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
-    private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var state: GlobalSearchPreviewState { model.previewState }
+    private var query: String { model.query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var shouldScroll: Bool { contentHeight > Layout.maxHeight }
 
     var body: some View {
@@ -125,29 +125,29 @@ struct AppGlobalSearchOverlayView: View {
                 Text("最近搜索")
                     .font(AppListTypography.rowCaptionEmphasized)
                     .foregroundStyle(.secondary)
-                if !viewModel.globalSearchHistoryEntries.isEmpty {
-                    Text("\(min(viewModel.globalSearchHistoryEntries.count, 8)) 条")
+                if !model.historyEntries.isEmpty {
+                    Text("\(min(model.historyEntries.count, 8)) 条")
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer(minLength: 0)
                 Button {
-                    viewModel.clearGlobalSearchHistory()
+                    model.clearHistory()
                 } label: {
                     Text("清空")
                         .font(AppListTypography.rowCaptionEmphasized)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(viewModel.globalSearchHistoryEntries.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
-                .disabled(viewModel.globalSearchHistoryEntries.isEmpty)
+                .foregroundStyle(model.historyEntries.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                .disabled(model.historyEntries.isEmpty)
             }
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
             VStack(spacing: AppShellLayout.spaceXS) {
-                ForEach(viewModel.globalSearchHistoryEntries.prefix(8)) { entry in
+                ForEach(model.historyEntries.prefix(8)) { entry in
                     Button {
-                        viewModel.selectGlobalSearchHistoryEntry(entry)
+                        model.selectHistoryEntry(entry)
                     } label: {
                         GlobalSearchRecentSearchRow(
                             entry: entry,
@@ -192,10 +192,10 @@ struct AppGlobalSearchOverlayView: View {
     private var actionRows: some View {
         VStack(spacing: 2) {
             GlobalSearchActionRow(kind: .newChat, query: query, isSelected: stateSelected(.action(.newChat))) {
-                viewModel.performGlobalSearchNewChat()
+                model.performNewChat()
             }
             GlobalSearchActionRow(kind: .webSearch, query: query, isSelected: stateSelected(.action(.webSearch))) {
-                viewModel.performGlobalSearchWebSearch()
+                model.performWebSearch()
             }
         }
     }
@@ -222,7 +222,7 @@ struct AppGlobalSearchOverlayView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button {
-                    viewModel.showAllGlobalSearchResults(kind: .chatSessions)
+                    model.showAllResults(kind: .chatSessions)
                 } label: {
                     Text("查看全部 ›")
                         .font(AppListTypography.rowCaptionEmphasized)
@@ -242,7 +242,7 @@ struct AppGlobalSearchOverlayView: View {
                 VStack(spacing: 1) {
                     ForEach(results.prefix(3)) { result in
                         Button {
-                            viewModel.openGlobalSearchChatSessionResult(result.id)
+                            model.openChatSession(result.id)
                         } label: {
                             GlobalSearchChatSessionRow(result: result, isSelected: stateSelected(.chatSession(result.id)))
                         }
@@ -280,7 +280,7 @@ struct AppGlobalSearchOverlayView: View {
                     browserHistoryPaginationControls(currentPage: currentPage, pageCount: pageCount)
                 }
                 Button {
-                    viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+                    model.showAllResults(kind: .browserHistory)
                 } label: {
                     Text("查看全部 ›")
                         .font(AppListTypography.rowCaptionEmphasized)
@@ -300,7 +300,7 @@ struct AppGlobalSearchOverlayView: View {
                 VStack(spacing: 1) {
                     ForEach(pageResults) { result in
                         Button {
-                            viewModel.openGlobalSearchResult(result)
+                            model.openResult(result)
                         } label: {
                             GlobalSearchResultRow(result: result, isSelected: stateSelected(.nativeResult(result.id)))
                         }
@@ -314,7 +314,7 @@ struct AppGlobalSearchOverlayView: View {
     }
 
     private func stateSelected(_ item: GlobalSearchSelectableItem) -> Bool {
-        viewModel.globalSearchSelectedItem == item
+        model.selectedItem == item
     }
 
     private func browserHistoryPaginationControls(currentPage: Int, pageCount: Int) -> some View {
@@ -362,7 +362,7 @@ struct AppGlobalSearchOverlayView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button {
-                    viewModel.showAllGlobalSearchResults(kind: kind)
+                    model.showAllResults(kind: kind)
                 } label: {
                     Text("查看全部 ›")
                         .font(AppListTypography.rowCaptionEmphasized)
@@ -384,7 +384,7 @@ struct AppGlobalSearchOverlayView: View {
                 VStack(spacing: 1) {
                     ForEach(results.prefix(3)) { result in
                         Button {
-                            viewModel.openGlobalSearchResult(result)
+                            model.openResult(result)
                         } label: {
                             GlobalSearchResultRow(result: result, isSelected: stateSelected(.nativeResult(result.id)))
                         }

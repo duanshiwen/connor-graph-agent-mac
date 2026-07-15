@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac 工程说明
 
-文档更新时间：2026-07-12 GMT+8  
+文档更新时间：2026-07-15 GMT+8  
 定位：本文件记录 Connor Graph Agent Mac 的工程架构、边界、运行布局、Memory OS、开发命令和质量约束。普通用户使用说明请看 [README.md](README.md)。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -448,6 +448,10 @@ Connor 是原生 macOS app。
 9. Markdown 持久化 cache 由 session 保存/后台预热路径维护；SwiftUI `body` 只允许访问内存 compiled-document cache，不得同步读写磁盘。
 10. 避免 nested navigation titles 泄漏到 macOS window/menu state。
 11. destructive 或 governance actions 必须打开 review surfaces；快捷键不得绕过 Connor policy/review gates。
+12. `RetainedRouteHostView` 的 cache owner 必须绑定当前 `AppFeatureGraph` identity。启动从 placeholder graph 切换到 live graph、runtime retry 或 fallback 时，list/detail 两个 host 必须同时失效旧 `NSHostingController`；只替换 route factory closure 而保留旧 `rootView` 会制造 sidebar 与内容区的数据分裂。
+13. 热路由 controller 创建后应保持在稳定 AppKit child hierarchy 中，切换只改变可见性；不得在每次 sidebar 切换时反复 `removeFromParent`、创建约束或依赖 `.onAppear` 重载。只有冷路由 MRU 淘汰、graph owner 变化或 shutdown 才销毁 controller。
+14. Route view appearance 不得同步扫描文件系统、全量读取 repository 或重建大型 presentation。启动内容由 bootstrap actor 构建 Sendable snapshot，MainActor 只应用；后续刷新由明确的数据失效或用户操作触发。
+15. Sidebar route 性能完成点必须是 list/detail 两个 pane 的真实 SwiftUI 内容完成布局并提交到后续 main-run-loop turn，不能把 selection setter 或 AppKit controller attach 当作“已显示”。Debug 测试执行宽松预算，Release/performance scheme 执行严格预算；性能测试必须同时断言数据正确，空页面不能以“很快”通过。
 
 用户可见文案应使用“康纳同学”的语气：温暖、准确、本地优先、行动导向。避免在终端用户界面出现泛泛的 `Something went wrong`、`No data` 或只有 raw error code 的文案。
 

@@ -30,6 +30,10 @@ public struct AppChatSessionRepository: Sendable {
         try store.recentSessions(limit: limit, includeArchived: true)
     }
 
+    public func loadSessionMetadata(limit: Int = Int.max) throws -> [AgentSession] {
+        try store.recentSessionMetadata(limit: limit)
+    }
+
     public func loadSessions(filter: AgentSessionListFilter, limit: Int = Int.max) throws -> [AgentSession] {
         switch filter {
         case .status(let status):
@@ -54,6 +58,22 @@ public struct AppChatSessionRepository: Sendable {
 
     public func createSession(title: String = "新对话", now: Date = Date()) throws -> AgentSession {
         try makeNewSession(title: title, now: now)
+    }
+
+    /// Persists a session whose stable identity was allocated by the interactive
+    /// UI before storage work began. This lets navigation/list selection commit
+    /// first without replacing the row identity after persistence completes.
+    @discardableResult
+    public func persistNewSession(_ session: AgentSession) throws -> AgentSessionArtifactDirectories? {
+        try store.upsertSession(session)
+        return try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+    }
+
+    /// Rolls back a session that failed during its initial persistence transaction.
+    /// Unlike user-initiated deletion, a not-yet-ready session cannot own runs or
+    /// background tasks, so no task lookup or governance event is required.
+    public func rollbackNewSession(sessionID: String) throws {
+        try store.deleteSession(id: sessionID)
     }
 
     /// Creates an imported note session in one database write. This avoids the
@@ -94,6 +114,10 @@ public struct AppChatSessionRepository: Sendable {
         session.readState = readState
         try store.updateSessionReadState(sessionID: sessionID, readState: readState)
         return session
+    }
+
+    public func persistReadState(sessionID: String, readState: SessionReadState) throws {
+        try store.updateSessionReadState(sessionID: sessionID, readState: readState)
     }
 
     private func prewarmMarkdownRenderCacheIfNeeded(for session: AgentSession, previousMessageCount: Int) throws {

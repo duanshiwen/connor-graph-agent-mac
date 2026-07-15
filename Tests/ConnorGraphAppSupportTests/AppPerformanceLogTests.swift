@@ -7,6 +7,7 @@ struct AppPerformanceLogTests {
     @Test func chatTurnLoggerUsesStableSubsystemAndCategory() {
         #expect(AppPerformanceLog.subsystem == "ConnorGraphAgentMac")
         #expect(AppPerformanceLog.chatTurnCategory == "ChatTurnPerformance")
+        #expect(AppPerformanceLog.sidebarNavigationCategory == "SidebarNavigationPerformance")
     }
 
     @Test func measuredDurationReportsElapsedMilliseconds() async throws {

@@ -47,13 +47,13 @@ enum SettingsListLayout {
 }
 
 struct ConnorSettingsDetailView: View {
-    @ObservedObject var viewModel: AppViewModel
+    let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
     @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
     @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
-    init(viewModel: AppViewModel, identityStore: AppUserIdentityStore) {
-        self.viewModel = viewModel
+    init(graph: AppFeatureGraph, identityStore: AppUserIdentityStore) {
+        self.graph = graph
         self.identityStore = identityStore
         let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
         _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
@@ -67,47 +67,58 @@ struct ConnorSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text(viewModel.selectedSettingsSection.title)
+                Text(graph.shell.selectedSettingsSection.title)
                     .font(SettingsListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
-                    switch viewModel.selectedSettingsSection {
+                    switch graph.shell.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.allChatSessions)
+                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: graph.chat.sessions.allSessions)
                     case .app:
-                        SettingsAppSection(viewModel: viewModel)
+                        SettingsAppSection(model: graph.appSettings, inputModel: graph.inputSettings, openProjectHelp: graph.settingsActions.openProjectHelp)
                     case .ai:
-                        SettingsAISection(viewModel: viewModel)
+                        SettingsAISection(
+                            model: graph.aiConnections,
+                            openURL: graph.settingsActions.openURL
+                        )
                     case .calendar:
-                        SettingsCalendarSection(viewModel: viewModel)
+                        SettingsCalendarSection(model: graph.calendar)
                     case .rss:
-                        SettingsRSSSection(viewModel: viewModel)
+                        SettingsRSSSection(model: graph.rss)
                     case .mail:
-                        SettingsMailSection(viewModel: viewModel)
+                        SettingsMailSection(model: graph.mail)
                     case .permissions:
-                        SettingsPermissionsSection(viewModel: viewModel)
+                        SettingsPermissionsSection(model: graph.permissionSettings)
                     case .labels:
-                        SettingsLabelsSection(viewModel: viewModel)
+                        SettingsLabelsSection(
+                            model: graph.governance,
+                            sessions: graph.chat.sessions.allSessions
+                        )
                     case .statuses:
-                        SettingsStatusesSection(viewModel: viewModel)
+                        SettingsStatusesSection(
+                            model: graph.governance,
+                            sessions: graph.chat.sessions.allSessions
+                        )
                     case .shortcuts:
-                        SettingsShortcutsSection(viewModel: viewModel)
+                        SettingsShortcutsSection(model: graph.inputSettings)
                     case .preferences:
-                        SettingsPreferencesSection(viewModel: viewModel)
+                        SettingsPreferencesSection(model: graph.userPreferences)
                     }
                 }
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                if let message = viewModel.settingsMessage(for: viewModel.selectedSettingsSection) {
+                if let message = graph.shell.settingsMessage(for: graph.shell.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 760, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                if let error = viewModel.errorMessage {
+                if let error = graph.shell.selectedSettingsSection == .ai
+                    ? graph.aiConnections.errorMessage
+                    : graph.errors.message {
                     Text(error)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
@@ -121,36 +132,36 @@ struct ConnorSettingsDetailView: View {
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .task {
-            viewModel.loadRuntimeSettings()
+            graph.settingsActions.load()
         }
     }
 }
 
 struct SettingsCalendarSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: CalendarFeatureModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
             SettingsGroup(title: "日历能力") {
                 SettingsValueRow(title: "定位", value: "独立日历数据源")
-                SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
-                SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
-                SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
+                SettingsValueRow(title: "已添加源", value: "\(model.accounts.count) 个")
+                SettingsValueRow(title: "日历", value: "\(model.collections.count) 个")
+                SettingsValueRow(title: "当前事件", value: "\(model.presentation.eventCount) 个")
                 Text("本机日历可通过 EventKit 安全修改；标准 CalDAV、iCloud、Fastmail 与 Nextcloud 可在账户行显式开启修改。ICS/Webcal 始终只读。每次真实写入仍需审批，并使用版本冲突保护。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: SettingsListLayout.spaceS) {
-                    Button(action: { viewModel.syncSystemCalendar() }) {
-                        Label(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历", systemImage: "arrow.triangle.2.circlepath")
+                    Button(action: { model.syncSystemCalendar() }) {
+                        Label(model.isSyncingSystemCalendar ? "同步中…" : "同步本机日历", systemImage: "arrow.triangle.2.circlepath")
                             .font(SettingsListTypography.actionTitle)
                             .padding(.horizontal, SettingsListLayout.spaceM)
                             .padding(.vertical, SettingsListLayout.spaceXS)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isSyncingSystemCalendar)
+                    .disabled(model.isSyncingSystemCalendar)
 
-                    Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                    Button(action: { model.isPresentingAddSourceSheet = true }) {
                         Label("添加日历源", systemImage: "plus")
                             .font(SettingsListTypography.actionTitle)
                             .padding(.horizontal, SettingsListLayout.spaceM)
@@ -158,7 +169,7 @@ struct SettingsCalendarSection: View {
                     }
                     .buttonStyle(.bordered)
                 }
-                if let message = viewModel.calendarSyncMessage {
+                if let message = model.syncMessage {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
@@ -167,28 +178,28 @@ struct SettingsCalendarSection: View {
             }
 
             SettingsGroup(title: "已添加日历源") {
-                if viewModel.calendarAccounts.isEmpty {
+                if model.accounts.isEmpty {
                     Text("暂无日历源。点击“添加日历源”开始。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    ForEach(viewModel.calendarAccounts) { account in
+                    ForEach(model.accounts) { account in
                         CalendarSourceSettingsRow(
                             account: account,
-                            calendarCount: viewModel.calendarCollections.filter { $0.accountID == account.id }.count,
-                            onSyncModeChange: { viewModel.setCalendarSyncMode(accountID: account.id, mode: $0) },
-                            onDelete: { viewModel.deleteCalendarSource(account) }
+                            calendarCount: model.collections.filter { $0.accountID == account.id }.count,
+                            onSyncModeChange: { model.setSyncMode(accountID: account.id, mode: $0) },
+                            onDelete: { model.deleteSource(account) }
                         )
-                        if account.id != viewModel.calendarAccounts.last?.id {
+                        if account.id != model.accounts.last?.id {
                             Divider().opacity(0.6)
                         }
                     }
                 }
             }
         }
-        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet(viewModel: viewModel)
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
+            AddCalendarSourceSheet(model: model)
         }
     }
 }
@@ -257,7 +268,9 @@ private struct CalendarSourceSettingsRow: View {
 }
 
 struct SettingsAppSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: AppSettingsFeatureModel
+    @Bindable var inputModel: InputSettingsFeatureModel
+    var openProjectHelp: () -> Void
 
     private var appVersionDisplay: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -282,12 +295,12 @@ struct SettingsAppSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "通知") {
-                SettingsToggleRow(title: "桌面通知", subtitle: "允许会话新消息发送 macOS 通知。", isOn: $viewModel.desktopNotificationsEnabled)
+                SettingsToggleRow(title: "桌面通知", subtitle: "允许会话新消息发送 macOS 通知。", isOn: $model.desktopNotificationsEnabled)
                 Divider()
                 SettingsPickerRow(
                     title: "会话新消息",
                     subtitle: "Connor 当前只保留这一种通知语义：当不可见会话产生新消息时如何提醒。",
-                    selection: $viewModel.sessionNewMessageNotificationLevel
+                    selection: $model.sessionNewMessageNotificationLevel
                 ) {
                     ForEach(SessionAttentionLevel.allCases) { level in
                         Text(level.displayName).tag(level)
@@ -296,7 +309,7 @@ struct SettingsAppSection: View {
                 Divider()
                 HStack {
                     Spacer()
-                    Button(action: viewModel.resetSessionNotificationSettings) {
+                    Button(action: model.resetSessionNotificationSettings) {
                         Label("恢复默认", systemImage: "arrow.counterclockwise")
                             .font(SettingsListTypography.rowCaptionEmphasized)
                     }
@@ -305,13 +318,16 @@ struct SettingsAppSection: View {
                 }
             }
             SettingsGroup(title: "电源") {
-                SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
+                SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $model.keepScreenAwake)
             }
             SettingsGroup(title: "输入") {
                 SettingsToggleRow(
                     title: "会话页语音转文字",
                     subtitle: "在会话输入栏启用按住说话；关闭后置灰快捷录音入口并停止监听 Option 语音输入。",
-                    isOn: $viewModel.sessionSpeechTranscriptionEnabled
+                    isOn: Binding(
+                        get: { inputModel.sessionSpeechTranscriptionEnabled },
+                        set: { inputModel.setSpeechTranscriptionEnabled($0) }
+                    )
                 )
             }
             SettingsGroup(title: "搜索") {
@@ -324,7 +340,7 @@ struct SettingsAppSection: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Picker("默认搜索引擎", selection: $viewModel.defaultSearchEngine) {
+                    Picker("默认搜索引擎", selection: $model.defaultSearchEngine) {
                         ForEach(DefaultSearchEngine.allCases) { engine in
                             Text(engine.displayName).tag(engine)
                         }
@@ -337,13 +353,13 @@ struct SettingsAppSection: View {
                 .frame(minHeight: SettingsListLayout.rowMinHeight)
             }
             SettingsGroup(title: "页面显示主题") {
-                SettingsAppearanceModeRow(selection: $viewModel.appearanceMode)
+                SettingsAppearanceModeRow(selection: $model.appearanceMode)
             }
             SettingsGroup(title: "网络") {
-                SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $viewModel.httpProxyEnabled)
-                if viewModel.httpProxyEnabled {
+                SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $model.httpProxyEnabled)
+                if model.httpProxyEnabled {
                     Divider()
-                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $viewModel.httpProxyURLString)
+                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $model.httpProxyURLString)
                 }
             }
             SettingsGroup(title: "关于") {
@@ -358,7 +374,7 @@ struct SettingsAppSection: View {
                             .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("打开 GitHub") { viewModel.openProjectGitHubHelp() }
+                    Button("打开 GitHub") { openProjectHelp() }
                         .buttonStyle(.bordered)
                 }
             }
@@ -367,38 +383,38 @@ struct SettingsAppSection: View {
 }
 
 struct SettingsRSSSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: RSSFeatureModel
 
-    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
+    private var presentation: NativeRSSBrowserPresentation { model.presentation }
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             sourceConnections
             fetchPolicy
         }
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+        .sheet(isPresented: $model.isPresentingAddSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
-                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+                try await model.addSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
-        .sheet(item: $viewModel.editingRSSSource) { source in
+        .sheet(item: $model.editingSource) { source in
             AddRSSSourceSheet(source: source) { feedURL, displayName in
-                try await viewModel.updateRSSSource(sourceID: source.id, feedURL: feedURL, displayName: displayName)
+                try await model.updateSource(sourceID: source.id, feedURL: feedURL, displayName: displayName)
             }
         }
         .confirmationDialog(
             "删除 RSS 订阅源？",
             isPresented: Binding(
-                get: { viewModel.pendingRSSSourceDeletion != nil },
-                set: { if !$0 { viewModel.pendingRSSSourceDeletion = nil } }
+                get: { model.pendingSourceDeletion != nil },
+                set: { if !$0 { model.pendingSourceDeletion = nil } }
             ),
-            presenting: viewModel.pendingRSSSourceDeletion
+            presenting: model.pendingSourceDeletion
         ) { source in
             Button("删除订阅源", role: .destructive) {
-                viewModel.deleteRSSSource(source)
+                model.deleteSource(source)
             }
             Button("取消", role: .cancel) {
-                viewModel.pendingRSSSourceDeletion = nil
+                model.pendingSourceDeletion = nil
             }
         } message: { source in
             Text("将删除“\(source.displayName)”及其本地文章缓存。")
@@ -421,8 +437,8 @@ struct SettingsRSSSection: View {
                         RSSSettingsSourceRow(
                             source: source,
                             unreadCount: presentation.unreadCount(sourceID: source.id),
-                            onEdit: { viewModel.editingRSSSource = source },
-                            onDelete: { viewModel.pendingRSSSourceDeletion = source }
+                            onEdit: { model.editingSource = source },
+                            onDelete: { model.pendingSourceDeletion = source }
                         )
                         if source.id != presentation.sources.last?.id { Divider().padding(.leading, 32) }
                     }
@@ -434,7 +450,7 @@ struct SettingsRSSSection: View {
                 .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
             }
 
-            Button(action: { viewModel.isPresentingAddRSSSourceSheet = true }) {
+            Button(action: { model.isPresentingAddSourceSheet = true }) {
                 Label("添加订阅源", systemImage: "plus")
                     .font(SettingsListTypography.actionTitle)
                     .padding(.horizontal, SettingsListLayout.spaceM)
@@ -521,7 +537,8 @@ private struct RSSSettingsSourceRow: View {
 }
 
 struct SettingsAISection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: AIConnectionsFeatureModel
+    var openURL: (URL) -> Void
     @State private var isShowingAddConnectionGuide = false
     @State private var setupOption: AIConnectionOnboardingOption?
     @State private var renamingConnection: AppLLMConnectionConfig?
@@ -532,8 +549,9 @@ struct SettingsAISection: View {
         Group {
             if let setupOption {
                 AIConnectionSetupView(
-                    viewModel: viewModel,
+                    aiModel: model,
                     option: setupOption,
+                    openURL: openURL,
                     complete: { addConnection(from: setupOption) },
                     back: { self.setupOption = nil },
                     cancel: {
@@ -581,21 +599,21 @@ struct SettingsAISection: View {
             }
 
             VStack(spacing: 0) {
-                ForEach(viewModel.llmConnectionConfigs) { connection in
+                ForEach(model.connectionConfigs) { connection in
                     AIConnectionEntryRow(
                         connection: connection,
-                        isDefault: connection.id == viewModel.llmDefaultConnectionID,
-                        canDelete: viewModel.llmConnectionConfigs.count > 1,
-                        makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
+                        isDefault: connection.id == model.defaultConnectionID,
+                        canDelete: model.connectionConfigs.count > 1,
+                        makeDefault: { model.selectDefaultConnection(connection.id) },
                         rename: { beginConnectionRename(connection) },
                         viewCapabilities: {
-                            capabilityDetail = viewModel.capabilityDetailPresentation(for: connection.id)
+                            capabilityDetail = model.capabilityDetailPresentation(for: connection.id)
                         },
                         delete: {
-                            viewModel.deleteLLMConnection(connection.id)
+                            model.deleteConnection(connection.id)
                         }
                     )
-                    if connection.id != viewModel.llmConnectionConfigs.last?.id {
+                    if connection.id != model.connectionConfigs.last?.id {
                         Divider()
                             .padding(.leading, 32)
                     }
@@ -649,7 +667,7 @@ struct SettingsAISection: View {
 
     private func commitConnectionRename() {
         guard let connection = renamingConnection else { return }
-        viewModel.renameLLMConnection(connection.id, name: renameDraft)
+        model.renameConnection(connection.id, name: renameDraft)
         renamingConnection = nil
         renameDraft = ""
     }
@@ -940,8 +958,9 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
 }
 
 struct AIConnectionSetupView: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var aiModel: AIConnectionsFeatureModel
     var option: AIConnectionOnboardingOption
+    var openURL: (URL) -> Void
     var complete: () -> Void
     var back: () -> Void
     var cancel: () -> Void
@@ -1808,7 +1827,7 @@ struct AIConnectionSetupView: View {
             do {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
                     Task { @MainActor in
-                        viewModel.openURLInSystemDefaultBrowser(url)
+                        openURL(url)
                     }
                 }
                 let input = AppLLMConnectionSetupInput(
@@ -1821,7 +1840,7 @@ struct AIConnectionSetupView: View {
                     apiKey: result.apiKey,
                     oauthTokens: result.tokens
                 )
-                _ = try await viewModel.setupLLMConnection(input)
+                _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
                     isAuthenticating = false
                     complete()
@@ -1847,7 +1866,7 @@ struct AIConnectionSetupView: View {
                     githubDeviceCode = code
                     didOpenBrowser = true
                     if let url = URL(string: code.verificationURI) {
-                        viewModel.openURLInSystemDefaultBrowser(url)
+                        openURL(url)
                     }
                     statusMessage = "在系统默认浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
@@ -1862,7 +1881,7 @@ struct AIConnectionSetupView: View {
                     apiKey: tokens.accessToken,
                     oauthTokens: tokens
                 )
-                _ = try await viewModel.setupLLMConnection(input)
+                _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
                     isAuthenticating = false
                     complete()
@@ -1902,7 +1921,7 @@ struct AIConnectionSetupView: View {
                     explicitVisionSupport: visionSupportOverride,
                     shouldFetchModelsList: selectedProviderPresetID == "custom" && customProtocol == .openAICompatible ? shouldFetchModelsList : true
                 )
-                _ = try await viewModel.setupLLMConnection(input)
+                _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
                     isAuthenticating = false
                     complete()
@@ -2475,7 +2494,7 @@ struct AIConnectionEntryRow: View {
 }
 
 struct SettingsPermissionsSection: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: PermissionSettingsFeatureModel
     @State private var isShowingPolicyDetails = false
 
     var body: some View {
@@ -2489,9 +2508,9 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "新会话默认权限") {
-                PermissionModePickerRow(selection: $viewModel.defaultPermissionMode)
+                PermissionModePickerRow(selection: $model.defaultPermissionMode)
                 Divider()
-                PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
+                PermissionModeSummaryRow(mode: model.defaultPermissionMode)
             }
 
             SettingsGroup(title: "生效范围") {
