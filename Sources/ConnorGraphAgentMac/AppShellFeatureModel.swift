@@ -10,13 +10,16 @@ final class AppShellFeatureModel {
     private(set) var focusTopSearchRequestID: UUID?
     private(set) var settingsSectionMessageStore = SettingsSectionMessageStore()
 
-    func select(_ item: SidebarItem) {
+    @discardableResult
+    func select(_ item: SidebarItem) -> Bool {
+        guard selection != item else { return false }
         selection = item
+        return true
     }
 
     func selectSettingsSection(_ section: ConnorSettingsSection) {
         selectedSettingsSection = section
-        selection = .llmSettings
+        select(.llmSettings)
     }
 
     func requestTopSearchFocus() {
@@ -42,33 +45,33 @@ final class AppShellFeatureModel {
     func applyNavigation(_ item: ConnorNativeShellItem) {
         switch item {
         case .home, .agentChat, .graphMemory:
-            selection = .agentChat
+            select(.agentChat)
         case .browserWorkspace:
             break
         case .search:
-            selection = .search
+            select(.search)
         case .graphEntities:
-            selection = .entities
+            select(.entities)
         case .approvals:
-            selection = .pendingApprovals
+            select(.pendingApprovals)
         case .automation, .localAutomationSurface:
-            selection = .scheduledTasks
+            select(.scheduledTasks)
         case .productOS:
-            selection = .productOS
+            select(.productOS)
         case .calendar:
-            selection = .calendar
+            select(.calendar)
         case .contacts:
-            selection = .contacts
+            select(.contacts)
         case .mail:
-            selection = .mail
+            select(.mail)
         case .rss:
-            selection = .rss
+            select(.rss)
         case .sources:
-            selection = .sources
+            select(.sources)
         case .skills:
-            selection = .skills
+            select(.skills)
         case .settings:
-            selection = .llmSettings
+            select(.llmSettings)
         }
     }
 }
