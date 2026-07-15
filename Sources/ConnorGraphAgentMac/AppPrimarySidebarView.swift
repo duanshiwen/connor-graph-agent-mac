@@ -8,17 +8,9 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct CraftPrimarySidebarView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @Bindable var shellModel: AppShellFeatureModel
-    @Bindable var governanceModel: GovernanceFeatureModel
-    @Bindable var sourceRuntimeModel: SourceRuntimeFeatureModel
-    @Bindable var skillRuntimeModel: SkillRuntimeFeatureModel
-    @Bindable var taskAutomationModel: TaskAutomationFeatureModel
-    @Bindable var calendarFeatureModel: CalendarFeatureModel
-    @Bindable var contactsFeatureModel: ContactsFeatureModel
-    @Bindable var mailFeatureModel: MailFeatureModel
-    @Bindable var rssFeatureModel: RSSFeatureModel
+    let graph: AppFeatureGraph
     @Binding var selection: SidebarItem?
+    var sendCommand: (AppCommand) -> Void
     @State private var sessionsExpanded = true
     @State private var labelsExpanded = true
     @State private var sourcesExpanded = true
@@ -29,7 +21,7 @@ struct CraftPrimarySidebarView: View {
     var body: some View {
         VStack(spacing: 10) {
             Button {
-                viewModel.newChatSession()
+                sendCommand(.shortcut(.newSession))
                 select(.agentChat)
             } label: {
                 SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
@@ -39,7 +31,7 @@ struct CraftPrimarySidebarView: View {
             .padding(.top, 10)
 
             Button {
-                viewModel.newNoteSession()
+                sendCommand(.newNote)
                 select(.agentChat)
             } label: {
                 SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
@@ -50,27 +42,27 @@ struct CraftPrimarySidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
-                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .all) {
-                            viewModel.setSessionListFilter(.all)
+                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && graph.chat.sessions.filter == .all) {
+                            graph.chatActions.session.setSessionListFilter(.all)
                             select(.agentChat)
                         }
                         .contextMenu {
                             Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor() }
                         }
-                        ForEach(governanceModel.config.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
+                        ForEach(graph.governance.config.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
-                                SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .status(sessionStatus)) {
-                                    viewModel.setSessionListFilter(.status(sessionStatus))
+                                SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && graph.chat.sessions.filter == .status(sessionStatus)) {
+                                    graph.chatActions.session.setSessionListFilter(.status(sessionStatus))
                                     select(.agentChat)
                                 }
                                 .contextMenu {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
                                     Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
                                     Divider()
-                                    Button(role: .destructive) { governanceModel.deleteStatus(status) } label: {
+                                    Button(role: .destructive) { graph.governance.deleteStatus(status) } label: {
                                         Label("删除状态", systemImage: "trash")
                                     }
-                                    .disabled(!governanceModel.canDeleteStatus(status))
+                                    .disabled(!graph.governance.canDeleteStatus(status))
                                 }
                             } else {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: 0, isSelected: false) {
@@ -80,32 +72,32 @@ struct CraftPrimarySidebarView: View {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
                                     Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
                                     Divider()
-                                    Button(role: .destructive) { governanceModel.deleteStatus(status) } label: {
+                                    Button(role: .destructive) { graph.governance.deleteStatus(status) } label: {
                                         Label("删除状态", systemImage: "trash")
                                     }
-                                    .disabled(!governanceModel.canDeleteStatus(status))
+                                    .disabled(!graph.governance.canDeleteStatus(status))
                                 }
                             }
                         }
                     }
 
                     SidebarDisclosure(title: "标签", systemImage: "tag", isExpanded: $labelsExpanded) {
-                        if governanceModel.config.labels.isEmpty {
+                        if graph.governance.config.labels.isEmpty {
                             SidebarMutedText("暂无标签")
                                 .contextMenu {
                                     Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
                                 }
                         } else {
-                            ForEach(governanceModel.config.labels) { label in
-                                SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.chatFeatureModel.sessions.filter == .label(label.id)) {
-                                    viewModel.setSessionListFilter(.label(label.id))
+                            ForEach(graph.governance.config.labels) { label in
+                                SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && graph.chat.sessions.filter == .label(label.id)) {
+                                    graph.chatActions.session.setSessionListFilter(.label(label.id))
                                     select(.agentChat)
                                 }
                                 .contextMenu {
                                     Button("编辑标签…", systemImage: "pencil") { presentLabelEditor(label) }
                                     Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
                                     Divider()
-                                    Button(role: .destructive) { governanceModel.deleteLabel(label) } label: {
+                                    Button(role: .destructive) { graph.governance.deleteLabel(label) } label: {
                                         Label("删除标签", systemImage: "trash")
                                     }
                                 }
@@ -113,20 +105,20 @@ struct CraftPrimarySidebarView: View {
                         }
                     }
 
-                    SidebarRow(title: "人际关系", systemImage: "person.2", count: contactsFeatureModel.presentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
+                    SidebarRow(title: "人际关系", systemImage: "person.2", count: graph.contacts.presentation.rows.count, isSelected: selection == .contacts) { select(.contacts) }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
-                        SidebarRow(title: "日历", systemImage: "calendar", count: calendarFeatureModel.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
+                        SidebarRow(title: "日历", systemImage: "calendar", count: graph.calendar.presentation.eventCount, isSelected: selection == .calendar) { select(.calendar) }
                         SidebarRow(title: "邮件", systemImage: "envelope", count: mailSidebarCount, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: rssUnreadCount, isSelected: selection == .rss) { select(.rss) }
-                        SidebarRow(title: "MCP", systemImage: "server.rack", count: sourceRuntimeModel.configurations.count, isSelected: selection == .sources) { select(.sources) }
+                        SidebarRow(title: "MCP", systemImage: "server.rack", count: graph.sources.configurations.count, isSelected: selection == .sources) { select(.sources) }
                     }
 
-                    SidebarRow(title: "技能", systemImage: "bolt", count: skillRuntimeModel.presentation.summary.total, isSelected: selection == .skills) { select(.skills) }
+                    SidebarRow(title: "技能", systemImage: "bolt", count: graph.skills.presentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
-                        SidebarRow(title: "定时任务", systemImage: "clock", count: taskAutomationModel.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
-                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: taskAutomationModel.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
+                        SidebarRow(title: "定时任务", systemImage: "clock", count: graph.tasks.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
+                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: graph.tasks.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
                     }
                 }
                 .padding(.horizontal, 10)
@@ -148,7 +140,7 @@ struct CraftPrimarySidebarView: View {
                 isCreating: request.isCreating,
                 onCancel: { statusEditorRequest = nil },
                 onSave: { definition in
-                    governanceModel.upsertStatus(definition)
+                    graph.governance.upsertStatus(definition)
                     statusEditorRequest = nil
                 }
             )
@@ -160,7 +152,7 @@ struct CraftPrimarySidebarView: View {
                 isCreating: request.isCreating,
                 onCancel: { labelEditorRequest = nil },
                 onSave: { definition in
-                    governanceModel.upsertLabel(definition)
+                    graph.governance.upsertLabel(definition)
                     labelEditorRequest = nil
                 }
             )
@@ -169,7 +161,7 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var countSourceSessions: [AgentSession] {
-        viewModel.chatFeatureModel.sessions.allSessions.isEmpty ? viewModel.chatFeatureModel.sessions.sessions : viewModel.chatFeatureModel.sessions.allSessions
+        graph.chat.sessions.allSessions.isEmpty ? graph.chat.sessions.sessions : graph.chat.sessions.allSessions
     }
 
     private var allSessionsCount: Int {
@@ -177,14 +169,14 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var mailSidebarCount: Int? {
-        let unreadCount = mailFeatureModel.presentation.totalUnreadCount
+        let unreadCount = graph.mail.presentation.totalUnreadCount
         if unreadCount > 0 { return unreadCount }
-        let totalCount = mailFeatureModel.presentation.totalMessageCount
+        let totalCount = graph.mail.presentation.totalMessageCount
         return totalCount > 0 ? totalCount : nil
     }
 
     private var rssUnreadCount: Int? {
-        let count = rssFeatureModel.presentation.unreadCount(sourceID: nil)
+        let count = graph.rss.presentation.unreadCount(sourceID: nil)
         return count > 0 ? count : nil
     }
 
@@ -203,7 +195,7 @@ struct CraftPrimarySidebarView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             selection = item
-            shellModel.select(item)
+            graph.shell.select(item)
         }
     }
 
@@ -212,7 +204,7 @@ struct CraftPrimarySidebarView: View {
     }
 
     private func presentNewStatusEditor(after definition: AgentSessionStatusDefinition? = nil) {
-        let nextSortOrder = (definition?.sortOrder ?? governanceModel.config.statuses.map(\.sortOrder).max() ?? 0) + 10
+        let nextSortOrder = (definition?.sortOrder ?? graph.governance.config.statuses.map(\.sortOrder).max() ?? 0) + 10
         statusEditorRequest = StatusDefinitionEditorRequest(
             definition: AgentSessionStatusDefinition(
                 id: "",

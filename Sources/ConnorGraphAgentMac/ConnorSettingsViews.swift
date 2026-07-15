@@ -47,20 +47,14 @@ enum SettingsListLayout {
 }
 
 struct ConnorSettingsDetailView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @Bindable var shellModel: AppShellFeatureModel
+    let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
-    let calendarFeatureModel: CalendarFeatureModel
-    let rssFeatureModel: RSSFeatureModel
     @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
     @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
-    init(viewModel: AppViewModel, shellModel: AppShellFeatureModel, identityStore: AppUserIdentityStore, calendarFeatureModel: CalendarFeatureModel, rssFeatureModel: RSSFeatureModel) {
-        self.viewModel = viewModel
-        self.shellModel = shellModel
+    init(graph: AppFeatureGraph, identityStore: AppUserIdentityStore) {
+        self.graph = graph
         self.identityStore = identityStore
-        self.calendarFeatureModel = calendarFeatureModel
-        self.rssFeatureModel = rssFeatureModel
         let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
         _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: baseURL),
@@ -73,58 +67,58 @@ struct ConnorSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text(shellModel.selectedSettingsSection.title)
+                Text(graph.shell.selectedSettingsSection.title)
                     .font(SettingsListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
-                    switch shellModel.selectedSettingsSection {
+                    switch graph.shell.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: viewModel.chatFeatureModel.sessions.allSessions)
+                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: graph.chat.sessions.allSessions)
                     case .app:
-                        SettingsAppSection(model: viewModel.appSettingsModel, inputModel: viewModel.inputSettingsModel, openProjectHelp: { viewModel.openProjectGitHubHelp() })
+                        SettingsAppSection(model: graph.appSettings, inputModel: graph.inputSettings, openProjectHelp: graph.settingsActions.openProjectHelp)
                     case .ai:
                         SettingsAISection(
-                            model: viewModel.aiConnectionsModel,
-                            openURL: viewModel.openURLInSystemDefaultBrowser
+                            model: graph.aiConnections,
+                            openURL: graph.settingsActions.openURL
                         )
                     case .calendar:
-                        SettingsCalendarSection(model: calendarFeatureModel)
+                        SettingsCalendarSection(model: graph.calendar)
                     case .rss:
-                        SettingsRSSSection(model: rssFeatureModel)
+                        SettingsRSSSection(model: graph.rss)
                     case .mail:
-                        SettingsMailSection(model: viewModel.mailFeatureModel)
+                        SettingsMailSection(model: graph.mail)
                     case .permissions:
-                        SettingsPermissionsSection(model: viewModel.permissionSettingsModel)
+                        SettingsPermissionsSection(model: graph.permissionSettings)
                     case .labels:
                         SettingsLabelsSection(
-                            model: viewModel.governanceModel,
-                            sessions: viewModel.chatFeatureModel.sessions.allSessions
+                            model: graph.governance,
+                            sessions: graph.chat.sessions.allSessions
                         )
                     case .statuses:
                         SettingsStatusesSection(
-                            model: viewModel.governanceModel,
-                            sessions: viewModel.chatFeatureModel.sessions.allSessions
+                            model: graph.governance,
+                            sessions: graph.chat.sessions.allSessions
                         )
                     case .shortcuts:
-                        SettingsShortcutsSection(model: viewModel.inputSettingsModel)
+                        SettingsShortcutsSection(model: graph.inputSettings)
                     case .preferences:
-                        SettingsPreferencesSection(model: viewModel.userPreferencesModel)
+                        SettingsPreferencesSection(model: graph.userPreferences)
                     }
                 }
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                if let message = shellModel.settingsMessage(for: shellModel.selectedSettingsSection) {
+                if let message = graph.shell.settingsMessage(for: graph.shell.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 760, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                if let error = shellModel.selectedSettingsSection == .ai
-                    ? viewModel.aiConnectionsModel.errorMessage
-                    : viewModel.errorMessage {
+                if let error = graph.shell.selectedSettingsSection == .ai
+                    ? graph.aiConnections.errorMessage
+                    : graph.errors.message {
                     Text(error)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
@@ -138,7 +132,7 @@ struct ConnorSettingsDetailView: View {
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .task {
-            viewModel.loadRuntimeSettings()
+            graph.settingsActions.load()
         }
     }
 }

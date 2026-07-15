@@ -35,13 +35,12 @@ struct ConnorGraphAgentMacApp: App {
     var body: some Scene {
         Window("康纳同学", id: "main") {
             AppShellView(
-                viewModel: root.viewModel,
-                shellModel: root.viewModel.shellFeatureModel,
+                graph: root.graph,
                 identityStore: root.identityStore,
                 noteImportModel: root.noteImportModel,
                 sendCommand: { root.sendWhenInteractive($0) }
             )
-                .preferredColorScheme(root.viewModel.appSettingsModel.appearanceMode.colorScheme)
+                .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .task {
                     await root.startupCoordinator.startIfNeeded()

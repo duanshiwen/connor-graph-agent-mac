@@ -71,7 +71,14 @@ final class AppViewModel: NSObject, ObservableObject {
     }
     let graphDiagnosticsModel: GraphDiagnosticsModel
     let chatFeatureModel: ChatFeatureModel
-    @Published var errorMessage: String?
+    let errorFeatureModel = AppErrorFeatureModel()
+    var errorMessage: String? {
+        get { errorFeatureModel.message }
+        set {
+            objectWillChange.send()
+            errorFeatureModel.message = newValue
+        }
+    }
     @Published var databasePath: String?
     let aiConnectionsModel: AIConnectionsFeatureModel
     var llmConnectionConfigs: [AppLLMConnectionConfig] {
@@ -807,7 +814,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.memoryOSStore = injectedMemoryOSStore
             self.memoryOSFacade = injectedMemoryOSFacade
             self.memoryOSSearchHealthSummary = injectedMemoryOSSearchHealthSummary
-            self.errorMessage = injectedMemoryOSInitializationError
+            self.errorFeatureModel.message = injectedMemoryOSInitializationError
         } else if let storagePaths {
             do {
                 let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
@@ -820,7 +827,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     : "Memory OS SearchKernel 降级启动，后台将修复索引：\(initialSearchHealth.messages.joined(separator: ", "))"
                 self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
             } catch {
-                self.errorMessage = "Memory OS 初始化失败：\(error)"
+                self.errorFeatureModel.message = "Memory OS 初始化失败：\(error)"
             }
         }
         self.databasePath = databasePath
