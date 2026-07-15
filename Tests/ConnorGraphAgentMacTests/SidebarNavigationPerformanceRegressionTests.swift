@@ -120,9 +120,12 @@ struct SidebarNavigationPerformanceRegressionTests {
     }
 
     private func assertReleaseBudget(_ samples: [Double], p95Milliseconds: Double) {
-        #if !DEBUG
-        #expect(percentile(samples, 0.95) <= p95Milliseconds)
+        #if DEBUG
+        let effectiveBudget = max(p95Milliseconds * 10, p95Milliseconds + 10)
+        #else
+        let effectiveBudget = p95Milliseconds
         #endif
+        #expect(percentile(samples, 0.95) <= effectiveBudget)
     }
 }
 
