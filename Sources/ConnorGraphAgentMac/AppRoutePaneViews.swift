@@ -34,7 +34,11 @@ struct CraftListPaneView: View {
             case .skills:
                 CraftSkillListPane(model: graph.skills)
             case .knowledgeMarketplace:
-                CloudKnowledgeMarketplaceListPane(store: graph.knowledgeMarketplace)
+                CloudKnowledgeMarketplaceListPane(
+                    store: graph.knowledgeMarketplace,
+                    creatorStore: graph.knowledgeCreator,
+                    sessions: graph.chat.sessions.allSessions
+                )
             case .automation, .scheduledTasks:
                 CraftTaskAutomationListPane(
                     model: graph.tasks,
@@ -119,11 +123,7 @@ struct CraftDetailPaneView: View {
             case .skills:
                 SkillRuntimePanelView(model: graph.skills)
             case .knowledgeMarketplace:
-                CloudKnowledgeMarketplaceDetailPane(
-                    store: graph.knowledgeMarketplace,
-                    creatorStore: graph.knowledgeCreator,
-                    sessions: graph.chat.sessions.allSessions
-                )
+                CloudKnowledgeMarketplaceDetailPane(store: graph.knowledgeMarketplace)
             case .llmSettings:
                 ConnorSettingsDetailView(graph: graph, identityStore: identityStore)
             }

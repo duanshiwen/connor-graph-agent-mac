@@ -4,57 +4,151 @@ import ConnorGraphAppSupport
 
 struct CloudKnowledgeMarketplaceListPane: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
+    @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
+    var sessions: [AgentSession]
+    @State private var isPresentingCreator = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("知识市场").font(.headline)
-                Spacer()
-                Button { Task { await store.load() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.plain).help("刷新知识市场")
+            HStack(spacing: 8) {
+                Text("知识市场")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button { isPresentingCreator = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加知识库")
+                .accessibilityLabel("添加知识库")
             }
-            .padding(12)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
 
             List {
-                Section {
-                    Button { store.showHome() } label: {
-                        Label("市场首页", systemImage: "storefront")
-                    }
-                    Button { store.showPublisher() } label: {
-                        Label("发布知识库", systemImage: "plus.square.on.square")
-                    }
+                marketplaceRow(
+                    title: "市场首页",
+                    caption: "推荐与分类",
+                    systemImage: "storefront",
+                    isSelected: store.selected == nil
+                ) {
+                    store.showHome()
                 }
 
                 Section("已订阅") {
                     if store.library.subscribed.isEmpty {
-                        Text("暂未订阅知识库").foregroundStyle(.secondary)
+                        emptyRow("暂未订阅知识库")
                     } else {
-                        ForEach(store.library.subscribed) { base in libraryRow(base, badge: "已订阅") }
+                        ForEach(store.library.subscribed) { base in
+                            libraryRow(base, caption: base.owned ? "我发布的 · 已订阅" : "已订阅")
+                        }
                     }
                 }
 
                 Section("我发布的") {
                     if store.library.owned.isEmpty {
-                        Text("暂未发布知识库").foregroundStyle(.secondary)
+                        emptyRow("暂未发布知识库")
                     } else {
-                        ForEach(store.library.owned) { base in libraryRow(base, badge: publicationLabel(base)) }
+                        ForEach(store.library.owned) { base in
+                            libraryRow(
+                                base,
+                                caption: base.subscribed
+                                    ? "\(publicationLabel(base)) · 已订阅"
+                                    : publicationLabel(base)
+                            )
+                        }
                     }
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .contentMargins(.top, 6, for: .scrollContent)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
         .task { if store.home.categories.isEmpty { await store.load() } }
+        .sheet(isPresented: $isPresentingCreator) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("添加知识库").font(AppListTypography.header)
+                    Spacer()
+                    Button { isPresentingCreator = false } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help("关闭")
+                    .accessibilityLabel("关闭")
+                }
+                .padding(16)
+                Divider()
+                ScrollView {
+                    CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
+                        .frame(maxWidth: 760)
+                        .padding(24)
+                }
+            }
+            .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
     }
 
-    private func libraryRow(_ base: CloudMarketplaceKnowledgeBase, badge: String) -> some View {
-        Button { Task { await store.loadDetail(id: base.id) } } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(base.name).lineLimit(1)
-                Text(badge).font(.caption).foregroundStyle(.secondary)
+    private func libraryRow(_ base: CloudMarketplaceKnowledgeBase, caption: String) -> some View {
+        marketplaceRow(
+            title: base.name,
+            caption: caption,
+            systemImage: "books.vertical",
+            isSelected: store.selected?.id == base.id
+        ) {
+            Task { await store.loadDetail(id: base.id) }
+        }
+    }
+
+    private func marketplaceRow(
+        title: String,
+        caption: String,
+        systemImage: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                        .lineLimit(1)
+                    Text(caption)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
             }
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .marketplaceListRowStyle()
+    }
+
+    private func emptyRow(_ title: String) -> some View {
+        Text(title)
+            .font(AppListTypography.rowCaption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .marketplaceListRowStyle()
     }
 
     private func publicationLabel(_ base: CloudMarketplaceKnowledgeBase) -> String {
@@ -64,18 +158,10 @@ struct CloudKnowledgeMarketplaceListPane: View {
 
 struct CloudKnowledgeMarketplaceDetailPane: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
-    @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
-    var sessions: [AgentSession]
 
     var body: some View {
         Group {
-            if store.showsPublisher {
-                ScrollView {
-                    CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
-                        .frame(maxWidth: 760)
-                        .padding(24)
-                }
-            } else if let selected = store.selected {
+            if let selected = store.selected {
                 marketplaceDetail(selected)
             } else {
                 marketplaceHome
@@ -171,14 +257,12 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                         Text("\(base.subscriberCount) 位订阅者").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if !base.owned {
-                        if base.subscribed {
-                            Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
-                                .buttonStyle(.bordered)
-                        } else {
-                            Button("订阅") { Task { await store.subscribe(id: base.id) } }
-                                .buttonStyle(.borderedProminent)
-                        }
+                    if base.subscribed {
+                        Button("取消订阅") { Task { await store.unsubscribe(id: base.id) } }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("订阅") { Task { await store.subscribe(id: base.id) } }
+                            .buttonStyle(.borderedProminent)
                     }
                 }
                 Divider()
@@ -198,10 +282,29 @@ struct MarketplaceStatusBadge: View {
     var base: CloudMarketplaceKnowledgeBase
 
     var body: some View {
-        Text(base.owned ? "我发布的" : (base.subscribed ? "已订阅" : "未订阅"))
+        HStack(spacing: 5) {
+            if base.owned { badge("我发布的", emphasized: true) }
+            if base.subscribed {
+                badge("已订阅", emphasized: true)
+            } else if !base.owned {
+                badge("未订阅", emphasized: false)
+            }
+        }
+    }
+
+    private func badge(_ title: String, emphasized: Bool) -> some View {
+        Text(title)
             .font(.caption.weight(.medium))
-            .foregroundStyle(base.owned || base.subscribed ? Color.accentColor : Color.secondary)
+            .foregroundStyle(emphasized ? Color.accentColor : Color.secondary)
             .padding(.horizontal, 7).padding(.vertical, 3)
-            .background((base.owned || base.subscribed ? Color.accentColor : Color.secondary).opacity(0.1), in: Capsule())
+            .background((emphasized ? Color.accentColor : Color.secondary).opacity(0.1), in: Capsule())
+    }
+}
+
+private extension View {
+    func marketplaceListRowStyle() -> some View {
+        listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }

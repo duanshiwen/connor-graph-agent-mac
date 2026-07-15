@@ -135,7 +135,7 @@ struct UserIdentitySettingsView: View {
             libraryGroup(title: "我创建的知识库", emptyMessage: "你还没有创建知识库。", libraries: identityStore.ownedKnowledgeBases)
             CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
             libraryGroup(title: "我订阅的知识库", emptyMessage: "你还没有订阅知识库。", libraries: identityStore.subscribedKnowledgeBases.map(\.knowledgeBase))
-            CloudKnowledgeMarketplaceDetailPane(store: marketplaceStore, creatorStore: creatorStore, sessions: sessions)
+            CloudKnowledgeMarketplaceDetailPane(store: marketplaceStore)
                 .frame(minHeight: 420)
 
             if identityStore.isLoadingLibraries { ProgressView("正在刷新知识库…") }

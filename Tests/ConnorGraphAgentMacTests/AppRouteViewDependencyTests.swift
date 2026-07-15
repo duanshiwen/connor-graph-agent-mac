@@ -64,6 +64,36 @@ struct AppRouteViewDependencyTests {
         #expect(!implementation.contains("totalUnreadCount"))
     }
 
+    @Test func knowledgeMarketplaceListMatchesNativeListAndPresentsCreatorFromAddButton() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        let listStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceListPane: View"))
+        let detailStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceDetailPane: View"))
+        let listSource = source[listStart.lowerBound..<detailStart.lowerBound]
+
+        #expect(listSource.contains("Text(\"知识市场\")"))
+        #expect(listSource.contains("AppListTypography.header"))
+        #expect(listSource.contains("Image(systemName: \"plus\")"))
+        #expect(listSource.contains("weight: .semibold"))
+        #expect(listSource.contains(".listStyle(.plain)"))
+        #expect(listSource.contains("Color(nsColor: .windowBackgroundColor)"))
+        #expect(listSource.contains(".sheet(isPresented: $isPresentingCreator)"))
+        #expect(listSource.contains("CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)"))
+        #expect(!listSource.contains("store.showPublisher()"))
+    }
+
+    @Test func knowledgeMarketplaceDetailOnlyShowsHomeOrLibraryAndAllowsOwnerSubscription() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        let detailStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceDetailPane: View"))
+        let badgeStart = try #require(source.range(of: "struct MarketplaceStatusBadge: View"))
+        let detailSource = source[detailStart.lowerBound..<badgeStart.lowerBound]
+
+        #expect(!detailSource.contains("CloudKnowledgeCreatorView"))
+        #expect(!detailSource.contains("store.showsPublisher"))
+        #expect(!detailSource.contains("if !base.owned"))
+        #expect(detailSource.contains("if base.subscribed"))
+        #expect(detailSource.contains("store.subscribe(id: base.id)"))
+    }
+
     private func routeCaseName(_ route: SidebarItem) -> String {
         switch route {
         case .entities: "entities"
