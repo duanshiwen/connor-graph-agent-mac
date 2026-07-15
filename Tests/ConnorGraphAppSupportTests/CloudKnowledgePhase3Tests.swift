@@ -134,7 +134,8 @@ struct CloudKnowledgePhase3Tests {
         )
         let session = AgentSession(id: "conversation-1", title: "Connor knowledge", messages: [
             AgentMessage(role: .system, content: "MAIN_AGENT_SYSTEM_PROMPT_SENTINEL"),
-            AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。")
+            AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。"),
+            AgentMessage(role: .assistant, content: "结构化发布需要检索后写入。")
         ])
 
         let result = try await CloudKnowledgeLLMGenerationRunner().generate(
@@ -157,6 +158,31 @@ struct CloudKnowledgePhase3Tests {
         #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("connor") == .orderedSame } == true)
     }
 
+    @Test func extractionSourceContainsOnlyUserAndFinalAssistantTurnPairs() throws {
+        let session = AgentSession(id: "source-projection", title: "Projection", messages: [
+            AgentMessage(role: .system, content: "MAIN_SYSTEM_PROMPT_MUST_NOT_LEAK"),
+            AgentMessage(role: .assistant, content: "ORPHAN_ASSISTANT_MUST_NOT_LEAK"),
+            AgentMessage(role: .user, content: "FIRST_USER_MESSAGE"),
+            AgentMessage(role: .assistant, content: "INTERMEDIATE_ASSISTANT_MUST_NOT_LEAK"),
+            AgentMessage(role: .assistant, content: "FIRST_FINAL_RESPONSE"),
+            AgentMessage(role: .user, content: "UNFINISHED_USER_MUST_NOT_LEAK")
+        ])
+
+        #expect(CloudKnowledgeExtractionPrompt.sourceTurns(session: session) == [
+            CloudKnowledgeSourceTurn(userMessage: "FIRST_USER_MESSAGE", assistantFinalResponse: "FIRST_FINAL_RESPONSE")
+        ])
+        let prompt = CloudKnowledgeExtractionPrompt.sourcePrompt(
+            session: session,
+            processingTime: Date(timeIntervalSince1970: 0)
+        )
+        #expect(prompt.contains("\"user_message\" : \"FIRST_USER_MESSAGE\"") || prompt.contains("\"user_message\": \"FIRST_USER_MESSAGE\""))
+        #expect(prompt.contains("\"assistant_final_response\" : \"FIRST_FINAL_RESPONSE\"") || prompt.contains("\"assistant_final_response\": \"FIRST_FINAL_RESPONSE\""))
+        #expect(!prompt.contains("MAIN_SYSTEM_PROMPT_MUST_NOT_LEAK"))
+        #expect(!prompt.contains("ORPHAN_ASSISTANT_MUST_NOT_LEAK"))
+        #expect(!prompt.contains("INTERMEDIATE_ASSISTANT_MUST_NOT_LEAK"))
+        #expect(!prompt.contains("UNFINISHED_USER_MUST_NOT_LEAK"))
+    }
+
     @Test func writeAssistSearchContextCanDriveL3Write() async throws {
         let api = InMemoryCloudKnowledgeAPI()
         let scripted = CloudKnowledgeWriteAssistProvider()
@@ -165,7 +191,10 @@ struct CloudKnowledgePhase3Tests {
             capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
             complete: { request in try await scripted.complete(request) }
         )
-        let session = AgentSession(id: "conversation-write-assist", title: "Answer cache", messages: [AgentMessage(role: .user, content: "Answer cache uses bounded refresh policies.")])
+        let session = AgentSession(id: "conversation-write-assist", title: "Answer cache", messages: [
+            AgentMessage(role: .user, content: "How should Answer cache refresh?"),
+            AgentMessage(role: .assistant, content: "Answer cache uses bounded refresh policies.")
+        ])
 
         _ = try await CloudKnowledgeLLMGenerationRunner().generate(
             session: session,
@@ -177,7 +206,8 @@ struct CloudKnowledgePhase3Tests {
         )
 
         #expect(await api.operations.count == 1)
-        #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("answer") == .orderedSame } == true)
+        #expect(await api.operations.first?.semanticTerms == ["answer cache answer package"])
+        #expect(await api.searchViews == [.combined, .combined])
         #expect(await scripted.requestCount == 3)
     }
 
@@ -254,7 +284,7 @@ private actor CloudKnowledgeWriteAssistProvider {
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "read", name: "cloud_kb_read_record", argumentsJSON: #"{"query":"Answer cache","limit":20}"#)], finishReason: .toolCalls)
         }
         if requestCount == 2 {
-            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["unrelated"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["answer-package"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
         }
         return AgentModelResponse(text: "\(CloudKnowledgeExtractionPrompt.completionMarker)\n已完成知识整理")
     }
