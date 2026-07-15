@@ -189,16 +189,23 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
 @Test func graphKernelStoreLoadsRecentAgentSessionsByUpdatedAt() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
-    let old = AgentSession(id: "session-old", title: "Old", createdAt: Date(timeIntervalSince1970: 1_000), updatedAt: Date(timeIntervalSince1970: 1_000))
+    let old = AgentSession(
+        id: "session-old",
+        title: "Old",
+        messages: [AgentMessage(role: .user, content: "large transcript")],
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_000)
+    )
     let new = AgentSession(id: "session-new", title: "New", createdAt: Date(timeIntervalSince1970: 2_000), updatedAt: Date(timeIntervalSince1970: 3_000))
 
     try store.upsertSession(old)
     try store.upsertSession(new)
 
-    let sessions = try store.recentSessions(limit: 10)
+    let sessions = try store.recentSessionMetadata(limit: 10)
 
     #expect(sessions.map(\.id) == ["session-new", "session-old"])
     #expect(sessions.allSatisfy { $0.messages.isEmpty })
+    #expect(try store.session(id: "session-old")?.messages.map(\.content) == ["large transcript"])
 }
 
 @Test func graphKernelStoreMigratesAgentSessionsTable() throws {

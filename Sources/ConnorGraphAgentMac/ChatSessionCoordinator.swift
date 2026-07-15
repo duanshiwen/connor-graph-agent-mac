@@ -212,9 +212,14 @@ final class ChatSessionCoordinator {
         cancelListRefresh()
         listRefreshGeneration += 1
         let generation = listRefreshGeneration
+        let existingSessions = model.allSessions
         listRefreshTask = Task(priority: .userInitiated) { [weak self] in
             do {
-                let result = try await self?.listLoader.refresh(repository: repository, filter: filter)
+                let result = try await self?.listLoader.refresh(
+                    repository: repository,
+                    filter: filter,
+                    preserving: existingSessions
+                )
                 try Task.checkCancellation()
                 guard let self,
                       let result,

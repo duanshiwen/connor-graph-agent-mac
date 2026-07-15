@@ -2474,11 +2474,16 @@ final class AppRuntimeLifecycle {
     private func scheduleChatSessionListRefresh(reason: String) {
         guard let chatSessionRepository else { return }
         let filter = chatFeatureModel.sessions.filter
+        let existingSessions = chatFeatureModel.sessions.allSessions
         let coordinator = chatSessionListRefreshCoordinator
         Task(priority: .utility) { [weak self] in
             let startedAt = ContinuousClock.now
             do {
-                let result = try await coordinator.refresh(repository: chatSessionRepository, filter: filter)
+                let result = try await coordinator.refresh(
+                    repository: chatSessionRepository,
+                    filter: filter,
+                    preserving: existingSessions
+                )
                 let elapsed = startedAt.duration(to: ContinuousClock.now)
                 let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
                 await MainActor.run { [weak self] in
