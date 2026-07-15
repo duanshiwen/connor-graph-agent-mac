@@ -143,6 +143,16 @@ struct CloudKnowledgePhase3Tests {
         #expect(await scripted.exposedValidationTool == false)
     }
 
+    @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
+        let longMessage = String(repeating: "invalid payload ", count: 30)
+        let bounded = String(longMessage.prefix(240))
+        let error = CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: bounded)
+
+        #expect(error.localizedDescription.contains("最后一次错误"))
+        #expect(error.localizedDescription.contains(bounded))
+        #expect(bounded.count == 240)
+    }
+
     private static func operation(layer: CloudKnowledgeLayer, contextID: String, terms: [String], payloadText: String = "knowledge") -> CloudKnowledgeOperation {
         CloudKnowledgeOperation(operationType: "update", layer: layer, decision: .createNew, searchContextID: contextID, semanticTerms: terms, payload: ["text": .string(payloadText)])
     }
