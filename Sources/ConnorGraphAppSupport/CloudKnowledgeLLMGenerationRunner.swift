@@ -122,7 +122,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     try validateSearchChannel(executableCall, searchMetadataByContextID: searchMetadataByContextID)
                     executableCall = normalizedWriteCall(executableCall, searchMetadataByContextID: searchMetadataByContextID)
                     let result = try await registry.execute(executableCall, context: executionContext)
-                    if call.name == "cloud_kb_recent_context" || call.name == "cloud_kb_knowledge_context" {
+                    if isSearchTool(call.name) {
                         searchCount += 1
                         recordSearchMetadata(call: call, result: result, into: &searchMetadataByContextID)
                     }
@@ -228,8 +228,8 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
               let arguments = try? AgentToolArguments(json: call.argumentsJSON),
               let contextID = arguments.string("search_context_id"),
               let metadata = searchMetadataByContextID[contextID],
-              let requiredTool = requiredSearchTool(for: call.name, arguments: arguments),
-              metadata.toolName != requiredTool,
+              let requiredTool = correctiveSearchTool(for: call.name, arguments: arguments),
+              !acceptedSearchTools(for: call.name, arguments: arguments).contains(metadata.toolName),
               let data = try? JSONSerialization.data(withJSONObject: ["query": metadata.query, "limit": 20], options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8)
         else { return nil }
@@ -266,22 +266,36 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
               let contextID = arguments.string("search_context_id"),
               let metadata = searchMetadataByContextID[contextID]
         else { return }
-        guard let requiredTool = requiredSearchTool(for: call.name, arguments: arguments) else { return }
-        guard metadata.toolName == requiredTool else {
+        let acceptedTools = acceptedSearchTools(for: call.name, arguments: arguments)
+        guard acceptedTools.contains(metadata.toolName) else {
+            let requiredTool = correctiveSearchTool(for: call.name, arguments: arguments) ?? "cloud_kb_knowledge_context"
             throw AgentToolError.invalidArguments(
                 "search_context_id came from \(metadata.toolName), but \(call.name) requires a new \(requiredTool) search for this semantic group"
             )
         }
     }
 
-    private func requiredSearchTool(for writeTool: String, arguments: AgentToolArguments) -> String? {
-        guard isWriteTool(writeTool) else { return nil }
+    private func acceptedSearchTools(for writeTool: String, arguments: AgentToolArguments) -> Set<String> {
+        guard isWriteTool(writeTool) else { return [] }
         let requiresRecentContext = writeTool == "cloud_kb_l2_update_entities"
             || (writeTool == "cloud_kb_retract_knowledge" && arguments.string("layer") == "l2")
-        return requiresRecentContext ? "cloud_kb_recent_context" : "cloud_kb_knowledge_context"
+        return requiresRecentContext
+            ? ["cloud_kb_recent_context"]
+            : ["cloud_kb_knowledge_context", "cloud_kb_read_record", "cloud_kb_expand_entity"]
+    }
+
+    private func correctiveSearchTool(for writeTool: String, arguments: AgentToolArguments) -> String? {
+        guard isWriteTool(writeTool) else { return nil }
+        return acceptedSearchTools(for: writeTool, arguments: arguments).contains("cloud_kb_recent_context")
+            ? "cloud_kb_recent_context"
+            : "cloud_kb_knowledge_context"
     }
 
     private func isWriteTool(_ name: String) -> Bool {
         name.hasPrefix("cloud_kb_l") || name == "cloud_kb_update_relations" || name == "cloud_kb_retract_knowledge"
+    }
+
+    private func isSearchTool(_ name: String) -> Bool {
+        ["cloud_kb_recent_context", "cloud_kb_knowledge_context", "cloud_kb_read_record", "cloud_kb_expand_entity"].contains(name)
     }
 }

@@ -151,6 +151,30 @@ struct CloudKnowledgePhase3Tests {
         #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("connor") == .orderedSame } == true)
     }
 
+    @Test func writeAssistSearchContextCanDriveL3Write() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeWriteAssistProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "tool-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "conversation-write-assist", title: "Answer cache", messages: [AgentMessage(role: .user, content: "Answer cache uses bounded refresh policies.")])
+
+        _ = try await CloudKnowledgeLLMGenerationRunner().generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(await api.operations.count == 1)
+        #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("answer") == .orderedSame } == true)
+        #expect(await scripted.requestCount == 2)
+    }
+
     @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
         let longMessage = String(repeating: "invalid payload ", count: 30)
         let bounded = String(longMessage.prefix(240))
@@ -206,6 +230,18 @@ private actor CloudKnowledgeScriptedProvider {
         default:
             return AgentModelResponse(text: "已完成知识整理")
         }
+    }
+}
+
+private actor CloudKnowledgeWriteAssistProvider {
+    var requestCount = 0
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        if requestCount == 1 {
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "read", name: "cloud_kb_read_record", argumentsJSON: #"{"query":"Answer cache","limit":20}"#)], finishReason: .toolCalls)
+        }
+        return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["unrelated"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
     }
 }
 
