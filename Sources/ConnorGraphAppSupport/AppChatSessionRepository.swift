@@ -116,6 +116,10 @@ public struct AppChatSessionRepository: Sendable {
         return session
     }
 
+    public func persistReadState(sessionID: String, readState: SessionReadState) throws {
+        try store.updateSessionReadState(sessionID: sessionID, readState: readState)
+    }
+
     private func prewarmMarkdownRenderCacheIfNeeded(for session: AgentSession, previousMessageCount: Int) throws {
         guard let storagePaths else { return }
         guard session.messages.count > previousMessageCount else { return }
