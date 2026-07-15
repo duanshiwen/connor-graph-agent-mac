@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 import Testing
 import ConnorGraphCore
 import ConnorGraphAppSupport
@@ -62,26 +62,17 @@ struct SidebarNavigationPerformanceRegressionTests {
         assertReleaseBudget(samples, p95Milliseconds: 5)
     }
 
-    @Test func retainedHostKeepsBoundedControllersAcrossOneHundredSwitches() {
-        let contentOwner = NSObject()
-        let host = RetainedRouteHostController(
-            pane: .list,
-            tracker: AppRoutePerformanceTracker(),
-            contentOwner: ObjectIdentifier(contentOwner),
-            routeFactory: { route in AnyView(Text(route.rawValue)) }
+    @Test func productionRoutePaneUsesNativeSwiftUISwitches() throws {
+        let source = try String(
+            contentsOf: projectSourceURL(named: "AppRoutePaneViews.swift"),
+            encoding: .utf8
         )
-        let routes: [SidebarItem] = [.agentChat, .rss, .mail, .calendar, .contacts, .sources]
-        var samples: [Double] = []
 
-        for index in 0..<100 {
-            let started = DispatchTime.now().uptimeNanoseconds
-            host.activate(routes[index % routes.count])
-            samples.append(milliseconds(since: started))
-            #expect(host.cachedControllerCount <= 4)
-        }
-
-        report("retainedHostActivation", samples)
-        assertReleaseBudget(Array(samples.dropFirst(routes.count)), p95Milliseconds: 50)
+        #expect(source.contains("switch selection ?? .agentChat"))
+        #expect(source.contains("switch selection"))
+        #expect(!source.contains("RetainedRouteHostView"))
+        #expect(!source.contains("NSHostingController"))
+        #expect(!source.contains("AnyView"))
     }
 
     @Test func preparedLargeHTMLCacheHasStableEntryBound() {
@@ -129,6 +120,15 @@ struct SidebarNavigationPerformanceRegressionTests {
         #endif
         #expect(percentile(samples, 0.95) <= effectiveBudget)
     }
+}
+
+private func projectSourceURL(named filename: String) -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Sources/ConnorGraphAgentMac")
+        .appendingPathComponent(filename)
 }
 
 @MainActor
