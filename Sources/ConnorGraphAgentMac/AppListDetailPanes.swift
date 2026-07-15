@@ -12,12 +12,22 @@ struct CraftListPaneView: View {
     @Binding var selection: SidebarItem?
 
     var body: some View {
+        let route = selection ?? .agentChat
         RetainedRouteHostView(
-            route: selection ?? .agentChat,
+            route: route,
             pane: .list,
             tracker: graph.shell.routePerformanceTracker,
             contentOwner: ObjectIdentifier(graph),
-            routeFactory: listRouteView
+            routeFactory: { route in
+                AnyView(listRouteView(route).background(
+                    AppRouteActivationSentinel(
+                        route: route,
+                        pane: .list,
+                        tracker: graph.shell.routePerformanceTracker
+                    )
+                    .frame(width: 0, height: 0)
+                ))
+            }
         )
     }
 
@@ -2049,7 +2059,16 @@ struct CraftDetailPaneView: View {
             pane: .detail,
             tracker: graph.shell.routePerformanceTracker,
             contentOwner: ObjectIdentifier(graph),
-            routeFactory: detailRouteView
+            routeFactory: { route in
+                AnyView(detailRouteView(route).background(
+                    AppRouteActivationSentinel(
+                        route: route,
+                        pane: .detail,
+                        tracker: graph.shell.routePerformanceTracker
+                    )
+                    .frame(width: 0, height: 0)
+                ))
+            }
         )
     }
 

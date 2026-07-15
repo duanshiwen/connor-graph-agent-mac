@@ -18,6 +18,7 @@ struct AppRoutePerformanceEvent: Sendable, Equatable {
     enum Kind: String, Sendable {
         case began
         case paneActivated
+        case panePresented
         case completed
         case cancelled
     }
@@ -40,6 +41,7 @@ final class AppRoutePerformanceTracker {
         var signpostID: OSSignpostID
         var interval: OSSignpostIntervalState
         var activatedPanes: Set<AppRoutePane> = []
+        var presentedPanes: Set<AppRoutePane> = []
     }
 
     private static let signposter = OSSignposter(
@@ -116,7 +118,33 @@ final class AppRoutePerformanceTracker {
             activationKind: activationKind
         ))
 
-        guard transaction.activatedPanes == Set(AppRoutePane.allCases) else { return }
+    }
+
+    func markPresented(route: SidebarItem, pane: AppRoutePane) {
+        guard var transaction = activeTransaction,
+              transaction.route == route,
+              !transaction.presentedPanes.contains(pane)
+        else { return }
+
+        transaction.presentedPanes.insert(pane)
+        activeTransaction = transaction
+        let elapsed = milliseconds(since: transaction.startedAt)
+        AppPerformanceLog.sidebarNavigationLogger.info(
+            "sidebar.route.contentPresented transaction=\(transaction.id) route=\(route.rawValue, privacy: .public) pane=\(pane.rawValue, privacy: .public) duration=\(elapsed, privacy: .public)ms"
+        )
+        Self.signposter.emitEvent(
+            "SidebarRoutePanePresented",
+            id: transaction.signpostID,
+            "transaction=\(transaction.id) route=\(route.rawValue, privacy: .public) pane=\(pane.rawValue, privacy: .public)"
+        )
+        emit(.init(
+            kind: .panePresented,
+            transactionID: transaction.id,
+            route: route,
+            pane: pane
+        ))
+
+        guard transaction.presentedPanes == Set(AppRoutePane.allCases) else { return }
         scheduleCompletion(for: transaction.id)
     }
 
@@ -204,7 +232,7 @@ struct AppRouteActivationSentinel: NSViewRepresentable {
     func makeNSView(context: Context) -> AppRouteActivationNSView {
         let view = AppRouteActivationNSView(frame: .zero)
         view.onActivated = { [weak tracker] route, pane in
-            tracker?.markActivated(route: route, pane: pane)
+            tracker?.markPresented(route: route, pane: pane)
         }
         view.update(route: route, pane: pane)
         return view
@@ -212,7 +240,7 @@ struct AppRouteActivationSentinel: NSViewRepresentable {
 
     func updateNSView(_ nsView: AppRouteActivationNSView, context: Context) {
         nsView.onActivated = { [weak tracker] route, pane in
-            tracker?.markActivated(route: route, pane: pane)
+            tracker?.markPresented(route: route, pane: pane)
         }
         nsView.update(route: route, pane: pane)
     }
