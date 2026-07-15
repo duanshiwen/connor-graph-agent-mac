@@ -670,7 +670,6 @@ struct CraftSessionListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task { sessionActions.reloadChatSessions() }
     }
 
     private func sessionRow(_ session: AgentSession) -> some View {

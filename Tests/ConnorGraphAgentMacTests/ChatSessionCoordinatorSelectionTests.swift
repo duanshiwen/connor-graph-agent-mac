@@ -8,6 +8,37 @@ import ConnorGraphAppSupport
 
 @MainActor
 struct ChatSessionRuntimeIntegrationTests {
+    @Test func inMemoryFilterProjectionPreservesOrderAndGovernanceSemantics() {
+        let todo = AgentSession(
+            id: "todo",
+            governance: AgentSessionGovernanceMetadata(
+                status: .todo,
+                labels: [AgentSessionLabel(id: "important")]
+            )
+        )
+        let inProgress = AgentSession(
+            id: "in-progress",
+            governance: AgentSessionGovernanceMetadata(status: .inProgress)
+        )
+        let sessions = [inProgress, todo]
+
+        #expect(ChatSessionCoordinator.filter(sessions, by: .all).map(\.id) == ["in-progress", "todo"])
+        #expect(ChatSessionCoordinator.filter(sessions, by: .status(.todo)).map(\.id) == ["todo"])
+        #expect(ChatSessionCoordinator.filter(sessions, by: .label("important")).map(\.id) == ["todo"])
+    }
+
+    @Test func sessionListPaneDoesNotForceReloadWhenRouteReappears() throws {
+        let source = try String(
+            contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"),
+            encoding: .utf8
+        )
+        let paneStart = try #require(source.range(of: "struct CraftSessionListPane: View"))
+        let paneEnd = try #require(source.range(of: "\nprivate extension View", range: paneStart.upperBound..<source.endIndex))
+        let paneSource = source[paneStart.lowerBound..<paneEnd.lowerBound]
+
+        #expect(!paneSource.contains("reloadChatSessions()"))
+    }
+
     @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -265,6 +296,15 @@ struct ChatSessionRuntimeIntegrationTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("Timed out waiting for session detail loading to finish")
+    }
+
+    private func projectSourceURL(named filename: String) -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ConnorGraphAgentMac")
+            .appendingPathComponent(filename)
     }
 
     private func makeFixture() throws -> Fixture {
