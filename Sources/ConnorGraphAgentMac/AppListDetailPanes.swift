@@ -16,6 +16,7 @@ struct CraftListPaneView: View {
             route: selection ?? .agentChat,
             pane: .list,
             tracker: graph.shell.routePerformanceTracker,
+            contentOwner: ObjectIdentifier(graph),
             routeFactory: listRouteView
         )
     }
@@ -2047,6 +2048,7 @@ struct CraftDetailPaneView: View {
             route: selection,
             pane: .detail,
             tracker: graph.shell.routePerformanceTracker,
+            contentOwner: ObjectIdentifier(graph),
             routeFactory: detailRouteView
         )
     }
