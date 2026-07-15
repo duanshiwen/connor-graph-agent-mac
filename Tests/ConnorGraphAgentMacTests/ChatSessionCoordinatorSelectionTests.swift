@@ -39,6 +39,40 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(!paneSource.contains("reloadChatSessions()"))
     }
 
+    @Test func rapidStatusLabelAndAllRoundTripRestoresCompleteSessionList() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let todo = try fixture.repository.createSession(title: "Todo", now: Date(timeIntervalSince1970: 2_000))
+        _ = try fixture.repository.setStatus(sessionID: todo.id, status: .todo)
+        _ = try fixture.repository.setLabels(sessionID: todo.id, labels: [AgentSessionLabel(id: "important")])
+        let inProgress = try fixture.repository.createSession(title: "In progress", now: Date(timeIntervalSince1970: 3_000))
+        _ = try fixture.repository.setStatus(sessionID: inProgress.id, status: .inProgress)
+
+        fixture.runtime.reloadChatSessions()
+        let allIDs = fixture.runtime.chatFeatureModel.sessions.allSessions.map(\.id)
+        #expect(allIDs.contains(todo.id))
+        #expect(allIDs.contains(inProgress.id))
+
+        fixture.runtime.setSessionListFilter(.status(.todo))
+        #expect(fixture.runtime.chatFeatureModel.sessions.filter == .status(.todo))
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.allSatisfy { $0.governance.status == .todo })
+
+        fixture.runtime.setSessionListFilter(.label("important"))
+        #expect(fixture.runtime.chatFeatureModel.sessions.filter == .label("important"))
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(todo.id))
+
+        fixture.runtime.setSessionListFilter(.all)
+        #expect(fixture.runtime.chatFeatureModel.sessions.filter == .all)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id) == allIDs)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sidebarSummary.totalCount == allIDs.count)
+
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(fixture.runtime.chatFeatureModel.sessions.filter == .all)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(todo.id))
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(inProgress.id))
+    }
+
     @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
