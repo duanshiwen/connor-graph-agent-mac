@@ -43,7 +43,7 @@ import ConnorGraphAppSupport
     #expect(model.focusTopSearchRequestID != firstRequest)
 
     model.selectSettingsSection(.calendar)
-    #expect(model.shellFeatureModel.selectedSettingsSection == .calendar)
+    #expect(model.selectedSettingsSection == .calendar)
     #expect(model.selection == .llmSettings)
 }
 

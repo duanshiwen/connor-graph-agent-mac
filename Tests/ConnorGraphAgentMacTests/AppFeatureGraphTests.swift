@@ -45,6 +45,32 @@ struct AppFeatureGraphTests {
         }
     }
 
+    @Test func legacyMegaTypeAndFilesAreAbsentAcrossProductionAndTests() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let fileManager = FileManager.default
+        for directory in ["Sources", "Tests"] {
+            let root = projectRoot.appendingPathComponent(directory, isDirectory: true)
+            let enumerator = try #require(fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]))
+            for case let url as URL in enumerator where url.pathExtension == "swift" {
+                #expect(!url.lastPathComponent.hasPrefix(legacyMegaTypeName), "legacy source file must be deleted: \(url.lastPathComponent)")
+                let source = try String(contentsOf: url, encoding: .utf8)
+                #expect(!source.contains(legacyMegaTypeName), "legacy mega type token must be absent: \(url.path)")
+            }
+        }
+    }
+
+    @Test func runtimeLifecycleIsNotAUIObservableOwner() throws {
+        let source = try projectSource(named: "AppRuntimeLifecycle.swift")
+        let declaration = try #require(source.range(of: "final class AppRuntimeLifecycle"))
+        let prefix = source[..<declaration.lowerBound]
+        #expect(!prefix.hasSuffix("@Observable\n"))
+        #expect(!source.contains("ObservableObject"))
+        #expect(!source.contains("@Published"))
+    }
+
     @Test func sidebarCreationActionsUseTypedInteractiveCommands() throws {
         let source = try projectSource(named: "AppPrimarySidebarView.swift")
         #expect(source.contains("sendCommand(.shortcut(.newSession))"))

@@ -7,7 +7,7 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @MainActor
-struct AppRuntimeOrchestratorSessionFilterSelectionTests {
+struct ChatSessionRuntimeIntegrationTests {
     @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -20,22 +20,22 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         var visibleSession = try fixture.repository.createSession(title: "Visible todo", now: Date(timeIntervalSince1970: 3_000))
         visibleSession = try fixture.repository.setStatus(sessionID: visibleSession.id, status: .todo)
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.selectChatSession(hiddenSession.id)
-        try await waitForTranscript(fixture.viewModel, expectedContents: ["Hidden transcript"])
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(hiddenSession.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["Hidden transcript"])
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == hiddenSession.id)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.map(\.content) == ["Hidden transcript"])
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == hiddenSession.id)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["Hidden transcript"])
 
-        fixture.viewModel.setSessionListFilter(.status(.todo))
+        fixture.runtime.setSessionListFilter(.status(.todo))
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.sessions.map(\.id).contains(visibleSession.id))
-        #expect(!fixture.viewModel.chatFeatureModel.sessions.sessions.map(\.id).contains(hiddenSession.id))
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == nil)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.isEmpty)
-        #expect(fixture.viewModel.chatFeatureModel.run.eventTimeline.isEmpty)
-        #expect(fixture.viewModel.chatFeatureModel.run.latestSummary == nil)
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedArtifactDirectories == nil)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(visibleSession.id))
+        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(hiddenSession.id))
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == nil)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.run.eventTimeline.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.run.latestSummary == nil)
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedArtifactDirectories == nil)
     }
 
     @Test func statusFilterKeepsDetailWhenSelectedSessionRemainsVisible() async throws {
@@ -50,16 +50,16 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         let otherSession = try fixture.repository.createSession(title: "Other in progress", now: Date(timeIntervalSince1970: 3_000))
         _ = try fixture.repository.setStatus(sessionID: otherSession.id, status: .inProgress)
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.selectChatSession(selectedSession.id)
-        try await waitForTranscript(fixture.viewModel, expectedContents: ["Selected transcript"])
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(selectedSession.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["Selected transcript"])
 
-        fixture.viewModel.setSessionListFilter(.status(.todo))
+        fixture.runtime.setSessionListFilter(.status(.todo))
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.sessions.map(\.id).contains(selectedSession.id))
-        #expect(!fixture.viewModel.chatFeatureModel.sessions.sessions.map(\.id).contains(otherSession.id))
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == selectedSession.id)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.map(\.content) == ["Selected transcript"])
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(selectedSession.id))
+        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(otherSession.id))
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == selectedSession.id)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["Selected transcript"])
     }
 
     @Test func labelFilterClearsDetailWhenSelectedSessionDoesNotHaveLabel() async throws {
@@ -73,17 +73,17 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         let visibleSession = try fixture.repository.createSession(title: "Important", now: Date(timeIntervalSince1970: 3_000))
         _ = try fixture.repository.setLabels(sessionID: visibleSession.id, labels: [AgentSessionLabel(id: "important")])
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.selectChatSession(hiddenSession.id)
-        try await waitForTranscript(fixture.viewModel, expectedContents: ["Unlabelled transcript"])
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(hiddenSession.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["Unlabelled transcript"])
 
-        fixture.viewModel.setSessionListFilter(.label("important"))
+        fixture.runtime.setSessionListFilter(.label("important"))
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.sessions.map(\.id).contains(visibleSession.id))
-        #expect(!fixture.viewModel.chatFeatureModel.sessions.sessions.map(\.id).contains(hiddenSession.id))
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == nil)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.isEmpty)
-        #expect(fixture.viewModel.chatFeatureModel.run.eventTimeline.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(visibleSession.id))
+        #expect(!fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id).contains(hiddenSession.id))
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == nil)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.run.eventTimeline.isEmpty)
     }
 
     @Test func selectingExistingSessionTracksLoadingUntilDetailIsApplied() async throws {
@@ -94,19 +94,19 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         session.messages = [AgentMessage(role: .user, content: "Loaded transcript")]
         session = try fixture.repository.saveSession(session)
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.selectChatSession(session.id)
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(session.id)
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == session.id)
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
-        #expect(fixture.viewModel.isLoadingSelectedChatSessionDetail)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == session.id)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
+        #expect(fixture.runtime.isLoadingSelectedChatSessionDetail)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
 
-        try await waitForLoadingToFinish(fixture.viewModel)
+        try await waitForLoadingToFinish(fixture.runtime)
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == nil)
-        #expect(!fixture.viewModel.isLoadingSelectedChatSessionDetail)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.map(\.content) == ["Loaded transcript"])
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
+        #expect(!fixture.runtime.isLoadingSelectedChatSessionDetail)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["Loaded transcript"])
     }
 
     @Test func selectingPersistedEmptySessionFinishesLoadingWithEmptyTranscript() async throws {
@@ -115,15 +115,15 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
 
         let session = try fixture.repository.createSession(title: "Persisted empty", now: Date(timeIntervalSince1970: 2_000))
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.selectChatSession(session.id)
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession(session.id)
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
-        try await waitForLoadingToFinish(fixture.viewModel)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
+        try await waitForLoadingToFinish(fixture.runtime)
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == session.id)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.isEmpty)
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == nil)
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == session.id)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
     }
 
     @Test(arguments: [true, false])
@@ -132,16 +132,16 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         defer { fixture.cleanup() }
 
         let session = try fixture.repository.createSession(title: "Composer race", now: Date(timeIntervalSince1970: 2_000))
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        fixture.viewModel.selectChatSession(session.id)
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.runtime.selectChatSession(session.id)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
 
-        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("a")
-        try await waitForLoadingToFinish(fixture.viewModel)
+        fixture.runtime.chatComposerCoordinator.updateSelectedDraft("a")
+        try await waitForLoadingToFinish(fixture.runtime)
 
-        #expect(fixture.viewModel.chatFeatureModel.composer.input == "a")
-        #expect(fixture.viewModel.chatComposerCoordinator.currentSelectedDraft() == "a")
+        #expect(fixture.runtime.chatFeatureModel.composer.input == "a")
+        #expect(fixture.runtime.chatComposerCoordinator.currentSelectedDraft() == "a")
     }
 
     @Test(arguments: [true, false])
@@ -149,15 +149,15 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let sessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID)
-        fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("draft in progress")
+        let sessionID = try #require(fixture.runtime.chatFeatureModel.sessions.selectedSessionID)
+        fixture.runtime.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.runtime.chatComposerCoordinator.updateSelectedDraft("draft in progress")
 
-        fixture.viewModel.reloadChatSessions()
+        fixture.runtime.reloadChatSessions()
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == sessionID)
-        #expect(fixture.viewModel.chatFeatureModel.composer.input == "draft in progress")
-        #expect(fixture.viewModel.chatComposerCoordinator.currentSelectedDraft() == "draft in progress")
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == sessionID)
+        #expect(fixture.runtime.chatFeatureModel.composer.input == "draft in progress")
+        #expect(fixture.runtime.chatComposerCoordinator.currentSelectedDraft() == "draft in progress")
     }
 
     @Test(arguments: [true, false])
@@ -165,49 +165,49 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        let firstSessionID = try #require(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID)
+        let firstSessionID = try #require(fixture.runtime.chatFeatureModel.sessions.selectedSessionID)
         let secondSession = try fixture.repository.createSession(title: "Second composer", now: Date(timeIntervalSince1970: 3_000))
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("first draft")
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        fixture.runtime.chatComposerCoordinator.updateSelectedDraft("first draft")
 
-        fixture.viewModel.selectChatSession(secondSession.id)
-        try await waitForLoadingToFinish(fixture.viewModel)
-        #expect(fixture.viewModel.chatFeatureModel.composer.input == "")
-        fixture.viewModel.chatComposerCoordinator.updateSelectedDraft("second draft")
+        fixture.runtime.selectChatSession(secondSession.id)
+        try await waitForLoadingToFinish(fixture.runtime)
+        #expect(fixture.runtime.chatFeatureModel.composer.input == "")
+        fixture.runtime.chatComposerCoordinator.updateSelectedDraft("second draft")
 
-        fixture.viewModel.selectChatSession(firstSessionID)
-        try await waitForLoadingToFinish(fixture.viewModel)
+        fixture.runtime.selectChatSession(firstSessionID)
+        try await waitForLoadingToFinish(fixture.runtime)
 
-        #expect(fixture.viewModel.chatFeatureModel.composer.input == (autoSaveDraftsEnabled ? "first draft" : ""))
-        #expect(fixture.viewModel.chatComposerCoordinator.currentSelectedDraft() == (autoSaveDraftsEnabled ? "first draft" : ""))
+        #expect(fixture.runtime.chatFeatureModel.composer.input == (autoSaveDraftsEnabled ? "first draft" : ""))
+        #expect(fixture.runtime.chatComposerCoordinator.currentSelectedDraft() == (autoSaveDraftsEnabled ? "first draft" : ""))
     }
 
     @Test func creatingNewSessionDoesNotEnterDetailLoadingState() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.newChatSession()
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.newChatSession()
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID != nil)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.isEmpty)
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == nil)
-        #expect(!fixture.viewModel.isLoadingSelectedChatSessionDetail)
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID != nil)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.isEmpty)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
+        #expect(!fixture.runtime.isLoadingSelectedChatSessionDetail)
     }
 
     @Test func selectingMissingSessionDoesNotLeaveLoadingStuck() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        fixture.viewModel.reloadChatSessions()
-        fixture.viewModel.selectChatSession("missing-session")
+        fixture.runtime.reloadChatSessions()
+        fixture.runtime.selectChatSession("missing-session")
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == "missing-session")
-        try await waitForLoadingToFinish(fixture.viewModel)
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == "missing-session")
+        try await waitForLoadingToFinish(fixture.runtime)
 
-        #expect(fixture.viewModel.chatFeatureModel.sessions.loadingSessionDetailID == nil)
-        #expect(fixture.viewModel.errorMessage == "无法加载所选会话。")
+        #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil)
+        #expect(fixture.runtime.errorMessage == "无法加载所选会话。")
     }
 
     @Test func selectingDifferentChatSessionsKeepsSelectedIDAndTranscriptInSync() async throws {
@@ -227,41 +227,41 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         ]
         secondSession = try fixture.repository.saveSession(secondSession)
 
-        fixture.viewModel.reloadChatSessions()
-        let revisionAfterReload = fixture.viewModel.chatFeatureModel.run.transcriptRevision
+        fixture.runtime.reloadChatSessions()
+        let revisionAfterReload = fixture.runtime.chatFeatureModel.run.transcriptRevision
 
-        fixture.viewModel.selectChatSession(firstSession.id)
-        try await waitForTranscript(fixture.viewModel, expectedContents: ["First transcript"])
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == firstSession.id)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.map(\.content) == ["First transcript"])
-        let revisionAfterFirstSelection = fixture.viewModel.chatFeatureModel.run.transcriptRevision
+        fixture.runtime.selectChatSession(firstSession.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["First transcript"])
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == firstSession.id)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["First transcript"])
+        let revisionAfterFirstSelection = fixture.runtime.chatFeatureModel.run.transcriptRevision
         #expect(revisionAfterFirstSelection > revisionAfterReload)
 
-        fixture.viewModel.selectChatSession(secondSession.id)
-        try await waitForTranscript(fixture.viewModel, expectedContents: ["Second transcript", "Second response"])
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == secondSession.id)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.map(\.content) == ["Second transcript", "Second response"])
-        let revisionAfterSecondSelection = fixture.viewModel.chatFeatureModel.run.transcriptRevision
+        fixture.runtime.selectChatSession(secondSession.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["Second transcript", "Second response"])
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == secondSession.id)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["Second transcript", "Second response"])
+        let revisionAfterSecondSelection = fixture.runtime.chatFeatureModel.run.transcriptRevision
         #expect(revisionAfterSecondSelection > revisionAfterFirstSelection)
 
-        fixture.viewModel.selectChatSession(firstSession.id)
-        try await waitForTranscript(fixture.viewModel, expectedContents: ["First transcript"])
-        #expect(fixture.viewModel.chatFeatureModel.sessions.selectedSessionID == firstSession.id)
-        #expect(fixture.viewModel.chatFeatureModel.run.transcript.map(\.content) == ["First transcript"])
-        #expect(fixture.viewModel.chatFeatureModel.run.transcriptRevision > revisionAfterSecondSelection)
+        fixture.runtime.selectChatSession(firstSession.id)
+        try await waitForTranscript(fixture.runtime, expectedContents: ["First transcript"])
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == firstSession.id)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.map(\.content) == ["First transcript"])
+        #expect(fixture.runtime.chatFeatureModel.run.transcriptRevision > revisionAfterSecondSelection)
     }
 
-    private func waitForTranscript(_ viewModel: AppRuntimeOrchestrator, expectedContents: [String]) async throws {
+    private func waitForTranscript(_ runtime: AppRuntimeLifecycle, expectedContents: [String]) async throws {
         for _ in 0..<100 {
-            if viewModel.chatFeatureModel.run.transcript.map(\.content) == expectedContents { return }
+            if runtime.chatFeatureModel.run.transcript.map(\.content) == expectedContents { return }
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("Timed out waiting for transcript: \(expectedContents)")
     }
 
-    private func waitForLoadingToFinish(_ viewModel: AppRuntimeOrchestrator) async throws {
+    private func waitForLoadingToFinish(_ runtime: AppRuntimeLifecycle) async throws {
         for _ in 0..<100 {
-            if viewModel.chatFeatureModel.sessions.loadingSessionDetailID == nil { return }
+            if runtime.chatFeatureModel.sessions.loadingSessionDetailID == nil { return }
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("Timed out waiting for session detail loading to finish")
@@ -274,7 +274,7 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
         let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
         try paths.ensureDirectoryHierarchy(fileManager: .default)
         let graphRepository = try AppGraphRepository.bootstrap(paths: paths)
-        let viewModel = AppRuntimeOrchestrator(
+        let runtime = AppRuntimeLifecycle(
             entities: [],
             statements: [],
             observeLogEntries: [],
@@ -283,12 +283,12 @@ struct AppRuntimeOrchestratorSessionFilterSelectionTests {
             storagePaths: paths
         )
         let sessionRepository = AppChatSessionRepository(store: graphRepository.store, storagePaths: paths)
-        return Fixture(root: root, viewModel: viewModel, repository: sessionRepository)
+        return Fixture(root: root, runtime: runtime, repository: sessionRepository)
     }
 
     private struct Fixture {
         var root: URL
-        var viewModel: AppRuntimeOrchestrator
+        var runtime: AppRuntimeLifecycle
         var repository: AppChatSessionRepository
 
         func cleanup() {

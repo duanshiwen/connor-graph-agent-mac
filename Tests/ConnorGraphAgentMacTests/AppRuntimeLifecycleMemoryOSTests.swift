@@ -6,7 +6,7 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @MainActor
-@Test func appViewModelInitializesMemoryOSBackendWithoutDashboardRoute() throws {
+@Test func runtimeInitializesMemoryOSBackendWithoutDashboardRoute() throws {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-app-vm-memory-os-cutover-\(UUID().uuidString)", isDirectory: true)
@@ -15,7 +15,7 @@ import ConnorGraphAppSupport
     try paths.ensureDirectoryHierarchy(fileManager: .default)
     let repository = try AppGraphRepository.bootstrap(paths: paths)
 
-    let viewModel = AppRuntimeOrchestrator(
+    let runtime = AppRuntimeLifecycle(
         entities: [],
         statements: [],
         observeLogEntries: [],
@@ -24,6 +24,6 @@ import ConnorGraphAppSupport
         storagePaths: paths
     )
 
-    #expect(viewModel.hasMemoryOSBackendForTests)
+    #expect(runtime.hasMemoryOSBackendForTests)
     #expect(!SidebarItem.allCases.map(\.rawValue).contains("Memory OS"))
 }
