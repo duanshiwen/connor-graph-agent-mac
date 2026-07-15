@@ -160,12 +160,8 @@ struct CraftPrimarySidebarView: View {
 
     }
 
-    private var countSourceSessions: [AgentSession] {
-        graph.chat.sessions.allSessions.isEmpty ? graph.chat.sessions.sessions : graph.chat.sessions.allSessions
-    }
-
     private var allSessionsCount: Int {
-        countSourceSessions.count
+        graph.chat.sessions.sidebarSummary.totalCount
     }
 
     private var mailSidebarCount: Int? {
@@ -181,13 +177,11 @@ struct CraftPrimarySidebarView: View {
     }
 
     private func count(for status: AgentSessionStatus) -> Int {
-        countSourceSessions.filter { $0.governance.status == status }.count
+        graph.chat.sessions.sidebarSummary.countsByStatus[status, default: 0]
     }
 
     private func count(forLabel labelID: String) -> Int {
-        countSourceSessions.filter { session in
-            session.governance.labels.contains { $0.id == labelID }
-        }.count
+        graph.chat.sessions.sidebarSummary.countsByLabelID[labelID, default: 0]
     }
 
     private func select(_ item: SidebarItem) {

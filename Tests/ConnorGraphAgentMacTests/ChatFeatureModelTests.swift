@@ -39,6 +39,42 @@ struct ChatFeatureModelTests {
         #expect(model.selectedArtifactDirectories == artifacts)
     }
 
+    @Test func sessionListBuildsSidebarSummaryOnceFromCompleteSessionSource() {
+        let todo = AgentSession(
+            id: "todo",
+            governance: AgentSessionGovernanceMetadata(
+                status: .todo,
+                labels: [AgentSessionLabel(id: "important"), AgentSessionLabel(id: "work")]
+            )
+        )
+        let inProgress = AgentSession(
+            id: "in-progress",
+            governance: AgentSessionGovernanceMetadata(
+                status: .inProgress,
+                labels: [AgentSessionLabel(id: "important")]
+            )
+        )
+        let model = ChatSessionListModel()
+
+        model.sessions = [todo]
+        #expect(model.sidebarSummary.totalCount == 1)
+        #expect(model.sidebarSummary.countsByStatus[.todo] == 1)
+
+        model.allSessions = [todo, inProgress]
+        #expect(model.sidebarSummary.totalCount == 2)
+        #expect(model.sidebarSummary.countsByStatus[.todo] == 1)
+        #expect(model.sidebarSummary.countsByStatus[.inProgress] == 1)
+        #expect(model.sidebarSummary.countsByLabelID["important"] == 2)
+        #expect(model.sidebarSummary.countsByLabelID["work"] == 1)
+
+        model.sessions = [inProgress]
+        #expect(model.sidebarSummary.totalCount == 2)
+
+        model.allSessions = []
+        #expect(model.sidebarSummary.totalCount == 1)
+        #expect(model.sidebarSummary.countsByStatus[.inProgress] == 1)
+    }
+
     @Test func runModelOwnsTranscriptSubmissionAndSummaryLifecycle() {
         let model = ChatRunModel()
         let message = AgentMessage(role: .user, content: "hello")

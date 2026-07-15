@@ -22,19 +22,26 @@ struct SidebarNavigationPerformanceRegressionTests {
 
     @Test func largeSessionMetadataProjectionStaysWithinReleaseBudget() {
         let fixture = SidebarNavigationPerformanceFixture.make()
-        var samples: [Double] = []
+        var buildSamples: [Double] = []
+        var lookupSamples: [Double] = []
 
         for _ in 0..<30 {
-            let started = DispatchTime.now().uptimeNanoseconds
-            let todo = ChatSessionCoordinator.filter(fixture.sessions, by: .status(.todo))
-            let all = ChatSessionCoordinator.filter(fixture.sessions, by: .all)
-            samples.append(milliseconds(since: started))
-            #expect(todo.count == 2_500)
-            #expect(all.count == 5_000)
+            let buildStarted = DispatchTime.now().uptimeNanoseconds
+            let summary = ChatSessionSidebarSummary.build(from: fixture.sessions)
+            buildSamples.append(milliseconds(since: buildStarted))
+            #expect(summary.totalCount == 5_000)
+            #expect(summary.countsByStatus[.todo] == 2_500)
+
+            let lookupStarted = DispatchTime.now().uptimeNanoseconds
+            _ = summary.countsByStatus[.todo, default: 0]
+            _ = summary.countsByLabelID["important", default: 0]
+            lookupSamples.append(milliseconds(since: lookupStarted))
         }
 
-        report("sessionProjection", samples)
-        assertReleaseBudget(samples, p95Milliseconds: 5)
+        report("sessionSummaryBuild", buildSamples)
+        report("sessionSummaryLookup", lookupSamples)
+        assertReleaseBudget(buildSamples, p95Milliseconds: 5)
+        assertReleaseBudget(lookupSamples, p95Milliseconds: 1)
     }
 
     @Test func selectionCommitStaysWithinReleaseBudgetAcrossThirtyRounds() {

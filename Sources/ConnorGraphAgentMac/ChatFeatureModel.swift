@@ -5,11 +5,38 @@ import ConnorGraphAppSupport
 import ConnorGraphCore
 import ConnorGraphSearch
 
+struct ChatSessionSidebarSummary: Sendable, Equatable {
+    var totalCount: Int = 0
+    var countsByStatus: [AgentSessionStatus: Int] = [:]
+    var countsByLabelID: [String: Int] = [:]
+
+    static func build(from sessions: [AgentSession]) -> ChatSessionSidebarSummary {
+        var summary = ChatSessionSidebarSummary(totalCount: sessions.count)
+        for session in sessions {
+            summary.countsByStatus[session.governance.status, default: 0] += 1
+            for label in session.governance.labels {
+                summary.countsByLabelID[label.id, default: 0] += 1
+            }
+        }
+        return summary
+    }
+}
+
 @MainActor
 @Observable
 final class ChatSessionListModel {
-    var sessions: [AgentSession] = []
-    var allSessions: [AgentSession] = []
+    var sessions: [AgentSession] = [] {
+        didSet {
+            guard allSessions.isEmpty else { return }
+            sidebarSummary = .build(from: sessions)
+        }
+    }
+    var allSessions: [AgentSession] = [] {
+        didSet {
+            sidebarSummary = .build(from: allSessions.isEmpty ? sessions : allSessions)
+        }
+    }
+    private(set) var sidebarSummary = ChatSessionSidebarSummary()
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var readStates: [String: SessionReadState] = [:]
