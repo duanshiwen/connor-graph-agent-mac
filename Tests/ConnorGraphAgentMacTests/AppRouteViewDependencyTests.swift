@@ -42,6 +42,16 @@ struct AppRouteViewDependencyTests {
         #expect(project.components(separatedBy: "\(sourcePath) in Sources */,").count - 1 == 1)
     }
 
+    @Test func knowledgePublicationProgressViewsBelongToXcodeAppTarget() throws {
+        let project = try String(contentsOf: xcodeProjectURL(), encoding: .utf8)
+        let sourcePath = "Sources/ConnorGraphAgentMac/KnowledgePublicationProgressViews.swift"
+
+        #expect(project.contains("\(sourcePath) */ = {isa = PBXFileReference"))
+        #expect(project.contains("\(sourcePath) in Sources */ = {isa = PBXBuildFile"))
+        #expect(project.components(separatedBy: "\(sourcePath) */,").count - 1 == 1)
+        #expect(project.components(separatedBy: "\(sourcePath) in Sources */,").count - 1 == 1)
+    }
+
     @Test func sessionRowDeletionAvailabilityUsesCachedStateWithoutPersistenceIO() throws {
         let source = try String(contentsOf: projectSourceURL(named: "AppRuntimeLifecycle.swift"), encoding: .utf8)
         let start = try #require(source.range(of: "func canDeleteChatSessionFromCachedState"))
