@@ -986,6 +986,9 @@ final class AppRuntimeLifecycle {
             self?.rebuildSessionSearchIndexSoon(sessions: sessions)
             self?.synchronizeSessionReadStates(from: sessions)
         }
+        chatSessionCoordinator.onSessionAdded = { [weak self] session in
+            self?.chatAttentionCoordinator.install(session)
+        }
         chatSessionCoordinator.onError = { [weak self] message in
             self?.errorMessage = message
         }
@@ -2376,29 +2379,37 @@ final class AppRuntimeLifecycle {
         startedAt: ContinuousClock.Instant
     ) {
         let session = snapshot.session
-        do {
-            markSessionRead(session.id)
-            chatRunCoordinator.clearProcessTimelines()
-            try loadSessionCapsule(sessionID: session.id)
-            try chatBackgroundTaskCoordinator.load(sessionID: session.id)
-            _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
-            chatRunCoordinator.applySelectedSnapshot(
-                session: session,
-                manager: makeNativeSessionManager(for: session),
-                timeline: snapshot.timeline,
-                summary: snapshot.latestSummary
-            )
-            restoreChatInputDraft(for: session.id)
-            chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
-            restoreWorkspaceMode(for: session.id)
-            aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
-            errorMessage = nil
-            let elapsed = startedAt.duration(to: ContinuousClock.now)
-            let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-            AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
-        } catch {
-            errorMessage = String(describing: error)
+        markSessionRead(session.id)
+        chatRunCoordinator.clearProcessTimelines()
+        let state = snapshot.sessionState ?? AppSessionStateSnapshot(sessionID: session.id)
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id] = state
+        syncWorkspaceDraftsFromSession(state)
+        if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
+            chatWorkspaceCoordinator.setMode(mode, for: session.id)
         }
+        chatWorkspaceCoordinator.recordsBySessionID[session.id] = snapshot.sessionRecords
+        if let browserState = snapshot.browserState {
+            browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: session.id)
+        }
+        chatBackgroundTaskCoordinator.install(
+            snapshot.backgroundTasks.map(AppSessionBackgroundTask.init(persisted:)),
+            sessionID: session.id
+        )
+        _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
+        chatRunCoordinator.applySelectedSnapshot(
+            session: session,
+            manager: makeNativeSessionManager(for: session),
+            timeline: snapshot.timeline,
+            summary: snapshot.latestSummary
+        )
+        restoreChatInputDraft(for: session.id)
+        chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
+        restoreWorkspaceMode(for: session.id)
+        aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
+        errorMessage = nil
+        let elapsed = startedAt.duration(to: ContinuousClock.now)
+        let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+        AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
     }
 
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {

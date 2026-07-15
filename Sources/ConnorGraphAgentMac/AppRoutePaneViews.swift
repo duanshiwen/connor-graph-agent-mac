@@ -6,8 +6,21 @@ struct CraftListPaneView: View {
     @Binding var selection: SidebarItem?
 
     var body: some View {
-        VStack(spacing: 0) {
-            switch selection ?? .agentChat {
+        let route = selection ?? .agentChat
+        RetainedRouteHostView(
+            route: route,
+            pane: .list,
+            tracker: graph.shell.routePerformanceTracker,
+            contentOwner: ObjectIdentifier(graph),
+            routeFactory: { route in
+                AnyView(listRouteView(route))
+            }
+        )
+    }
+
+    private func listRouteView(_ route: SidebarItem) -> some View {
+        Group {
+            switch route {
             case .agentChat:
                 ChatListRouteView(
                     model: graph.chat,
@@ -49,16 +62,12 @@ struct CraftListPaneView: View {
                         + graph.productOS.registry.skills.map(\.displayName)
                 )
             default:
-                CraftSimpleListPane(
-                    title: (selection ?? .agentChat).rawValue,
-                    subtitle: "康纳同学工作区",
-                    rows: []
-                )
+                CraftSimpleListPane(title: route.rawValue, subtitle: "康纳同学工作区", rows: [])
             }
         }
         .background {
             AppRouteActivationSentinel(
-                route: selection ?? .agentChat,
+                route: route,
                 pane: .list,
                 tracker: graph.shell.routePerformanceTracker
             )
@@ -72,8 +81,20 @@ struct CraftDetailPaneView: View {
     var selection: SidebarItem
 
     var body: some View {
+        RetainedRouteHostView(
+            route: selection,
+            pane: .detail,
+            tracker: graph.shell.routePerformanceTracker,
+            contentOwner: ObjectIdentifier(graph),
+            routeFactory: { route in
+                AnyView(detailRouteView(route))
+            }
+        )
+    }
+
+    private func detailRouteView(_ route: SidebarItem) -> some View {
         Group {
-            switch selection {
+            switch route {
             case .entities:
                 GraphEntitiesView(
                     entities: graph.graphDiagnostics.entities,
@@ -118,7 +139,7 @@ struct CraftDetailPaneView: View {
         }
         .background {
             AppRouteActivationSentinel(
-                route: selection,
+                route: route,
                 pane: .detail,
                 tracker: graph.shell.routePerformanceTracker
             )

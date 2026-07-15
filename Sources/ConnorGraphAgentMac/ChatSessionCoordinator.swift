@@ -27,6 +27,7 @@ final class ChatSessionCoordinator {
     @ObservationIgnored var onReloadSelectedSession: (AgentSession, Bool) throws -> Void = { _, _ in }
     @ObservationIgnored var onSelectionCleared: () -> Void = {}
     @ObservationIgnored var onSessionsChanged: ([AgentSession]) -> Void = { _ in }
+    @ObservationIgnored var onSessionAdded: (AgentSession) -> Void = { _ in }
     @ObservationIgnored var onError: (String) -> Void = { _ in }
 
     init(model: ChatSessionListModel, repository: AppChatSessionRepository?) {
@@ -106,9 +107,16 @@ final class ChatSessionCoordinator {
         model.loadingSessionDetailID = sessionID
         onSelectionStarted(sessionID)
         errorMessage = nil
+        let activeBackgroundTaskIDs = Set(model.backgroundTasksBySessionID[sessionID, default: []]
+            .filter { $0.status == .queued || $0.status == .running }
+            .map(\.id))
         selectionTask = Task(priority: .userInitiated) { [weak self] in
             do {
-                guard let snapshot = try await self?.detailLoader.load(repository: repository, sessionID: sessionID) else {
+                guard let snapshot = try await self?.detailLoader.load(
+                    repository: repository,
+                    sessionID: sessionID,
+                    activeBackgroundTaskIDs: activeBackgroundTaskIDs
+                ) else {
                     guard let self, self.isCurrent(sessionID: sessionID, generation: generation) else { return }
                     self.model.loadingSessionDetailID = nil
                     self.report("无法加载所选会话。")
@@ -194,7 +202,7 @@ final class ChatSessionCoordinator {
             pendingNewSessionIDs.remove(session.id)
             clearSelection()
         }
-        onSessionsChanged(model.allSessions)
+        onSessionAdded(session)
         errorMessage = nil
         return isVisible
     }

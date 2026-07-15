@@ -5,6 +5,26 @@ import UserNotifications
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
+private actor SessionReadStatePersistenceCoordinator {
+    private var latestRevisionBySessionID: [String: UInt64] = [:]
+
+    func persist(
+        _ state: SessionReadState,
+        sessionID: String,
+        revision: UInt64,
+        repository: AppChatSessionRepository
+    ) -> String? {
+        guard revision > latestRevisionBySessionID[sessionID, default: 0] else { return nil }
+        latestRevisionBySessionID[sessionID] = revision
+        do {
+            try repository.persistReadState(sessionID: sessionID, readState: state)
+            return nil
+        } catch {
+            return String(describing: error)
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ChatAttentionCoordinator {
@@ -12,6 +32,8 @@ final class ChatAttentionCoordinator {
     private let repository: AppChatSessionRepository?
     private var lastNotificationAt: [String: Date] = [:]
     private let sameSessionNotificationCooldown: TimeInterval
+    @ObservationIgnored private let persistenceCoordinator = SessionReadStatePersistenceCoordinator()
+    @ObservationIgnored private var persistenceRevision: UInt64 = 0
 
     @ObservationIgnored var selectedNavigation: () -> SidebarItem = { .agentChat }
     @ObservationIgnored var notificationSettings: () -> (enabled: Bool, level: SessionAttentionLevel) = { (false, .none) }
@@ -32,6 +54,11 @@ final class ChatAttentionCoordinator {
 
     func synchronize(from sessions: [AgentSession]) {
         model.readStates = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.readState) })
+        refreshDockBadge()
+    }
+
+    func install(_ session: AgentSession) {
+        model.readStates[session.id] = session.readState
         refreshDockBadge()
     }
 
@@ -85,12 +112,18 @@ final class ChatAttentionCoordinator {
     }
 
     private func persistReadState(_ state: SessionReadState, sessionID: String) {
-        do {
-            if let updated = try repository?.updateReadState(sessionID: sessionID, readState: state) {
-                updateLoadedSession(sessionID: updated.id, state: updated.readState)
-            }
-        } catch {
-            onError(String(describing: error))
+        guard let repository else { return }
+        persistenceRevision &+= 1
+        let revision = persistenceRevision
+        let persistenceCoordinator = persistenceCoordinator
+        Task { [weak self] in
+            guard let message = await persistenceCoordinator.persist(
+                state,
+                sessionID: sessionID,
+                revision: revision,
+                repository: repository
+            ) else { return }
+            self?.onError(message)
         }
     }
 
