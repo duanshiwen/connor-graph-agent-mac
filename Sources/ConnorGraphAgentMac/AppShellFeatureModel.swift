@@ -12,8 +12,17 @@ final class AppShellFeatureModel {
 
     @discardableResult
     func select(_ item: SidebarItem) -> Bool {
-        guard selection != item else { return false }
-        selection = item
+        let previous = selection
+        guard previous != item else {
+            AppPerformanceLog.sidebarNavigationLogger.debug(
+                "sidebar.route.commit from=\(previous?.rawValue ?? "none", privacy: .public) to=\(item.rawValue, privacy: .public) changed=false duration=0ms"
+            )
+            return false
+        }
+        let measured = AppPerformanceLog.measure { selection = item }
+        AppPerformanceLog.sidebarNavigationLogger.info(
+            "sidebar.route.commit from=\(previous?.rawValue ?? "none", privacy: .public) to=\(item.rawValue, privacy: .public) changed=true duration=\(measured.milliseconds, privacy: .public)ms"
+        )
         return true
     }
 
