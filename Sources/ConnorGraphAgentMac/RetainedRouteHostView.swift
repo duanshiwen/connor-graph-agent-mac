@@ -98,6 +98,7 @@ final class RetainedRouteHostController: NSViewController {
             installIfNeeded(controller)
             controller.view.isHidden = false
             tracker.markActivated(route: route, pane: pane, activationKind: .cacheHit)
+            schedulePresented(route: route, controller: controller)
             return
         }
 
@@ -126,6 +127,23 @@ final class RetainedRouteHostController: NSViewController {
         activeRoute = route
         recordRecency(for: route)
         tracker.markActivated(route: route, pane: pane, activationKind: activationKind)
+        schedulePresented(route: route, controller: controller)
+    }
+
+    private func schedulePresented(
+        route: SidebarItem,
+        controller: NSHostingController<AnyView>
+    ) {
+        controller.view.layoutSubtreeIfNeeded()
+        DispatchQueue.main.async { [weak self, weak controller] in
+            guard let self,
+                  let controller,
+                  self.activeRoute == route,
+                  controller.view.superview === self.view,
+                  !controller.view.isHidden
+            else { return }
+            self.tracker.markPresented(route: route, pane: self.pane)
+        }
     }
 
     func evict(_ route: SidebarItem) {
