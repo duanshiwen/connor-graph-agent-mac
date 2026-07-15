@@ -96,6 +96,11 @@
 		A0000000000000000000006C /* Sources/ConnorGraphAgentMac/AppMaintenanceBootstrapActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006D /* Sources/ConnorGraphAgentMac/AppMaintenanceBootstrapActor.swift */; };
 		A0000000000000000000006E /* Sources/ConnorGraphAgentMac/AppInteractiveBootstrapActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006F /* Sources/ConnorGraphAgentMac/AppInteractiveBootstrapActor.swift */; };
 		A00000000000000000000070 /* Sources/ConnorGraphAgentMac/AppShellFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000071 /* Sources/ConnorGraphAgentMac/AppShellFeatureModel.swift */; };
+		E71500010000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift */; };
+		E71500010000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift */; };
+		E71500010000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */; };
+		E71500010000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */; };
+		E71500010000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift */; };
 		A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */; };
 		A00000000000000000000074 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000075 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift */; };
 		A00000000000000000000076 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000077 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift */; };
@@ -180,6 +185,11 @@
 		7C0C0DE0000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift; sourceTree = "<group>"; };
+		E71500000000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift; sourceTree = "<group>"; };
+		E71500000000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppRouteViews.swift; sourceTree = "<group>"; };
+		E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift; sourceTree = "<group>"; };
+		E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift; sourceTree = "<group>"; };
+		E71500000000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000019 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift; sourceTree = "<group>"; };
 		7C0C0DE000000000000001A /* Sources/ConnorGraphAgentMac/PersonRelationshipDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonRelationshipDraft.swift; sourceTree = "<group>"; };
 		7C0C0DE000000000000001B /* Sources/ConnorGraphAgentMac/PersonRelationshipEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonRelationshipEditorView.swift; sourceTree = "<group>"; };
@@ -371,6 +381,9 @@
 				A0000000000000000000006D /* Sources/ConnorGraphAgentMac/AppMaintenanceBootstrapActor.swift */,
 				A0000000000000000000006F /* Sources/ConnorGraphAgentMac/AppInteractiveBootstrapActor.swift */,
 				A00000000000000000000071 /* Sources/ConnorGraphAgentMac/AppShellFeatureModel.swift */,
+				E71500000000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift */,
+				E71500000000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift */,
+				E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */,
 				A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */,
 				A00000000000000000000075 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift */,
 				A00000000000000000000077 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift */,
@@ -448,6 +461,8 @@
 				7C0C0DE0000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift */,
 				7C0C0DE0000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift */,
 				7C0C0DE0000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift */,
+				E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */,
+				E71500000000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift */,
 				7C0C0DE0000000000000019 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */,
 				7C0C0DE000000000000001A /* Sources/ConnorGraphAgentMac/PersonRelationshipDraft.swift */,
 				7C0C0DE000000000000001B /* Sources/ConnorGraphAgentMac/PersonRelationshipEditorView.swift */,
@@ -665,6 +680,9 @@
 				A0000000000000000000006C /* Sources/ConnorGraphAgentMac/AppMaintenanceBootstrapActor.swift in Sources */,
 				A0000000000000000000006E /* Sources/ConnorGraphAgentMac/AppInteractiveBootstrapActor.swift in Sources */,
 				A00000000000000000000070 /* Sources/ConnorGraphAgentMac/AppShellFeatureModel.swift in Sources */,
+				E71500010000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift in Sources */,
+				E71500010000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift in Sources */,
+				E71500010000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift in Sources */,
 				A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */,
 				A00000000000000000000074 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift in Sources */,
 				A00000000000000000000076 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift in Sources */,
@@ -742,6 +760,8 @@
 				7C0C0DE1000000000000016 /* Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift in Sources */,
 				7C0C0DE1000000000000017 /* Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift in Sources */,
 				7C0C0DE1000000000000018 /* Sources/ConnorGraphAgentMac/MailHTMLBodySanitizer.swift in Sources */,
+				E71500010000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift in Sources */,
+				E71500010000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift in Sources */,
 				7C0C0DE1000000000000019 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift in Sources */,
 				7C0C0DE100000000000001A /* Sources/ConnorGraphAgentMac/PersonRelationshipDraft.swift in Sources */,
 				7C0C0DE100000000000001B /* Sources/ConnorGraphAgentMac/PersonRelationshipEditorView.swift in Sources */,
