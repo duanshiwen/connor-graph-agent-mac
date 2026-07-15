@@ -3,7 +3,7 @@ import ConnorGraphAppSupport
 
 @MainActor
 final class AppCompositionRoot: ObservableObject {
-    @Published private(set) var viewModel: AppViewModel
+    @Published private(set) var graph: AppFeatureGraph
     @Published private(set) var noteImportModel: NoteImportViewModel
     let identityStore: AppUserIdentityStore
     let featureFlags: AppFeatureFlags
@@ -20,16 +20,18 @@ final class AppCompositionRoot: ObservableObject {
     private let interactiveBootstrapActor = AppInteractiveBootstrapActor()
     private let contentBootstrapActor = AppContentBootstrapActor()
     private let maintenanceBootstrapActor = AppMaintenanceBootstrapActor()
+    private var runtime: AppRuntimeLifecycle
     private var coreOutcome: CoreOutcome?
 
     private init(
-        viewModel: AppViewModel,
+        runtime: AppRuntimeLifecycle,
         identityStore: AppUserIdentityStore,
         noteImportModel: NoteImportViewModel,
         featureFlags: AppFeatureFlags,
         bootstrapActor: AppBootstrapActor
     ) {
-        self.viewModel = viewModel
+        self.runtime = runtime
+        self.graph = runtime.graph
         self.identityStore = identityStore
         self.noteImportModel = noteImportModel
         self.featureFlags = featureFlags
@@ -40,14 +42,9 @@ final class AppCompositionRoot: ObservableObject {
 
     static func live() -> AppCompositionRoot {
         AppStartupPerformance.measure("StartupLightConstruction") {
-            let placeholder = AppViewModel(
-                entities: [],
-                statements: [],
-                observeLogEntries: [],
-                startupMode: .deferred
-            )
+            let placeholder = AppRuntimeLifecycle.placeholder()
             let root = AppCompositionRoot(
-                viewModel: placeholder,
+                runtime: placeholder,
                 identityStore: AppUserIdentityStore(),
                 noteImportModel: NoteImportViewModel(configurationError: "导入功能正在准备中…"),
                 featureFlags: AppFeatureFlags.load(),
@@ -86,7 +83,7 @@ final class AppCompositionRoot: ObservableObject {
                       self.startupCoordinator.acceptsResults(for: generation),
                       let coreOutcome = self.coreOutcome
                 else { throw CancellationError() }
-                let model: AppViewModel
+                let runtime: AppRuntimeLifecycle
                 let interactiveSnapshot: AppInteractiveBootstrapSnapshot?
                 switch coreOutcome {
                 case .loaded(let snapshot):
@@ -96,48 +93,23 @@ final class AppCompositionRoot: ObservableObject {
                         governanceConfig: snapshot.governanceConfig
                     )
                     guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
-                    let graph = snapshot.graphSnapshot
-                    model = AppViewModel(
-                        entities: graph.entities,
-                        statements: graph.statements,
-                        episodes: graph.episodes,
-                        observeLogEntries: graph.observeLogEntries,
-                        repository: snapshot.repository,
-                        databasePath: snapshot.paths.databaseURL.path,
-                        storagePaths: snapshot.paths,
-                        governanceConfig: snapshot.governanceConfig,
-                        productOSRegistry: snapshot.productOSRegistry,
-                        automationConfig: snapshot.automationConfig,
-                        contactsProfileStore: snapshot.contactsProfileStore,
-                        contactsRelationshipStore: snapshot.contactsRelationshipStore,
-                        injectedMailStore: snapshot.mailStore,
-                        injectedNativeSourceSearchBackend: snapshot.nativeSourceSearchBackend,
-                        injectedSessionSearchIndexService: snapshot.sessionSearchIndexService,
-                        injectedMemoryOSStore: snapshot.memoryOSStore,
-                        injectedMemoryOSFacade: snapshot.memoryOSFacade,
-                        injectedMemoryOSSearchHealthSummary: snapshot.memoryOSSearchHealthSummary,
-                        injectedMemoryOSInitializationError: snapshot.memoryOSInitializationError,
-                        startupMode: .deferred
-                    )
+                    runtime = AppRuntimeLifecycle.live(core: snapshot)
                 case .fallback(let error):
                     interactiveSnapshot = nil
-                    model = AppViewModel.demo(startupMode: .deferred)
-                    model.errorMessage = "已回退到演示数据：\(error)"
+                    runtime = AppRuntimeLifecycle.demo(fallbackError: error)
                 }
-                self.bindCommandRouting(to: model)
-                if let interactiveSnapshot {
-                    model.prepareInteractiveStartup(snapshot: interactiveSnapshot)
-                } else {
-                    model.prepareDemoInteractiveStartup()
-                }
-                let noteImportModel = model.noteImportRuntimeFactory.makeModel()
+                self.bindCommandRouting(to: runtime)
+                runtime.prepareInteractive(snapshot: interactiveSnapshot)
+                let noteImportModel = runtime.makeNoteImportModel()
                 guard self.startupCoordinator.acceptsResults(for: generation) else {
-                    model.shutdownRuntimeResources()
+                    runtime.shutdown()
                     noteImportModel.stopJobMonitoring()
                     throw CancellationError()
                 }
-                self.viewModel.shutdownRuntimeResources()
-                self.viewModel = model
+                let previousRuntime = self.runtime
+                previousRuntime.shutdown()
+                self.runtime = runtime
+                self.graph = runtime.graph
                 self.noteImportModel = noteImportModel
             },
             loadContent: { [weak self] generation in
@@ -150,16 +122,16 @@ final class AppCompositionRoot: ObservableObject {
                     snapshot = nil
                 }
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
-                await self.viewModel.loadStartupContent(snapshot: snapshot)
+                await self.runtime.loadContent(snapshot: snapshot)
             },
             startMaintenance: { [weak self] generation in
                 guard let self, self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
-                self.viewModel.maintenanceCoordinator.startScheduler()
+                self.runtime.startScheduler()
                 await self.noteImportModel.recoverPersistedJobs()
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
                 await self.identityStore.restoreSession()
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
-                await self.viewModel.reconcileStartupRefreshTasks()
+                await self.runtime.reconcileStartupRefreshTasks()
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
                 let snapshot: AppMaintenanceBootstrapSnapshot?
                 switch self.coreOutcome {
@@ -169,35 +141,19 @@ final class AppCompositionRoot: ObservableObject {
                     snapshot = nil
                 }
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
-                await self.viewModel.startStartupMaintenance(snapshot: snapshot)
+                await self.runtime.startMaintenance(snapshot: snapshot)
             },
             shutdown: { [weak self] in
                 guard let self else { return }
                 self.noteImportModel.stopJobMonitoring()
-                self.viewModel.shutdownRuntimeResources()
+                self.runtime.shutdown()
             }
         )
     }
 
-    private func bindCommandRouting(to model: AppViewModel) {
+    private func bindCommandRouting(to runtime: AppRuntimeLifecycle) {
         commandRouter.replaceHandler { [weak self] command in
-            guard let model = self?.viewModel else { return }
-            switch command {
-            case let .shortcut(action):
-                model.performShortcutAction(action)
-            case .newNote:
-                model.newNoteSession()
-            case let .selectSidebar(selection):
-                model.shellFeatureModel.select(selection)
-            case let .navigate(item):
-                model.navigate(to: item)
-            case let .openSessionNotification(sessionID):
-                model.openSessionFromNotification(sessionID)
-            case .openCalendarSettings:
-                model.selectSettingsSection(.calendar)
-            case let .followRSSItem(request):
-                model.handleRSSFollowRequest(request)
-            }
+            self?.runtime.perform(command)
         }
         flowCoordinator.replaceHandler { [weak self] intent in
             guard let self else { return }
@@ -210,10 +166,10 @@ final class AppCompositionRoot: ObservableObject {
             }
             self.sendWhenInteractive(command)
         }
-        model.rssFeatureModel.onFollowRequest = { [weak flowCoordinator] request in
+        runtime.graph.rss.onFollowRequest = { [weak flowCoordinator] request in
             flowCoordinator?.send(.followRSSItem(request))
         }
-        model.calendarFeatureModel.onOpenSettingsRequest = { [weak flowCoordinator] in
+        runtime.graph.calendar.onOpenSettingsRequest = { [weak flowCoordinator] in
             flowCoordinator?.send(.openCalendarSettings)
         }
     }

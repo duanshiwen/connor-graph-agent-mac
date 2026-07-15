@@ -11,13 +11,13 @@ struct AppStartupLightConstructionContractTests {
         let end = try #require(tail.range(of: "    func sendWhenInteractive"))
         let body = String(tail[..<end.lowerBound])
 
-        #expect(!body.contains("AppViewModel.live()"))
+        #expect(!body.contains("AppViewModel"))
         #expect(!body.contains("AppGraphRepository.bootstrap"))
         #expect(!body.contains("loadSnapshot()"))
         #expect(!body.contains("SQLite"))
         #expect(!body.contains("SearchKernel"))
         #expect(!body.contains("makeNoteImportViewModel()"))
-        #expect(body.contains("startupMode: .deferred"))
+        #expect(body.contains("AppRuntimeLifecycle.placeholder()"))
     }
 
     @Test func stagedContentAndMaintenanceUseActorSnapshots() throws {
@@ -45,20 +45,32 @@ struct AppStartupLightConstructionContractTests {
 
         let compositionSource = try projectSource(named: "AppCompositionRoot.swift")
         #expect(compositionSource.contains("interactiveBootstrapActor.load"))
-        #expect(compositionSource.contains("injectedMailStore: snapshot.mailStore"))
+        #expect(compositionSource.contains("AppRuntimeLifecycle.live(core: snapshot)"))
         #expect(compositionSource.contains("contentBootstrapActor.load"))
         #expect(compositionSource.contains("maintenanceBootstrapActor.load"))
+        #expect(!compositionSource.contains("AppViewModel"))
+        #expect(compositionSource.contains("self.runtime = runtime"))
+        #expect(compositionSource.contains("self.graph = runtime.graph"))
+        let publicationStart = try #require(compositionSource.range(of: "let previousRuntime = self.runtime"))
+        let publication = compositionSource[publicationStart.lowerBound...]
+        let shutdown = try #require(publication.range(of: "previousRuntime.shutdown()"))
+        let publishRuntime = try #require(publication.range(of: "self.runtime = runtime"))
+        let publishGraph = try #require(publication.range(of: "self.graph = runtime.graph"))
+        let publishNoteImport = try #require(publication.range(of: "self.noteImportModel = noteImportModel"))
+        #expect(shutdown.lowerBound < publishRuntime.lowerBound)
+        #expect(publishRuntime.lowerBound < publishGraph.lowerBound)
+        #expect(publishGraph.lowerBound < publishNoteImport.lowerBound)
         let maintenance = try functionBody(
             named: "startMaintenance: {",
             in: compositionSource,
             endingAt: "            shutdown: {"
         )
-        let scheduler = try #require(maintenance.range(of: "maintenanceCoordinator.startScheduler()"))
+        let scheduler = try #require(maintenance.range(of: "runtime.startScheduler()"))
         let recovery = try #require(maintenance.range(of: "recoverPersistedJobs()"))
         let identity = try #require(maintenance.range(of: "identityStore.restoreSession()"))
         #expect(scheduler.lowerBound < recovery.lowerBound)
         #expect(recovery.lowerBound < identity.lowerBound)
-        #expect(maintenance.components(separatedBy: "maintenanceCoordinator.startScheduler()").count - 1 == 1)
+        #expect(maintenance.components(separatedBy: "runtime.startScheduler()").count - 1 == 1)
         #expect(!maintenance.contains("startTaskSchedulerTimer()"))
         #expect(maintenance.components(separatedBy: "recoverPersistedJobs()").count - 1 == 1)
         #expect(maintenance.components(separatedBy: "identityStore.restoreSession()").count - 1 == 1)

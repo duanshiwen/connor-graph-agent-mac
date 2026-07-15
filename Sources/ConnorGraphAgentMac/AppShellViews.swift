@@ -8,8 +8,7 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct AppShellView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @Bindable var shellModel: AppShellFeatureModel
+    let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
     @ObservedObject var noteImportModel: NoteImportViewModel
     var sendCommand: (AppCommand) -> Void
@@ -19,34 +18,26 @@ struct AppShellView: View {
 
     private var selectionBinding: Binding<SidebarItem?> {
         Binding(
-            get: { shellModel.selection ?? .agentChat },
-            set: { shellModel.selection = $0 ?? .agentChat }
+            get: { graph.shell.selection ?? .agentChat },
+            set: { graph.shell.selection = $0 ?? .agentChat }
         )
     }
     @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
         Group {
-            if viewModel.aiConnectionsModel.showsWelcome {
+            if graph.aiConnections.showsWelcome {
                 WelcomeLLMView(
-                    model: viewModel.aiConnectionsModel,
-                    openURL: viewModel.openURLInSystemDefaultBrowser
+                    model: graph.aiConnections,
+                    openURL: graph.shellActions.openURL
                 )
             } else {
                 HSplitView {
                     if isPrimarySidebarVisible {
                         CraftPrimarySidebarView(
-                            viewModel: viewModel,
-                            shellModel: shellModel,
-                            governanceModel: viewModel.governanceModel,
-                            sourceRuntimeModel: viewModel.sourceRuntimeModel,
-                            skillRuntimeModel: viewModel.skillRuntimeModel,
-                            taskAutomationModel: viewModel.taskAutomationModel,
-                            calendarFeatureModel: viewModel.calendarFeatureModel,
-                            contactsFeatureModel: viewModel.contactsFeatureModel,
-                            mailFeatureModel: viewModel.mailFeatureModel,
-                            rssFeatureModel: viewModel.rssFeatureModel,
-                            selection: selectionBinding
+                            graph: graph,
+                            selection: selectionBinding,
+                            sendCommand: sendCommand
                         )
                     .frame(
                         minWidth: AppShellLayout.primarySidebarMinWidth,
@@ -59,17 +50,7 @@ struct AppShellView: View {
             }
 
             CraftListPaneView(
-                viewModel: viewModel,
-                shellModel: shellModel,
-                governanceModel: viewModel.governanceModel,
-                sourceRuntimeModel: viewModel.sourceRuntimeModel,
-                skillRuntimeModel: viewModel.skillRuntimeModel,
-                taskAutomationModel: viewModel.taskAutomationModel,
-                productOSControlModel: viewModel.productOSControlModel,
-                calendarFeatureModel: viewModel.calendarFeatureModel,
-                contactsFeatureModel: viewModel.contactsFeatureModel,
-                mailFeatureModel: viewModel.mailFeatureModel,
-                rssFeatureModel: viewModel.rssFeatureModel,
+                graph: graph,
                 selection: selectionBinding
             )
                 .frame(
@@ -82,22 +63,11 @@ struct AppShellView: View {
                 .controlSize(.small)
 
             CraftDetailPaneView(
-                viewModel: viewModel,
-                shellModel: shellModel,
-                governanceModel: viewModel.governanceModel,
+                graph: graph,
                 identityStore: identityStore,
-                graphDiagnosticsModel: viewModel.graphDiagnosticsModel,
-                sourceRuntimeModel: viewModel.sourceRuntimeModel,
-                skillRuntimeModel: viewModel.skillRuntimeModel,
-                taskAutomationModel: viewModel.taskAutomationModel,
-                productOSControlModel: viewModel.productOSControlModel,
-                calendarFeatureModel: viewModel.calendarFeatureModel,
-                contactsFeatureModel: viewModel.contactsFeatureModel,
-                mailFeatureModel: viewModel.mailFeatureModel,
-                rssFeatureModel: viewModel.rssFeatureModel,
-                selection: shellModel.selection ?? .agentChat
+                selection: graph.shell.selection ?? .agentChat
             )
-                .id(shellModel.selection ?? .agentChat)
+                .id(graph.shell.selection ?? .agentChat)
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
@@ -122,29 +92,29 @@ struct AppShellView: View {
                         .foregroundStyle(.secondary)
                     TopSearchTextField(
                         text: Binding(
-                            get: { viewModel.globalSearchFeatureModel.query },
-                            set: { viewModel.globalSearchFeatureModel.updateQuery($0) }
+                            get: { graph.globalSearch.query },
+                            set: { graph.globalSearch.updateQuery($0) }
                         ),
                         isFocused: Binding(
-                            get: { viewModel.globalSearchFeatureModel.isFieldFocused },
+                            get: { graph.globalSearch.isFieldFocused },
                             set: { focused in
                                 if focused {
-                                    viewModel.globalSearchFeatureModel.activateField()
+                                    graph.globalSearch.activateField()
                                 } else {
-                                    viewModel.globalSearchFeatureModel.deactivateField()
+                                    graph.globalSearch.deactivateField()
                                 }
                             }
                         ),
                         placeholder: "搜索或发起对话",
-                        focusRequestID: shellModel.focusTopSearchRequestID,
-                        onSubmit: { viewModel.globalSearchFeatureModel.performSelectedItem() },
-                        onMoveUp: { viewModel.globalSearchFeatureModel.moveSelectionUp() },
-                        onMoveDown: { viewModel.globalSearchFeatureModel.moveSelectionDown() },
-                        onCancel: { viewModel.globalSearchFeatureModel.dismissOverlay() }
+                        focusRequestID: graph.shell.focusTopSearchRequestID,
+                        onSubmit: { graph.globalSearch.performSelectedItem() },
+                        onMoveUp: { graph.globalSearch.moveSelectionUp() },
+                        onMoveDown: { graph.globalSearch.moveSelectionDown() },
+                        onCancel: { graph.globalSearch.dismissOverlay() }
                     )
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
-                    if !viewModel.globalSearchFeatureModel.query.isEmpty {
-                        Button(action: { viewModel.globalSearchFeatureModel.clear() }) {
+                    if !graph.globalSearch.query.isEmpty {
+                        Button(action: { graph.globalSearch.clear() }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
                         }
@@ -179,17 +149,17 @@ struct AppShellView: View {
                 .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {
                     UserIdentityPopoverView(identityStore: identityStore) {
                         isIdentityPopoverPresented = false
-                        shellModel.selectSettingsSection(.identity)
+                        graph.shell.selectSettingsSection(.identity)
                     }
                 }
             }
         }
         .overlay(alignment: .topLeading) {
-            BrowserBackgroundTaskRunnerView(model: viewModel.browserFeatureModel)
+            BrowserBackgroundTaskRunnerView(model: graph.browser)
         }
         .overlay(alignment: .top) {
-            if viewModel.globalSearchFeatureModel.isOverlayPresented && (!viewModel.globalSearchFeatureModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.globalSearchFeatureModel.historyEntries.isEmpty) {
-                AppGlobalSearchOverlayView(model: viewModel.globalSearchFeatureModel)
+            if graph.globalSearch.isOverlayPresented && (!graph.globalSearch.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !graph.globalSearch.historyEntries.isEmpty) {
+                AppGlobalSearchOverlayView(model: graph.globalSearch)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(20)
@@ -197,20 +167,20 @@ struct AppShellView: View {
         }
         .simultaneousGesture(
             TapGesture().onEnded {
-                if viewModel.globalSearchFeatureModel.isFieldFocused {
-                    viewModel.globalSearchFeatureModel.deactivateField()
+                if graph.globalSearch.isFieldFocused {
+                    graph.globalSearch.deactivateField()
                 }
             }
         )
         .background(WindowTitlebarConfigurator())
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
-            if shellModel.selection == nil {
-                shellModel.selection = .agentChat
+            if graph.shell.selection == nil {
+                graph.shell.selection = .agentChat
             }
-            viewModel.reloadChatSessionsIfNeededAfterInitialLoad()
+            graph.chatActions.session.reloadChatSessionsIfNeededAfterInitialLoad()
             installTopSearchKeyMonitorIfNeeded()
-            viewModel.activateRuntimeSettingsSideEffectsAfterLaunch()
+            graph.shellActions.activateSettingsSideEffects()
         }
         .onDisappear {
             removeTopSearchKeyMonitor()
@@ -224,7 +194,7 @@ struct AppShellView: View {
     private func installTopSearchKeyMonitorIfNeeded() {
         guard topSearchKeyMonitor == nil else { return }
         topSearchKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let shortcut = viewModel.inputSettingsModel.shortcut(for: .focusTopSearch)
+            let shortcut = graph.inputSettings.shortcut(for: .focusTopSearch)
             guard shortcut.matches(
                 character: event.charactersIgnoringModifiers,
                 isCommandDown: event.modifierFlags.contains(.command),
@@ -234,7 +204,7 @@ struct AppShellView: View {
             ) else {
                 return event
             }
-            shellModel.requestTopSearchFocus()
+            graph.shell.requestTopSearchFocus()
             return nil
         }
     }

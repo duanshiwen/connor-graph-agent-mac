@@ -8,44 +8,39 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct CraftListPaneView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @Bindable var shellModel: AppShellFeatureModel
-    @Bindable var governanceModel: GovernanceFeatureModel
-    let sourceRuntimeModel: SourceRuntimeFeatureModel
-    let skillRuntimeModel: SkillRuntimeFeatureModel
-    let taskAutomationModel: TaskAutomationFeatureModel
-    let productOSControlModel: ProductOSControlFeatureModel
-    let calendarFeatureModel: CalendarFeatureModel
-    let contactsFeatureModel: ContactsFeatureModel
-    let mailFeatureModel: MailFeatureModel
-    let rssFeatureModel: RSSFeatureModel
+    let graph: AppFeatureGraph
     @Binding var selection: SidebarItem?
 
     var body: some View {
         VStack(spacing: 0) {
             switch selection ?? .agentChat {
             case .agentChat:
-                CraftSessionListPane(viewModel: viewModel, governanceModel: governanceModel)
+                CraftSessionListPane(
+                    model: graph.chat,
+                    governanceModel: graph.governance,
+                    sessionActions: graph.chatActions.session,
+                    rowActions: graph.chatSessionListActions
+                )
             case .llmSettings:
-                CraftSettingsListPane(shellModel: shellModel, selection: $selection)
+                CraftSettingsListPane(shellModel: graph.shell, selection: $selection)
             case .calendar:
-                CraftCalendarListPane(model: calendarFeatureModel)
+                CraftCalendarListPane(model: graph.calendar)
             case .contacts:
-                CraftContactsListPane(model: contactsFeatureModel)
+                CraftContactsListPane(model: graph.contacts)
             case .rss:
-                CraftRSSListPane(model: rssFeatureModel)
+                CraftRSSListPane(model: graph.rss)
             case .mail:
-                CraftMailListPane(model: mailFeatureModel)
+                CraftMailListPane(model: graph.mail)
             case .sources:
-                CraftSourceListPane(model: sourceRuntimeModel)
+                CraftSourceListPane(model: graph.sources)
             case .skills:
-                CraftSkillListPane(model: skillRuntimeModel)
+                CraftSkillListPane(model: graph.skills)
             case .automation, .scheduledTasks:
-                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: governanceModel.config, kind: .scheduled)
+                CraftTaskAutomationListPane(model: graph.tasks, governanceConfig: graph.governance.config, kind: .scheduled)
             case .eventTriggeredTasks:
-                CraftTaskAutomationListPane(model: taskAutomationModel, governanceConfig: governanceModel.config, kind: .eventTriggered)
+                CraftTaskAutomationListPane(model: graph.tasks, governanceConfig: graph.governance.config, kind: .eventTriggered)
             case .productOS:
-                CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: productOSControlModel.registry.sources.map(\.displayName) + productOSControlModel.registry.skills.map(\.displayName))
+                CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: graph.productOS.registry.sources.map(\.displayName) + graph.productOS.registry.skills.map(\.displayName))
             default:
                 CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
             }
@@ -640,8 +635,10 @@ private struct ContactRowButton: View {
 }
 
 struct CraftSessionListPane: View {
-    @ObservedObject var viewModel: AppViewModel
+    @Bindable var model: ChatFeatureModel
     @Bindable var governanceModel: GovernanceFeatureModel
+    let sessionActions: any ChatSessionCommanding
+    let rowActions: ChatSessionListActions
 
     var body: some View {
         VStack(spacing: 0) {
@@ -651,8 +648,8 @@ struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ListSearchFilterBanner(query: viewModel.chatFeatureModel.sessions.searchQuery, sourceTitle: "对话历史") {
-                viewModel.chatFeatureModel.sessions.searchQuery = ""
+            ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
+                model.sessions.searchQuery = ""
             }
 
             if visibleSessions.isEmpty {
@@ -673,24 +670,24 @@ struct CraftSessionListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task { viewModel.reloadChatSessions() }
+        .task { sessionActions.reloadChatSessions() }
     }
 
     private func sessionRow(_ session: AgentSession) -> some View {
         CraftSessionRow(
             row: AgentChatSessionPresentation(session: session),
-            readState: viewModel.chatFeatureModel.sessions.readStates[session.id],
-            isSelected: session.id == viewModel.chatFeatureModel.sessions.selectedSessionID,
-            isRunning: viewModel.isChatSessionSubmitting(session.id),
-            isRegeneratingTitle: viewModel.chatFeatureModel.sessions.regeneratingTitleSessionIDs.contains(session.id),
-            hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
+            readState: model.sessions.readStates[session.id],
+            isSelected: session.id == model.sessions.selectedSessionID,
+            isRunning: rowActions.isSubmitting(session.id),
+            isRegeneratingTitle: model.sessions.regeneratingTitleSessionIDs.contains(session.id),
+            hasRunningBackgroundTask: !rowActions.canDelete(session.id),
             labelDefinitions: governanceModel.config.labels,
             onSelect: { selectSession(id: session.id) },
-            onRename: { title in viewModel.renameChatSession(session.id, title: title) },
-            onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
-            onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
-            onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
-            onDelete: { viewModel.deleteChatSession(session.id) }
+            onRename: { title in rowActions.rename(session.id, title) },
+            onSetStatus: { status in rowActions.setStatus(session.id, status) },
+            onToggleLabel: { labelID in rowActions.toggleLabel(session.id, labelID) },
+            onRegenerateTitle: { rowActions.regenerateTitle(session.id) },
+            onDelete: { rowActions.delete(session.id) }
         )
         .id(session.id)
     }
@@ -699,31 +696,31 @@ struct CraftSessionListPane: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            viewModel.selectChatSession(id)
+            sessionActions.selectChatSession(id)
         }
     }
 
     private var visibleSessions: [AgentSession] {
-        let query = viewModel.chatFeatureModel.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return viewModel.chatFeatureModel.sessions.sessions }
+        let query = model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.sessions.sessions }
         let terms = listSearchTerms(for: query)
-        guard !terms.isEmpty else { return viewModel.chatFeatureModel.sessions.sessions }
-        return viewModel.chatFeatureModel.sessions.sessions.filter { session in
+        guard !terms.isEmpty else { return model.sessions.sessions }
+        return model.sessions.sessions.filter { session in
             listSearchTextMatches(session.title, terms: terms)
                 || session.messages.contains { listSearchTextMatches($0.content, terms: terms) }
         }
     }
 
     private var sessionEmptyTitle: String {
-        viewModel.chatFeatureModel.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
+        model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
     }
 
     private var sessionEmptyDescription: String {
-        viewModel.chatFeatureModel.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
+        model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
     }
 
     private var sessionListTitle: String {
-        switch viewModel.chatFeatureModel.sessions.filter {
+        switch model.sessions.filter {
         case .all: "全部会话"
         case .status(let status): status.displayName
         case .label(let labelID): governanceModel.config.labels.first(where: { $0.id == labelID })?.name ?? labelID
@@ -2109,137 +2106,55 @@ private struct RSSItemListRow: View {
 }
 
 struct CraftDetailPaneView: View {
-    @ObservedObject var viewModel: AppViewModel
-    @Bindable var shellModel: AppShellFeatureModel
-    @Bindable var governanceModel: GovernanceFeatureModel
+    let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
-    let graphDiagnosticsModel: GraphDiagnosticsModel
-    let sourceRuntimeModel: SourceRuntimeFeatureModel
-    let skillRuntimeModel: SkillRuntimeFeatureModel
-    let taskAutomationModel: TaskAutomationFeatureModel
-    let productOSControlModel: ProductOSControlFeatureModel
-    let calendarFeatureModel: CalendarFeatureModel
-    let contactsFeatureModel: ContactsFeatureModel
-    let mailFeatureModel: MailFeatureModel
-    let rssFeatureModel: RSSFeatureModel
     var selection: SidebarItem
-
-    private var chatActions: ChatFeatureActions {
-        let session = ClosureChatSessionPort(
-            isLoading: { [weak viewModel] in viewModel?.isLoadingSelectedChatSessionDetail ?? false },
-            reloadIfNeeded: { [weak viewModel] restore in viewModel?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: restore) },
-            reload: { [weak viewModel] restore in viewModel?.reloadChatSessions(restoreWorkspaceMode: restore) },
-            new: { [weak viewModel] in viewModel?.newChatSession() },
-            select: { [weak viewModel] in viewModel?.selectChatSession($0) },
-            rename: { [weak viewModel] in viewModel?.renameChatSession($0, title: $1) },
-            filter: { [weak viewModel] in viewModel?.setSessionListFilter($0, restoreWorkspaceMode: $1) },
-            status: { [weak viewModel] in viewModel?.setSelectedSessionStatus($0) },
-            flag: { [weak viewModel] in viewModel?.toggleSelectedSessionFlag() },
-            label: { [weak viewModel] in viewModel?.toggleSelectedSessionLabel($0) }
-        )
-        let run = ClosureChatRunPort(
-            backgroundTasks: { [weak viewModel] in
-                guard let viewModel else { return [] }
-                return viewModel.chatBackgroundTaskCoordinator.tasks(for: viewModel.chatFeatureModel.sessions.selectedSessionID)
-            },
-            hasBackgroundTask: { [weak viewModel] in
-                guard let viewModel, let sessionID = viewModel.chatFeatureModel.sessions.selectedSessionID else { return false }
-                return viewModel.chatBackgroundTaskCoordinator.hasRunningTask(sessionID: sessionID)
-            },
-            summaryFreshness: { [weak viewModel] in viewModel?.latestChatSummaryFreshness },
-            summaryContext: { [weak viewModel] in viewModel?.latestChatSummaryContextMessage ?? "" },
-            submit: { [weak viewModel] prompt, clear, display, attachments, people in
-                await viewModel?.submitChat(prompt: prompt, clearComposer: clear, displayPrompt: display, attachments: attachments, personReferences: people)
-            },
-            cancel: { [weak viewModel] in viewModel?.cancelActiveChatRun() },
-            permission: { [weak viewModel] in viewModel?.setAgentPermissionMode($0) },
-            timeline: { [weak viewModel] in viewModel?.restoredAgentEventTimeline(for: $0) ?? [] },
-            markdown: { [weak viewModel] in viewModel?.markdownPersistentCacheContext(messageID: $0) },
-            copy: { [weak viewModel] in viewModel?.copyAssistantMessageToPasteboard($0) },
-            export: { [weak viewModel] in viewModel?.exportAssistantMessageToFile($0, now: $1) },
-            download: { [weak viewModel] in viewModel?.downloadPreviewImage($0) },
-            clearOverride: { [weak viewModel] in viewModel?.clearSessionLLMOverride() },
-            selectModel: { [weak viewModel] in viewModel?.selectLLMModel($0, providerMode: $1, connectionID: $2) },
-            thinking: { [weak viewModel] in viewModel?.selectLLMThinkingLevel($0) },
-            defaultThinking: { [weak viewModel] in viewModel?.selectDefaultLLMThinkingLevel($0) },
-            reloadModels: { [weak viewModel] in await viewModel?.reloadLLMModelConnections() }
-        )
-        return ChatFeatureActions(
-            session: session,
-            composer: viewModel.chatComposerCoordinator,
-            run: run,
-            approval: viewModel.chatApprovalCoordinator,
-            workspace: ClosureChatWorkspacePort(
-                open: { [weak viewModel] in viewModel?.openURLInCurrentChatBrowser($0) },
-                record: { [weak viewModel] in viewModel?.appendSessionRecord(kind: $0, title: $1, body: $2, metadata: $3, sessionID: $4) }
-            ),
-            errors: ClosureChatErrorPort(
-                get: { [weak viewModel] in viewModel?.errorMessage },
-                set: { [weak viewModel] in viewModel?.errorMessage = $0 }
-            ),
-            dependencies: ChatFeatureDependencies(
-                browser: viewModel.browserFeatureModel,
-                appSettings: viewModel.appSettingsModel,
-                inputSettings: viewModel.inputSettingsModel,
-                workspaceSettings: viewModel.workspaceSettingsModel,
-                skills: skillRuntimeModel,
-                contacts: contactsFeatureModel,
-                governance: governanceModel,
-                aiConnections: viewModel.aiConnectionsModel,
-                permissionMode: { [weak viewModel] in viewModel?.agentPermissionMode ?? .askToWrite },
-                sessionHasLLMOverride: { [weak viewModel] in viewModel?.sessionHasLLMOverride ?? false }
-            )
-        )
-    }
 
     var body: some View {
         Group {
             switch selection {
             case .entities:
-                GraphEntitiesView(entities: graphDiagnosticsModel.entities, statements: graphDiagnosticsModel.statements, episodes: graphDiagnosticsModel.episodes)
+                GraphEntitiesView(entities: graph.graphDiagnostics.entities, statements: graph.graphDiagnostics.statements, episodes: graph.graphDiagnostics.episodes)
             case .search:
-                SearchView(model: graphDiagnosticsModel)
+                SearchView(model: graph.graphDiagnostics)
             case .observeLog:
-                ObserveLogView(entries: graphDiagnosticsModel.observeLogEntries)
+                ObserveLogView(entries: graph.graphDiagnostics.observeLogEntries)
             case .agentChat:
-                if viewModel.chatFeatureModel.sessions.selectedSessionID == nil {
+                if graph.chat.sessions.selectedSessionID == nil {
                     AgentChatNoSelectionDetailView()
                 } else {
-                    AgentChatView(model: viewModel.chatFeatureModel, chatActions: chatActions)
+                    AgentChatView(model: graph.chat, chatActions: graph.chatActions)
                 }
             case .promotionQueue:
-                PromotionQueueView(model: graphDiagnosticsModel)
+                PromotionQueueView(model: graph.graphDiagnostics)
             case .pendingApprovals:
-                AgentPendingApprovalReviewView(model: viewModel.chatFeatureModel, chatActions: chatActions)
+                AgentPendingApprovalReviewView(model: graph.chat, chatActions: graph.chatActions)
             case .automation, .scheduledTasks:
-                TaskAutomationDetailPane(model: taskAutomationModel, kind: .scheduled)
+                TaskAutomationDetailPane(model: graph.tasks, kind: .scheduled)
             case .eventTriggeredTasks:
-                TaskAutomationDetailPane(model: taskAutomationModel, kind: .eventTriggered)
+                TaskAutomationDetailPane(model: graph.tasks, kind: .eventTriggered)
             case .productOS:
                 ProductOSRegistryView(
-                    model: productOSControlModel,
-                    governanceConfig: governanceModel.config,
-                    commercialReadinessDashboard: viewModel.commercialReadinessDashboard
+                    model: graph.productOS,
+                    governanceConfig: graph.governance.config,
+                    commercialReadinessDashboard: graph.commercialReadinessDashboard()
                 )
             case .calendar:
-                CalendarSourceSettingsView(model: calendarFeatureModel)
+                CalendarSourceSettingsView(model: graph.calendar)
             case .contacts:
-                ContactsSourceSettingsView(model: contactsFeatureModel)
+                ContactsSourceSettingsView(model: graph.contacts)
             case .mail:
-                MailSourceDetailView(model: mailFeatureModel)
+                MailSourceDetailView(model: graph.mail)
             case .rss:
-                RSSSourceSettingsView(model: rssFeatureModel)
+                RSSSourceSettingsView(model: graph.rss)
             case .sources:
-                SourceRuntimePanelView(model: sourceRuntimeModel)
+                SourceRuntimePanelView(model: graph.sources)
             case .skills:
-                SkillRuntimePanelView(model: skillRuntimeModel)
+                SkillRuntimePanelView(model: graph.skills)
             case .llmSettings:
                 ConnorSettingsDetailView(
-                    viewModel: viewModel,
-                    shellModel: shellModel,
-                    identityStore: identityStore,
-                    calendarFeatureModel: calendarFeatureModel,
-                    rssFeatureModel: rssFeatureModel
+                    graph: graph,
+                    identityStore: identityStore
                 )
             }
         }
