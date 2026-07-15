@@ -53,12 +53,13 @@ struct AppStartupLightConstructionContractTests {
             in: compositionSource,
             endingAt: "            shutdown: {"
         )
-        let scheduler = try #require(maintenance.range(of: "startTaskSchedulerTimer()"))
+        let scheduler = try #require(maintenance.range(of: "maintenanceCoordinator.startScheduler()"))
         let recovery = try #require(maintenance.range(of: "recoverPersistedJobs()"))
         let identity = try #require(maintenance.range(of: "identityStore.restoreSession()"))
         #expect(scheduler.lowerBound < recovery.lowerBound)
         #expect(recovery.lowerBound < identity.lowerBound)
-        #expect(maintenance.components(separatedBy: "startTaskSchedulerTimer()").count - 1 == 1)
+        #expect(maintenance.components(separatedBy: "maintenanceCoordinator.startScheduler()").count - 1 == 1)
+        #expect(!maintenance.contains("startTaskSchedulerTimer()"))
         #expect(maintenance.components(separatedBy: "recoverPersistedJobs()").count - 1 == 1)
         #expect(maintenance.components(separatedBy: "identityStore.restoreSession()").count - 1 == 1)
     }
