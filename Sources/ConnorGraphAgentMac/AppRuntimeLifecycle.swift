@@ -983,7 +983,6 @@ final class AppRuntimeLifecycle {
             self?.clearSelectedChatRuntime()
         }
         chatSessionCoordinator.onSessionsChanged = { [weak self] sessions in
-            self?.rebuildSessionSearchIndexSoon(sessions: sessions)
             self?.synchronizeSessionReadStates(from: sessions)
         }
         chatSessionCoordinator.onSessionAdded = { [weak self] session in
@@ -1156,7 +1155,7 @@ final class AppRuntimeLifecycle {
             return
         }
         chatSessionCoordinator.installStartupSessions(snapshot.sessions, allSessions: snapshot.allSessions)
-        rebuildSessionSearchIndexSoon(sessions: snapshot.allSessions)
+        globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {
             clearSelectedChatSessionDetail()
@@ -1861,10 +1860,6 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.reloadIfNeeded(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
     }
 
-    private func rebuildSessionSearchIndexSoon(sessions: [AgentSession]) {
-        globalSearchFeatureModel.rebuildSessionIndex(sessions: sessions)
-    }
-
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
         if chatSessionRepository == nil {
             replaceSelectedChatTranscript(activeChatTranscript)
@@ -1989,6 +1984,7 @@ final class AppRuntimeLifecycle {
             self.newSessionPreparationTasks.removeValue(forKey: session.id)
             switch result {
             case let .success(artifactDirectories, manager):
+                self.globalSearchFeatureModel.upsertSessionIndex(session)
                 if self.chatFeatureModel.sessions.selectedSessionID == session.id {
                     self.chatFeatureModel.sessions.selectedArtifactDirectories = artifactDirectories
                     self.chatRunCoordinator.prepareNewSession(session, manager: manager)
@@ -2024,6 +2020,7 @@ final class AppRuntimeLifecycle {
     }
 
     private func synchronizeRenamedChatSession(_ updated: AgentSession) {
+        globalSearchFeatureModel.upsertSessionIndex(updated)
         if let index = chatFeatureModel.sessions.sessions.firstIndex(where: { $0.id == updated.id }) {
             chatFeatureModel.sessions.sessions[index] = updated
         }
@@ -2123,6 +2120,7 @@ final class AppRuntimeLifecycle {
                 return
             }
             try chatSessionRepository.deleteSession(sessionID: sessionID)
+            globalSearchFeatureModel.removeSessionIndex(sessionID: sessionID)
             chatBackgroundTaskCoordinator.removeSession(sessionID)
             chatComposerCoordinator.removeSession(sessionID)
             chatRunCoordinator.removeSession(sessionID)
@@ -2588,7 +2586,6 @@ final class AppRuntimeLifecycle {
                     guard let self, self.chatFeatureModel.sessions.filter == filter else { return }
                     self.chatFeatureModel.sessions.sessions = result.visibleSessions
                     self.chatFeatureModel.sessions.allSessions = result.allSessions
-                    self.rebuildSessionSearchIndexSoon(sessions: result.allSessions)
                     self.synchronizeSessionReadStates(from: result.allSessions)
                     AppPerformanceLog.chatTurnLogger.info("sessionList.asyncRefresh reason=\(reason, privacy: .public) visible=\(result.visibleSessions.count, privacy: .public) all=\(result.allSessions.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
                 }
@@ -2797,6 +2794,7 @@ final class AppRuntimeLifecycle {
                 chatSessionCoordinator.adoptDirectSelection(response.session.id)
             }
             chatApprovalCoordinator.reload()
+            globalSearchFeatureModel.upsertSessionIndex(response.session)
             scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
             if shouldAutoGenerateInitialTitle {
                 regenerateChatSessionTitle(submittingSessionID)
@@ -2816,6 +2814,7 @@ final class AppRuntimeLifecycle {
             return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
+            globalSearchFeatureModel.upsertSessionIndex(recoveredSession)
             if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
                 chatRunCoordinator.applyRecoveredRun(
                     manager: manager,

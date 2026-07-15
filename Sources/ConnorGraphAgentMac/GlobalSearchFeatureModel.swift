@@ -27,7 +27,8 @@ final class GlobalSearchFeatureModel {
     @ObservationIgnored private let sessionSearchIndexService: SessionSearchIndexService?
     @ObservationIgnored private let historyRepository: AppGlobalSearchHistoryRepository?
     @ObservationIgnored private var previewTask: Task<Void, Never>?
-    @ObservationIgnored private var sessionIndexRebuildTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionIndexBootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionIndexMutationTask: Task<Void, Never>?
     @ObservationIgnored private var sessionIndexGeneration: UInt64 = 0
     @ObservationIgnored private var refreshGeneration: UInt64 = 0
     @ObservationIgnored private var isShutdown = false
@@ -219,15 +220,35 @@ final class GlobalSearchFeatureModel {
         return nil
     }
 
-    func rebuildSessionIndex(sessions: [AgentSession]) {
+    func bootstrapSessionIndexIfNeeded(sessions: [AgentSession]) {
         guard let sessionSearchIndexService else { return }
         sessionIndexGeneration &+= 1
         let generation = sessionIndexGeneration
-        sessionIndexRebuildTask?.cancel()
-        sessionIndexRebuildTask = Task { [weak self] in
-            try? await sessionSearchIndexService.rebuild(sessions: sessions)
+        sessionIndexBootstrapTask?.cancel()
+        sessionIndexBootstrapTask = Task(priority: .utility) { [weak self] in
+            _ = try? await sessionSearchIndexService.bootstrapIfEmpty(sessions: sessions)
             guard let self, self.sessionIndexGeneration == generation else { return }
-            self.sessionIndexRebuildTask = nil
+            self.sessionIndexBootstrapTask = nil
+        }
+    }
+
+    func upsertSessionIndex(_ session: AgentSession) {
+        guard let sessionSearchIndexService else { return }
+        let precedingMutation = sessionIndexMutationTask
+        sessionIndexMutationTask = Task(priority: .utility) {
+            await precedingMutation?.value
+            guard !Task.isCancelled else { return }
+            try? await sessionSearchIndexService.upsert(session: session)
+        }
+    }
+
+    func removeSessionIndex(sessionID: String) {
+        guard let sessionSearchIndexService else { return }
+        let precedingMutation = sessionIndexMutationTask
+        sessionIndexMutationTask = Task(priority: .utility) {
+            await precedingMutation?.value
+            guard !Task.isCancelled else { return }
+            try? await sessionSearchIndexService.remove(sessionID: sessionID)
         }
     }
 
@@ -238,8 +259,10 @@ final class GlobalSearchFeatureModel {
         previewTask?.cancel()
         previewTask = nil
         sessionIndexGeneration &+= 1
-        sessionIndexRebuildTask?.cancel()
-        sessionIndexRebuildTask = nil
+        sessionIndexBootstrapTask?.cancel()
+        sessionIndexBootstrapTask = nil
+        sessionIndexMutationTask?.cancel()
+        sessionIndexMutationTask = nil
     }
 
     private func finishInteraction(clearQuery: Bool) -> Bool {
