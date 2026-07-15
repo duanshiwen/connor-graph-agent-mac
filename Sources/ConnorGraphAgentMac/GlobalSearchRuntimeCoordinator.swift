@@ -45,9 +45,6 @@ final class GlobalSearchRuntimeCoordinator {
         search.fallbackNativeSearchProvider = { [weak self] kind, query, limit in
             self?.fallbackResults(kind: kind, query: query, limit: limit) ?? []
         }
-        search.sourceReadinessProvider = { [weak browser] in
-            await browser?.waitForPendingIndexOperations()
-        }
         search.defaultSearchURLProvider = { [weak appSettings] query in
             appSettings?.defaultSearchEngine.searchURL(for: query)
         }
