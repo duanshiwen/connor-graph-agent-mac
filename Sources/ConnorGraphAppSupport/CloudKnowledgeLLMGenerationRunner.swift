@@ -5,14 +5,14 @@ import ConnorGraphCore
 public enum CloudKnowledgeLLMGenerationError: Error, Sendable, Equatable, LocalizedError {
     case toolCallingUnsupported(modelID: String)
     case modelDidNotSearch
-    case tooManyToolErrors
+    case tooManyToolErrors(lastError: String)
     case maximumIterationsReached
 
     public var errorDescription: String? {
         switch self {
         case .toolCallingUnsupported(let modelID): "当前模型 \(modelID) 不支持工具调用，请切换模型后继续。"
         case .modelDidNotSearch: "模型没有先检索知识库，未写入任何知识。请继续重试或切换模型。"
-        case .tooManyToolErrors: "模型连续多次生成了无效的知识操作，任务已暂停。"
+        case .tooManyToolErrors(let lastError): "模型连续多次生成了无效的知识操作，任务已暂停。最后一次错误：\(lastError)"
         case .maximumIterationsReached: "知识生成超过最大处理轮数，任务已暂停。"
         }
     }
@@ -62,6 +62,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         var consecutiveErrors = 0
         var lastSignature: String?
         var repeatedSignatureCount = 0
+        var lastToolError = "模型重复提交了相同的无效工具调用。"
 
         for _ in 0..<maximumIterations {
             try Task.checkCancellation()
@@ -81,7 +82,9 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                 try Task.checkCancellation()
                 let signature = "\(call.name)|\(call.argumentsJSON)"
                 if signature == lastSignature { repeatedSignatureCount += 1 } else { lastSignature = signature; repeatedSignatureCount = 1 }
-                if repeatedSignatureCount >= 6 { throw CloudKnowledgeLLMGenerationError.tooManyToolErrors }
+                if repeatedSignatureCount >= 6 {
+                    throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastToolError)
+                }
 
                 let executionContext = AgentToolExecutionContext(
                     runID: agentRunID,
@@ -99,8 +102,11 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     messages.append(AgentModelMessage(role: .tool, content: result.contentJSON ?? result.contentText, toolCallID: call.id, name: call.name))
                 } catch {
                     consecutiveErrors += 1
-                    messages.append(AgentModelMessage(role: .tool, content: "Tool failed: \(error.localizedDescription)", toolCallID: call.id, name: call.name))
-                    if consecutiveErrors >= 3 { throw CloudKnowledgeLLMGenerationError.tooManyToolErrors }
+                    lastToolError = String(error.localizedDescription.prefix(240))
+                    messages.append(AgentModelMessage(role: .tool, content: "Tool failed: \(lastToolError)", toolCallID: call.id, name: call.name))
+                    if consecutiveErrors >= 3 {
+                        throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastToolError)
+                    }
                 }
             }
         }
