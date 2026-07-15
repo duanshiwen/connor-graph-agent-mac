@@ -4,7 +4,9 @@ import os
 public enum AppPerformanceLog {
     public static let subsystem = "ConnorGraphAgentMac"
     public static let chatTurnCategory = "ChatTurnPerformance"
+    public static let sidebarNavigationCategory = "SidebarNavigationPerformance"
     public static let chatTurnLogger = Logger(subsystem: subsystem, category: chatTurnCategory)
+    public static let sidebarNavigationLogger = Logger(subsystem: subsystem, category: sidebarNavigationCategory)
 
     public struct Duration: Sendable, Equatable {
         public var nanoseconds: UInt64
