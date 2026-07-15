@@ -34,6 +34,11 @@ public actor ActivityTimelineCacheWriter {
         pendingSaves[sessionID] = PendingSave(timeline: timeline, task: task)
     }
 
+    public func waitForPendingSave(sessionID: String) async {
+        let task = pendingSaves[sessionID]?.task
+        await task?.value
+    }
+
     public func flush(sessionID: String) throws {
         guard let pending = pendingSaves.removeValue(forKey: sessionID) else { return }
         pending.task?.cancel()
