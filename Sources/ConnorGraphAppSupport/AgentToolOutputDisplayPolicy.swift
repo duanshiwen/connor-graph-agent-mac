@@ -17,7 +17,7 @@ public struct AgentToolOutputDisplay: Codable, Sendable, Equatable {
 public struct AgentToolOutputDisplayPolicy: Sendable {
     public var previewCharacterLimit: Int
 
-    public init(previewCharacterLimit: Int = 100_000) {
+    public init(previewCharacterLimit: Int = 16_000) {
         self.previewCharacterLimit = max(0, previewCharacterLimit)
     }
 

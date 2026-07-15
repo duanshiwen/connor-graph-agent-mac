@@ -60,12 +60,12 @@ struct MailHTMLRenderCacheTests {
         #expect(model.preparedHTMLCache.count == 0)
     }
 
-    @Test func mailConfigurationsShareDedicatedPoolAndDisableJavaScript() {
+    @Test func mailConfigurationsAreIndependentAndDisableJavaScript() {
         let provider = MailWebViewConfigurationProvider()
         let first = provider.makeConfiguration()
         let second = provider.makeConfiguration()
 
-        #expect(provider.sharesMailProcessPool(first, second))
+        #expect(first !== second)
         #expect(first.defaultWebpagePreferences.allowsContentJavaScript == false)
         #expect(second.defaultWebpagePreferences.allowsContentJavaScript == false)
     }

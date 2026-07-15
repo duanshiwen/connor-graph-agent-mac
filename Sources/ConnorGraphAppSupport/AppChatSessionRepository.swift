@@ -60,6 +60,22 @@ public struct AppChatSessionRepository: Sendable {
         try makeNewSession(title: title, now: now)
     }
 
+    /// Persists a session whose stable identity was allocated by the interactive
+    /// UI before storage work began. This lets navigation/list selection commit
+    /// first without replacing the row identity after persistence completes.
+    @discardableResult
+    public func persistNewSession(_ session: AgentSession) throws -> AgentSessionArtifactDirectories? {
+        try store.upsertSession(session)
+        return try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+    }
+
+    /// Rolls back a session that failed during its initial persistence transaction.
+    /// Unlike user-initiated deletion, a not-yet-ready session cannot own runs or
+    /// background tasks, so no task lookup or governance event is required.
+    public func rollbackNewSession(sessionID: String) throws {
+        try store.deleteSession(id: sessionID)
+    }
+
     /// Creates an imported note session in one database write. This avoids the
     /// previous empty-session insert followed by a load and full messages_json
     /// rewrite for every imported note.

@@ -20,6 +20,21 @@ public enum AppLLMRuntimeConfigurationError: Error, LocalizedError, Equatable, S
     }
 }
 
+private final class AppGraphAgentRuntimeSharedCache: @unchecked Sendable {
+    private let lock = NSLock()
+    /// `nil` means not initialized; an empty array caches an unavailable facade.
+    private var memoryOSFacades: [AppMemoryOSFacade]?
+
+    func memoryOSFacade(build: () -> AppMemoryOSFacade?) -> AppMemoryOSFacade? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let memoryOSFacades { return memoryOSFacades.first }
+        let facade = build()
+        memoryOSFacades = facade.map { [$0] } ?? []
+        return facade
+    }
+}
+
 public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
@@ -35,6 +50,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
+    private let sharedCache: AppGraphAgentRuntimeSharedCache
 
     public init(
         store: SQLiteGraphKernelStore,
@@ -66,6 +82,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
+        self.sharedCache = AppGraphAgentRuntimeSharedCache()
     }
 
     public func makeAgentLoopChatController(
@@ -102,15 +119,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     private func makeMemoryOSFacade() -> AppMemoryOSFacade? {
         guard let storagePaths else { return nil }
-        do {
-            let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
-            try store.migrate()
-            let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
-            let facade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
-            try facade.ensureCurrentUserAnchor()
-            return facade
-        } catch {
-            return nil
+        return sharedCache.memoryOSFacade {
+            do {
+                let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
+                try store.migrate()
+                let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
+                let facade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
+                try facade.ensureCurrentUserAnchor()
+                return facade
+            } catch {
+                return nil
+            }
         }
     }
 

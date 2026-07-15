@@ -21,8 +21,8 @@ struct CraftPrimarySidebarView: View {
     var body: some View {
         VStack(spacing: 10) {
             Button {
-                sendCommand(.shortcut(.newSession))
                 select(.agentChat)
+                sendCommand(.shortcut(.newSession))
             } label: {
                 SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
             }
@@ -31,8 +31,8 @@ struct CraftPrimarySidebarView: View {
             .padding(.top, 10)
 
             Button {
-                sendCommand(.newNote)
                 select(.agentChat)
+                sendCommand(.newNote)
             } label: {
                 SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
             }

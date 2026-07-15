@@ -37,6 +37,10 @@ struct AgentToolInvocationDetailOverlay: View {
             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
             .padding(AgentChatLayout.spaceXL)
         }
+        .task(id: invocation.callID) {
+            await Task.yield()
+            AppInteractionPerformance.endAgentDetail(callID: invocation.callID)
+        }
     }
 
     private var header: some View {

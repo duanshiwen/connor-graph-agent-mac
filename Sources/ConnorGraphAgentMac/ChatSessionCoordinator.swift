@@ -17,6 +17,7 @@ final class ChatSessionCoordinator {
     @ObservationIgnored private var listRefreshGeneration = 0
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var selectionGeneration = 0
+    @ObservationIgnored private var pendingNewSessionIDs: Set<String> = []
     @ObservationIgnored private var isShutdown = false
 
     @ObservationIgnored var activeSessionIDProvider: () -> String = { "" }
@@ -91,6 +92,7 @@ final class ChatSessionCoordinator {
 
     func select(_ sessionID: String) {
         guard !isShutdown, let repository else { return }
+        if pendingNewSessionIDs.contains(sessionID) { return }
         if model.selectedSessionID == sessionID,
            model.loadingSessionDetailID == nil,
            activeSessionIDProvider() == sessionID { return }
@@ -134,6 +136,67 @@ final class ChatSessionCoordinator {
         selectionGeneration += 1
         model.loadingSessionDetailID = nil
         model.selectedSessionID = sessionID
+    }
+
+    /// Installs a newly persisted session without synchronously reloading every
+    /// session (and the selected session detail) from SQLite. New sessions are
+    /// already complete value snapshots, so a full repository round-trip adds
+    /// latency without adding correctness.
+    @discardableResult
+    func adoptNewSession(_ session: AgentSession) -> Bool {
+        adoptNewSession(session, isPreparing: false)
+    }
+
+    /// Publishes a new session before persistence/runtime construction finishes.
+    /// The selected row changes immediately while the existing chat loading view
+    /// replaces stale detail content until `completeNewSessionPreparation` runs.
+    @discardableResult
+    func adoptPreparingNewSession(_ session: AgentSession) -> Bool {
+        adoptNewSession(session, isPreparing: true)
+    }
+
+    func completeNewSessionPreparation(sessionID: String) {
+        pendingNewSessionIDs.remove(sessionID)
+        guard model.selectedSessionID == sessionID,
+              model.loadingSessionDetailID == sessionID else { return }
+        model.loadingSessionDetailID = nil
+    }
+
+    func discardPreparingNewSession(sessionID: String) {
+        pendingNewSessionIDs.remove(sessionID)
+        model.allSessions.removeAll { $0.id == sessionID }
+        model.sessions.removeAll { $0.id == sessionID }
+        if model.selectedSessionID == sessionID {
+            clearSelection()
+        }
+        onSessionsChanged(model.allSessions)
+    }
+
+    private func adoptNewSession(_ session: AgentSession, isPreparing: Bool) -> Bool {
+        guard !isShutdown else { return false }
+        cancelListRefresh()
+        hasLoadedInitialSessions = true
+
+        model.allSessions.removeAll { $0.id == session.id }
+        model.allSessions.insert(session, at: 0)
+        model.sessions = Self.filter(model.allSessions, by: model.filter)
+        let isVisible = model.sessions.contains { $0.id == session.id }
+        if isVisible {
+            selectionTask?.cancel()
+            selectionGeneration += 1
+            model.selectedSessionID = session.id
+            model.loadingSessionDetailID = isPreparing ? session.id : nil
+            if isPreparing {
+                pendingNewSessionIDs.insert(session.id)
+                onSelectionStarted(session.id)
+            }
+        } else {
+            pendingNewSessionIDs.remove(session.id)
+            clearSelection()
+        }
+        onSessionsChanged(model.allSessions)
+        errorMessage = nil
+        return isVisible
     }
 
     func clearSelection() {
@@ -191,6 +254,7 @@ final class ChatSessionCoordinator {
         selectionTask?.cancel()
         selectionTask = nil
         selectionGeneration += 1
+        pendingNewSessionIDs.removeAll()
         model.loadingSessionDetailID = nil
     }
 
@@ -226,9 +290,13 @@ final class ChatSessionCoordinator {
                       !self.isShutdown,
                       self.listRefreshGeneration == generation,
                       self.model.filter == filter else { return }
-                self.model.sessions = result.visibleSessions
-                self.model.allSessions = result.allSessions
-                self.onSessionsChanged(result.allSessions)
+                if self.model.sessions != result.visibleSessions {
+                    self.model.sessions = result.visibleSessions
+                }
+                if self.model.allSessions != result.allSessions {
+                    self.model.allSessions = result.allSessions
+                    self.onSessionsChanged(result.allSessions)
+                }
                 self.reconcileSelection(visibleSessions: result.visibleSessions)
                 self.errorMessage = nil
             } catch is CancellationError {
