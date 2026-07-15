@@ -26,6 +26,24 @@ public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Ident
         self.subscriberCount = subscriberCount; self.subscribed = subscribed; self.owned = owned
         self.ownerID = ownerID; self.ownerName = ownerName; self.publicationStatus = publicationStatus
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, categoryID, subscriberCount, subscribed, owned, ownerID, ownerName, publicationStatus
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        categoryID = try container.decodeIfPresent(String.self, forKey: .categoryID)
+        subscriberCount = try container.decodeIfPresent(Int.self, forKey: .subscriberCount) ?? 0
+        subscribed = try container.decodeIfPresent(Bool.self, forKey: .subscribed) ?? false
+        owned = try container.decodeIfPresent(Bool.self, forKey: .owned) ?? false
+        ownerID = try container.decodeIfPresent(UInt.self, forKey: .ownerID)
+        ownerName = try container.decodeIfPresent(String.self, forKey: .ownerName)
+        publicationStatus = try container.decodeIfPresent(String.self, forKey: .publicationStatus)
+    }
 }
 public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
     public var subscribed: [CloudMarketplaceKnowledgeBase]
@@ -97,7 +115,8 @@ public actor CloudKnowledgeAuthorizationCache {
             async let library = self.api.library()
             self.home = try await home
             self.library = try await library
-            for base in self.library.subscribed { await self.cache.authorize(base.id) }
+            let subscribed = self.home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + self.library.subscribed
+            for base in subscribed { await self.cache.authorize(base.id) }
         }
     }
     public func loadHome() async { await load() }
