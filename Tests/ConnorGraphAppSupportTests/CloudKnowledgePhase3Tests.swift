@@ -115,6 +115,13 @@ struct CloudKnowledgePhase3Tests {
         let schema = write.inputSchema.jsonObject
         let properties = try #require(schema["properties"] as? [String: Any])
         #expect(properties["knowledge_base_id"] == nil); #expect(properties["publication_run_id"] == nil); #expect(properties["owner_user_id"] == nil); #expect(properties["raw_conversation"] == nil)
+        let payloadSchema = try #require(properties["payload"] as? [String: Any])
+        let payloadProperties = try #require(payloadSchema["properties"] as? [String: Any])
+        #expect(payloadProperties["kind"] != nil)
+        #expect(payloadProperties["stable_key"] != nil)
+        #expect(payloadProperties["valid_from"] != nil)
+        #expect(payloadProperties["payload"] != nil)
+        #expect(write.description.contains("kind, stable_key, valid_from"))
     }
 
     @Test func realModelToolLoopSearchesStagesAndSummarizesConversation() async throws {
@@ -151,6 +158,13 @@ struct CloudKnowledgePhase3Tests {
         #expect(error.localizedDescription.contains("最后一次错误"))
         #expect(error.localizedDescription.contains(bounded))
         #expect(bounded.count == 240)
+    }
+
+    @Test func agentToolErrorsExposeTheirActionableDescription() {
+        let error: Error = AgentToolError.invalidArguments("payload requires stable_key")
+        let diagnostic = (error as? AgentToolError)?.description ?? error.localizedDescription
+
+        #expect(diagnostic == "Invalid arguments: payload requires stable_key")
     }
 
     private static func operation(layer: CloudKnowledgeLayer, contextID: String, terms: [String], payloadText: String = "knowledge") -> CloudKnowledgeOperation {
