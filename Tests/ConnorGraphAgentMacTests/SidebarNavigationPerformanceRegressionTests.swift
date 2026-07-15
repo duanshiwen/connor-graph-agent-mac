@@ -56,9 +56,11 @@ struct SidebarNavigationPerformanceRegressionTests {
     }
 
     @Test func retainedHostKeepsBoundedControllersAcrossOneHundredSwitches() {
+        let contentOwner = NSObject()
         let host = RetainedRouteHostController(
             pane: .list,
             tracker: AppRoutePerformanceTracker(),
+            contentOwner: ObjectIdentifier(contentOwner),
             routeFactory: { route in AnyView(Text(route.rawValue)) }
         )
         let routes: [SidebarItem] = [.agentChat, .rss, .mail, .calendar, .contacts, .sources]

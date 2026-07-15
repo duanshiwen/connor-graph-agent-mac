@@ -32,6 +32,7 @@ final class RetainedRouteHostController: NSViewController {
     private let pane: AppRoutePane
     private let tracker: AppRoutePerformanceTracker
     private let policy: RetainedRouteCachePolicy
+    private var contentOwner: ObjectIdentifier
     private var routeFactory: RouteFactory
     private var controllers: [SidebarItem: NSHostingController<AnyView>] = [:]
     private var coldRoutesByRecency: [SidebarItem] = []
@@ -41,11 +42,13 @@ final class RetainedRouteHostController: NSViewController {
         pane: AppRoutePane,
         tracker: AppRoutePerformanceTracker,
         policy: RetainedRouteCachePolicy = .sidebar,
+        contentOwner: ObjectIdentifier,
         routeFactory: @escaping RouteFactory
     ) {
         self.pane = pane
         self.tracker = tracker
         self.policy = policy
+        self.contentOwner = contentOwner
         self.routeFactory = routeFactory
         super.init(nibName: nil, bundle: nil)
     }
@@ -68,8 +71,18 @@ final class RetainedRouteHostController: NSViewController {
         controllers[route].map(ObjectIdentifier.init)
     }
 
-    func updateRouteFactory(_ routeFactory: @escaping RouteFactory) {
+    func updateContent(
+        owner: ObjectIdentifier,
+        routeFactory: @escaping RouteFactory
+    ) {
         self.routeFactory = routeFactory
+        guard contentOwner != owner else { return }
+
+        contentOwner = owner
+        invalidateCachedRoutes()
+        AppPerformanceLog.sidebarNavigationLogger.info(
+            "sidebar.route.contentOwnerChanged pane=\(self.pane.rawValue, privacy: .public)"
+        )
     }
 
     func activate(_ route: SidebarItem) {
@@ -116,6 +129,10 @@ final class RetainedRouteHostController: NSViewController {
     }
 
     func shutdown() {
+        invalidateCachedRoutes()
+    }
+
+    private func invalidateCachedRoutes() {
         for controller in controllers.values { detach(controller) }
         controllers.removeAll()
         coldRoutesByRecency.removeAll()
@@ -162,6 +179,7 @@ struct RetainedRouteHostView: NSViewControllerRepresentable {
     var pane: AppRoutePane
     var tracker: AppRoutePerformanceTracker
     var policy: RetainedRouteCachePolicy = .sidebar
+    var contentOwner: ObjectIdentifier
     var routeFactory: RetainedRouteHostController.RouteFactory
 
     func makeNSViewController(context: Context) -> RetainedRouteHostController {
@@ -169,6 +187,7 @@ struct RetainedRouteHostView: NSViewControllerRepresentable {
             pane: pane,
             tracker: tracker,
             policy: policy,
+            contentOwner: contentOwner,
             routeFactory: routeFactory
         )
         controller.activate(route)
@@ -176,7 +195,7 @@ struct RetainedRouteHostView: NSViewControllerRepresentable {
     }
 
     func updateNSViewController(_ controller: RetainedRouteHostController, context: Context) {
-        controller.updateRouteFactory(routeFactory)
+        controller.updateContent(owner: contentOwner, routeFactory: routeFactory)
         controller.activate(route)
     }
 

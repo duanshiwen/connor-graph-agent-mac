@@ -4,6 +4,8 @@ import Testing
 
 @MainActor
 struct RetainedRouteHostControllerTests {
+    private final class ContentOwner {}
+
     @Test func hotRouteControllersKeepIdentityAcrossRoundTrips() throws {
         let host = makeHost()
 
@@ -48,6 +50,45 @@ struct RetainedRouteHostControllerTests {
         #expect(host.cachedControllerCount <= 4)
     }
 
+    @Test func unchangedContentOwnerPreservesCachedControllerIdentity() throws {
+        let owner = ContentOwner()
+        let host = makeHost(owner: owner)
+
+        host.activate(.agentChat)
+        let identity = try #require(host.controllerIdentity(for: .agentChat))
+        host.updateContent(
+            owner: ObjectIdentifier(owner),
+            routeFactory: { route in AnyView(Text("updated-\(route.rawValue)")) }
+        )
+        host.activate(.agentChat)
+
+        #expect(host.controllerIdentity(for: .agentChat) == identity)
+    }
+
+    @Test func changedContentOwnerInvalidatesEveryCachedController() throws {
+        let placeholderOwner = ContentOwner()
+        let liveOwner = ContentOwner()
+        let host = makeHost(owner: placeholderOwner)
+
+        host.activate(.agentChat)
+        host.activate(.mail)
+        let placeholderChatIdentity = try #require(host.controllerIdentity(for: .agentChat))
+        let placeholderMailIdentity = try #require(host.controllerIdentity(for: .mail))
+
+        host.updateContent(
+            owner: ObjectIdentifier(liveOwner),
+            routeFactory: { route in AnyView(Text("live-\(route.rawValue)")) }
+        )
+
+        #expect(host.cachedRoutes.isEmpty)
+        #expect(host.activeRoute == nil)
+
+        host.activate(.agentChat)
+        host.activate(.mail)
+        #expect(host.controllerIdentity(for: .agentChat) != placeholderChatIdentity)
+        #expect(host.controllerIdentity(for: .mail) != placeholderMailIdentity)
+    }
+
     @Test func cachePolicyEvictionIsDeterministic() {
         let policy = RetainedRouteCachePolicy.sidebar
         let candidate = policy.evictionCandidate(
@@ -63,10 +104,11 @@ struct RetainedRouteHostControllerTests {
         ) == nil)
     }
 
-    private func makeHost() -> RetainedRouteHostController {
+    private func makeHost(owner: ContentOwner = ContentOwner()) -> RetainedRouteHostController {
         RetainedRouteHostController(
             pane: .list,
             tracker: AppRoutePerformanceTracker(),
+            contentOwner: ObjectIdentifier(owner),
             routeFactory: { route in AnyView(Text(route.rawValue)) }
         )
     }
