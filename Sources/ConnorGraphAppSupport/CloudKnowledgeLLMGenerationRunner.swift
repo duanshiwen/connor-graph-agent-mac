@@ -19,6 +19,7 @@ public enum CloudKnowledgeLLMGenerationError: Error, Sendable, Equatable, Locali
 }
 
 private struct CloudKnowledgeSearchMetadata: Sendable {
+    var query: String
     var terms: [String]
     var toolName: String
 }
@@ -101,8 +102,24 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     policyEngine: policy
                 )
                 do {
-                    try validateSearchChannel(call, searchMetadataByContextID: searchMetadataByContextID)
-                    let executableCall = normalizedWriteCall(call, searchMetadataByContextID: searchMetadataByContextID)
+                    var executableCall = call
+                    if let correctiveSearch = correctiveSearchCall(
+                        for: call,
+                        searchMetadataByContextID: searchMetadataByContextID
+                    ) {
+                        let correctiveResult = try await registry.execute(correctiveSearch, context: executionContext)
+                        searchCount += 1
+                        recordSearchMetadata(
+                            call: correctiveSearch,
+                            result: correctiveResult,
+                            into: &searchMetadataByContextID
+                        )
+                        if let contextID = searchContextID(from: correctiveResult) {
+                            executableCall = replacingSearchContext(in: call, with: contextID)
+                        }
+                    }
+                    try validateSearchChannel(executableCall, searchMetadataByContextID: searchMetadataByContextID)
+                    executableCall = normalizedWriteCall(executableCall, searchMetadataByContextID: searchMetadataByContextID)
                     let result = try await registry.execute(executableCall, context: executionContext)
                     if call.name == "cloud_kb_recent_context" || call.name == "cloud_kb_knowledge_context" {
                         searchCount += 1
@@ -165,6 +182,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
               let response = try? JSONDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
         else { return }
         metadataByContextID[response.searchContextID] = CloudKnowledgeSearchMetadata(
+            query: query,
             terms: CloudKnowledgePublishingTraceValidator.normalizedTerms(query),
             toolName: call.name
         )
@@ -193,6 +211,43 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         return normalized
     }
 
+    private func correctiveSearchCall(
+        for call: AgentToolCall,
+        searchMetadataByContextID: [String: CloudKnowledgeSearchMetadata]
+    ) -> AgentToolCall? {
+        guard isWriteTool(call.name),
+              let arguments = try? AgentToolArguments(json: call.argumentsJSON),
+              let contextID = arguments.string("search_context_id"),
+              let metadata = searchMetadataByContextID[contextID],
+              let requiredTool = requiredSearchTool(for: call.name, arguments: arguments),
+              metadata.toolName != requiredTool,
+              let data = try? JSONSerialization.data(withJSONObject: ["query": metadata.query, "limit": 20], options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8)
+        else { return nil }
+        return AgentToolCall(id: "corrective-search-\(call.id)", name: requiredTool, argumentsJSON: json)
+    }
+
+    private func searchContextID(from result: AgentToolResult) -> String? {
+        guard let contentJSON = result.contentJSON,
+              let data = contentJSON.data(using: .utf8),
+              let response = try? JSONDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
+        else { return nil }
+        return response.searchContextID
+    }
+
+    private func replacingSearchContext(in call: AgentToolCall, with contextID: String) -> AgentToolCall {
+        guard let data = call.argumentsJSON.data(using: .utf8),
+              var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return call }
+        object["search_context_id"] = contextID
+        guard let correctedData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let correctedJSON = String(data: correctedData, encoding: .utf8)
+        else { return call }
+        var corrected = call
+        corrected.argumentsJSON = correctedJSON
+        return corrected
+    }
+
     private func validateSearchChannel(
         _ call: AgentToolCall,
         searchMetadataByContextID: [String: CloudKnowledgeSearchMetadata]
@@ -202,14 +257,19 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
               let contextID = arguments.string("search_context_id"),
               let metadata = searchMetadataByContextID[contextID]
         else { return }
-        let requiresRecentContext = call.name == "cloud_kb_l2_update_entities"
-            || (call.name == "cloud_kb_retract_knowledge" && arguments.string("layer") == "l2")
-        let requiredTool = requiresRecentContext ? "cloud_kb_recent_context" : "cloud_kb_knowledge_context"
+        guard let requiredTool = requiredSearchTool(for: call.name, arguments: arguments) else { return }
         guard metadata.toolName == requiredTool else {
             throw AgentToolError.invalidArguments(
                 "search_context_id came from \(metadata.toolName), but \(call.name) requires a new \(requiredTool) search for this semantic group"
             )
         }
+    }
+
+    private func requiredSearchTool(for writeTool: String, arguments: AgentToolArguments) -> String? {
+        guard isWriteTool(writeTool) else { return nil }
+        let requiresRecentContext = writeTool == "cloud_kb_l2_update_entities"
+            || (writeTool == "cloud_kb_retract_knowledge" && arguments.string("layer") == "l2")
+        return requiresRecentContext ? "cloud_kb_recent_context" : "cloud_kb_knowledge_context"
     }
 
     private func isWriteTool(_ name: String) -> Bool {

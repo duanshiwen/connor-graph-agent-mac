@@ -146,9 +146,9 @@ struct CloudKnowledgePhase3Tests {
         #expect(result.summary == "已完成知识整理")
         #expect(await api.operations.count == 1)
         #expect(await api.searchViews == [.combined, .combined])
-        #expect(await scripted.requestCount == 5)
+        #expect(await scripted.requestCount == 3)
         #expect(await scripted.exposedValidationTool == false)
-        #expect(await api.operations.first?.semanticTerms.contains("connor") == true)
+        #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("connor") == .orderedSame } == true)
     }
 
     @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
@@ -203,10 +203,6 @@ private actor CloudKnowledgeScriptedProvider {
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-search", name: "cloud_kb_recent_context", argumentsJSON: #"{"query":"Connor","limit":20}"#)], finishReason: .toolCalls)
         case 2:
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor-publishing","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
-        case 3:
-            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "search", name: "cloud_kb_knowledge_context", argumentsJSON: #"{"query":"Connor","limit":20}"#)], finishReason: .toolCalls)
-        case 4:
-            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-2","decision":"create_new","semantic_terms":["unrelated"],"payload":{"kind":"reusable_knowledge","stable_key":"connor-publishing","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
         default:
             return AgentModelResponse(text: "已完成知识整理")
         }
