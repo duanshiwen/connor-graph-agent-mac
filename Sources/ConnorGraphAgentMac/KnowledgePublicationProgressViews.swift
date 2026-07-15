@@ -37,26 +37,29 @@ struct KnowledgePublicationToolbarProgressButton: View {
 
     private var summary: KnowledgePublicationActivitySummary { .init(store: store) }
 
+    @ViewBuilder
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                if let progress = summary.progressFraction {
-                    Circle().stroke(Color.secondary.opacity(0.22), lineWidth: 2.5)
-                    Circle().trim(from: 0, to: progress)
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                } else {
-                    ProgressView().controlSize(.small).progressViewStyle(.circular)
+        if summary.isVisible {
+            Button(action: action) {
+                ZStack {
+                    if let progress = summary.progressFraction {
+                        Circle().stroke(Color.secondary.opacity(0.22), lineWidth: 2.5)
+                        Circle().trim(from: 0, to: progress)
+                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    } else {
+                        ProgressView().controlSize(.small).progressViewStyle(.circular)
+                    }
+                    statusImage.font(.system(size: 8, weight: .bold)).foregroundStyle(Color.accentColor)
                 }
-                statusImage.font(.system(size: 8, weight: .bold)).foregroundStyle(Color.accentColor)
+                .frame(width: 21, height: 21)
+                .contentShape(Circle())
             }
-            .frame(width: 21, height: 21)
-            .contentShape(Circle())
+            .buttonStyle(.plain)
+            .help(helpText)
+            .accessibilityLabel("打开知识库发布进度")
+            .accessibilityValue(helpText)
         }
-        .buttonStyle(.plain)
-        .help(helpText)
-        .accessibilityLabel("打开知识库发布进度")
-        .accessibilityValue(helpText)
     }
 
     @ViewBuilder private var statusImage: some View {

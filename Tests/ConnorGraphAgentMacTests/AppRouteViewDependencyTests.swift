@@ -104,6 +104,16 @@ struct AppRouteViewDependencyTests {
         #expect(detailSource.contains("store.subscribe(id: base.id)"))
     }
 
+    @Test func knowledgePublicationToolbarButtonOwnsItsDynamicVisibility() throws {
+        let shellSource = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
+        let progressSource = try String(contentsOf: projectSourceURL(named: "KnowledgePublicationProgressViews.swift"), encoding: .utf8)
+
+        #expect(shellSource.contains("KnowledgePublicationToolbarProgressButton(store: graph.knowledgeCreator)"))
+        #expect(!shellSource.contains("if KnowledgePublicationActivitySummary(store: graph.knowledgeCreator).isVisible"))
+        #expect(progressSource.contains("@ObservedObject var store: CloudKnowledgeCreatorStore"))
+        #expect(progressSource.contains("if summary.isVisible"))
+    }
+
     private func routeCaseName(_ route: SidebarItem) -> String {
         switch route {
         case .entities: "entities"
