@@ -60,7 +60,7 @@ struct CloudKnowledgeCreatorView: View {
     }
     private var conversations: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("原始对话只会送入你本地选择的 LLM，不会上传云端。即时发布不需要人工审核。")
+            Text("原始对话会发送给当前配置的 LLM 提供商进行分析，但不会上传到康纳知识后端；后端只接收生成后的结构化知识操作。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("管理员下架 / 删除中 / 已删除将阻止继续发布；被下架后可提交一次开放申诉。")

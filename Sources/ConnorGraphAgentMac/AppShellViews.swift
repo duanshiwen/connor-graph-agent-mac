@@ -128,6 +128,12 @@ struct AppShellView: View {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
+                if KnowledgePublicationActivitySummary(store: graph.knowledgeCreator).isVisible {
+                    KnowledgePublicationToolbarProgressButton(store: graph.knowledgeCreator) {
+                        openWindow(id: AppMenuPresentation.knowledgePublicationProgressWindowID)
+                    }
+                }
+
                 if noteImportModel.activitySummary.isVisible {
                     NoteImportToolbarProgressButton(summary: noteImportModel.activitySummary) {
                         openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
