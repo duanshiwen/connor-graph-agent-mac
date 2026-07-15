@@ -33,7 +33,7 @@ actor AppBootstrapActor {
 
         var graphSnapshot = try repository.loadSnapshot()
         if graphSnapshot.entities.isEmpty {
-            let demo = AppViewModel.demoSnapshot()
+            let demo = AppDemoGraphSnapshotFactory.make()
             for entity in demo.entities { try repository.store.upsert(entity: entity) }
             for statement in demo.statements { try repository.store.upsert(statement: statement) }
             for episode in demo.episodes { try repository.store.upsert(episode: episode) }

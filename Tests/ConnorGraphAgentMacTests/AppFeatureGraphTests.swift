@@ -4,6 +4,8 @@ import Testing
 
 @Suite("App Feature Graph Tests")
 struct AppFeatureGraphTests {
+    private let legacyMegaTypeName = "App" + "View" + "Model"
+
     @MainActor
     @Test func placeholderRuntimePublishesStableFeatureReferences() {
         let runtime = AppRuntimeLifecycle.placeholder()
@@ -26,7 +28,7 @@ struct AppFeatureGraphTests {
         let source = try projectSource(named: "AppCompositionRoot.swift")
         #expect(source.contains("@Published private(set) var graph: AppFeatureGraph"))
         #expect(source.contains("private var runtime: AppRuntimeLifecycle"))
-        #expect(!source.contains("AppViewModel"))
+        #expect(!source.contains(legacyMegaTypeName))
         #expect(!source.contains("@Published private(set) var runtime"))
     }
 
@@ -39,7 +41,7 @@ struct AppFeatureGraphTests {
             "ConnorSettingsViews.swift"
         ] {
             let source = try projectSource(named: filename)
-            #expect(!source.contains("AppViewModel"), "\(filename) must consume narrow feature models and typed ports")
+            #expect(!source.contains(legacyMegaTypeName), "\(filename) must consume narrow feature models and typed ports")
         }
     }
 
@@ -54,7 +56,7 @@ struct AppFeatureGraphTests {
     @Test func featureGraphDoesNotOwnBackendsOrPerformIO() throws {
         let source = try projectSource(named: "AppFeatureGraph.swift")
         for forbidden in [
-            "AppViewModel",
+            legacyMegaTypeName,
             "AppGraphRepository",
             "AppStoragePaths",
             "SQLite",

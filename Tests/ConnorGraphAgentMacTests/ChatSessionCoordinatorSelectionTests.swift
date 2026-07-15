@@ -7,7 +7,7 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @MainActor
-struct AppViewModelSessionFilterSelectionTests {
+struct AppRuntimeOrchestratorSessionFilterSelectionTests {
     @Test func statusFilterClearsDetailWhenSelectedSessionIsNoLongerVisible() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -251,7 +251,7 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.chatFeatureModel.run.transcriptRevision > revisionAfterSecondSelection)
     }
 
-    private func waitForTranscript(_ viewModel: AppViewModel, expectedContents: [String]) async throws {
+    private func waitForTranscript(_ viewModel: AppRuntimeOrchestrator, expectedContents: [String]) async throws {
         for _ in 0..<100 {
             if viewModel.chatFeatureModel.run.transcript.map(\.content) == expectedContents { return }
             try await Task.sleep(for: .milliseconds(10))
@@ -259,7 +259,7 @@ struct AppViewModelSessionFilterSelectionTests {
         Issue.record("Timed out waiting for transcript: \(expectedContents)")
     }
 
-    private func waitForLoadingToFinish(_ viewModel: AppViewModel) async throws {
+    private func waitForLoadingToFinish(_ viewModel: AppRuntimeOrchestrator) async throws {
         for _ in 0..<100 {
             if viewModel.chatFeatureModel.sessions.loadingSessionDetailID == nil { return }
             try await Task.sleep(for: .milliseconds(10))
@@ -274,7 +274,7 @@ struct AppViewModelSessionFilterSelectionTests {
         let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
         try paths.ensureDirectoryHierarchy(fileManager: .default)
         let graphRepository = try AppGraphRepository.bootstrap(paths: paths)
-        let viewModel = AppViewModel(
+        let viewModel = AppRuntimeOrchestrator(
             entities: [],
             statements: [],
             observeLogEntries: [],
@@ -288,7 +288,7 @@ struct AppViewModelSessionFilterSelectionTests {
 
     private struct Fixture {
         var root: URL
-        var viewModel: AppViewModel
+        var viewModel: AppRuntimeOrchestrator
         var repository: AppChatSessionRepository
 
         func cleanup() {

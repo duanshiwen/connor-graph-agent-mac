@@ -15,7 +15,7 @@ import ConnorGraphAppSupport
     try paths.ensureDirectoryHierarchy(fileManager: .default)
     let repository = try AppGraphRepository.bootstrap(paths: paths)
 
-    let viewModel = AppViewModel(
+    let viewModel = AppRuntimeOrchestrator(
         entities: [],
         statements: [],
         observeLogEntries: [],

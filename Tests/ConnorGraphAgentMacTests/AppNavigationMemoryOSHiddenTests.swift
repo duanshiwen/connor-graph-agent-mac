@@ -1,8 +1,4 @@
-import AppKit
-import Foundation
 import Testing
-import ConnorGraphStore
-import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @Test func sidebarItemsDoNotExposeMemoryOSAsUserVisibleRoute() {
@@ -10,28 +6,10 @@ import ConnorGraphAppSupport
 }
 
 @MainActor
-@Test func appViewModelKeepsMemoryOSBackendButGraphMemoryNavigationFallsBackToAgentChat() async throws {
-    _ = NSApplication.shared
-    let root = FileManager.default.temporaryDirectory
-        .appendingPathComponent("connor-app-vm-memory-os-hidden-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
-    try paths.ensureDirectoryHierarchy(fileManager: .default)
-    let repository = try AppGraphRepository.bootstrap(paths: paths)
+@Test func graphMemoryNavigationFallsBackToAgentChat() {
+    let model = AppShellFeatureModel()
 
-    let viewModel = AppViewModel(
-        entities: [],
-        statements: [],
-        observeLogEntries: [],
-        repository: repository,
-        databasePath: paths.databaseURL.path,
-        storagePaths: paths
-    )
+    model.applyNavigation(.graphMemory)
 
-    #expect(viewModel.hasMemoryOSBackendForTests)
-
-    viewModel.navigate(to: .graphMemory)
-    try await Task.sleep(nanoseconds: 30_000_000)
-
-    #expect(viewModel.selection == .agentChat)
+    #expect(model.selection == .agentChat)
 }
