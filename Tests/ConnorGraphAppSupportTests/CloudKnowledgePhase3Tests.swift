@@ -132,7 +132,10 @@ struct CloudKnowledgePhase3Tests {
             capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
             complete: { request in try await scripted.complete(request) }
         )
-        let session = AgentSession(id: "conversation-1", title: "Connor knowledge", messages: [AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。")])
+        let session = AgentSession(id: "conversation-1", title: "Connor knowledge", messages: [
+            AgentMessage(role: .system, content: "MAIN_AGENT_SYSTEM_PROMPT_SENTINEL"),
+            AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。")
+        ])
 
         let result = try await CloudKnowledgeLLMGenerationRunner().generate(
             session: session,
@@ -146,8 +149,11 @@ struct CloudKnowledgePhase3Tests {
         #expect(result.summary == "已完成《Connor knowledge》的知识分析：检索 2 次，处理 1 个知识决策。")
         #expect(await api.operations.count == 1)
         #expect(await api.searchViews == [.combined, .combined])
-        #expect(await scripted.requestCount == 2)
+        #expect(await scripted.requestCount == 3)
         #expect(await scripted.exposedValidationTool == false)
+        #expect(await scripted.usedDedicatedExtractionPrompt)
+        #expect(await scripted.usedExplicitTerminationContract)
+        #expect(await scripted.exposedMainAgentSystemPrompt == false)
         #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("connor") == .orderedSame } == true)
     }
 
@@ -172,7 +178,7 @@ struct CloudKnowledgePhase3Tests {
 
         #expect(await api.operations.count == 1)
         #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("answer") == .orderedSame } == true)
-        #expect(await scripted.requestCount == 2)
+        #expect(await scripted.requestCount == 3)
     }
 
     @Test func repeatedToolErrorKeepsBoundedDiagnosticForRecovery() {
@@ -218,17 +224,23 @@ private struct StaticCloudCredential: CloudKnowledgeCredentialProvider { func ac
 private actor CloudKnowledgeScriptedProvider {
     var requestCount = 0
     var exposedValidationTool = false
+    var usedDedicatedExtractionPrompt = false
+    var usedExplicitTerminationContract = false
+    var exposedMainAgentSystemPrompt = false
 
     func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
         requestCount += 1
         exposedValidationTool = exposedValidationTool || request.tools.contains { $0.name == "cloud_kb_validate_publication" }
+        usedDedicatedExtractionPrompt = usedDedicatedExtractionPrompt || request.messages.first?.content.contains("bounded background knowledge-extraction worker") == true
+        usedExplicitTerminationContract = usedExplicitTerminationContract || request.messages.first?.content.contains("A successful write is not, by itself, a reason to stop") == true
+        exposedMainAgentSystemPrompt = exposedMainAgentSystemPrompt || request.messages.contains { $0.content.contains("MAIN_AGENT_SYSTEM_PROMPT_SENTINEL") }
         switch requestCount {
         case 1:
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-search", name: "cloud_kb_recent_context", argumentsJSON: #"{"query":"Connor","limit":20}"#)], finishReason: .toolCalls)
         case 2:
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor-publishing","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
         default:
-            return AgentModelResponse(text: "已完成知识整理")
+            return AgentModelResponse(text: CloudKnowledgeExtractionPrompt.completionMarker)
         }
     }
 }
@@ -241,7 +253,10 @@ private actor CloudKnowledgeWriteAssistProvider {
         if requestCount == 1 {
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "read", name: "cloud_kb_read_record", argumentsJSON: #"{"query":"Answer cache","limit":20}"#)], finishReason: .toolCalls)
         }
-        return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["unrelated"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
+        if requestCount == 2 {
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["unrelated"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
+        }
+        return AgentModelResponse(text: "\(CloudKnowledgeExtractionPrompt.completionMarker)\n已完成知识整理")
     }
 }
 
