@@ -6,16 +6,7 @@ struct CraftListPaneView: View {
     @Binding var selection: SidebarItem?
 
     var body: some View {
-        let route = selection ?? .agentChat
-        RetainedRouteHostView(
-            route: route,
-            pane: .list,
-            tracker: graph.shell.routePerformanceTracker,
-            contentOwner: ObjectIdentifier(graph),
-            routeFactory: { route in
-                AnyView(listRouteView(route))
-            }
-        )
+        listRouteView(selection ?? .agentChat)
     }
 
     private func listRouteView(_ route: SidebarItem) -> some View {
@@ -81,15 +72,7 @@ struct CraftDetailPaneView: View {
     var selection: SidebarItem
 
     var body: some View {
-        RetainedRouteHostView(
-            route: selection,
-            pane: .detail,
-            tracker: graph.shell.routePerformanceTracker,
-            contentOwner: ObjectIdentifier(graph),
-            routeFactory: { route in
-                AnyView(detailRouteView(route))
-            }
-        )
+        detailRouteView(selection)
     }
 
     private func detailRouteView(_ route: SidebarItem) -> some View {

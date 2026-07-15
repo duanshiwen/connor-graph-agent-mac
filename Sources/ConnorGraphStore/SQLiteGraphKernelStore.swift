@@ -166,6 +166,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private let databaseLock = NSRecursiveLock()
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let iso8601Formatter = ISO8601DateFormatter()
+    private let iso8601FormatterLock = NSLock()
 
     public init(path: String) throws {
         self.encoder = JSONEncoder()
@@ -1321,10 +1323,16 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         do { return try decoder.decode(type, from: data) } catch { throw SQLiteGraphKernelStoreError.decodeFailed(String(describing: error)) }
     }
 
-    private func iso(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+    private func iso(_ date: Date) -> String {
+        iso8601FormatterLock.lock()
+        defer { iso8601FormatterLock.unlock() }
+        return iso8601Formatter.string(from: date)
+    }
 
     private func date(_ string: String) throws -> Date {
-        guard let date = ISO8601DateFormatter().date(from: string) else { throw SQLiteGraphKernelStoreError.decodeFailed("Invalid date: \(string)") }
+        iso8601FormatterLock.lock()
+        defer { iso8601FormatterLock.unlock() }
+        guard let date = iso8601Formatter.date(from: string) else { throw SQLiteGraphKernelStoreError.decodeFailed("Invalid date: \(string)") }
         return date
     }
 
