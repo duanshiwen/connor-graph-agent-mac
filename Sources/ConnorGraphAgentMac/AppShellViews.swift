@@ -67,7 +67,6 @@ struct AppShellView: View {
                 identityStore: identityStore,
                 selection: graph.shell.selection ?? .agentChat
             )
-                .id(graph.shell.selection ?? .agentChat)
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)

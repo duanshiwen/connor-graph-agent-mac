@@ -2527,32 +2527,17 @@ struct ContactsSourceSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
         .sheet(isPresented: $model.isPresentingProfileEditor) {
-            if let draft = Binding($model.editingProfileDraft) {
-                PersonProfileEditorView(
-                    draft: draft,
-                    onCancel: {
-                        model.isPresentingProfileEditor = false
-                        model.editingProfileDraft = nil
-                    },
-                    onSave: { draft in
-                        Task { @MainActor in await model.saveProfileDraft(draft) }
-                    }
-                )
+            if let initialDraft = model.editingProfileDraft {
+                ProfileEditorSheet(draft: initialDraft, model: model)
             }
         }
         .sheet(isPresented: $model.isPresentingRelationshipEditor) {
-            if let draft = Binding($model.editingRelationshipDraft) {
-                PersonRelationshipEditorView(
-                    draft: draft,
+            if let initialDraft = model.editingRelationshipDraft {
+                RelationshipEditorSheet(
+                    draft: initialDraft,
                     sourceDisplayName: selectedContactRow?.displayName ?? "此人物",
                     candidateProfiles: model.profiles,
-                    onCancel: {
-                        model.isPresentingRelationshipEditor = false
-                        model.editingRelationshipDraft = nil
-                    },
-                    onSave: { draft in
-                        Task { @MainActor in await model.saveRelationshipDraft(draft) }
-                    }
+                    model: model
                 )
             }
         }
@@ -2573,6 +2558,54 @@ struct ContactsSourceSettingsView: View {
     private var selectedContactRow: NativeContactRowPresentation? {
         guard let id = model.selectedContactID else { return nil }
         return model.presentation.rows.first { $0.id == id }
+    }
+}
+
+private struct ProfileEditorSheet: View {
+    @State var draft: PersonProfileDraft
+    @Bindable var model: ContactsFeatureModel
+
+    var body: some View {
+        PersonProfileEditorView(
+            draft: $draft,
+            onCancel: {
+                model.isPresentingProfileEditor = false
+                model.editingProfileDraft = nil
+            },
+            onSave: { savedDraft in
+                model.isPresentingProfileEditor = false
+                model.editingProfileDraft = nil
+                Task { @MainActor in
+                    await model.saveProfileDraft(savedDraft)
+                }
+            }
+        )
+    }
+}
+
+private struct RelationshipEditorSheet: View {
+    @State var draft: PersonRelationshipDraft
+    var sourceDisplayName: String
+    var candidateProfiles: [PersonProfile]
+    @Bindable var model: ContactsFeatureModel
+
+    var body: some View {
+        PersonRelationshipEditorView(
+            draft: $draft,
+            sourceDisplayName: sourceDisplayName,
+            candidateProfiles: candidateProfiles,
+            onCancel: {
+                model.isPresentingRelationshipEditor = false
+                model.editingRelationshipDraft = nil
+            },
+            onSave: { savedDraft in
+                model.isPresentingRelationshipEditor = false
+                model.editingRelationshipDraft = nil
+                Task { @MainActor in
+                    await model.saveRelationshipDraft(savedDraft)
+                }
+            }
+        )
     }
 }
 
