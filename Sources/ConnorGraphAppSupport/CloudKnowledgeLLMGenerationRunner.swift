@@ -85,6 +85,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
             }
 
             messages.append(AgentModelMessage(role: .assistant, content: response.text ?? "", toolCalls: calls, providerMetadata: response.providerMetadata))
+            var didProcessKnowledgeDecision = false
             for call in calls {
                 try Task.checkCancellation()
                 let signature = "\(call.name)|\(call.argumentsJSON)"
@@ -125,7 +126,10 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                         searchCount += 1
                         recordSearchMetadata(call: call, result: result, into: &searchMetadataByContextID)
                     }
-                    if call.name.hasPrefix("cloud_kb_l") || call.name == "cloud_kb_update_relations" || call.name == "cloud_kb_retract_knowledge" { decisionCount += 1 }
+                    if isWriteTool(call.name) {
+                        decisionCount += 1
+                        didProcessKnowledgeDecision = true
+                    }
                     consecutiveErrors = 0
                     messages.append(AgentModelMessage(role: .tool, content: result.contentJSON ?? result.contentText, toolCallID: call.id, name: call.name))
                 } catch {
@@ -137,6 +141,11 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                         throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastToolError)
                     }
                 }
+            }
+            if didProcessKnowledgeDecision {
+                return CloudKnowledgeLocalGenerationResult(
+                    summary: "已完成《\(session.title)》的知识分析：检索 \(searchCount) 次，处理 \(decisionCount) 个知识决策。"
+                )
             }
         }
         throw CloudKnowledgeLLMGenerationError.maximumIterationsReached

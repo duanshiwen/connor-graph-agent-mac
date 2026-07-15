@@ -143,10 +143,10 @@ struct CloudKnowledgePhase3Tests {
             provider: provider
         )
 
-        #expect(result.summary == "已完成知识整理")
+        #expect(result.summary == "已完成《Connor knowledge》的知识分析：检索 2 次，处理 1 个知识决策。")
         #expect(await api.operations.count == 1)
         #expect(await api.searchViews == [.combined, .combined])
-        #expect(await scripted.requestCount == 3)
+        #expect(await scripted.requestCount == 2)
         #expect(await scripted.exposedValidationTool == false)
         #expect(await api.operations.first?.semanticTerms.contains { $0.caseInsensitiveCompare("connor") == .orderedSame } == true)
     }
