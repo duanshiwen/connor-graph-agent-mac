@@ -18,6 +18,18 @@ public struct SessionSearchResult: Sendable, Equatable, Identifiable {
     }
 }
 
+public struct SessionSearchIndexSynchronizationResult: Sendable, Equatable {
+    public var upsertedCount: Int
+    public var removedCount: Int
+    public var unchangedCount: Int
+
+    public init(upsertedCount: Int, removedCount: Int, unchangedCount: Int) {
+        self.upsertedCount = upsertedCount
+        self.removedCount = removedCount
+        self.unchangedCount = unchangedCount
+    }
+}
+
 public actor SessionSearchIndexService {
     private let databaseURL: URL
     private nonisolated(unsafe) var db: OpaquePointer?
@@ -39,12 +51,39 @@ public actor SessionSearchIndexService {
         if let db { sqlite3_close(db) }
     }
 
-    public func rebuild(sessions: [AgentSession]) async throws {
+    public func bootstrapIfEmpty(sessions: [AgentSession]) async throws -> SessionSearchIndexSynchronizationResult {
+        try Task.checkCancellation()
+        guard try !hasIndexedSessions() else {
+            return SessionSearchIndexSynchronizationResult(
+                upsertedCount: 0,
+                removedCount: 0,
+                unchangedCount: sessions.count
+            )
+        }
+
         try execute("BEGIN IMMEDIATE")
         do {
-            try execute("DELETE FROM session_search_fts")
-            try execute("DELETE FROM session_search_docs")
-            for session in sessions { try upsertOne(session) }
+            for session in sessions {
+                try Task.checkCancellation()
+                try upsertOne(session)
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+        return SessionSearchIndexSynchronizationResult(
+            upsertedCount: sessions.count,
+            removedCount: 0,
+            unchangedCount: 0
+        )
+    }
+
+    public func upsert(session: AgentSession) async throws {
+        try Task.checkCancellation()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try upsertOne(session)
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
@@ -52,10 +91,12 @@ public actor SessionSearchIndexService {
         }
     }
 
-    public func upsert(session: AgentSession) async throws {
+    public func remove(sessionID: String) async throws {
+        try Task.checkCancellation()
         try execute("BEGIN IMMEDIATE")
         do {
-            try upsertOne(session)
+            try execute("DELETE FROM session_search_fts WHERE session_id = ?", bindings: [.text(sessionID)])
+            try execute("DELETE FROM session_search_docs WHERE session_id = ?", bindings: [.text(sessionID)])
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
@@ -113,6 +154,10 @@ public actor SessionSearchIndexService {
         )
         try execute("DELETE FROM session_search_fts WHERE session_id = ?", bindings: [.text(session.id)])
         try execute("INSERT INTO session_search_fts(session_id, title, recent_messages, indexed_text) VALUES (?, ?, ?, ?)", bindings: [.text(session.id), .text(session.title), .text(recentMessages), .text(indexedText)])
+    }
+
+    private func hasIndexedSessions() throws -> Bool {
+        try !queryRows("SELECT 1 FROM session_search_docs LIMIT 1").isEmpty
     }
 
     private static func recentMessagesText(for session: AgentSession) -> String {
