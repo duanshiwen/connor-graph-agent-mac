@@ -647,7 +647,6 @@ struct CraftSessionListPane: View {
             onRegenerateTitle: { rowActions.regenerateTitle(session.id) },
             onDelete: { rowActions.delete(session.id) }
         )
-        .id(session.id)
     }
 
     private func selectSession(id: String) {

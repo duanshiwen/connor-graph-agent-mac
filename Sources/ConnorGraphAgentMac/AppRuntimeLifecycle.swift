@@ -149,6 +149,7 @@ final class AppRuntimeLifecycle {
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var globalSearchRuntimeCoordinator: GlobalSearchRuntimeCoordinator?
     private var newSessionPreparationTasks: [String: Task<Void, Never>] = [:]
+    private var workspaceStatePersistenceTask: Task<Void, Never>?
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -634,6 +635,11 @@ final class AppRuntimeLifecycle {
             guard let self else { return [] }
             return try self.chatSessionRepository?.loadSessions(filter: .all)
                 ?? self.chatFeatureModel.sessions.allSessions
+        }
+        governanceModel.statusUsageCountProvider = { [weak self] statusID in
+            self?.chatFeatureModel.sessions.allSessions.reduce(into: 0) { count, session in
+                if session.governance.status.rawValue == statusID { count += 1 }
+            } ?? 0
         }
         governanceModel.removeLabelFromSessions = { [weak self] labelID in
             guard let self, let repository = self.chatSessionRepository else { return 0 }
@@ -1241,6 +1247,8 @@ final class AppRuntimeLifecycle {
     func shutdownRuntimeResources() {
         for task in newSessionPreparationTasks.values { task.cancel() }
         newSessionPreparationTasks.removeAll()
+        workspaceStatePersistenceTask?.cancel()
+        workspaceStatePersistenceTask = nil
         maintenanceCoordinator.shutdown()
         chatSessionCoordinator.shutdown()
         chatApprovalCoordinator.shutdown()
@@ -2065,8 +2073,9 @@ final class AppRuntimeLifecycle {
         try chatBackgroundTaskCoordinator.runningTasksForDeletionCheck(sessionID: sessionID)
     }
 
-    func canDeleteChatSession(_ sessionID: String) -> Bool {
-        (try? runningBackgroundTasksForDeletionCheck(sessionID: sessionID).isEmpty) ?? !hasRunningBackgroundTask(sessionID: sessionID)
+    // Called from every visible session row; this path must remain free of persistence I/O.
+    func canDeleteChatSessionFromCachedState(_ sessionID: String) -> Bool {
+        !hasRunningBackgroundTask(sessionID: sessionID)
     }
 
     func regenerateChatSessionTitle(_ sessionID: String) {
@@ -2228,15 +2237,18 @@ final class AppRuntimeLifecycle {
 
     private func rememberWorkspaceMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
         chatWorkspaceCoordinator.setMode(mode, for: sessionID)
-        guard let sessionID else { return }
-        do {
-            var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
-            state.selectedPane = mode.rawValue
-            state.updatedAt = Date()
-            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
-            try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
-        } catch {
-            errorMessage = String(describing: error)
+        guard let sessionID, let repository = chatSessionRepository else { return }
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.selectedPane = mode.rawValue
+        state.updatedAt = Date()
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+
+        let previousPersistence = workspaceStatePersistenceTask
+        workspaceStatePersistenceTask = Task.detached(priority: .utility) {
+            await previousPersistence?.value
+            guard !Task.isCancelled else { return }
+            try? repository.saveSessionState(state, sessionID: sessionID)
         }
     }
 
@@ -3075,7 +3087,7 @@ extension AppRuntimeLifecycle {
             chatActions: chatActions,
             chatSessionListActions: ChatSessionListActions(
                 isSubmitting: { [weak model] in model?.isChatSessionSubmitting($0) ?? false },
-                canDelete: { [weak model] in model?.canDeleteChatSession($0) ?? true },
+                canDelete: { [weak model] in model?.canDeleteChatSessionFromCachedState($0) ?? true },
                 rename: { [weak model] in model?.renameChatSession($0, title: $1) },
                 setStatus: { [weak model] in model?.setChatSessionStatus($0, status: $1) },
                 toggleLabel: { [weak model] in model?.toggleChatSessionLabel($0, labelID: $1) },

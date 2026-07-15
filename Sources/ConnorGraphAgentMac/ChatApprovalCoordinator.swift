@@ -10,7 +10,9 @@ final class ChatApprovalCoordinator {
     let model: ChatApprovalModel
     private let repository: AppAgentPendingApprovalRepository?
     private var resolutionTasksByRequestID: [String: Task<Void, Never>] = [:]
+    private var reloadTask: Task<Void, Never>?
     private var generation = 0
+    private var reloadGeneration = 0
     private var isShutdown = false
 
     @ObservationIgnored var activeSessionID: () -> String = { "" }
@@ -36,11 +38,28 @@ final class ChatApprovalCoordinator {
 
     func reload() {
         guard !isShutdown else { return }
-        do {
-            model.pendingApprovals = try repository?.loadPending() ?? []
-            autoApproveCurrentPolicy()
-        } catch {
-            onError(String(describing: error))
+        guard let repository else {
+            model.pendingApprovals = []
+            return
+        }
+        reloadGeneration += 1
+        let currentGeneration = reloadGeneration
+        reloadTask?.cancel()
+        reloadTask = Task { [weak self] in
+            do {
+                let approvals = try await Task.detached(priority: .userInitiated) {
+                    try repository.loadPending()
+                }.value
+                try Task.checkCancellation()
+                guard let self, !self.isShutdown, self.reloadGeneration == currentGeneration else { return }
+                self.model.pendingApprovals = approvals
+                self.autoApproveCurrentPolicy()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self, !self.isShutdown, self.reloadGeneration == currentGeneration else { return }
+                self.onError(String(describing: error))
+            }
         }
     }
 
@@ -161,6 +180,9 @@ final class ChatApprovalCoordinator {
         guard !isShutdown else { return }
         isShutdown = true
         generation += 1
+        reloadGeneration += 1
+        reloadTask?.cancel()
+        reloadTask = nil
         for task in resolutionTasksByRequestID.values { task.cancel() }
         resolutionTasksByRequestID.removeAll()
     }

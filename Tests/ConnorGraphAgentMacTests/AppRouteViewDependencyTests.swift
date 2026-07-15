@@ -42,6 +42,28 @@ struct AppRouteViewDependencyTests {
         #expect(project.components(separatedBy: "\(sourcePath) in Sources */,").count - 1 == 1)
     }
 
+    @Test func sessionRowDeletionAvailabilityUsesCachedStateWithoutPersistenceIO() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppRuntimeLifecycle.swift"), encoding: .utf8)
+        let start = try #require(source.range(of: "func canDeleteChatSessionFromCachedState"))
+        let tail = source[start.lowerBound...]
+        let end = try #require(tail.range(of: "func regenerateChatSessionTitle"))
+        let implementation = tail[..<end.lowerBound]
+
+        #expect(implementation.contains("hasRunningBackgroundTask"))
+        #expect(!implementation.contains("runningBackgroundTasksForDeletionCheck"))
+    }
+
+    @Test func mailSidebarCountUsesTheDisplayedMessageTotal() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppPrimarySidebarView.swift"), encoding: .utf8)
+        let start = try #require(source.range(of: "private var mailSidebarCount"))
+        let tail = source[start.lowerBound...]
+        let end = try #require(tail.range(of: "private var rssUnreadCount"))
+        let implementation = tail[..<end.lowerBound]
+
+        #expect(implementation.contains("totalMessageCount"))
+        #expect(!implementation.contains("totalUnreadCount"))
+    }
+
     private func routeCaseName(_ route: SidebarItem) -> String {
         switch route {
         case .entities: "entities"

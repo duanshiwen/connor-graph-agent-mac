@@ -43,8 +43,7 @@ struct CraftPrimarySidebarView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
                         SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && graph.chat.sessions.filter == .all) {
-                            graph.chatActions.session.setSessionListFilter(.all)
-                            select(.agentChat)
+                            selectSessionFilter(.all)
                         }
                         .contextMenu {
                             Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor() }
@@ -52,8 +51,7 @@ struct CraftPrimarySidebarView: View {
                         ForEach(graph.governance.config.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && graph.chat.sessions.filter == .status(sessionStatus)) {
-                                    graph.chatActions.session.setSessionListFilter(.status(sessionStatus))
-                                    select(.agentChat)
+                                    selectSessionFilter(.status(sessionStatus))
                                 }
                                 .contextMenu {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
@@ -90,8 +88,7 @@ struct CraftPrimarySidebarView: View {
                         } else {
                             ForEach(graph.governance.config.labels) { label in
                                 SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && graph.chat.sessions.filter == .label(label.id)) {
-                                    graph.chatActions.session.setSessionListFilter(.label(label.id))
-                                    select(.agentChat)
+                                    selectSessionFilter(.label(label.id))
                                 }
                                 .contextMenu {
                                     Button("编辑标签…", systemImage: "pencil") { presentLabelEditor(label) }
@@ -165,8 +162,6 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var mailSidebarCount: Int? {
-        let unreadCount = graph.mail.presentation.totalUnreadCount
-        if unreadCount > 0 { return unreadCount }
         let totalCount = graph.mail.presentation.totalMessageCount
         return totalCount > 0 ? totalCount : nil
     }
@@ -189,6 +184,15 @@ struct CraftPrimarySidebarView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             _ = graph.shell.select(item)
+        }
+    }
+
+    private func selectSessionFilter(_ filter: AgentSessionListFilter) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            graph.chatActions.session.setSessionListFilter(filter)
+            _ = graph.shell.select(.agentChat)
         }
     }
 
@@ -466,4 +470,3 @@ private func colorStorageName(from color: Color) -> String {
     let blue = Int((nsColor.blueComponent * 255).rounded())
     return String(format: "#%02X%02X%02X", red, green, blue)
 }
-

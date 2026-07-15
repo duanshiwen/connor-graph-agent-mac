@@ -11,14 +11,12 @@ final class ChatSessionCoordinator {
     private(set) var errorMessage: String?
 
     @ObservationIgnored private let repository: AppChatSessionRepository?
-    @ObservationIgnored private let listLoader = ChatSessionListRefreshCoordinator()
     @ObservationIgnored private let detailLoader = ChatSessionDetailLoadCoordinator()
-    @ObservationIgnored private var listRefreshTask: Task<Void, Never>?
-    @ObservationIgnored private var listRefreshGeneration = 0
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var selectionGeneration = 0
     @ObservationIgnored private var pendingNewSessionIDs: Set<String> = []
     @ObservationIgnored private var isShutdown = false
+    @ObservationIgnored private var filterChangeGeneration = 0
 
     @ObservationIgnored var activeSessionIDProvider: () -> String = { "" }
     @ObservationIgnored var onSelectionWillChange: (String?, String) -> Void = { _, _ in }
@@ -42,7 +40,6 @@ final class ChatSessionCoordinator {
 
     func installStartupSessions(_ sessions: [AgentSession], allSessions: [AgentSession]) {
         guard !isShutdown else { return }
-        cancelListRefresh()
         hasLoadedInitialSessions = true
         model.sessions = sessions
         model.allSessions = allSessions
@@ -56,7 +53,6 @@ final class ChatSessionCoordinator {
 
     func reload(restoreWorkspaceMode: Bool = true) {
         guard !isShutdown else { return }
-        cancelListRefresh()
         hasLoadedInitialSessions = true
         guard let repository else { return }
         do {
@@ -83,12 +79,25 @@ final class ChatSessionCoordinator {
     func setFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
         guard !isShutdown, model.filter != filter else { return }
         _ = restoreWorkspaceMode
-        model.filter = filter
-
-        let projectedSessions = Self.filter(model.allSessions, by: filter)
-        model.sessions = projectedSessions
-        reconcileSelection(visibleSessions: projectedSessions)
-        refreshFilterFromRepository(filter)
+        filterChangeGeneration += 1
+        let generation = filterChangeGeneration
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let measured = AppPerformanceLog.measure {
+            model.filter = filter
+            let projectedSessions = Self.filter(model.allSessions, by: filter)
+            model.sessions = projectedSessions
+            reconcileSelection(visibleSessions: projectedSessions)
+        }
+        AppPerformanceLog.sidebarNavigationLogger.info(
+            "sidebar.filter.commit filter=\(String(describing: filter), privacy: .public) visible=\(self.model.sessions.count, privacy: .public) duration=\(measured.milliseconds, privacy: .public)ms"
+        )
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.filterChangeGeneration == generation, self.model.filter == filter else { return }
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+            AppPerformanceLog.sidebarNavigationLogger.info(
+                "sidebar.filter.firstMainTurn filter=\(String(describing: filter), privacy: .public) visible=\(self.model.sessions.count, privacy: .public) duration=\(elapsed, privacy: .public)ms"
+            )
+        }
     }
 
     func select(_ sessionID: String) {
@@ -182,7 +191,6 @@ final class ChatSessionCoordinator {
 
     private func adoptNewSession(_ session: AgentSession, isPreparing: Bool) -> Bool {
         guard !isShutdown else { return false }
-        cancelListRefresh()
         hasLoadedInitialSessions = true
 
         model.allSessions.removeAll { $0.id == session.id }
@@ -256,9 +264,6 @@ final class ChatSessionCoordinator {
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
-        listRefreshTask?.cancel()
-        listRefreshTask = nil
-        listRefreshGeneration += 1
         selectionTask?.cancel()
         selectionTask = nil
         selectionGeneration += 1
@@ -277,52 +282,6 @@ final class ChatSessionCoordinator {
                 session.governance.labels.contains { $0.id == labelID }
             }
         }
-    }
-
-    private func refreshFilterFromRepository(_ filter: AgentSessionListFilter) {
-        guard let repository else { return }
-        cancelListRefresh()
-        listRefreshGeneration += 1
-        let generation = listRefreshGeneration
-        let existingSessions = model.allSessions
-        listRefreshTask = Task(priority: .userInitiated) { [weak self] in
-            do {
-                let result = try await self?.listLoader.refresh(
-                    repository: repository,
-                    filter: filter,
-                    preserving: existingSessions
-                )
-                try Task.checkCancellation()
-                guard let self,
-                      let result,
-                      !self.isShutdown,
-                      self.listRefreshGeneration == generation,
-                      self.model.filter == filter else { return }
-                if self.model.sessions != result.visibleSessions {
-                    self.model.sessions = result.visibleSessions
-                }
-                if self.model.allSessions != result.allSessions {
-                    self.model.allSessions = result.allSessions
-                    self.onSessionsChanged(result.allSessions)
-                }
-                self.reconcileSelection(visibleSessions: result.visibleSessions)
-                self.errorMessage = nil
-            } catch is CancellationError {
-                return
-            } catch {
-                guard let self,
-                      !self.isShutdown,
-                      self.listRefreshGeneration == generation,
-                      self.model.filter == filter else { return }
-                self.report(error)
-            }
-        }
-    }
-
-    private func cancelListRefresh() {
-        listRefreshTask?.cancel()
-        listRefreshTask = nil
-        listRefreshGeneration += 1
     }
 
     private func reconcileSelection(visibleSessions: [AgentSession]) {

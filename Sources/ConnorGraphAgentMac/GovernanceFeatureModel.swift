@@ -11,6 +11,7 @@ final class GovernanceFeatureModel {
 
     @ObservationIgnored private let repository: AppSessionGovernanceConfigRepository?
     @ObservationIgnored var sessionsProvider: () throws -> [AgentSession] = { [] }
+    @ObservationIgnored var statusUsageCountProvider: (String) -> Int = { _ in 0 }
     @ObservationIgnored var removeLabelFromSessions: (String) throws -> Int = { _ in 0 }
     @ObservationIgnored var onConfigSaved: (AppSessionGovernanceConfig) throws -> Void = { _ in }
     @ObservationIgnored var onSettingsMessage: (String, ConnorSettingsSection) -> Void = { _, _ in }
@@ -50,8 +51,7 @@ final class GovernanceFeatureModel {
 
     func canDeleteStatus(_ definition: AgentSessionStatusDefinition) -> Bool {
         guard config.statuses.count > 1 else { return false }
-        let sessions = (try? sessionsProvider()) ?? []
-        return !sessions.contains { $0.governance.status.rawValue == definition.id }
+        return statusUsageCountProvider(definition.id) == 0
     }
 
     func deleteStatus(_ definition: AgentSessionStatusDefinition) {

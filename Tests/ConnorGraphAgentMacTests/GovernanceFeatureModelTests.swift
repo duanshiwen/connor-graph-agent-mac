@@ -27,12 +27,30 @@ import ConnorGraphAppSupport
     var session = AgentSession(id: "session-1")
     session.governance.status = .inProgress
     model.sessionsProvider = { [session] }
+    model.statusUsageCountProvider = { id in id == status.id ? 1 : 0 }
 
     #expect(!model.canDeleteStatus(status))
     model.deleteStatus(status)
 
     #expect(model.config.statuses.contains(where: { $0.id == status.id }))
     #expect(model.errorMessage == "无法删除状态“进行中”: 仍有 1 个会话处于此状态。")
+}
+
+@MainActor
+@Test func governanceDeleteAvailabilityNeverLoadsSessions() {
+    let status = AgentSessionStatusDefinition(id: AgentSessionStatus.inProgress.rawValue, name: "进行中", systemImage: "clock", sortOrder: 20, isTerminal: false)
+    let fallback = AgentSessionStatusDefinition(id: AgentSessionStatus.todo.rawValue, name: "待办", systemImage: "circle", sortOrder: 10, isTerminal: false)
+    let model = GovernanceFeatureModel(config: AppSessionGovernanceConfig(statuses: [fallback, status], labels: []))
+    var loadCount = 0
+    model.sessionsProvider = {
+        loadCount += 1
+        return []
+    }
+    model.statusUsageCountProvider = { id in id == status.id ? 1 : 0 }
+
+    #expect(!model.canDeleteStatus(status))
+    #expect(model.canDeleteStatus(fallback))
+    #expect(loadCount == 0)
 }
 
 @MainActor
