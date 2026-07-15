@@ -506,12 +506,6 @@ final class BrowserFeatureModel {
         }
     }
 
-    func waitForPendingIndexOperations() async {
-        while !historyIndexTasksByID.isEmpty {
-            for task in Array(historyIndexTasksByID.values) { await task.value }
-        }
-    }
-
     func openHistorySearch(query: String) {
         historySearchQuery = query
         isHistoryPanelVisible = true
