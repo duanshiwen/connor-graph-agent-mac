@@ -158,9 +158,10 @@ final class MailFeatureModel {
         let inbox = MailMailbox(id: MailMailboxID(rawValue: "\(accountID.rawValue)-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
         try credentialStore.saveCredential(password, binding: binding)
         try await store?.saveAccount(account); try await store?.saveMailbox(inbox)
-        selectedAccountID = accountID; selectedMailboxID = inbox.id; isPresentingAddAccountSheet = false
+        selectedAccountID = accountID; selectedMailboxID = inbox.id
         syncMessage = "已添加邮箱：\(account.displayName)，正在同步最近邮件…"
         await reload()
+        isPresentingAddAccountSheet = false
         do { try await sourceSetChanged(); let summary = try await refreshForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil); syncMessage = summary; try await sourceSetChanged() }
         catch { let message = String(describing: error); syncMessage = "邮箱已添加，但同步失败：\(message)"; reportFailure(message) }
     }
