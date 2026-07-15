@@ -627,13 +627,18 @@ struct MailPreparedHTMLBodyPresentation: Equatable {
     var html: String
     var blockedRemoteImageCount: Int
 
+    init(html: String, blockedRemoteImageCount: Int) {
+        self.html = html
+        self.blockedRemoteImageCount = blockedRemoteImageCount
+    }
+
     init(_ result: MailHTMLBodySanitizationResult) {
         html = result.html
         blockedRemoteImageCount = result.blockedRemoteImageCount
     }
 }
 
-struct MailHTMLSanitizationRequest: Equatable {
+struct MailHTMLSanitizationRequest: Equatable, Hashable {
     var messageID: MailMessageID
     var htmlFingerprint: Int
     var htmlLength: Int
@@ -780,12 +785,9 @@ private struct MailHTMLBodyView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> MailHTMLPassthroughScrollWebView {
-        let config = WKWebViewConfiguration()
-        // Disable JavaScript for security (email HTML should not execute scripts)
-        let preferences = WKWebpagePreferences()
-        preferences.allowsContentJavaScript = false
-        config.defaultWebpagePreferences = preferences
-        let view = MailHTMLPassthroughScrollWebView(frame: .zero, configuration: config)
+        let configuration = MailWebViewConfigurationProvider.shared.makeConfiguration()
+        let view = MailHTMLPassthroughScrollWebView(frame: .zero, configuration: configuration)
+        mailBodyRenderingLogger.info("mailBody.webView.create")
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.isHidden = true
@@ -823,7 +825,7 @@ private struct MailHTMLBodyView: NSViewRepresentable {
             guard loadState.shouldReload(identity: identity) else { return false }
             measurementGeneration += 1
             loadStartedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) messageID=\(identity.messageID.rawValue, privacy: .public) htmlLength=\(identity.htmlLength, privacy: .public) allowsRemoteImages=\(identity.allowsRemoteImages, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.webView.reload generation=\(self.measurementGeneration, privacy: .public) htmlLength=\(identity.htmlLength, privacy: .public) allowsRemoteImages=\(identity.allowsRemoteImages, privacy: .public)")
             return true
         }
 
@@ -899,6 +901,7 @@ private struct MailMessageDetailPane: View {
     var mailbox: MailMailbox?
     var message: MailMessageSummary
     @Bindable var model: MailFeatureModel
+    private static let preparedHTMLCache = MailHTMLRenderCache(capacity: 8)
     @State private var bodyDisplay: MailBodyDisplayPresentation = .loading
     @State private var preparedHTMLBody: MailPreparedHTMLBodyPresentation?
     @State private var bodyWebLayout: MailHTMLBodyLayout = .initial
@@ -971,7 +974,7 @@ private struct MailMessageDetailPane: View {
         .task(id: message.id) {
             let token = bodyLoadGate.begin(messageID: message.id)
             let startedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.load.start messageID=\(token.messageID.rawValue, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.load.start")
             allowRemoteImagesForMessage = false
             preparedHTMLBody = nil
             bodyWebLayout = .initial
@@ -981,7 +984,7 @@ private struct MailMessageDetailPane: View {
             guard !Task.isCancelled else { return }
             guard bodyLoadGate.shouldCommit(token) else { return }
             let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
-            mailBodyRenderingLogger.info("mailBody.load.end messageID=\(token.messageID.rawValue, privacy: .public) kind=\(String(describing: display.kind), privacy: .public) htmlLength=\(display.html?.count ?? 0, privacy: .public) textLength=\(display.text.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+            mailBodyRenderingLogger.info("mailBody.load.end kind=\(String(describing: display.kind), privacy: .public) htmlLength=\(display.html?.count ?? 0, privacy: .public) textLength=\(display.text.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
             bodyDisplay = display
         }
         .task(id: htmlSanitizationRequest) {
@@ -991,19 +994,26 @@ private struct MailMessageDetailPane: View {
                 preparedHTMLBody = nil
                 return
             }
-            preparedHTMLBody = nil
             bodyWebLayout = .initial
+            if let cached = Self.preparedHTMLCache.value(for: request) {
+                mailBodyRenderingLogger.info("mailBody.sanitize.cacheHit htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
+                preparedHTMLBody = cached
+                return
+            }
+            preparedHTMLBody = nil
             let policy = MailHTMLDisplayPolicy(remoteContentMode: request.allowsRemoteImages ? .allowForMessage : .block)
             let startedAt = ContinuousClock.now
-            mailBodyRenderingLogger.info("mailBody.sanitize.start messageID=\(request.messageID.rawValue, privacy: .public) htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
+            mailBodyRenderingLogger.info("mailBody.sanitize.start htmlLength=\(request.htmlLength, privacy: .public) allowsRemoteImages=\(request.allowsRemoteImages, privacy: .public)")
             let result = await Task.detached(priority: .userInitiated) {
                 MailHTMLBodySanitizer().prepareHTML(html, policy: policy)
             }.value
             guard !Task.isCancelled else { return }
             guard htmlSanitizationRequest == request else { return }
             let milliseconds = mailBodyDurationMilliseconds(from: startedAt)
-            mailBodyRenderingLogger.info("mailBody.sanitize.end messageID=\(request.messageID.rawValue, privacy: .public) outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
-            preparedHTMLBody = MailPreparedHTMLBodyPresentation(result)
+            mailBodyRenderingLogger.info("mailBody.sanitize.end outputLength=\(result.html.count, privacy: .public) blockedImages=\(result.blockedRemoteImageCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+            let prepared = MailPreparedHTMLBodyPresentation(result)
+            Self.preparedHTMLCache.insert(prepared, for: request)
+            preparedHTMLBody = prepared
         }
     }
 }
