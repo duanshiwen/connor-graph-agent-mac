@@ -38,6 +38,40 @@ struct MailFeatureModelTests {
         #expect(f.model.preferences.defaultSendAccountID == data.account.id)
     }
 
+    @Test func listProjectionUsesBoundedWindowAndPersistsFiltersInModel() throws {
+        let f = try fixture(); defer { f.cleanup() }
+        let data = mailFixture(id: "message-template")
+        let messages = (0..<250).map { index in
+            MailMessageSummary(
+                id: MailMessageID(rawValue: "message-\(index)"),
+                accountID: data.account.id,
+                mailboxID: data.mailbox.id,
+                subject: index == 149 ? "Needle" : "Subject \(index)",
+                from: MailAddress(email: "sender@example.com"),
+                to: data.account.identities.map(\.address),
+                date: Date(timeIntervalSince1970: TimeInterval(index)),
+                snippet: "Snippet"
+            )
+        }
+
+        f.model.presentation = NativeMailBrowserPresentation(
+            accounts: [data.account],
+            mailboxes: [data.mailbox],
+            messages: messages
+        )
+        #expect(f.model.filteredListMessages.count == 250)
+        #expect(f.model.visibleListMessages.count == 100)
+        #expect(f.model.hiddenFilteredListMessageCount == 150)
+
+        f.model.loadMoreListMessages()
+        #expect(f.model.visibleListMessages.count == 200)
+        #expect(f.model.hiddenFilteredListMessageCount == 50)
+
+        f.model.searchQuery = "Needle"
+        #expect(f.model.filteredListMessages.map(\.subject) == ["Needle"])
+        #expect(f.model.visibleListMessages.count == 1)
+    }
+
     @Test func shutdownPreventsFurtherReloadApplication() async throws {
         let f = try fixture(); defer { f.cleanup() }
         f.model.shutdown(); await f.model.reload()
