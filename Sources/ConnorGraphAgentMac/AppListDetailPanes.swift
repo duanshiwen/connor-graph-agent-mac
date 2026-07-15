@@ -15,7 +15,7 @@ struct CraftListPaneView: View {
         VStack(spacing: 0) {
             switch selection ?? .agentChat {
             case .agentChat:
-                CraftSessionListPane(
+                ChatListRouteView(
                     model: graph.chat,
                     governanceModel: graph.governance,
                     sessionActions: graph.chatActions.session,
@@ -28,9 +28,9 @@ struct CraftListPaneView: View {
             case .contacts:
                 CraftContactsListPane(model: graph.contacts)
             case .rss:
-                CraftRSSListPane(model: graph.rss)
+                RSSListRouteView(model: graph.rss)
             case .mail:
-                CraftMailListPane(model: graph.mail)
+                MailListRouteView(model: graph.mail)
             case .sources:
                 CraftSourceListPane(model: graph.sources)
             case .skills:
@@ -2048,11 +2048,7 @@ struct CraftDetailPaneView: View {
             case .observeLog:
                 ObserveLogView(entries: graph.graphDiagnostics.observeLogEntries)
             case .agentChat:
-                if graph.chat.sessions.selectedSessionID == nil {
-                    AgentChatNoSelectionDetailView()
-                } else {
-                    AgentChatView(model: graph.chat, chatActions: graph.chatActions)
-                }
+                ChatDetailRouteView(model: graph.chat, chatActions: graph.chatActions)
             case .promotionQueue:
                 PromotionQueueView(model: graph.graphDiagnostics)
             case .pendingApprovals:
@@ -2072,9 +2068,9 @@ struct CraftDetailPaneView: View {
             case .contacts:
                 ContactsSourceSettingsView(model: graph.contacts)
             case .mail:
-                MailSourceDetailView(model: graph.mail)
+                MailDetailRouteView(model: graph.mail)
             case .rss:
-                RSSSourceSettingsView(model: graph.rss)
+                RSSDetailRouteView(model: graph.rss)
             case .sources:
                 SourceRuntimePanelView(model: graph.sources)
             case .skills:
@@ -2096,7 +2092,7 @@ struct CraftDetailPaneView: View {
     }
 }
 
-private struct AgentChatNoSelectionDetailView: View {
+struct AgentChatNoSelectionDetailView: View {
     var body: some View {
         VStack(alignment: .center, spacing: AppShellLayout.spaceL) {
             Spacer(minLength: 80)
