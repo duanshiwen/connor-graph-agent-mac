@@ -107,6 +107,33 @@ struct GlobalSearchFeatureModelTests {
         #expect(model.previewState.rssResults.isEmpty)
     }
 
+    @Test func marketplaceResultsJoinUnifiedSearchAndOpenDetail() async {
+        let model = makeModel()
+        model.knowledgeMarketplaceSearchProvider = { query in
+            guard query == "Swift" else { return [] }
+            return [CloudMarketplaceKnowledgeBase(
+                id: "kb-swift",
+                name: "Swift 知识库",
+                subscribed: true,
+                ownerName: "Connor",
+                publicationStatus: "published"
+            )]
+        }
+        var openedID: String?
+        model.onDestination = {
+            if case let .knowledgeBase(id) = $0 { openedID = id }
+        }
+        model.updateQuery("Swift")
+
+        await model.refreshPreview(for: "Swift")
+
+        #expect(model.previewState.knowledgeBaseResults.map(\.id) == ["kb-swift"])
+        #expect(model.selectableItems.contains(.knowledgeBase("kb-swift")))
+        model.openKnowledgeBase("kb-swift")
+        #expect(openedID == "kb-swift")
+        model.shutdown()
+    }
+
     private func makeModel() -> GlobalSearchFeatureModel {
         GlobalSearchFeatureModel(nativeSourceSearchBackend: nil, sessionSearchIndexService: nil, historyRepository: nil)
     }

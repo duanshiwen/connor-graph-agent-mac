@@ -113,6 +113,8 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarRow(title: "技能", systemImage: "bolt", count: graph.skills.presentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
+                    SidebarRow(title: "知识市场", systemImage: "books.vertical.fill", count: marketplaceCount, isSelected: selection == .knowledgeMarketplace) { select(.knowledgeMarketplace) }
+
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: graph.tasks.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
                         SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: graph.tasks.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
@@ -168,6 +170,11 @@ struct CraftPrimarySidebarView: View {
 
     private var rssUnreadCount: Int? {
         let count = graph.rss.presentation.unreadCount(sourceID: nil)
+        return count > 0 ? count : nil
+    }
+
+    private var marketplaceCount: Int? {
+        let count = graph.knowledgeMarketplace.library.subscribed.count
         return count > 0 ? count : nil
     }
 

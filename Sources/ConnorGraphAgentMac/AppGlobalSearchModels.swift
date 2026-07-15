@@ -44,6 +44,7 @@ struct GlobalSearchPreviewState: Equatable {
     var rssResults: [NativeSearchResult] = []
     var mailResults: [NativeSearchResult] = []
     var browserHistoryResults: [NativeSearchResult] = []
+    var knowledgeBaseResults: [CloudMarketplaceKnowledgeBase] = []
     var searchTokens: [String] = []
     var sectionStatusMessages: [GlobalSearchSectionKind: String] = [:]
     var errorMessage: String?
@@ -57,6 +58,7 @@ struct GlobalSearchPreviewState: Equatable {
         rssResults: [NativeSearchResult] = [],
         mailResults: [NativeSearchResult] = [],
         browserHistoryResults: [NativeSearchResult] = [],
+        knowledgeBaseResults: [CloudMarketplaceKnowledgeBase] = [],
         searchTokens: [String] = [],
         sectionStatusMessages: [GlobalSearchSectionKind: String] = [:],
         errorMessage: String? = nil
@@ -68,6 +70,7 @@ struct GlobalSearchPreviewState: Equatable {
         self.rssResults = rssResults
         self.mailResults = mailResults
         self.browserHistoryResults = browserHistoryResults
+        self.knowledgeBaseResults = knowledgeBaseResults
         self.searchTokens = searchTokens
         self.sectionStatusMessages = sectionStatusMessages
         self.errorMessage = errorMessage
@@ -86,7 +89,7 @@ struct GlobalSearchPreviewState: Equatable {
     }
 
     var hasAnySourceResults: Bool {
-        !chatSessionResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
+        !chatSessionResults.isEmpty || !knowledgeBaseResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !mailResults.isEmpty || !browserHistoryResults.isEmpty
     }
 }
 
@@ -115,6 +118,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
     case rss
     case mail
     case browserHistory
+    case knowledgeMarketplace
 
     init(nativeSourceKind: NativeSearchSourceKind) {
         switch nativeSourceKind {
@@ -134,6 +138,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .rss: "RSS"
         case .mail: "邮件"
         case .browserHistory: "浏览历史"
+        case .knowledgeMarketplace: "知识库"
         }
     }
 
@@ -144,6 +149,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .rss: "dot.radiowaves.left.and.right"
         case .mail: "envelope"
         case .browserHistory: "clock.arrow.circlepath"
+        case .knowledgeMarketplace: "books.vertical"
         }
     }
 
@@ -154,6 +160,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
         case .rss: "没有匹配的 RSS"
         case .mail: "没有匹配的邮件"
         case .browserHistory: "没有匹配的浏览历史"
+        case .knowledgeMarketplace: "没有匹配的知识库"
         }
     }
 }
@@ -163,6 +170,7 @@ enum GlobalSearchSelectableItem: Equatable {
     case action(GlobalSearchActionKind)
     case chatSession(String)
     case nativeResult(String)
+    case knowledgeBase(String)
 }
 
 enum GlobalSearchActionKind: String, CaseIterable, Identifiable {

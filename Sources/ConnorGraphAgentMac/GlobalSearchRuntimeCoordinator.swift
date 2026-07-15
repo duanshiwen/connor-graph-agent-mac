@@ -15,6 +15,7 @@ final class GlobalSearchRuntimeCoordinator {
     private let rss: RSSFeatureModel
     private let mail: MailFeatureModel
     private let appSettings: AppSettingsFeatureModel
+    private let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
 
     init(
         search: GlobalSearchFeatureModel,
@@ -26,6 +27,7 @@ final class GlobalSearchRuntimeCoordinator {
         calendar: CalendarFeatureModel,
         rss: RSSFeatureModel,
         mail: MailFeatureModel,
+        knowledgeMarketplace: CloudKnowledgeMarketplaceStore,
         appSettings: AppSettingsFeatureModel
     ) {
         self.search = search
@@ -37,6 +39,7 @@ final class GlobalSearchRuntimeCoordinator {
         self.calendar = calendar
         self.rss = rss
         self.mail = mail
+        self.knowledgeMarketplace = knowledgeMarketplace
         self.appSettings = appSettings
     }
 
@@ -47,6 +50,9 @@ final class GlobalSearchRuntimeCoordinator {
         }
         search.defaultSearchURLProvider = { [weak appSettings] query in
             appSettings?.defaultSearchEngine.searchURL(for: query)
+        }
+        search.knowledgeMarketplaceSearchProvider = { [weak knowledgeMarketplace] query in
+            await knowledgeMarketplace?.resultsForGlobalSearch(query: query) ?? []
         }
         search.onDestination = { [weak self] destination in
             self?.handle(destination)
@@ -140,6 +146,9 @@ final class GlobalSearchRuntimeCoordinator {
             open(result)
         case .browserHistoryRecord(let record):
             browser.navigateToHistoryRecord(record)
+        case .knowledgeBase(let id):
+            shell.selection = .knowledgeMarketplace
+            Task { await knowledgeMarketplace.loadDetail(id: id) }
         case .showAll(let kind, let query):
             switch kind {
             case .chatSessions:
@@ -157,6 +166,9 @@ final class GlobalSearchRuntimeCoordinator {
                 shell.selection = .mail
             case .browserHistory:
                 browser.openHistorySearch(query: query)
+            case .knowledgeMarketplace:
+                shell.selection = .knowledgeMarketplace
+                Task { await knowledgeMarketplace.search(query: query) }
             }
         }
     }
