@@ -11,7 +11,7 @@ struct ActivityTimelineCacheWriterTests {
 
         await writer.scheduleSave(sessionID: sessionID, timeline: [event("one")])
         await writer.scheduleSave(sessionID: sessionID, timeline: [event("one"), event("two")])
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await writer.waitForPendingSave(sessionID: sessionID)
 
         let writes = persistor.writes
         #expect(writes.count == 1)
