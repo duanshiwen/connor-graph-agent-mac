@@ -9,8 +9,23 @@ final class MailFeatureModel {
     enum Event { case operationSucceeded; case operationFailed(String) }
     typealias SyncServiceFactory = @Sendable () -> MailIMAPInitialSyncService
 
-    var presentation: NativeMailBrowserPresentation = .empty
-    var searchQuery = ""
+    var presentation: NativeMailBrowserPresentation = .empty {
+        didSet {
+            bodyDisplayCache.removeAll()
+            bodyDisplayCacheOrder.removeAll()
+            rebuildListProjection(resetWindow: true)
+        }
+    }
+    var searchQuery = "" {
+        didSet { rebuildListProjection(resetWindow: true) }
+    }
+    var listDirectionFilter: MailMessageDirectionFilter = .all {
+        didSet { rebuildListProjection(resetWindow: true) }
+    }
+    private(set) var filteredListMessages: [MailMessageSummary] = []
+    private(set) var visibleListMessages: [MailMessageSummary] = []
+    private(set) var visibleListMessageIDs: Set<MailMessageID> = []
+    private(set) var listProjectionRevision: UInt64 = 0
     var selectedAccountID: MailAccountID?
     var selectedMailboxID: MailMailboxID?
     var selectedMessageID: MailMessageID?
@@ -28,6 +43,9 @@ final class MailFeatureModel {
     @ObservationIgnored private let syncServiceFactory: SyncServiceFactory
     @ObservationIgnored private var cacheObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
+    @ObservationIgnored private var visibleListMessageLimit = 100
+    @ObservationIgnored private var bodyDisplayCache: [MailMessageID: MailBodyDisplayPresentation] = [:]
+    @ObservationIgnored private var bodyDisplayCacheOrder: [MailMessageID] = []
     @ObservationIgnored private var ownedTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShutdown = false
     @ObservationIgnored var sourceSetChanged: @MainActor () async throws -> Void = {}
@@ -116,6 +134,16 @@ final class MailFeatureModel {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty ? presentation.unqueriedMessages(direction: direction) : presentation.messages(accountID: nil, mailboxID: nil, query: query, direction: direction)
     }
+
+    var hiddenFilteredListMessageCount: Int {
+        max(filteredListMessages.count - visibleListMessages.count, 0)
+    }
+
+    func loadMoreListMessages() {
+        visibleListMessageLimit += 100
+        rebuildVisibleListWindow()
+    }
+
     func presentAddAccountSheet() { isPresentingAddAccountSheet = true }
 
     func setDefaultSendAccount(_ accountID: MailAccountID) async {
@@ -130,14 +158,21 @@ final class MailFeatureModel {
     }
 
     func loadBodyDisplay(for messageID: MailMessageID) async -> MailBodyDisplayPresentation {
+        if let cached = bodyDisplayCache[messageID] { return cached }
         do {
             guard let detail = try await store?.message(id: messageID) else { return .init(kind: .error, text: "无法读取邮件正文：本地缓存中找不到这封邮件") }
             guard !Task.isCancelled else { return .loading }
-            if MailBodyOnDemandFetchPlanner.hasDisplayableBody(detail) { return await .preparing(detail: detail) }
+            if MailBodyOnDemandFetchPlanner.hasDisplayableBody(detail) {
+                let display = await MailBodyDisplayPresentation.preparing(detail: detail)
+                cacheBodyDisplay(display, for: messageID)
+                return display
+            }
             do {
                 let fetched = try await fetchAndCacheBody(detail)
                 try Task.checkCancellation()
-                return await .preparing(detail: fetched)
+                let display = await MailBodyDisplayPresentation.preparing(detail: fetched)
+                cacheBodyDisplay(display, for: messageID)
+                return display
             } catch is CancellationError { return .loading }
             catch { let message = "无法按需读取邮件正文：\(error.localizedDescription)"; reportFailure(message); return .error(message, fallback: detail.summary.snippet) }
         } catch is CancellationError { return .loading }
@@ -204,6 +239,30 @@ final class MailFeatureModel {
         guard !isShutdown else { return }; isShutdown = true; reloadGeneration &+= 1
         if let cacheObserver { notificationCenter.removeObserver(cacheObserver); self.cacheObserver = nil }
         for task in ownedTasks.values { task.cancel() }; ownedTasks.removeAll()
+        bodyDisplayCache.removeAll()
+        bodyDisplayCacheOrder.removeAll()
+    }
+
+    private func rebuildListProjection(resetWindow: Bool) {
+        if resetWindow { visibleListMessageLimit = 100 }
+        filteredListMessages = listMessages(direction: listDirectionFilter)
+        rebuildVisibleListWindow()
+    }
+
+    private func rebuildVisibleListWindow() {
+        let visible = Array(filteredListMessages.prefix(visibleListMessageLimit))
+        visibleListMessages = visible
+        visibleListMessageIDs = Set(visible.map(\.id))
+        listProjectionRevision &+= 1
+    }
+
+    private func cacheBodyDisplay(_ display: MailBodyDisplayPresentation, for messageID: MailMessageID) {
+        bodyDisplayCache[messageID] = display
+        bodyDisplayCacheOrder.removeAll { $0 == messageID }
+        bodyDisplayCacheOrder.append(messageID)
+        while bodyDisplayCacheOrder.count > 8 {
+            bodyDisplayCache.removeValue(forKey: bodyDisplayCacheOrder.removeFirst())
+        }
     }
 
     private func reconciledPreferences(accounts: [MailAccount]) async throws -> MailPreferences {

@@ -16,8 +16,14 @@ final class RSSFeatureModel {
         case operationFailed(String)
     }
 
-    var presentation: NativeRSSBrowserPresentation = .empty
-    var searchQuery = ""
+    var presentation: NativeRSSBrowserPresentation = .empty {
+        didSet { rebuildVisibleItems() }
+    }
+    var searchQuery = "" {
+        didSet { rebuildVisibleItems() }
+    }
+    private(set) var visibleItems: [RSSItemSummary] = []
+    private(set) var visibleItemsRevision: UInt64 = 0
     var selectedSourceID: RSSSourceID?
     var selectedItemID: RSSItemID?
     var isPresentingAddSourceSheet = false
@@ -65,6 +71,12 @@ final class RSSFeatureModel {
             guard !isShutdown, generation == reloadGeneration else { return }
             reportFailure(String(describing: error))
         }
+    }
+
+    private func rebuildVisibleItems() {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        visibleItems = query.isEmpty ? presentation.items : presentation.items(sourceID: nil, query: query)
+        visibleItemsRevision &+= 1
     }
 
     func selectItem(_ item: RSSItemSummary) {

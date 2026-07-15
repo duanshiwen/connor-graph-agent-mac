@@ -120,6 +120,30 @@ private func waitUntil(
 }
 
 @MainActor
+@Test func rssFeatureCachesVisibleItemsAcrossSearchAndPresentationChanges() {
+    let (source, item) = makeRSSFixture()
+    let second = RSSItemSummary(
+        id: RSSItemID(rawValue: "item-2"),
+        sourceID: source.id,
+        title: "Swift Performance",
+        snippet: "Navigation profiling"
+    )
+    let model = RSSFeatureModel(runtime: RSSRuntime(
+        repository: InMemoryRSSSourceRepository(sources: [source]),
+        cache: InMemoryRSSSourceCache(items: [])
+    ))
+
+    model.presentation = NativeRSSBrowserPresentation(sources: [source], items: [item.summary, second])
+    #expect(model.visibleItems.map(\.id) == [item.id, second.id])
+
+    model.searchQuery = "performance"
+    #expect(model.visibleItems.map(\.id) == [second.id])
+
+    model.presentation = NativeRSSBrowserPresentation(sources: [source], items: [item.summary])
+    #expect(model.visibleItems.isEmpty)
+}
+
+@MainActor
 @Test func rssFeatureSelectOptimisticallyMarksReadAndPersists() async throws {
     let (source, item) = makeRSSFixture()
     let cache = InMemoryRSSSourceCache(items: [item])

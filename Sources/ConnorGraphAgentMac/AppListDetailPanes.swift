@@ -1556,19 +1556,12 @@ private struct AddTaskAutomationSheet: View {
 
 struct CraftMailListPane: View {
     @Bindable var model: MailFeatureModel
-    @State private var directionFilter: MailMessageDirectionFilter = .all
-    @State private var filteredMessagesCache: [MailMessageSummary] = []
-    @State private var visibleMessagesCache: [MailMessageSummary] = []
-    @State private var visibleMessageIDCache: Set<MailMessageID> = []
-    @State private var visibleMessagesCacheKey = MailVisibleMessagesCacheKey.empty
-    @State private var visibleMessagesLimit = Self.initialVisibleMessagesLimit
 
-    private static let initialVisibleMessagesLimit = 500
-    private static let visibleMessagesBatchSize = 500
+    private static let visibleMessagesBatchSize = 100
 
     private var presentation: NativeMailBrowserPresentation { model.presentation }
-    private var visibleMessages: [MailMessageSummary] { visibleMessagesCache }
-    private var hiddenFilteredMessageCount: Int { max(filteredMessagesCache.count - visibleMessagesCache.count, 0) }
+    private var visibleMessages: [MailMessageSummary] { model.visibleListMessages }
+    private var hiddenFilteredMessageCount: Int { model.hiddenFilteredListMessageCount }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1602,7 +1595,7 @@ struct CraftMailListPane: View {
                 ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else {
-                MailDirectionFilterChips(selection: $directionFilter)
+                MailDirectionFilterChips(selection: $model.listDirectionFilter)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 6)
 
@@ -1627,7 +1620,7 @@ struct CraftMailListPane: View {
                                 MailListLoadMoreRow(
                                     hiddenCount: hiddenFilteredMessageCount,
                                     batchSize: Self.visibleMessagesBatchSize,
-                                    onLoadMore: loadMoreVisibleMessages
+                                    onLoadMore: model.loadMoreListMessages
                                 )
                                 .nativeListRowStyle()
                             }
@@ -1641,7 +1634,7 @@ struct CraftMailListPane: View {
                         .onChange(of: model.selectedMessageID) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
-                        .onChange(of: visibleMessagesCacheKey) { _, _ in
+                        .onChange(of: model.listProjectionRevision) { _, _ in
                             scrollToSelectedMessage(with: proxy)
                         }
                     }
@@ -1649,58 +1642,9 @@ struct CraftMailListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onAppear(perform: refreshVisibleMessagesCacheIfNeeded)
-        .onChange(of: directionFilter) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
-        .onChange(of: model.searchQuery) { _, _ in refreshVisibleMessagesCacheIfNeeded() }
-        .onChange(of: mailPresentationListSignature) { _, _ in refreshVisibleMessagesCache(force: true) }
         .sheet(isPresented: $model.isPresentingAddAccountSheet) {
             AddMailAccountSheet(model: model)
         }
-    }
-
-    private func refreshVisibleMessagesCacheIfNeeded() {
-        refreshVisibleMessagesCache(force: false)
-    }
-
-    private func refreshVisibleMessagesCache(force: Bool) {
-        let key = MailVisibleMessagesCacheKey(
-            messageCount: model.presentation.messages.count,
-            firstMessageID: model.presentation.messages.first?.id,
-            lastMessageID: model.presentation.messages.last?.id,
-            query: model.searchQuery,
-            direction: directionFilter
-        )
-        guard force || key != visibleMessagesCacheKey else { return }
-        if key.query != visibleMessagesCacheKey.query
-            || key.direction != visibleMessagesCacheKey.direction
-            || key.messageCount != visibleMessagesCacheKey.messageCount
-            || key.firstMessageID != visibleMessagesCacheKey.firstMessageID
-            || key.lastMessageID != visibleMessagesCacheKey.lastMessageID {
-            visibleMessagesLimit = Self.initialVisibleMessagesLimit
-        }
-        let messages = model.listMessages(direction: directionFilter)
-        visibleMessagesCacheKey = key
-        filteredMessagesCache = messages
-        rebuildVisibleMessagesWindow()
-    }
-
-    private func loadMoreVisibleMessages() {
-        visibleMessagesLimit += Self.visibleMessagesBatchSize
-        rebuildVisibleMessagesWindow()
-    }
-
-    private func rebuildVisibleMessagesWindow() {
-        let windowedMessages = Array(filteredMessagesCache.prefix(visibleMessagesLimit))
-        visibleMessagesCache = windowedMessages
-        visibleMessageIDCache = Set(windowedMessages.map(\.id))
-    }
-
-    private var mailPresentationListSignature: MailPresentationListSignature {
-        MailPresentationListSignature(
-            messageCount: model.presentation.messages.count,
-            firstMessageID: model.presentation.messages.first?.id,
-            lastMessageID: model.presentation.messages.last?.id
-        )
     }
 
     private var isFilteringBySearch: Bool {
@@ -1708,15 +1652,15 @@ struct CraftMailListPane: View {
     }
 
     private var mailEmptyListTitle: String {
-        isFilteringBySearch ? "没有找到匹配的邮件" : directionFilter.emptyListTitle
+        isFilteringBySearch ? "没有找到匹配的邮件" : model.listDirectionFilter.emptyListTitle
     }
 
     private var mailEmptyListDescription: String {
-        isFilteringBySearch ? "换个关键词试试，或者清除筛选查看全部邮件。" : directionFilter.emptyListDescription
+        isFilteringBySearch ? "换个关键词试试，或者清除筛选查看全部邮件。" : model.listDirectionFilter.emptyListDescription
     }
 
     private var mailEmptyListSystemImage: String {
-        isFilteringBySearch ? "envelope.badge.magnifyingglass" : directionFilter.emptyListSystemImage
+        isFilteringBySearch ? "envelope.badge.magnifyingglass" : model.listDirectionFilter.emptyListSystemImage
     }
 
     private func selectMessage(_ message: MailMessageSummary) {
@@ -1725,34 +1669,12 @@ struct CraftMailListPane: View {
 
     private func scrollToSelectedMessage(with proxy: ScrollViewProxy) {
         guard let selectedID = model.selectedMessageID,
-              visibleMessageIDCache.contains(selectedID) else { return }
+              model.visibleListMessageIDs.contains(selectedID) else { return }
         Task { @MainActor in
             await Task.yield()
             proxy.scrollTo(selectedID, anchor: .center)
         }
     }
-}
-
-private struct MailVisibleMessagesCacheKey: Equatable {
-    var messageCount: Int
-    var firstMessageID: MailMessageID?
-    var lastMessageID: MailMessageID?
-    var query: String
-    var direction: MailMessageDirectionFilter
-
-    static let empty = MailVisibleMessagesCacheKey(
-        messageCount: -1,
-        firstMessageID: nil,
-        lastMessageID: nil,
-        query: "",
-        direction: .all
-    )
-}
-
-private struct MailPresentationListSignature: Equatable {
-    var messageCount: Int
-    var firstMessageID: MailMessageID?
-    var lastMessageID: MailMessageID?
 }
 
 extension MailMessageDirectionFilter {
@@ -1991,7 +1913,7 @@ struct CraftRSSListPane: View {
     @Bindable var model: RSSFeatureModel
 
     private var presentation: NativeRSSBrowserPresentation { model.presentation }
-    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: model.searchQuery) }
+    private var visibleItems: [RSSItemSummary] { model.visibleItems }
 
     var body: some View {
         VStack(spacing: 0) {
