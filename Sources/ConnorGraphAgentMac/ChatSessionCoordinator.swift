@@ -13,6 +13,8 @@ final class ChatSessionCoordinator {
     @ObservationIgnored private let repository: AppChatSessionRepository?
     @ObservationIgnored private let listLoader = ChatSessionListRefreshCoordinator()
     @ObservationIgnored private let detailLoader = ChatSessionDetailLoadCoordinator()
+    @ObservationIgnored private var listRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var listRefreshGeneration = 0
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var selectionGeneration = 0
     @ObservationIgnored private var isShutdown = false
@@ -38,6 +40,7 @@ final class ChatSessionCoordinator {
 
     func installStartupSessions(_ sessions: [AgentSession], allSessions: [AgentSession]) {
         guard !isShutdown else { return }
+        cancelListRefresh()
         hasLoadedInitialSessions = true
         model.sessions = sessions
         model.allSessions = allSessions
@@ -51,6 +54,7 @@ final class ChatSessionCoordinator {
 
     func reload(restoreWorkspaceMode: Bool = true) {
         guard !isShutdown else { return }
+        cancelListRefresh()
         hasLoadedInitialSessions = true
         guard let repository else { return }
         do {
@@ -75,9 +79,14 @@ final class ChatSessionCoordinator {
     }
 
     func setFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
-        guard !isShutdown else { return }
+        guard !isShutdown, model.filter != filter else { return }
+        _ = restoreWorkspaceMode
         model.filter = filter
-        reload(restoreWorkspaceMode: restoreWorkspaceMode)
+
+        let projectedSessions = Self.filter(model.allSessions, by: filter)
+        model.sessions = projectedSessions
+        reconcileSelection(visibleSessions: projectedSessions)
+        refreshFilterFromRepository(filter)
     }
 
     func select(_ sessionID: String) {
@@ -176,10 +185,75 @@ final class ChatSessionCoordinator {
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
+        listRefreshTask?.cancel()
+        listRefreshTask = nil
+        listRefreshGeneration += 1
         selectionTask?.cancel()
         selectionTask = nil
         selectionGeneration += 1
         model.loadingSessionDetailID = nil
+    }
+
+    static func filter(_ sessions: [AgentSession], by filter: AgentSessionListFilter) -> [AgentSession] {
+        switch filter {
+        case .all:
+            sessions
+        case .status(let status):
+            sessions.filter { $0.governance.status == status }
+        case .label(let labelID):
+            sessions.filter { session in
+                session.governance.labels.contains { $0.id == labelID }
+            }
+        }
+    }
+
+    private func refreshFilterFromRepository(_ filter: AgentSessionListFilter) {
+        guard let repository else { return }
+        cancelListRefresh()
+        listRefreshGeneration += 1
+        let generation = listRefreshGeneration
+        listRefreshTask = Task(priority: .userInitiated) { [weak self] in
+            do {
+                let result = try await self?.listLoader.refresh(repository: repository, filter: filter)
+                try Task.checkCancellation()
+                guard let self,
+                      let result,
+                      !self.isShutdown,
+                      self.listRefreshGeneration == generation,
+                      self.model.filter == filter else { return }
+                self.model.sessions = result.visibleSessions
+                self.model.allSessions = result.allSessions
+                self.onSessionsChanged(result.allSessions)
+                self.reconcileSelection(visibleSessions: result.visibleSessions)
+                self.errorMessage = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      !self.isShutdown,
+                      self.listRefreshGeneration == generation,
+                      self.model.filter == filter else { return }
+                self.report(error)
+            }
+        }
+    }
+
+    private func cancelListRefresh() {
+        listRefreshTask?.cancel()
+        listRefreshTask = nil
+        listRefreshGeneration += 1
+    }
+
+    private func reconcileSelection(visibleSessions: [AgentSession]) {
+        if let selectedSessionID = model.selectedSessionID {
+            if !visibleSessions.contains(where: { $0.id == selectedSessionID }) {
+                clearSelection()
+            }
+            return
+        }
+        if model.filter == .all, let firstSessionID = visibleSessions.first?.id {
+            select(firstSessionID)
+        }
     }
 
     private func selectedSessionIDVisible(in sessions: [AgentSession]) -> String? {

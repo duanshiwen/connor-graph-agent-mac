@@ -2482,7 +2482,7 @@ final class AppRuntimeLifecycle {
                 let elapsed = startedAt.duration(to: ContinuousClock.now)
                 let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.chatFeatureModel.sessions.filter == filter else { return }
                     self.chatFeatureModel.sessions.sessions = result.visibleSessions
                     self.chatFeatureModel.sessions.allSessions = result.allSessions
                     self.rebuildSessionSearchIndexSoon(sessions: result.allSessions)
