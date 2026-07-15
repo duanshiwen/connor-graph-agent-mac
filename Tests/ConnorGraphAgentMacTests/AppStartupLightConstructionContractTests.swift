@@ -4,6 +4,8 @@ import Testing
 
 @Suite("App Startup Light Construction Contract Tests")
 struct AppStartupLightConstructionContractTests {
+    private let legacyMegaTypeName = "App" + "View" + "Model"
+
     @Test func compositionRootLiveDoesNotPerformPersistentBootstrap() throws {
         let source = try projectSource(named: "AppCompositionRoot.swift")
         let liveBody = try #require(source.range(of: "static func live() -> AppCompositionRoot"))
@@ -11,7 +13,7 @@ struct AppStartupLightConstructionContractTests {
         let end = try #require(tail.range(of: "    func sendWhenInteractive"))
         let body = String(tail[..<end.lowerBound])
 
-        #expect(!body.contains("AppViewModel"))
+        #expect(!body.contains(legacyMegaTypeName))
         #expect(!body.contains("AppGraphRepository.bootstrap"))
         #expect(!body.contains("loadSnapshot()"))
         #expect(!body.contains("SQLite"))
@@ -21,7 +23,7 @@ struct AppStartupLightConstructionContractTests {
     }
 
     @Test func stagedContentAndMaintenanceUseActorSnapshots() throws {
-        let viewModelSource = try projectSource(named: "AppViewModel.swift")
+        let viewModelSource = try projectSource(named: "AppRuntimeOrchestrator.swift")
         let content = try functionBody(named: "func loadStartupContent", in: viewModelSource, endingAt: "    func reconcileStartupRefreshTasks")
         #expect(content.contains("applyStartupSnapshot"))
         #expect(content.contains("applyStartupHistory"))
@@ -48,7 +50,7 @@ struct AppStartupLightConstructionContractTests {
         #expect(compositionSource.contains("AppRuntimeLifecycle.live(core: snapshot)"))
         #expect(compositionSource.contains("contentBootstrapActor.load"))
         #expect(compositionSource.contains("maintenanceBootstrapActor.load"))
-        #expect(!compositionSource.contains("AppViewModel"))
+        #expect(!compositionSource.contains(legacyMegaTypeName))
         #expect(compositionSource.contains("self.runtime = runtime"))
         #expect(compositionSource.contains("self.graph = runtime.graph"))
         let publicationStart = try #require(compositionSource.range(of: "let previousRuntime = self.runtime"))

@@ -7,7 +7,7 @@ public protocol MailSourceRepository: Sendable {
     func account(id: MailAccountID) async throws -> MailAccount?
 }
 
-/// Combined protocol for all mail store operations used by AppViewModel
+/// Combined protocol for mail store operations used by the app runtime
 public protocol MailStoreProtocol: MailSourceRepository, TimeAwareMailSourceCache {
     func saveMessagesBatch(_ messages: [MailMessageDetail]) async throws
     func allMessageIDs() async throws -> [MailMessageID]

@@ -3,16 +3,16 @@ import ConnorGraphAppSupport
 
 @MainActor
 final class AppRuntimeLifecycle {
-    private let model: AppViewModel
+    private let model: AppRuntimeOrchestrator
     let graph: AppFeatureGraph
 
-    private init(model: AppViewModel) {
+    private init(model: AppRuntimeOrchestrator) {
         self.model = model
         self.graph = Self.makeFeatureGraph(model: model)
     }
 
     static func placeholder() -> AppRuntimeLifecycle {
-        AppRuntimeLifecycle(model: AppViewModel(
+        AppRuntimeLifecycle(model: AppRuntimeOrchestrator(
             entities: [],
             statements: [],
             observeLogEntries: [],
@@ -22,7 +22,7 @@ final class AppRuntimeLifecycle {
 
     static func live(core snapshot: CoreBootstrapSnapshot) -> AppRuntimeLifecycle {
         let graph = snapshot.graphSnapshot
-        return AppRuntimeLifecycle(model: AppViewModel(
+        return AppRuntimeLifecycle(model: AppRuntimeOrchestrator(
             entities: graph.entities,
             statements: graph.statements,
             episodes: graph.episodes,
@@ -47,7 +47,14 @@ final class AppRuntimeLifecycle {
     }
 
     static func demo(fallbackError: Error) -> AppRuntimeLifecycle {
-        let model = AppViewModel.demo(startupMode: .deferred)
+        let demo = AppDemoGraphSnapshotFactory.make()
+        let model = AppRuntimeOrchestrator(
+            entities: demo.entities,
+            statements: demo.statements,
+            episodes: demo.episodes,
+            observeLogEntries: demo.observeLogEntries,
+            startupMode: .deferred
+        )
         model.errorMessage = "已回退到演示数据：\(fallbackError)"
         return AppRuntimeLifecycle(model: model)
     }
@@ -103,7 +110,7 @@ final class AppRuntimeLifecycle {
         model.shutdownRuntimeResources()
     }
 
-    private static func makeFeatureGraph(model: AppViewModel) -> AppFeatureGraph {
+    private static func makeFeatureGraph(model: AppRuntimeOrchestrator) -> AppFeatureGraph {
         let session = ClosureChatSessionPort(
             isLoading: { [weak model] in model?.isLoadingSelectedChatSessionDetail ?? false },
             reloadIfNeeded: { [weak model] restore in model?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: restore) },

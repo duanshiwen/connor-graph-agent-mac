@@ -1,4 +1,3 @@
-import AppKit
 import Testing
 @testable import ConnorGraphAgentMac
 
@@ -6,81 +5,61 @@ import Testing
 @Suite("Composer Draft Synchronization Tests")
 struct ComposerDraftSynchronizationTests {
     @Test func manualComposerEditDoesNotPublishChatInputOnEveryKeystroke() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
+        let fixture = makeFixture()
+        fixture.model.input = "上一轮语音"
 
-        viewModel.chatFeatureModel.composer.input = "上一轮语音"
-        viewModel.chatComposerCoordinator.updateSelectedDraft("")
+        fixture.coordinator.updateSelectedDraft("")
 
-        #expect(viewModel.chatFeatureModel.composer.input == "上一轮语音")
+        #expect(fixture.model.input == "上一轮语音")
     }
 
     @Test func speechInputUsesLatestManualDraftInsteadOfPublishedChatInput() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
+        let fixture = makeFixture()
+        fixture.model.input = "上一轮语音"
 
-        viewModel.chatFeatureModel.composer.input = "上一轮语音"
-        viewModel.chatComposerCoordinator.updateSelectedDraft("")
+        fixture.coordinator.updateSelectedDraft("")
 
-        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "")
+        #expect(fixture.coordinator.currentSelectedDraft() == "")
     }
 
     @Test func manualComposerEditKeepsLiveDraftWhenAutoSaveIsDisabled() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
-        viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
-        viewModel.chatFeatureModel.composer.input = ""
+        let fixture = makeFixture(autoSaveDraftsEnabled: false)
+        fixture.model.input = ""
 
-        viewModel.chatComposerCoordinator.updateSelectedDraft("a")
+        fixture.coordinator.updateSelectedDraft("a")
 
-        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "a")
-        #expect(viewModel.chatFeatureModel.composer.input == "")
+        #expect(fixture.coordinator.currentSelectedDraft() == "a")
+        #expect(fixture.model.input == "")
     }
 
     @Test func repeatedManualEditsReplaceLiveDraftWithoutPublishingChatInput() {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
-        viewModel.inputSettingsModel.autoSaveDraftsEnabled = false
-        viewModel.chatFeatureModel.composer.input = "published value"
+        let fixture = makeFixture(autoSaveDraftsEnabled: false)
+        fixture.model.input = "published value"
 
-        viewModel.chatComposerCoordinator.updateSelectedDraft("a")
-        viewModel.chatComposerCoordinator.updateSelectedDraft("ab")
+        fixture.coordinator.updateSelectedDraft("a")
+        fixture.coordinator.updateSelectedDraft("ab")
 
-        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "ab")
-        #expect(viewModel.chatFeatureModel.composer.input == "published value")
+        #expect(fixture.coordinator.currentSelectedDraft() == "ab")
+        #expect(fixture.model.input == "published value")
     }
 
     @Test(arguments: [true, false])
     func externalContextAppendPreservesLatestManualDraft(autoSaveDraftsEnabled: Bool) {
-        _ = NSApplication.shared
-        let viewModel = AppViewModel(
-            entities: [],
-            statements: [],
-            observeLogEntries: []
-        )
-        viewModel.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
-        viewModel.chatFeatureModel.composer.input = "stale published value"
-        viewModel.chatComposerCoordinator.updateSelectedDraft("current manual draft")
+        let fixture = makeFixture(autoSaveDraftsEnabled: autoSaveDraftsEnabled)
+        fixture.model.input = "stale published value"
+        fixture.coordinator.updateSelectedDraft("current manual draft")
 
-        viewModel.chatComposerCoordinator.appendToSelectedDraft("external browser context")
+        fixture.coordinator.appendToSelectedDraft("external browser context")
 
-        #expect(viewModel.chatFeatureModel.composer.input == "current manual draft\n\nexternal browser context")
-        #expect(viewModel.chatComposerCoordinator.currentSelectedDraft() == "current manual draft\n\nexternal browser context")
+        #expect(fixture.model.input == "current manual draft\n\nexternal browser context")
+        #expect(fixture.coordinator.currentSelectedDraft() == "current manual draft\n\nexternal browser context")
+    }
+
+    private func makeFixture(autoSaveDraftsEnabled: Bool = true) -> (model: ChatComposerModel, coordinator: ChatComposerCoordinator) {
+        let model = ChatComposerModel()
+        let coordinator = ChatComposerCoordinator(model: model, storagePaths: nil)
+        coordinator.selectedSessionID = { "session" }
+        coordinator.autoSaveDraftsEnabled = { autoSaveDraftsEnabled }
+        return (model, coordinator)
     }
 }

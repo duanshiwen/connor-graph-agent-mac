@@ -603,7 +603,7 @@ struct AppGlobalSearchTests {
     }
 
     @Test func globalSearchIncludesMailResultsInFallbackPreview() async throws {
-        let viewModel = AppViewModel(entities: [], statements: [], observeLogEntries: [])
+        let viewModel = AppRuntimeOrchestrator(entities: [], statements: [], observeLogEntries: [])
         let mails = (0..<5).map { index in
             makeMailFixture(messageID: "fallback-mail-\(index)", subject: "Phoenix mail \(index)")
         }
@@ -703,7 +703,7 @@ struct AppGlobalSearchTests {
         let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
         try paths.ensureDirectoryHierarchy(fileManager: .default)
         let graphRepository = try AppGraphRepository.bootstrap(paths: paths)
-        let viewModel = AppViewModel(
+        let viewModel = AppRuntimeOrchestrator(
             entities: [],
             statements: [],
             observeLogEntries: [],
@@ -764,7 +764,7 @@ struct AppGlobalSearchTests {
     private struct Fixture {
         var root: URL
         var paths: AppStoragePaths
-        var viewModel: AppViewModel
+        var viewModel: AppRuntimeOrchestrator
         var repository: AppChatSessionRepository
 
         func cleanup() {

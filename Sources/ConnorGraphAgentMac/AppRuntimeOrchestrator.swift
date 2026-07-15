@@ -19,13 +19,13 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
-enum AppViewModelStartupMode: Equatable {
+enum AppRuntimeStartupMode: Equatable {
     case immediate
     case deferred
 }
 
 @MainActor
-final class AppViewModel: NSObject, ObservableObject {
+final class AppRuntimeOrchestrator {
     let maintenanceCoordinator = AppMaintenanceCoordinator()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
     private lazy var chatSessionCoordinator = ChatSessionCoordinator(
@@ -75,75 +75,12 @@ final class AppViewModel: NSObject, ObservableObject {
     var errorMessage: String? {
         get { errorFeatureModel.message }
         set {
-            objectWillChange.send()
             errorFeatureModel.message = newValue
         }
     }
-    @Published var databasePath: String?
+    var databasePath: String?
     let aiConnectionsModel: AIConnectionsFeatureModel
-    var llmConnectionConfigs: [AppLLMConnectionConfig] {
-        get { aiConnectionsModel.connectionConfigs }
-        set { aiConnectionsModel.connectionConfigs = newValue }
-    }
-    var llmDefaultConnectionID: String {
-        get { aiConnectionsModel.defaultConnectionID }
-        set { aiConnectionsModel.defaultConnectionID = newValue }
-    }
-    var llmConnectionName: String {
-        get { aiConnectionsModel.connectionName }
-        set { aiConnectionsModel.connectionName = newValue }
-    }
-    var llmProviderMode: AppLLMProviderMode {
-        get { aiConnectionsModel.providerMode }
-        set { aiConnectionsModel.providerMode = newValue }
-    }
-    var llmBaseURLString: String {
-        get { aiConnectionsModel.baseURLString }
-        set { aiConnectionsModel.baseURLString = newValue }
-    }
-    var llmModel: String {
-        get { aiConnectionsModel.model }
-        set { aiConnectionsModel.model = newValue }
-    }
-    var llmSelectedModel: String {
-        get { aiConnectionsModel.selectedModel }
-        set { aiConnectionsModel.selectedModel = newValue }
-    }
-    var llmShouldFetchModelsList: Bool {
-        get { aiConnectionsModel.shouldFetchModelsList }
-        set { aiConnectionsModel.shouldFetchModelsList = newValue }
-    }
-    var llmThinkingLevel: AppLLMThinkingLevel {
-        get { aiConnectionsModel.thinkingLevel }
-        set { aiConnectionsModel.thinkingLevel = newValue }
-    }
-    var llmAPIKeyInput: String {
-        get { aiConnectionsModel.apiKeyInput }
-        set { aiConnectionsModel.apiKeyInput = newValue }
-    }
-    var llmHasAPIKey: Bool {
-        get { aiConnectionsModel.hasAPIKey }
-        set { aiConnectionsModel.hasAPIKey = newValue }
-    }
-    @Published var agentPermissionMode: AgentPermissionMode = .readOnly
-    var llmSettingsMessage: String? {
-        get { aiConnectionsModel.settingsMessage }
-        set { aiConnectionsModel.settingsMessage = newValue }
-    }
-    var llmHealthCheckMessage: String? {
-        get { aiConnectionsModel.healthCheckMessage }
-        set { aiConnectionsModel.healthCheckMessage = newValue }
-    }
-    var isTestingLLMConnection: Bool { aiConnectionsModel.isTestingConnection }
-    var lastAddedLLMConnectionID: String? { aiConnectionsModel.lastAddedConnectionID }
-    var lastAddedLLMCapabilityEvidence: [AppProviderCapabilityEvidence] { aiConnectionsModel.lastAddedCapabilityEvidence }
-    var isAddingLLMConnection: Bool { aiConnectionsModel.isAddingConnection }
-    var llmModelConnections: [AppLLMModelConnection] { aiConnectionsModel.modelConnections }
-    var isLoadingLLMModelConnections: Bool { aiConnectionsModel.isLoadingModelConnections }
-    var showWelcomePlaceholder: Bool {
-        get { aiConnectionsModel.showsWelcome }
-        set { aiConnectionsModel.showsWelcome = newValue }
-    }
+    var agentPermissionMode: AgentPermissionMode = .readOnly
     let governanceModel: GovernanceFeatureModel
     var governanceConfig: AppSessionGovernanceConfig { governanceModel.config }
     let productOSControlModel: ProductOSControlFeatureModel
@@ -157,27 +94,13 @@ final class AppViewModel: NSObject, ObservableObject {
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
-    var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] {
-        get { chatWorkspaceCoordinator.stateSnapshotsBySessionID }
-        set { chatWorkspaceCoordinator.stateSnapshotsBySessionID = newValue }
-    }
-    var sessionRecordsBySessionID: [String: [AppSessionRecord]] {
-        get { chatWorkspaceCoordinator.recordsBySessionID }
-        set { chatWorkspaceCoordinator.recordsBySessionID = newValue }
-    }
-    var selectedSettingsSection: ConnorSettingsSection {
-        get { shellFeatureModel.selectedSettingsSection }
-        set { shellFeatureModel.selectedSettingsSection = newValue }
-    }
     let appSettingsModel: AppSettingsFeatureModel
     let inputSettingsModel: InputSettingsFeatureModel
     let userPreferencesModel: UserPreferencesFeatureModel
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
-    var focusTopSearchRequestID: UUID? { shellFeatureModel.focusTopSearchRequestID }
-    var settingsSectionMessageStore: SettingsSectionMessageStore { shellFeatureModel.settingsSectionMessageStore }
-    @Published var memoryOSSearchHealthSummary: String?
-    @Published private(set) var isMemoryOSSearchIndexRepairing = false
+    var memoryOSSearchHealthSummary: String?
+    private(set) var isMemoryOSSearchIndexRepairing = false
 
     private var repository: AppGraphRepository?
     private var memoryOSStore: SQLiteMemoryOSStore?
@@ -208,6 +131,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var fallbackChatSessionStorage: AgentSession
     private var isLoadingRuntimeSettings = false
     private var hasActivatedRuntimeSettingsSideEffects = false
+    private var globalSearchRuntimeCoordinator: GlobalSearchRuntimeCoordinator?
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -410,165 +334,6 @@ final class AppViewModel: NSObject, ObservableObject {
         browserFeatureModel.openURL(url)
     }
 
-    private func fallbackNativeSearchResults(kind: NativeSearchSourceKind, query: String, limit: Int) -> [NativeSearchResult] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let now = Date()
-        switch kind {
-        case .calendar:
-            return presentationFallbackCalendarResults(query: trimmed, now: now, limit: limit)
-        case .rss:
-            return presentationFallbackRSSResults(query: trimmed, now: now, limit: limit)
-        case .mail:
-            return presentationFallbackMailResults(query: trimmed, now: now, limit: limit)
-        case .browserHistory:
-            return presentationFallbackBrowserHistoryResults(query: trimmed, now: now, limit: limit)
-        }
-    }
-
-    private func presentationFallbackCalendarResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
-        let normalized = query.lowercased()
-        return calendarFeatureModel.events
-            .filter { event in
-                guard !normalized.isEmpty else { return true }
-                return event.title.lowercased().contains(normalized)
-                    || (event.location?.lowercased().contains(normalized) ?? false)
-                    || (event.notes?.lowercased().contains(normalized) ?? false)
-                    || event.attendees.contains { attendee in
-                        (attendee.name?.lowercased().contains(normalized) ?? false) || (attendee.email?.lowercased().contains(normalized) ?? false)
-                    }
-            }
-            .sorted { $0.start.date < $1.start.date }
-            .prefix(limit)
-            .map { event in
-                NativeSearchResult(
-                    id: "calendar:\(event.id.rawValue)",
-                    sourceKind: .calendar,
-                    externalID: event.id.rawValue,
-                    sourceInstanceID: event.calendarID.rawValue,
-                    title: event.title,
-                    snippet: [event.location, event.notes].compactMap { $0 }.joined(separator: " · "),
-                    score: 1,
-                    lexicalScore: 1,
-                    freshnessScore: 0,
-                    fieldScore: 0,
-                    temporal: NativeSearchTemporalMetadata(primaryTime: event.start.date, primaryTimeKind: .eventStartAt, eventStartAt: event.start.date, eventEndAt: event.end.date, indexedAt: now),
-                    resultTimeLabel: event.start.date.connorLocalFormatted(date: .medium, time: .short)
-                )
-            }
-    }
-
-    private func presentationFallbackRSSResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
-        rssFeatureModel.presentation.items(sourceID: nil, query: query).prefix(limit).map { item in
-            NativeSearchResult(
-                id: "rss:\(item.id.rawValue)",
-                sourceKind: .rss,
-                externalID: item.id.rawValue,
-                sourceInstanceID: item.sourceID.rawValue,
-                title: item.title,
-                snippet: item.snippet,
-                score: 1,
-                lexicalScore: 1,
-                freshnessScore: 0,
-                fieldScore: 0,
-                temporal: NativeSearchTemporalMetadata(primaryTime: item.publishedAt, primaryTimeKind: .publishedAt, publishedAt: item.publishedAt, fetchedAt: item.fetchedAt, indexedAt: now),
-                resultTimeLabel: item.publishedAt.connorLocalFormatted(date: .medium, time: .short)
-            )
-        }
-    }
-
-    private func presentationFallbackMailResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
-        let normalized = query.lowercased()
-        return mailFeatureModel.presentation.messages
-            .filter { message in
-                guard !normalized.isEmpty else { return true }
-                return message.subject.lowercased().contains(normalized)
-                    || message.snippet.lowercased().contains(normalized)
-                    || message.from.email.lowercased().contains(normalized)
-                    || (message.from.name?.lowercased().contains(normalized) ?? false)
-                    || message.to.contains { $0.email.lowercased().contains(normalized) || ($0.name?.lowercased().contains(normalized) ?? false) }
-            }
-            .sorted { $0.date > $1.date }
-            .prefix(limit)
-            .map { message in
-                NativeSearchResult(
-                    id: "mail:\(message.id.rawValue)",
-                    sourceKind: .mail,
-                    externalID: message.id.rawValue,
-                    sourceInstanceID: message.accountID.rawValue,
-                    title: message.subject.isEmpty ? "(No subject)" : message.subject,
-                    snippet: [message.from.name ?? message.from.email, message.snippet].filter { !$0.isEmpty }.joined(separator: " · "),
-                    score: 1,
-                    lexicalScore: 1,
-                    freshnessScore: 0,
-                    fieldScore: 0,
-                    temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, receivedAt: message.date, sentAt: message.date, indexedAt: now),
-                    resultTimeLabel: message.date.connorLocalFormatted(date: .medium, time: .short)
-                )
-            }
-    }
-
-    private func presentationFallbackBrowserHistoryResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
-        browserFeatureModel.fallbackSearchResults(query: query, now: now, limit: limit)
-    }
-
-    private func handleGlobalSearchDestination(_ destination: GlobalSearchFeatureModel.Destination) {
-        switch destination {
-        case .newChat(let prompt):
-            newChatSession()
-            selection = .agentChat
-            Task { @MainActor in
-                _ = await submitChat(prompt: prompt, clearComposer: false, displayPrompt: prompt)
-            }
-        case .webSearch(let url):
-            openURLInCurrentChatBrowser(url)
-        case .chatSession(let sessionID):
-            selection = .agentChat
-            selectChatSession(sessionID)
-        case .nativeResult(let result):
-            openGlobalSearchNativeResult(result)
-        case .browserHistoryRecord(let record):
-            browserFeatureModel.navigateToHistoryRecord(record)
-        case .showAll(let kind, let query):
-            switch kind {
-            case .chatSessions:
-                chatFeatureModel.sessions.searchQuery = query
-                browserFeatureModel.isVisible = false
-                selection = .agentChat
-            case .calendar:
-                calendarFeatureModel.searchQuery = query
-                selection = .calendar
-            case .rss:
-                rssFeatureModel.searchQuery = query
-                selection = .rss
-            case .mail:
-                mailFeatureModel.searchQuery = query
-                selection = .mail
-            case .browserHistory:
-                browserFeatureModel.openHistorySearch(query: query)
-            }
-        }
-    }
-
-    private func openGlobalSearchNativeResult(_ result: NativeSearchResult) {
-        switch result.sourceKind {
-        case .calendar:
-            selection = .calendar
-            calendarFeatureModel.selectEvent(id: CalendarEventID(rawValue: result.externalID))
-        case .rss:
-            selection = .rss
-            rssFeatureModel.selectItem(id: RSSItemID(rawValue: result.externalID))
-        case .mail:
-            selection = .mail
-            mailFeatureModel.openSearchResult(result)
-        case .browserHistory:
-            if let id = UUID(uuidString: result.externalID), let record = browserFeatureModel.historyRecord(id: id) {
-                browserFeatureModel.navigateToHistoryRecord(record)
-            } else {
-                browserFeatureModel.openHistorySearch(query: "")
-            }
-        }
-    }
-
     private func rebuildCalendarSearchIndexIfNeeded(events: [CalendarEvent]) async throws {
         guard let nativeSourceSearchBackend else { return }
         try await nativeSourceSearchBackend.rebuildSource(
@@ -683,7 +448,7 @@ final class AppViewModel: NSObject, ObservableObject {
         injectedMemoryOSFacade: AppMemoryOSFacade? = nil,
         injectedMemoryOSSearchHealthSummary: String? = nil,
         injectedMemoryOSInitializationError: String? = nil,
-        startupMode: AppViewModelStartupMode = .immediate,
+        startupMode: AppRuntimeStartupMode = .immediate,
         calendarRemoteAccountSynchronizer: @escaping CalendarFeatureModel.RemoteAccountSynchronizer = { account, credential, runID, runtimeStore in
             let engine = CalendarSourceSyncEngine(
                 connectors: [
@@ -833,7 +598,6 @@ final class AppViewModel: NSObject, ObservableObject {
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSessionStorage = initialSession
-        super.init()
         aiConnectionsModel.onRuntimeSettingsChanged = { [weak self] rebuildRuntime in
             guard let self else { return }
             if rebuildRuntime {
@@ -934,7 +698,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         productOSControlModel.onEvent = { [weak self] event in
             guard let self else { return }
-            self.objectWillChange.send()
             switch event {
             case .operationSucceeded:
                 break
@@ -968,7 +731,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
         }
         workspaceSettingsModel.onChanged = { [weak self] in
-            self?.objectWillChange.send()
             self?.scheduleRuntimeSettingsAutosave()
         }
         runtimeSettingsCoordinator.onEvent = { [weak self] event in
@@ -982,19 +744,49 @@ final class AppViewModel: NSObject, ObservableObject {
                 self.errorMessage = message
             }
         }
-        globalSearchFeatureModel.sessionsProvider = { [weak self] in self?.chatFeatureModel.sessions.allSessions ?? [] }
-        globalSearchFeatureModel.fallbackNativeSearchProvider = { [weak self] kind, query, limit in
-            self?.fallbackNativeSearchResults(kind: kind, query: query, limit: limit) ?? []
-        }
-        globalSearchFeatureModel.sourceReadinessProvider = { [weak self] in
-            await self?.browserFeatureModel.waitForPendingIndexOperations()
-        }
-        globalSearchFeatureModel.defaultSearchURLProvider = { [weak self] query in
-            self?.appSettingsModel.defaultSearchEngine.searchURL(for: query)
-        }
-        globalSearchFeatureModel.onDestination = { [weak self] destination in
-            self?.handleGlobalSearchDestination(destination)
-        }
+        let globalSearchRuntimeCoordinator = GlobalSearchRuntimeCoordinator(
+            search: globalSearchFeatureModel,
+            shell: shellFeatureModel,
+            chat: chatFeatureModel,
+            chatSessions: ClosureChatSessionPort(
+                isLoading: { [weak self] in self?.isLoadingSelectedChatSessionDetail ?? false },
+                reloadIfNeeded: { [weak self] in self?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: $0) },
+                reload: { [weak self] in self?.reloadChatSessions(restoreWorkspaceMode: $0) },
+                new: { [weak self] in self?.newChatSession() },
+                select: { [weak self] in self?.selectChatSession($0) },
+                rename: { [weak self] in self?.renameChatSession($0, title: $1) },
+                filter: { [weak self] in self?.setSessionListFilter($0, restoreWorkspaceMode: $1) },
+                status: { [weak self] in self?.setSelectedSessionStatus($0) },
+                flag: { [weak self] in self?.toggleSelectedSessionFlag() },
+                label: { [weak self] in self?.toggleSelectedSessionLabel($0) }
+            ),
+            chatRun: ClosureChatRunPort(
+                backgroundTasks: { [weak self] in self?.activeSessionBackgroundTasks ?? [] },
+                hasBackgroundTask: { [weak self] in self?.hasRunningActiveSessionBackgroundTask ?? false },
+                summaryFreshness: { [weak self] in self?.latestChatSummaryFreshness },
+                summaryContext: { [weak self] in self?.latestChatSummaryContextMessage ?? "" },
+                submit: { [weak self] in await self?.submitChat(prompt: $0, clearComposer: $1, displayPrompt: $2, attachments: $3, personReferences: $4) },
+                cancel: { [weak self] in self?.cancelActiveChatRun() },
+                permission: { [weak self] in self?.setAgentPermissionMode($0) },
+                timeline: { [weak self] in self?.restoredAgentEventTimeline(for: $0) ?? [] },
+                markdown: { [weak self] in self?.markdownPersistentCacheContext(messageID: $0) },
+                copy: { [weak self] in self?.copyAssistantMessageToPasteboard($0) },
+                export: { [weak self] in self?.exportAssistantMessageToFile($0, now: $1) },
+                download: { [weak self] in self?.downloadPreviewImage($0) },
+                clearOverride: { [weak self] in self?.clearSessionLLMOverride() },
+                selectModel: { [weak self] in self?.selectLLMModel($0, providerMode: $1, connectionID: $2) },
+                thinking: { [weak self] in self?.selectLLMThinkingLevel($0) },
+                defaultThinking: { [weak self] in self?.selectDefaultLLMThinkingLevel($0) },
+                reloadModels: { [weak self] in await self?.reloadLLMModelConnections() }
+            ),
+            browser: browserFeatureModel,
+            calendar: calendarFeatureModel,
+            rss: rssFeatureModel,
+            mail: mailFeatureModel,
+            appSettings: appSettingsModel
+        )
+        self.globalSearchRuntimeCoordinator = globalSearchRuntimeCoordinator
+        globalSearchRuntimeCoordinator.activate()
         browserFeatureModel.sessionContextProvider = { [weak self] in
             guard let self else {
                 return BrowserFeatureModel.SessionContext(
@@ -1029,7 +821,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self?.openBrowserHistoryRecord(record, url: url)
         }
         browserFeatureModel.onEvent = { [weak self] event in
-            self?.objectWillChange.send()
             if case let .operationFailed(message) = event { self?.errorMessage = message }
         }
         taskAutomationModel.createdBySessionIDProvider = { [weak self] in
@@ -1037,7 +828,6 @@ final class AppViewModel: NSObject, ObservableObject {
             return self.chatFeatureModel.sessions.selectedSessionID ?? self.activeChatSession.id
         }
         taskAutomationModel.onEvent = { [weak self] event in
-            self?.objectWillChange.send()
             switch event {
             case .operationSucceeded:
                 break
@@ -1052,7 +842,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
         }
         sourceRuntimeModel.onEvent = { [weak self] event in
-            self?.objectWillChange.send()
             switch event {
             case .operationSucceeded:
                 break
@@ -1075,7 +864,6 @@ final class AppViewModel: NSObject, ObservableObject {
             self.taskAutomationModel.reload()
         }
         rssFeatureModel.onEvent = { [weak self] event in
-            self?.objectWillChange.send()
             if case let .operationFailed(message) = event {
                 self?.errorMessage = message
             }
@@ -1087,7 +875,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         calendarFeatureModel.onEvent = { [weak self] event in
             guard let self else { return }
-            self.objectWillChange.send()
             switch event {
             case .operationSucceeded:
                 break
@@ -1104,12 +891,10 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         mailFeatureModel.onEvent = { [weak self] event in
             guard let self else { return }
-            self.objectWillChange.send()
             if case let .operationFailed(message) = event { self.errorMessage = message }
         }
         contactsFeatureModel.onEvent = { [weak self] event in
             guard let self else { return }
-            self.objectWillChange.send()
             switch event {
             case .operationSucceeded:
                 break
@@ -1130,7 +915,6 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         }
         skillRuntimeModel.onEvent = { [weak self] event in
-            self?.objectWillChange.send()
             switch event {
             case .operationSucceeded:
                 break
@@ -1217,7 +1001,7 @@ final class AppViewModel: NSObject, ObservableObject {
         chatComposerCoordinator.selectedSessionID = { [weak self] in self?.chatFeatureModel.sessions.selectedSessionID }
         chatComposerCoordinator.autoSaveDraftsEnabled = { [weak self] in self?.inputSettingsModel.autoSaveDraftsEnabled ?? true }
         chatComposerCoordinator.speechEnabled = { [weak self] in self?.inputSettingsModel.sessionSpeechTranscriptionEnabled ?? false }
-        chatComposerCoordinator.selectedModelID = { [weak self] in self?.llmSelectedModel ?? "" }
+        chatComposerCoordinator.selectedModelID = { [weak self] in self?.aiConnectionsModel.selectedModel ?? "" }
         chatComposerCoordinator.skillDisplayName = { [weak self] slug in
             self?.skillRuntimeModel.definitions.first(where: { $0.slug == slug })?.manifest.name
                 ?? self?.skillRuntimeModel.presentation.cards.first(where: { $0.id == slug })?.title
@@ -1357,13 +1141,13 @@ final class AppViewModel: NSObject, ObservableObject {
         let sessionID = session.id
         chatSessionCoordinator.adoptDirectSelection(sessionID)
         if let state = snapshot.state {
-            sessionStateSnapshotsBySessionID[sessionID] = state
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
             syncWorkspaceDraftsFromSession(state)
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
                 chatWorkspaceCoordinator.setMode(mode, for: sessionID)
             }
         }
-        sessionRecordsBySessionID[sessionID] = snapshot.records
+        chatWorkspaceCoordinator.recordsBySessionID[sessionID] = snapshot.records
         if let browserState = snapshot.browserState {
             browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
         }
@@ -1781,13 +1565,13 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
         guard !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        llmProviderMode = providerMode
-        if let connectionID { llmDefaultConnectionID = connectionID }
-        llmSelectedModel = modelID
+        aiConnectionsModel.providerMode = providerMode
+        if let connectionID { aiConnectionsModel.defaultConnectionID = connectionID }
+        aiConnectionsModel.selectedModel = modelID
 
         // Write session-level override (not global)
         let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
-        var state = sessionStateSnapshotsBySessionID[sessionID]
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         state.llmOverride = SessionLLMOverride(
             providerMode: providerMode.rawValue,
@@ -1796,7 +1580,7 @@ final class AppViewModel: NSObject, ObservableObject {
             thinkingLevel: state.llmOverride?.thinkingLevel
         )
         state.updatedAt = Date()
-        sessionStateSnapshotsBySessionID[sessionID] = state
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
         try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
 
         rebuildNativeSessionManagerForActiveSession()
@@ -1812,14 +1596,14 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func selectLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
-        llmThinkingLevel = level
+        aiConnectionsModel.thinkingLevel = level
         let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
-        var state = sessionStateSnapshotsBySessionID[sessionID]
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         let settings = try? llmSettingsRepository.loadSettings()
-        let providerMode = state.llmOverride?.providerMode ?? llmProviderMode.rawValue
-        let model = state.llmOverride?.model ?? llmSelectedModel
-        let connectionID = state.llmOverride?.connectionID ?? llmDefaultConnectionID
+        let providerMode = state.llmOverride?.providerMode ?? aiConnectionsModel.providerMode.rawValue
+        let model = state.llmOverride?.model ?? aiConnectionsModel.selectedModel
+        let connectionID = state.llmOverride?.connectionID ?? aiConnectionsModel.defaultConnectionID
         state.llmOverride = SessionLLMOverride(
             providerMode: providerMode,
             model: model,
@@ -1828,7 +1612,7 @@ final class AppViewModel: NSObject, ObservableObject {
             thinkingLevel: level.rawValue
         )
         state.updatedAt = Date()
-        sessionStateSnapshotsBySessionID[sessionID] = state
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
         try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
         if state.llmOverride?.connectionID == nil, settings?.defaultConnectionID == connectionID {
             // Keep the session override explicit; this setting is intentionally session-scoped.
@@ -1882,7 +1666,7 @@ final class AppViewModel: NSObject, ObservableObject {
             selectedModel: selectedModel,
             hasAPIKey: apiKey?.isEmpty == false || oauthTokens != nil
         )
-        let settings = AppLLMSettings(connections: llmConnectionConfigs, defaultConnectionID: connection.id)
+        let settings = AppLLMSettings(connections: aiConnectionsModel.connectionConfigs, defaultConnectionID: connection.id)
         try llmSettingsRepository.save(settings: settings, apiKey: apiKey)
         if let oauthTokens {
             try llmSettingsRepository.saveOAuthTokens(oauthTokens, connectionID: connection.id)
@@ -1926,15 +1710,15 @@ final class AppViewModel: NSObject, ObservableObject {
             hasAPIKey: hasAPIKey,
             shouldFetchModelsList: shouldFetchModelsList
         )
-        llmConnectionConfigs.removeAll { $0.id == connection.id }
-        llmConnectionConfigs.append(connection)
-        llmDefaultConnectionID = connection.id
+        aiConnectionsModel.connectionConfigs.removeAll { $0.id == connection.id }
+        aiConnectionsModel.connectionConfigs.append(connection)
+        aiConnectionsModel.defaultConnectionID = connection.id
         selectDefaultLLMConnection(connection.id)
         return connection
     }
 
     func deleteSelectedLLMConnection() {
-        deleteLLMConnection(llmDefaultConnectionID)
+        deleteLLMConnection(aiConnectionsModel.defaultConnectionID)
     }
 
     func deleteLLMConnection(_ connectionID: String) {
@@ -1994,8 +1778,8 @@ final class AppViewModel: NSObject, ObservableObject {
             for: session,
             permissionMode: configuration.permissionMode,
             configuration: configuration,
-            sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace,
-            sessionLLMOverride: sessionStateSnapshotsBySessionID[session.id]?.llmOverride
+            sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
+            sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride
         )
     }
 
@@ -2016,12 +1800,12 @@ final class AppViewModel: NSObject, ObservableObject {
 
     @discardableResult
     private func ensureSessionLLMOverride(sessionID: String) -> SessionLLMOverride? {
-        var state = sessionStateSnapshotsBySessionID[sessionID]
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
         if state == nil, let loaded = try? chatSessionRepository?.loadSessionState(sessionID: sessionID) {
             state = loaded
         }
         if let existing = state?.llmOverride, !existing.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            sessionStateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
             return existing
         }
         guard let settings = try? llmSettingsRepository.loadSettings(),
@@ -2038,7 +1822,7 @@ final class AppViewModel: NSObject, ObservableObject {
         )
         nextState.llmOverride = override
         nextState.updatedAt = Date()
-        sessionStateSnapshotsBySessionID[sessionID] = nextState
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = nextState
         try? chatSessionRepository?.saveSessionState(nextState, sessionID: sessionID)
         return override
     }
@@ -2064,30 +1848,30 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func syncLLMModelDisplayFromSession(_ sessionID: String) {
         _ = ensureSessionLLMOverride(sessionID: sessionID)
-        if let override = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride {
-            llmSelectedModel = override.model
-            llmThinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? ((try? llmSettingsRepository.loadSettings())?.defaultThinkingLevel ?? llmThinkingLevel)
+        if let override = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride {
+            aiConnectionsModel.selectedModel = override.model
+            aiConnectionsModel.thinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? ((try? llmSettingsRepository.loadSettings())?.defaultThinkingLevel ?? aiConnectionsModel.thinkingLevel)
             if let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
-                llmProviderMode = overrideMode
+                aiConnectionsModel.providerMode = overrideMode
             }
             if let connectionID = override.connectionID {
-                llmDefaultConnectionID = connectionID
+                aiConnectionsModel.defaultConnectionID = connectionID
             }
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
-            llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? ""
-            llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-            llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
-            llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
+            aiConnectionsModel.selectedModel = settings?.defaultConnection?.effectiveModel ?? ""
+            aiConnectionsModel.thinkingLevel = settings?.defaultThinkingLevel ?? aiConnectionsModel.thinkingLevel
+            aiConnectionsModel.providerMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
+            aiConnectionsModel.defaultConnectionID = settings?.defaultConnectionID ?? ""
         }
     }
 
     private func syncActiveSessionLLMOverride(to connection: AppLLMConnectionConfig) {
         let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
         let settings = try? llmSettingsRepository.loadSettings()
-        let thinkingLevel = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride?.thinkingLevel
+        let thinkingLevel = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride?.thinkingLevel
             ?? settings?.defaultThinkingLevel.rawValue
-        var state = sessionStateSnapshotsBySessionID[sessionID]
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
             ?? (try? chatSessionRepository?.loadSessionState(sessionID: sessionID))
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         state.llmOverride = SessionLLMOverride(
@@ -2098,33 +1882,33 @@ final class AppViewModel: NSObject, ObservableObject {
             thinkingLevel: thinkingLevel
         )
         state.updatedAt = Date()
-        sessionStateSnapshotsBySessionID[sessionID] = state
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
         try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
-        llmProviderMode = connection.providerMode
-        llmSelectedModel = connection.effectiveModel
-        llmDefaultConnectionID = connection.id
+        aiConnectionsModel.providerMode = connection.providerMode
+        aiConnectionsModel.selectedModel = connection.effectiveModel
+        aiConnectionsModel.defaultConnectionID = connection.id
     }
 
     var sessionHasLLMOverride: Bool {
         let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
-        return sessionStateSnapshotsBySessionID[sessionID]?.llmOverride != nil
+        return chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride != nil
     }
 
     func clearSessionLLMOverride() {
         let sessionID = chatFeatureModel.sessions.selectedSessionID ?? activeChatSession.id
-        var state = sessionStateSnapshotsBySessionID[sessionID]
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         state.llmOverride = nil
         state.updatedAt = Date()
-        sessionStateSnapshotsBySessionID[sessionID] = state
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
         try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
 
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
-        llmSelectedModel = settings?.defaultConnection?.effectiveModel ?? ""
-        llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
-        llmProviderMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
-        llmDefaultConnectionID = settings?.defaultConnectionID ?? ""
+        aiConnectionsModel.selectedModel = settings?.defaultConnection?.effectiveModel ?? ""
+        aiConnectionsModel.thinkingLevel = settings?.defaultThinkingLevel ?? aiConnectionsModel.thinkingLevel
+        aiConnectionsModel.providerMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
+        aiConnectionsModel.defaultConnectionID = settings?.defaultConnectionID ?? ""
 
         rebuildNativeSessionManagerForActiveSession()
         Task { await reloadLLMModelConnections() }
@@ -2168,7 +1952,7 @@ final class AppViewModel: NSObject, ObservableObject {
             var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
             state.workspace = sessionWorkspaceReference(roots: roots, defaultWorkingDirectoryPath: defaultWorkingDirectoryPath)
             state.updatedAt = Date()
-            sessionStateSnapshotsBySessionID[sessionID] = state
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
             try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
             if activeChatSession.id == sessionID || chatFeatureModel.sessions.selectedSessionID == sessionID { rebuildNativeSessionManagerForActiveSession() }
             setSettingsMessage("当前会话 Workspace 已保存。", for: .app)
@@ -2185,7 +1969,7 @@ final class AppViewModel: NSObject, ObservableObject {
         permissionSettingsModel.apply(settings)
         workspaceSettingsModel.applyRecentPaths(settings.workspace.recentWorkspacePaths)
         if let sessionID = currentSessionIDForWorkspaceDrafts() {
-            workspaceSettingsModel.applySessionState(sessionStateSnapshotsBySessionID[sessionID])
+            workspaceSettingsModel.applySessionState(chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID])
         } else {
             workspaceSettingsModel.applySessionState(nil)
         }
@@ -2558,18 +2342,18 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let chatSessionRepository else { return }
         _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
         if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
-            sessionStateSnapshotsBySessionID[sessionID] = state
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
             if chatFeatureModel.sessions.selectedSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
                 chatWorkspaceCoordinator.setMode(mode, for: sessionID)
             }
         } else {
             let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
-            sessionStateSnapshotsBySessionID[sessionID] = state
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
             if chatFeatureModel.sessions.selectedSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             try chatSessionRepository.saveSessionState(state, sessionID: sessionID)
         }
-        sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
+        chatWorkspaceCoordinator.recordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
         if let browserState = try chatSessionRepository.loadBrowserState(sessionID: sessionID) {
             browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
         }
@@ -2580,7 +2364,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             try chatSessionRepository?.saveBrowserState(snapshot, sessionID: sessionID)
             if let state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) {
-                sessionStateSnapshotsBySessionID[sessionID] = state
+                chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
             }
             _ = try chatSessionRepository?.refreshSessionManifest(sessionID: sessionID)
         } catch {
@@ -2642,7 +2426,7 @@ final class AppViewModel: NSObject, ObservableObject {
             var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
             state.selectedPane = mode.rawValue
             state.updatedAt = Date()
-            sessionStateSnapshotsBySessionID[sessionID] = state
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
             try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
         } catch {
             errorMessage = String(describing: error)
@@ -2660,9 +2444,9 @@ final class AppViewModel: NSObject, ObservableObject {
         let record = AppSessionRecord(sessionID: targetSessionID, kind: kind, title: title, body: body, metadata: metadata)
         do {
             try chatSessionRepository?.appendSessionRecord(record, sessionID: targetSessionID)
-            sessionRecordsBySessionID[targetSessionID] = try chatSessionRepository?.loadSessionRecords(sessionID: targetSessionID, limit: nil) ?? []
+            chatWorkspaceCoordinator.recordsBySessionID[targetSessionID] = try chatSessionRepository?.loadSessionRecords(sessionID: targetSessionID, limit: nil) ?? []
             if let state = try chatSessionRepository?.loadSessionState(sessionID: targetSessionID) {
-                sessionStateSnapshotsBySessionID[targetSessionID] = state
+                chatWorkspaceCoordinator.stateSnapshotsBySessionID[targetSessionID] = state
             }
             _ = try chatSessionRepository?.refreshSessionManifest(sessionID: targetSessionID)
             errorMessage = nil
@@ -3238,7 +3022,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
 }
 
-extension AppViewModel {
+extension AppRuntimeOrchestrator {
     var hasMemoryOSBackendForTests: Bool {
         memoryOSFacade != nil
     }
