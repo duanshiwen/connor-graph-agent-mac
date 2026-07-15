@@ -17,13 +17,17 @@ final class RSSFeatureModel {
     }
 
     var presentation: NativeRSSBrowserPresentation = .empty {
-        didSet { rebuildVisibleItems() }
+        didSet { rebuildVisibleItems(resetWindow: false) }
     }
     var searchQuery = "" {
-        didSet { rebuildVisibleItems() }
+        didSet { rebuildVisibleItems(resetWindow: true) }
     }
     private(set) var visibleItems: [RSSItemSummary] = []
+    private(set) var visibleWindowItems: [RSSItemSummary] = []
     private(set) var visibleItemsRevision: UInt64 = 0
+    @ObservationIgnored private let initialWindowSize = 50
+    @ObservationIgnored private let windowBatchSize = 50
+    @ObservationIgnored private var visibleWindowLimit = 50
     var selectedSourceID: RSSSourceID?
     var selectedItemID: RSSItemID?
     var isPresentingAddSourceSheet = false
@@ -73,10 +77,28 @@ final class RSSFeatureModel {
         }
     }
 
-    private func rebuildVisibleItems() {
+    private func rebuildVisibleItems(resetWindow: Bool) {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         visibleItems = query.isEmpty ? presentation.items : presentation.items(sourceID: nil, query: query)
+        if resetWindow {
+            visibleWindowLimit = initialWindowSize
+        } else {
+            visibleWindowLimit = max(initialWindowSize, visibleWindowLimit)
+        }
+        rebuildVisibleWindow()
         visibleItemsRevision &+= 1
+    }
+
+    func loadMoreVisibleItemsIfNeeded(currentItemID: RSSItemID) {
+        guard visibleWindowItems.last?.id == currentItemID,
+              visibleWindowItems.count < visibleItems.count else { return }
+        visibleWindowLimit = min(visibleWindowLimit + windowBatchSize, visibleItems.count)
+        rebuildVisibleWindow()
+    }
+
+    private func rebuildVisibleWindow() {
+        visibleWindowLimit = min(visibleWindowLimit, visibleItems.count)
+        visibleWindowItems = Array(visibleItems.prefix(visibleWindowLimit))
     }
 
     func selectItem(_ item: RSSItemSummary) {

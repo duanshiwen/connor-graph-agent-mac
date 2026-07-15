@@ -144,6 +144,36 @@ private func waitUntil(
 }
 
 @MainActor
+@Test func rssFeatureUsesBoundedFirstFrameWindowAndExpandsInBatches() throws {
+    let (source, _) = makeRSSFixture()
+    let items = (0..<200).map { index in
+        RSSItemSummary(
+            id: RSSItemID(rawValue: "item-\(index)"),
+            sourceID: source.id,
+            title: "Article \(index)",
+            snippet: "Body \(index)"
+        )
+    }
+    let model = RSSFeatureModel(runtime: RSSRuntime(
+        repository: InMemoryRSSSourceRepository(sources: [source]),
+        cache: InMemoryRSSSourceCache(items: [])
+    ))
+
+    model.presentation = NativeRSSBrowserPresentation(sources: [source], items: items)
+    #expect(model.visibleItems.count == 200)
+    #expect(model.visibleWindowItems.count == 50)
+
+    model.loadMoreVisibleItemsIfNeeded(currentItemID: items[10].id)
+    #expect(model.visibleWindowItems.count == 50)
+
+    model.loadMoreVisibleItemsIfNeeded(currentItemID: try #require(model.visibleWindowItems.last?.id))
+    #expect(model.visibleWindowItems.count == 100)
+
+    model.searchQuery = "Article 1"
+    #expect(model.visibleWindowItems.count == min(50, model.visibleItems.count))
+}
+
+@MainActor
 @Test func rssFeatureSelectOptimisticallyMarksReadAndPersists() async throws {
     let (source, item) = makeRSSFixture()
     let cache = InMemoryRSSSourceCache(items: [item])

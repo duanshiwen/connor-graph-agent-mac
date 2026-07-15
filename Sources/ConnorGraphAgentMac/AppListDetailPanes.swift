@@ -1921,6 +1921,7 @@ struct CraftRSSListPane: View {
 
     private var presentation: NativeRSSBrowserPresentation { model.presentation }
     private var visibleItems: [RSSItemSummary] { model.visibleItems }
+    private var visibleWindowItems: [RSSItemSummary] { model.visibleWindowItems }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1954,7 +1955,7 @@ struct CraftRSSListPane: View {
                 ContentUnavailableView("没有找到匹配的 RSS 文章", systemImage: "newspaper", description: Text("换个关键词试试，或者清除筛选查看全部订阅文章。"))
                     .padding(.top, 80)
             } else {
-                List(visibleItems) { item in
+                List(visibleWindowItems) { item in
                     RSSItemListRow(
                         item: item,
                         source: presentation.source(id: item.sourceID),
@@ -1962,6 +1963,9 @@ struct CraftRSSListPane: View {
                         onSelect: { selectItem(item) }
                     )
                     .nativeListRowStyle()
+                    .onAppear {
+                        model.loadMoreVisibleItemsIfNeeded(currentItemID: item.id)
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
