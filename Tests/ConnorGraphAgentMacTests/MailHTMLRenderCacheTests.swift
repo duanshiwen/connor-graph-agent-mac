@@ -32,6 +32,34 @@ struct MailHTMLRenderCacheTests {
         #expect(cache.count == 2)
     }
 
+    @Test func cacheEnforcesTotalByteCapacity() {
+        let cache = MailHTMLRenderCache(capacity: 8, byteCapacity: 10)
+        let first = request(id: "first", html: "first", allowsRemoteImages: false)
+        let second = request(id: "second", html: "second", allowsRemoteImages: false)
+        let oversized = request(id: "oversized", html: "oversized", allowsRemoteImages: false)
+
+        cache.insert(MailPreparedHTMLBodyPresentation(html: "123456", blockedRemoteImageCount: 0), for: first)
+        cache.insert(MailPreparedHTMLBodyPresentation(html: "abcdef", blockedRemoteImageCount: 0), for: second)
+        cache.insert(MailPreparedHTMLBodyPresentation(html: "12345678901", blockedRemoteImageCount: 0), for: oversized)
+
+        #expect(cache.cachedRequests == [second])
+        #expect(cache.totalByteCount == 6)
+    }
+
+    @Test func presentationUpdateInvalidatesModelPreparedHTMLCache() {
+        let model = MailFeatureModel(store: nil, preferencesStore: nil)
+        let request = request(id: "message", html: "<p>Hello</p>", allowsRemoteImages: false)
+        model.preparedHTMLCache.insert(
+            MailPreparedHTMLBodyPresentation(html: "prepared", blockedRemoteImageCount: 0),
+            for: request
+        )
+        #expect(model.preparedHTMLCache.count == 1)
+
+        model.presentation = .empty
+
+        #expect(model.preparedHTMLCache.count == 0)
+    }
+
     @Test func mailConfigurationsShareDedicatedPoolAndDisableJavaScript() {
         let provider = MailWebViewConfigurationProvider()
         let first = provider.makeConfiguration()

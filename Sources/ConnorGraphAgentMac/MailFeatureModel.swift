@@ -13,6 +13,7 @@ final class MailFeatureModel {
         didSet {
             bodyDisplayCache.removeAll()
             bodyDisplayCacheOrder.removeAll()
+            preparedHTMLCache.removeAll()
             rebuildListProjection(resetWindow: true)
         }
     }
@@ -46,6 +47,7 @@ final class MailFeatureModel {
     @ObservationIgnored private var visibleListMessageLimit = 100
     @ObservationIgnored private var bodyDisplayCache: [MailMessageID: MailBodyDisplayPresentation] = [:]
     @ObservationIgnored private var bodyDisplayCacheOrder: [MailMessageID] = []
+    @ObservationIgnored let preparedHTMLCache = MailHTMLRenderCache(capacity: 8, byteCapacity: 4 * 1_024 * 1_024)
     @ObservationIgnored private var ownedTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShutdown = false
     @ObservationIgnored var sourceSetChanged: @MainActor () async throws -> Void = {}
@@ -241,6 +243,7 @@ final class MailFeatureModel {
         for task in ownedTasks.values { task.cancel() }; ownedTasks.removeAll()
         bodyDisplayCache.removeAll()
         bodyDisplayCacheOrder.removeAll()
+        preparedHTMLCache.removeAll()
     }
 
     private func rebuildListProjection(resetWindow: Bool) {
