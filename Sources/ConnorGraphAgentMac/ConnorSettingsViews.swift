@@ -57,9 +57,9 @@ struct ConnorSettingsDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: AppShellLayout.sectionSpacing) {
                 Text(graph.shell.selectedSettingsSection.title)
-                    .font(SettingsListTypography.header)
+                    .font(AppTypography.pageTitle)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
@@ -97,14 +97,14 @@ struct ConnorSettingsDetailView: View {
                         SettingsPreferencesSection(model: graph.userPreferences)
                     }
                 }
-                .frame(maxWidth: 760)
+                .frame(maxWidth: SettingsListLayout.contentMaxWidth)
                 .frame(maxWidth: .infinity, alignment: .center)
 
                 if let message = graph.shell.settingsMessage(for: graph.shell.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: SettingsListLayout.contentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 if let error = graph.shell.selectedSettingsSection == .ai
@@ -114,12 +114,12 @@ struct ConnorSettingsDetailView: View {
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
-                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: SettingsListLayout.contentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            .padding(.horizontal, 44)
-            .padding(.vertical, 18)
+            .padding(.horizontal, AppShellLayout.pageHorizontalPadding)
+            .padding(.vertical, AppShellLayout.pageVerticalPadding)
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .task {
@@ -2249,9 +2249,9 @@ struct AIConnectionCapabilityDetailView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("支持能力")
-                        .font(.title2.weight(.semibold))
+                        .font(AppTypography.pageTitle)
                     Text(detail.connectionName)
-                        .font(.subheadline)
+                        .font(AppTypography.meta)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()

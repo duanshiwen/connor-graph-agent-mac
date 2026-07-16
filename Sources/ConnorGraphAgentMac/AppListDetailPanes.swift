@@ -604,8 +604,8 @@ struct CraftSessionListPane: View {
             Text(sessionListTitle)
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+                .padding(.horizontal, AppShellLayout.paneHeaderHorizontalPadding)
+                .padding(.vertical, AppShellLayout.paneHeaderVerticalPadding)
 
             ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
                 model.sessions.searchQuery = ""
@@ -622,8 +622,8 @@ struct CraftSessionListPane: View {
                         }
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
-                    .padding(.top, 6)
-                    .padding(.bottom, 10)
+                    .padding(.top, AppShellLayout.spaceS)
+                    .padding(.bottom, AppShellLayout.spaceM)
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -884,7 +884,7 @@ struct AddRSSSourceSheet: View {
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(isEditing ? "修改 RSS 订阅源" : "添加 RSS 订阅源")
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text(isEditing ? "更新显示名称或 Feed URL。源注册、缓存清理和审计继续由 Native RSS Runtime 托管。" : "支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1412,7 +1412,7 @@ private struct AddTaskAutomationSheet: View {
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(kind.createButtonHelp)
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text(kind == .scheduled ? "创建一个按时间触发的用户任务，到点后新建会话并发送消息。" : "创建一个由会话状态变化触发的用户任务，状态命中后向该会话发送消息。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -2109,7 +2109,7 @@ private struct CalendarEventHero: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 Text(event.title)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -2669,7 +2669,7 @@ private struct TaskAutomationHero: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 Text(card.title)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)

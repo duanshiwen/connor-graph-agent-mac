@@ -3,24 +3,24 @@ import SwiftUI
 enum BrowserFloatingTypography {
     // Browser chrome follows a compact macOS semantic scale: clear hierarchy,
     // consistent controls, and legible 12–14 pt text instead of one-off sizes.
-    static let popoverTitle: Font = .system(size: 14, weight: .semibold)
-    static let pageTitle: Font = .system(size: 13, weight: .semibold)
-    static let pageURL: Font = .system(size: 12, weight: .regular)
-    static let selectedText: Font = .system(size: 13, weight: .regular)
-    static let input: Font = .system(size: 13, weight: .regular)
-    static let hint: Font = .system(size: 12, weight: .regular)
-    static let messageRole: Font = .system(size: 12, weight: .semibold)
-    static let messageBody: Font = .system(size: 13, weight: .regular)
-    static let askButton: Font = .system(size: 13, weight: .semibold)
-    static let askButtonIcon: Font = .system(size: 13, weight: .semibold)
-    static let quickAction: Font = .system(size: 12, weight: .medium)
-    static let quickActionIcon: Font = .system(size: 12, weight: .semibold)
-    static let loadingOverlay: Font = .system(size: 12, weight: .medium)
-    static let toolbarIcon: Font = .system(size: 13, weight: .semibold)
-    static let tabTitle: Font = .system(size: 12, weight: .regular)
-    static let tabTitleSelected: Font = .system(size: 12, weight: .semibold)
-    static let tabIcon: Font = .system(size: 12, weight: .regular)
-    static let tabCloseIcon: Font = .system(size: 10, weight: .semibold)
+    static let popoverTitle = AppTypography.sectionTitle
+    static let pageTitle = AppTypography.bodyEmphasis
+    static let pageURL = AppTypography.caption
+    static let selectedText = AppTypography.body
+    static let input = AppTypography.body
+    static let hint = AppTypography.caption
+    static let messageRole = AppTypography.captionEmphasis
+    static let messageBody = AppTypography.body
+    static let askButton = AppTypography.bodyEmphasis
+    static let askButtonIcon = AppTypography.bodyEmphasis
+    static let quickAction = AppTypography.captionEmphasis
+    static let quickActionIcon = AppTypography.captionEmphasis
+    static let loadingOverlay = AppTypography.captionEmphasis
+    static let toolbarIcon = AppTypography.bodyEmphasis
+    static let tabTitle = AppTypography.caption
+    static let tabTitleSelected = AppTypography.captionEmphasis
+    static let tabIcon = AppTypography.caption
+    static let tabCloseIcon = AppTypography.microEmphasis
 }
 
 struct BrowserSelectionPopover: View {

@@ -186,7 +186,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("知识市场").font(.largeTitle.bold())
+                    Text("知识市场").font(AppTypography.pageTitle)
                     Text("发现、订阅并使用社区发布的结构化知识库").foregroundStyle(.secondary)
                 }
 
@@ -223,7 +223,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
 
     private func marketplaceSection(title: String, bases: [CloudMarketplaceKnowledgeBase]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title2.bold())
+            Text(title).font(AppTypography.sectionTitle)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], spacing: 12) {
                 ForEach(bases) { base in
                     Button { Task { await store.loadDetail(id: base.id) } } label: {
@@ -264,7 +264,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                         .font(.system(size: 48)).foregroundStyle(Color.accentColor).frame(width: 72, height: 72)
                         .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text(base.name).font(.largeTitle.bold()); MarketplaceStatusBadge(base: base) }
+                        HStack { Text(base.name).font(AppTypography.pageTitle); MarketplaceStatusBadge(base: base) }
                         Text(base.ownerName.map { "由 \($0) 发布" } ?? "社区知识库").foregroundStyle(.secondary)
                         Text("\(base.subscriberCount) 位订阅者").font(.caption).foregroundStyle(.secondary)
                     }
@@ -278,7 +278,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                     }
                 }
                 Divider()
-                Text("关于此知识库").font(.title2.bold())
+                Text("关于此知识库").font(AppTypography.sectionTitle)
                 Text(base.description ?? "发布者暂未提供详细介绍。").font(.body)
                 if let category = base.categoryID { Label(category, systemImage: "folder").foregroundStyle(.secondary) }
                 if store.isLoading { ProgressView() }

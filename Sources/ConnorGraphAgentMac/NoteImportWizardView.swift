@@ -28,7 +28,7 @@ struct NoteImportWizardView: View {
                 .font(.system(size: 28, weight: .medium)).foregroundStyle(.tint)
                 .frame(width: 44, height: 44).background(.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
-                Text("导入笔记").font(.title2.bold())
+                Text("导入笔记").font(AppTypography.pageTitle)
                 Text(stepSubtitle).foregroundStyle(.secondary)
             }
             Spacer()
@@ -48,7 +48,7 @@ struct NoteImportWizardView: View {
 
     private var sourceStep: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("选择来源").font(.title3.bold())
+            Text("选择来源").font(AppTypography.sectionTitle)
             Text("Connor 会保留原始内容和来源信息。导入在本机后台完成。")
                 .foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -94,7 +94,7 @@ struct NoteImportWizardView: View {
 
     private var reviewStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack { Text("检查导入内容").font(.title3.bold()); Spacer(); summaryPills }
+            HStack { Text("检查导入内容").font(AppTypography.sectionTitle); Spacer(); summaryPills }
             if model.notes.isEmpty {
                 ContentUnavailableView("没有找到可导入的笔记", systemImage: "doc.text.magnifyingglass", description: Text("请返回并选择其他来源。"))
                     .frame(maxWidth: .infinity, minHeight: 300)
@@ -143,7 +143,7 @@ struct NoteImportWizardView: View {
 
     private var confirmStep: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("确认导入").font(.title3.bold())
+            Text("确认导入").font(AppTypography.sectionTitle)
             VStack(spacing: 0) {
                 confirmationRow("来源", model.sourceKind.displayName, "externaldrive")
                 Divider()
@@ -193,4 +193,3 @@ struct NoteImportWizardView: View {
     private var activityLabel: String { switch model.activity { case .idle: ""; case .scanning: "正在扫描…"; case .starting: "正在创建任务…"; case .importing: "正在导入…" } }
     private var summaryPills: some View { HStack { Label("\(model.notes.count) 篇", systemImage: "doc.text"); Label("\(model.attachmentCount) 个附件", systemImage: "paperclip") }.font(.callout).foregroundStyle(.secondary) }
 }
-

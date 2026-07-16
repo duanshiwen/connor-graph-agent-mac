@@ -207,7 +207,7 @@ private struct MCPSourceTopBar: View {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
                     Text(title)
-                        .font(.largeTitle.weight(.semibold))
+                        .font(AppTypography.pageTitle)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     if let status {
@@ -958,7 +958,7 @@ private struct RuntimePanelScaffold<Content: View>: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title)
-                            .font(.largeTitle.weight(.semibold))
+                            .font(AppTypography.pageTitle)
                         Text(subtitle)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)

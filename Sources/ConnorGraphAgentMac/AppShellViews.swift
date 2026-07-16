@@ -42,15 +42,15 @@ private struct AppInitializationView: View {
 
             VStack(spacing: AppShellLayout.spaceS) {
                 Text("康纳同学")
-                    .font(.title2.weight(.semibold))
+                    .font(AppTypography.pageTitle)
 
                 if startupCoordinator.phase == .failed {
                     Text("初始化失败")
-                        .font(.body.weight(.medium))
+                        .font(AppTypography.bodyEmphasis)
                         .foregroundStyle(.red)
 
                     Text(startupCoordinator.failureMessage ?? "无法完成应用初始化。")
-                        .font(.callout)
+                        .font(AppTypography.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .lineLimit(3)
@@ -61,7 +61,7 @@ private struct AppInitializationView: View {
                         .accessibilityLabel("应用正在初始化")
 
                     Text(startupStatusText)
-                        .font(.callout)
+                        .font(AppTypography.callout)
                         .foregroundStyle(.secondary)
                 }
             }

@@ -206,13 +206,13 @@ private struct SkillRequestDialogLayout<TextEditorContent: View, ActionsContent:
     @ViewBuilder var actions: () -> ActionsContent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
             SkillRequestDialogHeader(iconName: iconName, title: title, description: description)
             textEditor()
             SkillRequestStatusMessage(message: statusMessage, isSubmitting: isSubmitting, isFailure: isFailure)
             actions()
         }
-        .padding(22)
+        .padding(AppShellLayout.spaceXL)
         .frame(width: 520)
     }
 }
@@ -223,9 +223,9 @@ private struct SkillRequestDialogHeader: View {
     var description: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
                     .fill(Color.accentColor.opacity(0.14))
                 Image(systemName: iconName)
                     .font(.system(size: 20, weight: .semibold))
@@ -233,11 +233,11 @@ private struct SkillRequestDialogHeader: View {
             }
             .frame(width: 48, height: 48)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(AppTypography.pageTitle)
                 Text(description)
-                    .font(.callout)
+                    .font(AppTypography.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
