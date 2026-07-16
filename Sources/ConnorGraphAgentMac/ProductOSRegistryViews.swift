@@ -18,7 +18,7 @@ struct ProductOSRegistryView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Product OS Registry")
-                            .font(.largeTitle.bold())
+                            .font(AppTypography.pageTitle)
                         Text("Phase 5 将 Automation / Labels / Statuses 纳入康纳同学控制平面：自动化只能记录和建议，不能绕过权限、审计和图谱准入。")
                             .foregroundStyle(.secondary)
                     }

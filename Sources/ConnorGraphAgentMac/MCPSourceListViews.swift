@@ -213,7 +213,7 @@ private struct MCPSourceAddSheet: View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(draft.isEditing ? "编辑外部工具连接" : "添加外部工具连接")
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text("连接本机命令或 HTTP 工具服务。凭据会安全保存在本机，不写入连接配置。")
                     .font(.callout)
                     .foregroundStyle(.secondary)

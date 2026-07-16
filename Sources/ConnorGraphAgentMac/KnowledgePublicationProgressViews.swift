@@ -102,7 +102,7 @@ struct KnowledgePublicationProgressView: View {
                     .frame(width: 52, height: 52)
                     .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(store.snapshot.draft.name.isEmpty ? "知识库发布" : store.snapshot.draft.name).font(.title2.bold())
+                    Text(store.snapshot.draft.name.isEmpty ? "知识库发布" : store.snapshot.draft.name).font(AppTypography.pageTitle)
                     Label(stageTitle, systemImage: stageIcon).foregroundStyle(stageColor)
                 }
                 Spacer()
@@ -284,7 +284,7 @@ struct KnowledgePublicationHistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Text("发布历史").font(.title2.bold())
+                Text("发布历史").font(AppTypography.pageTitle)
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
@@ -376,7 +376,7 @@ struct KnowledgePublicationHistoryView: View {
                             .frame(width: 38, height: 38)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.snapshot.draft.name.isEmpty ? "未命名知识库" : entry.snapshot.draft.name)
-                                .font(.title2.bold())
+                                .font(AppTypography.pageTitle)
                             Text(historyStageTitle(entry.snapshot.stage))
                                 .foregroundStyle(historyColor(entry.snapshot.stage))
                         }

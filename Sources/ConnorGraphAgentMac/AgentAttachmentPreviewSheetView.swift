@@ -25,7 +25,7 @@ struct AgentAttachmentPreviewSheetView: View {
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(ConnorCraftPalette.accent)
                 .frame(width: 32)
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(model.title)
                     .font(AgentChatTypography.sectionTitle)
                     .lineLimit(2)

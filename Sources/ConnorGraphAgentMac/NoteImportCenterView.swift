@@ -79,7 +79,7 @@ struct NoteImportCenterView: View {
         )
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) { Text(sourceName(job)).font(.title2.bold()); Label(presentation.displayName, systemImage: presentation.systemImage).foregroundStyle(job.status.tint) }
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) { Text(sourceName(job)).font(AppTypography.pageTitle); Label(presentation.displayName, systemImage: presentation.systemImage).foregroundStyle(job.status.tint) }
                 Spacer()
                 controls(job)
             }.padding(24)
@@ -143,4 +143,3 @@ struct NoteImportCenterView: View {
         catch { return "笔记导入" }
     }
 }
-

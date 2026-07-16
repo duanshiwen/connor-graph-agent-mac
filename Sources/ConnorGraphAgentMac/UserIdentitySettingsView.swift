@@ -134,7 +134,7 @@ struct UserIdentitySettingsView: View {
                 HStack(spacing: SettingsListLayout.spaceL) {
                     IdentityAvatarView(user: user, size: 64)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(user.displayName).font(.title3.weight(.semibold))
+                        Text(user.displayName).font(AppTypography.pageTitle)
                         Text("@\(user.username)").foregroundStyle(.secondary)
                         Text(user.email).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
                     }

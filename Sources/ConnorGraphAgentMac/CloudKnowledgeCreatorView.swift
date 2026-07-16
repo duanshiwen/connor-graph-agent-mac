@@ -411,7 +411,7 @@ struct CloudKnowledgeCreatorView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(CloudKnowledgePublishingAgreement.title)
-                        .font(.title2.bold())
+                        .font(AppTypography.pageTitle)
                     Text("版本 \(CloudKnowledgePublishingAgreement.version) · \(CloudKnowledgePublishingAgreement.effectiveDate)")
                         .font(.caption)
                         .foregroundStyle(.secondary)

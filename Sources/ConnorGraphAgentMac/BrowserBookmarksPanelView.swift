@@ -42,7 +42,7 @@ struct BrowserBookmarksPanelView: View {
     // MARK: - Header
 
     private var headerBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: AppShellLayout.spaceS) {
             Image(systemName: "star.fill")
                 .font(BrowserFloatingTypography.popoverTitle)
                 .foregroundStyle(.secondary)
@@ -51,7 +51,7 @@ struct BrowserBookmarksPanelView: View {
             Spacer()
             Button(action: addCurrentPageToBookmarks) {
                 Label(currentPageIsBookmarked ? "已收藏" : "收藏当前页", systemImage: currentPageIsBookmarked ? "checkmark" : "plus")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(AppTypography.captionEmphasis)
                     .labelStyle(.titleAndIcon)
                     .padding(.horizontal, 8)
                     .frame(height: 22)
@@ -70,8 +70,8 @@ struct BrowserBookmarksPanelView: View {
             .help("关闭收藏夹面板")
             .accessibilityLabel("关闭收藏夹面板")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
     }
 
     private var canBookmarkCurrentPage: Bool {
@@ -97,9 +97,9 @@ struct BrowserBookmarksPanelView: View {
     // MARK: - Search
 
     private var searchBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: AppShellLayout.spaceS) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(BrowserFloatingTypography.hint)
                 .foregroundStyle(.tertiary)
             TextField("搜索网址、标题或分组", text: $searchText)
                 .textFieldStyle(.plain)
@@ -113,7 +113,7 @@ struct BrowserBookmarksPanelView: View {
                     model.filterBookmarks(query: "", groupName: model.selectedBookmarkGroupName)
                 }) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(AppTypography.caption)
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
@@ -121,22 +121,22 @@ struct BrowserBookmarksPanelView: View {
                 .accessibilityLabel("清空收藏搜索")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
     }
 
     // MARK: - Group Filter
 
     private var groupFilterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: AppShellLayout.spaceS) {
                 groupChip(title: "全部", groupName: nil)
                 ForEach(model.bookmarkGroupNames, id: \.self) { group in
                     groupChip(title: group, groupName: group)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.vertical, AppShellLayout.spaceS)
         }
     }
 
@@ -146,7 +146,7 @@ struct BrowserBookmarksPanelView: View {
             model.filterBookmarks(query: searchText, groupName: groupName)
         }) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(AppTypography.captionEmphasis)
                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -156,9 +156,9 @@ struct BrowserBookmarksPanelView: View {
     }
 
     private var groupInputBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: AppShellLayout.spaceS) {
             Image(systemName: "folder.badge.plus")
-                .font(.system(size: 12))
+                .font(BrowserFloatingTypography.hint)
                 .foregroundStyle(.tertiary)
             TextField("输入分组名，按 Return 切换/创建", text: $groupText)
                 .textFieldStyle(.plain)
@@ -173,13 +173,13 @@ struct BrowserBookmarksPanelView: View {
                 Button("清除") {
                     model.filterBookmarks(query: searchText, groupName: nil)
                 }
-                .font(.system(size: 11, weight: .medium))
+                .font(AppTypography.captionEmphasis)
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
     }
 
     // MARK: - Empty State
@@ -187,7 +187,7 @@ struct BrowserBookmarksPanelView: View {
     private var emptyState: some View {
         let isSearching = !searchText.isEmpty
 
-        return VStack(spacing: 8) {
+        return VStack(spacing: AppShellLayout.spaceS) {
             Spacer()
             Image(systemName: "star")
                 .font(.system(size: 32))
@@ -196,11 +196,11 @@ struct BrowserBookmarksPanelView: View {
                 .font(BrowserFloatingTypography.hint.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(isSearching ? "可以换个关键词，或者查看全部收藏。" : "遇到想反复查看的资料，可以点星标收藏。康纳同学会把它留在这个工作区里，方便之后继续阅读和提问。")
-                .font(.system(size: 11))
+                .font(AppTypography.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
-                .padding(.horizontal, 18)
+                .padding(.horizontal, AppShellLayout.spaceL)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -227,18 +227,18 @@ struct BrowserBookmarksPanelView: View {
                     }
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, AppShellLayout.spaceS)
         }
     }
 
     @ViewBuilder
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(AppTypography.captionEmphasis)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.top, AppShellLayout.spaceM)
+            .padding(.bottom, AppShellLayout.spaceXS)
     }
 
     // MARK: - Footer
@@ -246,15 +246,15 @@ struct BrowserBookmarksPanelView: View {
     private var footerBar: some View {
         HStack {
             Text("\(model.filteredBookmarkRecords.count) 个收藏")
-                .font(.system(size: 11))
+                .font(AppTypography.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
             Text(model.selectedBookmarkGroupName ?? "全部分组")
-                .font(.system(size: 11, weight: .medium))
+                .font(AppTypography.captionEmphasis)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
     }
 }
 
@@ -269,35 +269,35 @@ struct BrowserBookmarkRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 8) {
+            HStack(spacing: AppShellLayout.spaceS) {
                 favicon
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                     Text(displayTitle)
                         .font(BrowserFloatingTypography.pageTitle)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text(displayURL)
-                        .font(.system(size: 11))
+                        .font(BrowserFloatingTypography.pageURL)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 2) {
+                Spacer(minLength: AppShellLayout.spaceXS)
+                VStack(alignment: .trailing, spacing: AppShellLayout.spaceXS) {
                     Text(record.groupName)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(AppTypography.microEmphasis)
                         .foregroundStyle(Color.accentColor)
                         .lineLimit(1)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Color.accentColor.opacity(0.10), in: Capsule())
                     Text(timeString)
-                        .font(.system(size: 10).monospacedDigit())
+                        .font(AppTypography.monoMicro.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.vertical, AppShellLayout.spaceS)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
