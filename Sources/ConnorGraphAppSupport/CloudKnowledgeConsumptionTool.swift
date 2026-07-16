@@ -2,46 +2,134 @@ import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
 
-public struct CloudKnowledgeAnswerTool: AgentTool {
-    public let name = "cloud_kb_answer"
-    public let description: String
-    public let permission: AgentPermissionCapability = .externalNetwork
-    public let inputSchema: AgentToolInputSchema
-    private let client: CloudKnowledgeConsumptionClient
-    private let allowedKnowledgeBaseIDs: Set<String>?
-    public init(client: CloudKnowledgeConsumptionClient, allowedKnowledgeBaseIDs: [String]? = nil) {
-        self.client = client
-        self.allowedKnowledgeBaseIDs = allowedKnowledgeBaseIDs.map(Set.init)
-        let scopeDescription = allowedKnowledgeBaseIDs.map { " This session allows only these knowledge base IDs: \($0.sorted().joined(separator: ", "))." } ?? ""
-        self.description = "Search current committed knowledge from explicitly subscribed cloud knowledge bases. Returns separate L2 recent state, L3 reusable knowledge, and L4 stable entity/relation partitions within a context budget. Subscription authorization and the current session knowledge scope are enforced before retrieval.\(scopeDescription)"
-        self.inputSchema = AgentToolInputSchema.closedObject(properties: [
-            "query": .string(description: "Question or knowledge query."),
-            "knowledge_base_ids": .array(items: .string(description: "Subscribed knowledge base ID allowed by this session."), description: "One or more IDs from the current session's allowed knowledge base scope.\(scopeDescription)"),
-            "context_budget": .integer(description: "Maximum returned context characters."),
-            "limit": .integer(description: "Maximum result count.")
-        ], required: ["query", "knowledge_base_ids", "context_budget", "limit"])
-    }
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty else { throw AgentToolError.invalidArguments("query is required") }
-        let ids = arguments.array("knowledge_base_ids")?.compactMap(\.stringValue) ?? []; guard !ids.isEmpty else { throw AgentToolError.invalidArguments("knowledge_base_ids is required") }
-        if let allowedKnowledgeBaseIDs {
-            let disallowed = Set(ids).subtracting(allowedKnowledgeBaseIDs)
-            guard disallowed.isEmpty else {
-                throw AgentToolError.invalidArguments("knowledge_base_ids contains IDs outside this session's selected remote knowledge scope: \(disallowed.sorted().joined(separator: ", "))")
-            }
+private enum CloudKnowledgeContextToolSupport {
+    static let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "query": .string(description: "Use 2-5 focused search terms separated by semicolons (; or ；). Include aliases and both Chinese and English terms when useful."),
+        "context_budget": .integer(description: "Optional maximum returned context characters. Defaults to 8000."),
+        "limit": .integer(description: "Optional maximum result count. Defaults to 20.")
+    ], required: ["query"])
+
+    static func execute(
+        toolName: String,
+        channel: CloudKnowledgeSearchChannel,
+        allowedLayers: Set<CloudKnowledgeLayer>,
+        client: CloudKnowledgeConsumptionClient,
+        knowledgeBaseIDs: [String],
+        arguments: AgentToolArguments,
+        context: AgentToolExecutionContext
+    ) async throws -> AgentToolResult {
+        guard !knowledgeBaseIDs.isEmpty else {
+            return AgentToolResult(
+                toolCallID: context.toolCallID,
+                toolName: toolName,
+                contentText: "No remote knowledge bases are selected for this session. Do not use remote knowledge context from earlier user runs.",
+                contentJSON: "{\"channel\":\"\(channel.rawValue)\",\"knowledge_base_ids\":[],\"partitions\":[]}",
+                citations: []
+            )
         }
-        let response = try await client.answer(.init(query: query, knowledgeBaseIDs: ids, contextBudget: max(1_000, min(arguments.int("context_budget") ?? 8_000, 32_000)), limit: max(1, min(arguments.int("limit") ?? 20, 100))))
-        let text = response.partitions.map { partition in
-            let rows = partition.results.enumerated().map { index, hit in "\(index + 1). \(hit.title ?? hit.stableKey ?? hit.kind): \(hit.text)" }.joined(separator: "\n")
+        guard let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty else {
+            throw AgentToolError.invalidArguments("query is required")
+        }
+        let request = CloudKnowledgeAnswerRequest(
+            query: query,
+            knowledgeBaseIDs: knowledgeBaseIDs,
+            contextBudget: max(1_000, min(arguments.int("context_budget") ?? 8_000, 32_000)),
+            limit: max(1, min(arguments.int("limit") ?? 20, 100))
+        )
+        let response = try await client.context(request, channel: channel)
+        let partitions = response.partitions
+            .filter { allowedLayers.contains($0.layer) }
+            .map { CloudKnowledgeAnswerPartition(layer: $0.layer, results: $0.results.filter { allowedLayers.contains($0.layer) }) }
+        let filtered = CloudKnowledgeAnswerResponse(
+            requestID: response.requestID,
+            channel: channel,
+            partitions: partitions,
+            returnedBytes: response.returnedBytes,
+            knowledgeSequence: response.knowledgeSequence
+        )
+        let text = partitions.map { partition in
+            let rows = partition.results.enumerated().map { index, hit -> String in
+                let timestamp = hit.recordedAt.map { " [recorded_at: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
+                return "\(index + 1). \(hit.title ?? hit.stableKey ?? hit.kind): \(hit.text)\(timestamp)"
+            }.joined(separator: "\n")
             return "## \(partition.layer.rawValue)\n\(rows.isEmpty ? "No results." : rows)"
         }.joined(separator: "\n\n")
-        let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text, contentJSON: String(data: try encoder.encode(response), encoding: .utf8), citations: response.partitions.flatMap(\.results).compactMap(\.revisionID))
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.dateEncodingStrategy = .iso8601
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: toolName,
+            contentText: text.isEmpty ? "No matching cloud knowledge context." : text,
+            contentJSON: String(data: try encoder.encode(filtered), encoding: .utf8),
+            citations: partitions.flatMap(\.results).compactMap(\.revisionID)
+        )
+    }
+}
+
+public struct CloudKnowledgeRecentContextTool: AgentTool {
+    public let name = "cloud_kb_recent_context"
+    public let description: String
+    public let permission: AgentPermissionCapability = .externalNetwork
+    public let inputSchema = CloudKnowledgeContextToolSupport.inputSchema
+    private let client: CloudKnowledgeConsumptionClient
+    private let knowledgeBaseIDs: [String]
+
+    public init(client: CloudKnowledgeConsumptionClient, knowledgeBaseIDs: [String]) {
+        let resolvedIDs = Array(Set(knowledgeBaseIDs)).sorted()
+        self.client = client
+        self.knowledgeBaseIDs = resolvedIDs
+        self.description = resolvedIDs.isEmpty
+            ? "No remote knowledge bases are selected for this session. Do not call this tool or reuse remote knowledge context from earlier user runs."
+            : "Search only L2 mutable operational context from the remote knowledge bases selected for this session, including current project or task state, recent decisions, and other time-sensitive facts. Compare recorded_at when results conflict. This tool never returns L3/L4 durable knowledge."
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try await CloudKnowledgeContextToolSupport.execute(
+            toolName: name,
+            channel: .recentContext,
+            allowedLayers: [.l2],
+            client: client,
+            knowledgeBaseIDs: knowledgeBaseIDs,
+            arguments: arguments,
+            context: context
+        )
+    }
+}
+
+public struct CloudKnowledgeKnowledgeContextTool: AgentTool {
+    public let name = "cloud_kb_knowledge_context"
+    public let description: String
+    public let permission: AgentPermissionCapability = .externalNetwork
+    public let inputSchema = CloudKnowledgeContextToolSupport.inputSchema
+    private let client: CloudKnowledgeConsumptionClient
+    private let knowledgeBaseIDs: [String]
+
+    public init(client: CloudKnowledgeConsumptionClient, knowledgeBaseIDs: [String]) {
+        let resolvedIDs = Array(Set(knowledgeBaseIDs)).sorted()
+        self.client = client
+        self.knowledgeBaseIDs = resolvedIDs
+        self.description = resolvedIDs.isEmpty
+            ? "No remote knowledge bases are selected for this session. Do not call this tool or reuse remote knowledge context from earlier user runs."
+            : "Search only L3/L4 durable context from the remote knowledge bases selected for this session, including reusable knowledge, stable entities, concepts, and durable relationships. Do not use these results as proof of current operational state."
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try await CloudKnowledgeContextToolSupport.execute(
+            toolName: name,
+            channel: .knowledgeContext,
+            allowedLayers: [.l3, .l4],
+            client: client,
+            knowledgeBaseIDs: knowledgeBaseIDs,
+            arguments: arguments,
+            context: context
+        )
     }
 }
 
 public extension AgentToolRegistry {
-    mutating func registerCloudKnowledgeConsumptionTool(client: CloudKnowledgeConsumptionClient, allowedKnowledgeBaseIDs: [String]? = nil) {
-        register(CloudKnowledgeAnswerTool(client: client, allowedKnowledgeBaseIDs: allowedKnowledgeBaseIDs))
+    mutating func registerCloudKnowledgeConsumptionTools(client: CloudKnowledgeConsumptionClient, knowledgeBaseIDs: [String]) {
+        register(CloudKnowledgeRecentContextTool(client: client, knowledgeBaseIDs: knowledgeBaseIDs))
+        register(CloudKnowledgeKnowledgeContextTool(client: client, knowledgeBaseIDs: knowledgeBaseIDs))
     }
 }

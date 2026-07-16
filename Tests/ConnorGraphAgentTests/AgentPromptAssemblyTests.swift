@@ -93,6 +93,16 @@ import ConnorGraphAgent
     #expect(!prompt.contains("do not request a separate depth expansion"))
 }
 
+@Test func defaultSystemPromptConditionallyBootstrapsSelectedRemoteKnowledge() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("If the definitions of `cloud_kb_recent_context` and `cloud_kb_knowledge_context` indicate"))
+    #expect(prompt.contains("call both once during the same bootstrap"))
+    #expect(prompt.contains("If their definitions indicate that none are selected, do not call them"))
+    #expect(prompt.contains("do not reuse remote knowledge results from earlier user runs"))
+    #expect(prompt.contains("supplement rather than replace local Memory OS results"))
+}
+
 @Test func defaultSystemPromptRequiresMemoryAndWebSearchForEveryNewUserRun() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

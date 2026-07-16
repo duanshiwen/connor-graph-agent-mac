@@ -15,7 +15,11 @@ public struct CloudKnowledgeMarketplaceAPIClient: CloudKnowledgeMarketplaceAPI, 
     public func detail(id: String) async throws -> CloudMarketplaceKnowledgeBase { try await send("marketplace/knowledge-bases/\(id)") }
     public func subscribe(id: String) async throws { let _: Empty = try await send("knowledge-bases/\(id)/subscribe", method: "POST", body: Empty()) }
     public func unsubscribe(id: String) async throws { let _: Empty = try await send("knowledge-bases/\(id)/subscribe", method: "DELETE") }
-    public func answer(_ request: CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse { try await send("knowledge/search/answer", method: "POST", body: request) }
+	public func answer(_ request: CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse { try await send("knowledge/search/answer", method: "POST", body: request) }
+	public func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse {
+		let path = channel == .recentContext ? "knowledge/search/recent-context" : "knowledge/search/knowledge-context"
+		return try await send(path, method: "POST", body: request)
+	}
     private struct Empty: Codable {}
     private struct Envelope<T: Decodable>: Decodable { var data: T }
     private func send<T: Decodable>(_ path: String, method: String = "GET") async throws -> T { try await send(path, method: method, bodyData: nil) }

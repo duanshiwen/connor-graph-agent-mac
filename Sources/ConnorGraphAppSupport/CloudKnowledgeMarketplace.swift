@@ -61,11 +61,11 @@ public struct CloudMarketplaceSearchRequest: Codable, Sendable, Equatable { publ
 public struct CloudKnowledgeAnswerRequest: Codable, Sendable, Equatable { public var requestID: String; public var query: String; public var knowledgeBaseIDs: [String]; public var contextBudget: Int; public var limit: Int; public init(requestID: String = UUID().uuidString, query: String, knowledgeBaseIDs: [String], contextBudget: Int = 8_000, limit: Int = 20) { self.requestID = requestID; self.query = query; self.knowledgeBaseIDs = knowledgeBaseIDs; self.contextBudget = contextBudget; self.limit = limit }; private enum CodingKeys: String, CodingKey { case requestID = "requestId", query, knowledgeBaseIDs, contextBudget = "contextBudgetBytes", limit } }
 public struct CloudKnowledgeAnswerPartition: Codable, Sendable, Equatable { public var layer: CloudKnowledgeLayer; public var results: [CloudKnowledgeSearchHit]; public init(layer: CloudKnowledgeLayer, results: [CloudKnowledgeSearchHit]) { self.layer = layer; self.results = results } }
 public struct CloudKnowledgeAnswerResponse: Codable, Sendable, Equatable {
-    public var requestID: String; public var partitions: [CloudKnowledgeAnswerPartition]; public var returnedBytes: Int?; public var knowledgeSequence: Int?
-    public init(requestID: String, partitions: [CloudKnowledgeAnswerPartition], returnedBytes: Int? = nil, knowledgeSequence: Int? = nil) { self.requestID = requestID; self.partitions = partitions; self.returnedBytes = returnedBytes; self.knowledgeSequence = knowledgeSequence }
-    private enum CodingKeys: String, CodingKey { case requestID = "requestId", partitions, returnedBytes, knowledgeSequence, l2, l3, l4 }
-    public init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: CodingKeys.self); requestID = try c.decode(String.self, forKey: .requestID); returnedBytes = try c.decodeIfPresent(Int.self, forKey: .returnedBytes); knowledgeSequence = try c.decodeIfPresent(Int.self, forKey: .knowledgeSequence); if let direct = try c.decodeIfPresent([CloudKnowledgeAnswerPartition].self, forKey: .partitions) { partitions = direct } else { partitions = [.init(layer: .l2, results: try c.decodeIfPresent([CloudKnowledgeSearchHit].self, forKey: .l2) ?? []), .init(layer: .l3, results: try c.decodeIfPresent([CloudKnowledgeSearchHit].self, forKey: .l3) ?? []), .init(layer: .l4, results: try c.decodeIfPresent([CloudKnowledgeSearchHit].self, forKey: .l4) ?? [])] } }
-    public func encode(to encoder: Encoder) throws { var c = encoder.container(keyedBy: CodingKeys.self); try c.encode(requestID, forKey: .requestID); try c.encode(partitions, forKey: .partitions); try c.encodeIfPresent(returnedBytes, forKey: .returnedBytes); try c.encodeIfPresent(knowledgeSequence, forKey: .knowledgeSequence) }
+    public var requestID: String; public var channel: CloudKnowledgeSearchChannel?; public var partitions: [CloudKnowledgeAnswerPartition]; public var returnedBytes: Int?; public var knowledgeSequence: Int?
+    public init(requestID: String, channel: CloudKnowledgeSearchChannel? = nil, partitions: [CloudKnowledgeAnswerPartition], returnedBytes: Int? = nil, knowledgeSequence: Int? = nil) { self.requestID = requestID; self.channel = channel; self.partitions = partitions; self.returnedBytes = returnedBytes; self.knowledgeSequence = knowledgeSequence }
+    private enum CodingKeys: String, CodingKey { case requestID = "requestId", channel, partitions, returnedBytes, knowledgeSequence, l2, l3, l4 }
+    public init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: CodingKeys.self); requestID = try c.decode(String.self, forKey: .requestID); channel = try c.decodeIfPresent(CloudKnowledgeSearchChannel.self, forKey: .channel); returnedBytes = try c.decodeIfPresent(Int.self, forKey: .returnedBytes); knowledgeSequence = try c.decodeIfPresent(Int.self, forKey: .knowledgeSequence); if let direct = try c.decodeIfPresent([CloudKnowledgeAnswerPartition].self, forKey: .partitions) { partitions = direct } else { partitions = [.init(layer: .l2, results: try c.decodeIfPresent([CloudKnowledgeSearchHit].self, forKey: .l2) ?? []), .init(layer: .l3, results: try c.decodeIfPresent([CloudKnowledgeSearchHit].self, forKey: .l3) ?? []), .init(layer: .l4, results: try c.decodeIfPresent([CloudKnowledgeSearchHit].self, forKey: .l4) ?? [])] } }
+    public func encode(to encoder: Encoder) throws { var c = encoder.container(keyedBy: CodingKeys.self); try c.encode(requestID, forKey: .requestID); try c.encodeIfPresent(channel, forKey: .channel); try c.encode(partitions, forKey: .partitions); try c.encodeIfPresent(returnedBytes, forKey: .returnedBytes); try c.encodeIfPresent(knowledgeSequence, forKey: .knowledgeSequence) }
 }
 
 public protocol CloudKnowledgeMarketplaceAPI: Sendable {
@@ -77,10 +77,12 @@ public protocol CloudKnowledgeMarketplaceAPI: Sendable {
     func subscribe(id: String) async throws
     func unsubscribe(id: String) async throws
     func answer(_ request: CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse
+    func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse
 }
 
 public extension CloudKnowledgeMarketplaceAPI {
     func library() async throws -> CloudMarketplaceLibrary { .init() }
+    func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse { try await answer(request) }
 }
 
 public struct CloudKnowledgeAnswerCacheEntry: Sendable, Equatable {
@@ -141,5 +143,11 @@ public actor CloudKnowledgeConsumptionClient {
         let key = request.knowledgeBaseIDs.sorted().joined(separator: ",") + "|" + request.query + "|\(request.contextBudget)|\(request.limit)"
         if let cached = await cache.value(key: key) { return cached }
         let response = try await api.answer(request); await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs); return response
+    }
+    public func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse {
+        for id in request.knowledgeBaseIDs where await !cache.isAuthorized(id) { throw CloudKnowledgeError.server(status: 403, code: "subscription_required", message: "知识库订阅已失效。") }
+        let key = channel.rawValue + "|" + request.knowledgeBaseIDs.sorted().joined(separator: ",") + "|" + request.query + "|\(request.contextBudget)|\(request.limit)"
+        if let cached = await cache.value(key: key) { return cached }
+        let response = try await api.context(request, channel: channel); await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs); return response
     }
 }
