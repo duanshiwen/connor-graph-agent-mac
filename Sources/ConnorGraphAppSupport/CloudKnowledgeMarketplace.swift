@@ -107,6 +107,7 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var showsPublisher = false
     @Published public private(set) var isLoading = false
     @Published public private(set) var errorMessage: String?
+    public var onLibraryChanged: (() -> Void)?
     private let api: any CloudKnowledgeMarketplaceAPI; private let cache: CloudKnowledgeAuthorizationCache
     public init(api: any CloudKnowledgeMarketplaceAPI, cache: CloudKnowledgeAuthorizationCache = .init()) { self.api = api; self.cache = cache }
     public func load() async {
@@ -117,6 +118,7 @@ public actor CloudKnowledgeAuthorizationCache {
             self.library = try await library
             let subscribed = self.home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + self.library.subscribed
             for base in subscribed { await self.cache.authorize(base.id) }
+            self.onLibraryChanged?()
         }
     }
     public func loadHome() async { await load() }
@@ -124,10 +126,10 @@ public actor CloudKnowledgeAuthorizationCache {
     public func showHome() { selected = nil; showsPublisher = false }
     public func showPublisher() { selected = nil; showsPublisher = true }
     public func loadDetail(id: String) async { showsPublisher = false; await perform { self.selected = try await self.api.detail(id: id) } }
-    public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library() } }
-    public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library() } catch { errorMessage = error.localizedDescription } }
+    public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
+    public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
     public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { (try? await api.search(.init(query: query, limit: 6))) ?? [] }
-    public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear() }
+    public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
     private func perform(_ action: @escaping () async throws -> Void) async { isLoading = true; errorMessage = nil; defer { isLoading = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }
 

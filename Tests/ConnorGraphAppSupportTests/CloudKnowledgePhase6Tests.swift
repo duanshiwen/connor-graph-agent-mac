@@ -1,6 +1,8 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphAppSupport
+import ConnorGraphStore
 
 @Suite("Cloud Knowledge Phase 6 Tests")
 struct CloudKnowledgePhase6Tests {
@@ -54,6 +56,51 @@ struct CloudKnowledgePhase6Tests {
         #expect(store.home.sections.isEmpty && store.selected == nil && store.searchResults.isEmpty)
         #expect(await cache.isAuthorized("kb-1") == false)
         await #expect(throws: (any Error).self) { try await client.answer(.init(query: "Connor", knowledgeBaseIDs: ["kb-1"])) }
+    }
+
+    @Test func answerToolRejectsKnowledgeBasesOutsideTheSessionSelection() async throws {
+        let api = MarketplaceFakeAPI()
+        let cache = CloudKnowledgeAuthorizationCache()
+        await cache.authorize("kb-1")
+        await cache.authorize("kb-2")
+        let tool = CloudKnowledgeAnswerTool(
+            client: CloudKnowledgeConsumptionClient(api: api, cache: cache),
+            allowedKnowledgeBaseIDs: ["kb-1"]
+        )
+        let arguments = try AgentToolArguments(json: #"{"query":"Connor","knowledge_base_ids":["kb-2"],"context_budget":8000,"limit":20}"#)
+        let context = AgentToolExecutionContext(
+            runID: "run",
+            sessionID: "session",
+            groupID: "group",
+            userPrompt: "query",
+            toolCallID: "tool",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+
+        await #expect(throws: AgentToolError.self) {
+            try await tool.execute(arguments: arguments, context: context)
+        }
+        #expect(await api.answerCount == 0)
+    }
+
+    @Test func runtimeRegistersRemoteKnowledgeToolOnlyForNonemptySessionScope() throws {
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-consumption-runtime-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let store = try SQLiteGraphKernelStore(path: databaseURL.path)
+        try store.migrate()
+        let api = MarketplaceFakeAPI()
+        let cache = CloudKnowledgeAuthorizationCache()
+        let factory = AppGraphAgentRuntimeFactory(
+            store: store,
+            settingsRepository: AppLLMSettingsRepository(),
+            cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient(api: api, cache: cache)
+        )
+
+        let enabled = factory.makeAgentLoopController(remoteKnowledgeBaseIDs: ["kb-1"])
+        let disabled = factory.makeAgentLoopController(remoteKnowledgeBaseIDs: [])
+        #expect(enabled.toolRegistry.definitions.map(\.name).contains("cloud_kb_answer"))
+        #expect(!disabled.toolRegistry.definitions.map(\.name).contains("cloud_kb_answer"))
+        #expect(enabled.toolRegistry.definition(named: "cloud_kb_answer")?.description.contains("kb-1") == true)
     }
 }
 
