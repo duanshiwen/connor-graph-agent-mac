@@ -115,7 +115,7 @@ struct CloudKnowledgeCreatorView: View {
                     Task { await store.saveKnowledgeBase() }
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -160,14 +160,14 @@ struct CloudKnowledgeCreatorView: View {
 
             actionBar {
                 Button("返回") { store.advance(to: .configure) }
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                 Spacer()
                 Text("已选择 \(store.snapshot.selectedConversationIDs.count) 个对话")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("下一步：确认生成") { store.advance(to: .confirm) }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.selectedConversationIDs.isEmpty)
             }
         }
@@ -180,11 +180,11 @@ struct CloudKnowledgeCreatorView: View {
             summaryRow("提交前可以查看完整变更预览", systemImage: "checkmark.rectangle")
             actionBar {
                 Button("返回") { store.advance(to: .conversations) }
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                 Spacer()
                 Button("确认并开始") { Task { await store.beginPublication() } }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
             }
         }
     }
@@ -205,13 +205,13 @@ struct CloudKnowledgeCreatorView: View {
                 Button(store.snapshot.stage == .paused ? "恢复" : "暂停") {
                     store.snapshot.stage == .paused ? store.resume() : store.pause()
                 }
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 Button("取消", role: .destructive) { store.cancel() }
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                 Spacer()
                 Button("验证发布") { Task { await store.validatePublication() } }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.processedConversationIDs.count < store.snapshot.selectedConversationIDs.count)
             }
         }
@@ -231,7 +231,7 @@ struct CloudKnowledgeCreatorView: View {
                 Spacer()
                 Button("修复后重试") { Task { await store.finalizePublication() } }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                     .disabled(store.snapshot.validationIssues.isEmpty || store.isWorking)
             }
         }
@@ -255,7 +255,7 @@ struct CloudKnowledgeCreatorView: View {
             }
             actionBar {
                 Button("返回修复") { store.advance(to: .validating) }
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
             }
         }
     }
@@ -273,7 +273,7 @@ struct CloudKnowledgeCreatorView: View {
                 Task { await store.finalizePublication() }
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
             .disabled(store.isWorking || !store.snapshot.validationIssues.isEmpty)
         }
         .padding(.horizontal, 20)
@@ -289,7 +289,7 @@ struct CloudKnowledgeCreatorView: View {
                 Spacer()
                 Button("重新检索并继续") { store.resume() }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
             }
         }
     }
@@ -317,7 +317,7 @@ struct CloudKnowledgeCreatorView: View {
                     store.reset()
                     draft = .init()
                 }
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
             }
         }
     }
@@ -330,7 +330,7 @@ struct CloudKnowledgeCreatorView: View {
                 store.reset()
                 draft = .init()
             }
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
         }
     }
 

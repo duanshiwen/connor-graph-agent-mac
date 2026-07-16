@@ -47,12 +47,9 @@ struct BrowserHistoryPanelView: View {
             Spacer()
             Button(action: { model.toggleHistoryPanel() }) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .help("关闭历史面板")
             .accessibilityLabel("关闭历史面板")
         }

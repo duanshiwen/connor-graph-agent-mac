@@ -1342,12 +1342,10 @@ private struct ComposerFormatBar: View {
 
             Button(action: onInsertImage) {
                 Label("图片", systemImage: "photo")
-                    .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                     .labelStyle(.iconOnly)
-                    .frame(width: 26, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(.secondary)
             .help("插入图片")
             .accessibilityLabel("插入图片")
@@ -1356,7 +1354,7 @@ private struct ComposerFormatBar: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .frame(height: 28)
+        .frame(height: AppButtonLayout.iconButtonSize + 6)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
 
@@ -1365,14 +1363,11 @@ private struct ComposerFormatBar: View {
             if let shortcut {
                 Text(shortcut)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .frame(width: 26, height: 22)
             } else {
                 Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 26, height: 22)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.appIcon)
         .foregroundStyle(.secondary)
         .help(shortcut.map { "\($0) (\(buttonHelpLabel(systemImage: systemImage)))" } ?? buttonHelpLabel(systemImage: systemImage))
         .accessibilityLabel(buttonAccessibilityLabel(systemImage: systemImage, shortcut: shortcut))

@@ -64,12 +64,9 @@ struct BrowserBookmarksPanelView: View {
 
             Button(action: { model.toggleBookmarksPanel() }) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .help("关闭收藏夹面板")
             .accessibilityLabel("关闭收藏夹面板")
         }

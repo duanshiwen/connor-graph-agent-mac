@@ -257,7 +257,7 @@ struct BrowserToolbarIconButtonLabel: View {
             .font(iconFont)
             .symbolRenderingMode(.monochrome)
             .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-            .frame(width: 28, height: 28)
+            .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isActive ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.055))
@@ -318,4 +318,3 @@ struct WebNavigationState: Equatable {
     var isLoading: Bool = false
     var errorMessage: String? = nil
 }
-

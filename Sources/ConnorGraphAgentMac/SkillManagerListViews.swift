@@ -34,11 +34,8 @@ private struct SkillListHeader: View {
         AppListPaneHeader(title: "技能") {
             Button(action: onAdd) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
-            .contentShape(Circle())
+            .buttonStyle(.appIcon)
             .help("添加技能")
             .accessibilityLabel("添加技能")
         }

@@ -70,7 +70,7 @@ struct NoteImportToolbarProgressButton: View {
             .frame(width: 21, height: 21)
             .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.appIcon)
         .help(presentation.helpText)
         .accessibilityLabel("打开导入中心")
         .accessibilityValue(presentation.accessibilityValue)

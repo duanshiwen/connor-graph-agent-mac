@@ -628,7 +628,7 @@ struct SettingsAISection: View {
                         .padding(.vertical, SettingsListLayout.spaceXS)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
 
                 Label("连接能力会在添加时一次性验证并保存。为保护 API Key 安全，我们暂时不支持编辑连接；如需更改，请删除后重建。", systemImage: "lock.shield")
                     .font(SettingsListTypography.rowCaption)
@@ -1081,14 +1081,14 @@ struct AIConnectionSetupView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
 
             Button(action: primaryAction) {
                 Label(primaryButtonTitle, systemImage: primaryButtonIcon)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
             .keyboardShortcut(.defaultAction)
             .disabled(isPrimaryButtonDisabled || isAuthenticating)
         }
@@ -2428,7 +2428,7 @@ struct AIConnectionEntryRow: View {
                     Image(systemName: "ellipsis")
                         .font(SettingsListTypography.icon)
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)

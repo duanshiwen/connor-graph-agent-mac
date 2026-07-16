@@ -80,9 +80,9 @@ enum AgentChatLayout {
     static let radiusXL: CGFloat = 18
 
     static let hairlineOpacity: Double = 0.14
-    static let chipHeight: CGFloat = 30
-    static let iconButtonSize: CGFloat = 32
-    static let primaryButtonSize: CGFloat = 34
+    static let chipHeight = AppButtonLayout.height
+    static let iconButtonSize = AppButtonLayout.iconButtonSize
+    static let primaryButtonSize = AppButtonLayout.iconButtonSize
     static let hitTargetSize: CGFloat = 44
     static let activityRowMinHeight: CGFloat = 24
     static let composerTextMinHeight: CGFloat = 56

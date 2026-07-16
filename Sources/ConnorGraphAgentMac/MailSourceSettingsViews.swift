@@ -1031,7 +1031,7 @@ private struct MailRemoteImagesBlockedBanner: View {
             Spacer(minLength: AppShellLayout.spaceS)
             Button("加载此邮件的远程图片", action: onLoadRemoteImages)
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(AppButtonLayout.controlSize)
         }
         .padding(AppShellLayout.spaceS)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))

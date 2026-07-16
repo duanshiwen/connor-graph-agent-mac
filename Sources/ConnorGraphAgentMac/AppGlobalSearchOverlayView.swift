@@ -370,10 +370,8 @@ struct AppGlobalSearchOverlayView: View {
                 browserHistoryPage = max(0, currentPage - 1)
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(currentPage == 0 ? Color.secondary.opacity(0.35) : Color.accentColor)
             .disabled(currentPage == 0)
             .help("上一页浏览历史")
@@ -387,10 +385,8 @@ struct AppGlobalSearchOverlayView: View {
                 browserHistoryPage = min(pageCount - 1, currentPage + 1)
             } label: {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(currentPage >= pageCount - 1 ? Color.secondary.opacity(0.35) : Color.accentColor)
             .disabled(currentPage >= pageCount - 1)
             .help("下一页浏览历史")

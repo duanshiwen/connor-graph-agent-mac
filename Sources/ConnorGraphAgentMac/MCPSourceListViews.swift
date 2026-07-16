@@ -53,11 +53,8 @@ private struct SourceListHeader: View {
         AppListPaneHeader(title: "外部工具连接", verticalPadding: 12) {
             Button(action: onAdd) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
-            .contentShape(Circle())
+            .buttonStyle(.appIcon)
             .help("添加外部工具连接")
             .accessibilityLabel("添加外部工具连接")
         }

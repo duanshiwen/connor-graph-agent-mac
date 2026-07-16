@@ -936,7 +936,7 @@ private struct TaskRuntimeCardActionButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .controlSize(AppButtonLayout.controlSize)
         .help(title)
     }
 }
