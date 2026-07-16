@@ -65,12 +65,7 @@ struct ConnorSettingsDetailView: View {
                 Group {
                     switch graph.shell.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(
-                            identityStore: identityStore,
-                            creatorStore: graph.knowledgeCreator,
-                            marketplaceStore: graph.knowledgeMarketplace,
-                            sessions: graph.chat.sessions.allSessions
-                        )
+                        UserIdentitySettingsView(identityStore: identityStore)
                     case .app:
                         SettingsAppSection(model: graph.appSettings, inputModel: graph.inputSettings, openProjectHelp: graph.settingsActions.openProjectHelp)
                     case .ai:

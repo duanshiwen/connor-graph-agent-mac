@@ -4,9 +4,6 @@ import ConnorGraphAppSupport
 
 struct UserIdentitySettingsView: View {
     @ObservedObject var identityStore: AppUserIdentityStore
-    @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
-    @ObservedObject var marketplaceStore: CloudKnowledgeMarketplaceStore
-    var sessions: [AgentSession]
     @State private var mode: AuthenticationMode = .login
     @State private var username = ""
     @State private var email = ""
@@ -32,20 +29,12 @@ struct UserIdentitySettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .task(id: identityStore.currentUser?.id) {
-            if identityStore.currentUser != nil {
-                await identityStore.refreshLibraries()
-            } else if identityStore.hasStoredSession, !didRetryStoredSession {
+            if identityStore.currentUser == nil, identityStore.hasStoredSession, !didRetryStoredSession {
                 didRetryStoredSession = true
                 await identityStore.restoreSession()
             }
         }
         .onChange(of: mode) { _, _ in didAttemptSubmit = false }
-        .onChange(of: identityStore.authenticationState) { _, state in
-            if state == .signedOut || state == .expired {
-                creatorStore.reset()
-                Task { await marketplaceStore.clearSession() }
-            }
-        }
     }
 
     private var authenticationView: some View {
@@ -63,7 +52,7 @@ struct UserIdentitySettingsView: View {
                     VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                         Text(mode == .login ? "登录康纳账号" : "创建康纳账号")
                             .font(SettingsListTypography.rowTitleSelected)
-                        Text("同步账号资料，并管理你创建和订阅的知识库。")
+                        Text("登录后同步账号资料和登录状态。")
                             .font(SettingsListTypography.rowCaption)
                             .foregroundStyle(.secondary)
                     }
@@ -125,8 +114,6 @@ struct UserIdentitySettingsView: View {
             SettingsGroup(title: "同步与隐私") {
                 accountCapabilityRow(systemImage: "arrow.triangle.2.circlepath", title: "账号同步", subtitle: "同步账号资料和登录状态。")
                 Divider()
-                accountCapabilityRow(systemImage: "books.vertical", title: "知识市场", subtitle: "管理你创建和订阅的知识库。")
-                Divider()
                 accountCapabilityRow(systemImage: "lock.shield", title: "本地数据独立", subtitle: "本地会话、偏好和 Memory OS 不会随账号同步。")
             }
         }
@@ -152,7 +139,7 @@ struct UserIdentitySettingsView: View {
                         Text(user.email).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("退出登录", role: .destructive) { creatorStore.reset(); Task { await identityStore.logout() } }
+                    Button("退出登录", role: .destructive) { Task { await identityStore.logout() } }
                         .buttonStyle(.bordered)
                 }
                 Divider()
@@ -161,15 +148,6 @@ struct UserIdentitySettingsView: View {
                 SettingsValueRow(title: "注册时间", value: user.createdAt.formatted(date: .long, time: .omitted))
             }
 
-            libraryGroup(title: "我创建的知识库", emptyMessage: "你还没有创建知识库。", libraries: identityStore.ownedKnowledgeBases)
-            CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
-            libraryGroup(title: "我订阅的知识库", emptyMessage: "你还没有订阅知识库。", libraries: identityStore.subscribedKnowledgeBases.map(\.knowledgeBase))
-            CloudKnowledgeMarketplaceDetailPane(store: marketplaceStore)
-                .frame(minHeight: 420)
-
-            if identityStore.isLoadingLibraries { ProgressView("正在刷新知识库…") }
-            if let error = identityStore.errorMessage { Text(error).font(SettingsListTypography.rowCaption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("刷新") { Task { await identityStore.refreshLibraries() } }.disabled(identityStore.isLoadingLibraries) }
         }
     }
 
@@ -216,19 +194,6 @@ struct UserIdentitySettingsView: View {
             Spacer()
         }
         .frame(minHeight: SettingsListLayout.rowMinHeight)
-    }
-
-    private func libraryGroup(title: String, emptyMessage: String, libraries: [ConnorKnowledgeBaseSummary]) -> some View {
-        SettingsGroup(title: title) {
-            if libraries.isEmpty {
-                Text(emptyMessage).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(libraries.enumerated()), id: \.element.id) { index, library in
-                    KnowledgeLibraryIdentityRow(library: library)
-                    if index < libraries.count - 1 { Divider() }
-                }
-            }
-        }
     }
 
     private var formError: String? {
@@ -289,24 +254,5 @@ struct IdentityAvatarView: View {
             Text(String(user.displayName.prefix(1)).uppercased())
                 .font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(Color.accentColor)
         }
-    }
-}
-
-private struct KnowledgeLibraryIdentityRow: View {
-    var library: ConnorKnowledgeBaseSummary
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "books.vertical").font(.title3).foregroundStyle(.orange).frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(library.name).font(SettingsListTypography.rowTitleSelected)
-                Text([library.category, library.visibility, "\(library.subscriberCount) 位订阅者"].compactMap { $0 }.joined(separator: " · "))
-                    .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-                if let description = library.description, !description.isEmpty {
-                    Text(description).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-            Spacer()
-        }
-        .frame(minHeight: SettingsListLayout.prominentRowMinHeight)
     }
 }

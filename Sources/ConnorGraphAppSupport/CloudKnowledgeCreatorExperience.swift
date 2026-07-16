@@ -1,6 +1,13 @@
 import Foundation
 import Combine
 
+private struct CloudKnowledgeCreatorCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+    init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
+    init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
+}
+
 public struct CloudKnowledgeBaseDraft: Codable, Sendable, Equatable {
     public var name: String; public var slug: String; public var description: String; public var visibility: String; public var defaultLocale: String
     public init(name: String = "", slug: String = "", description: String = "", visibility: String = "private", defaultLocale: String = "zh-CN") { self.name = name; self.slug = slug; self.description = description; self.visibility = visibility; self.defaultLocale = defaultLocale }
@@ -18,11 +25,75 @@ public struct CloudKnowledgePreview: Codable, Sendable, Equatable {
     public var runID: String { publicationRunID }
     public init(runID: String, stagedSequence: Int, operations: [CloudKnowledgeOperation], summaries: [String]) { self.publicationRunID = runID; self.stagedSequence = stagedSequence; self.operations = operations; self.summaries = summaries }
     private enum CodingKeys: String, CodingKey { case publicationRunID, runID, stagedSequence, operations, summaries }
-    public init(from decoder: Decoder) throws { let box = try decoder.container(keyedBy: CodingKeys.self); publicationRunID = try box.decodeIfPresent(String.self, forKey: .publicationRunID) ?? box.decode(String.self, forKey: .runID); stagedSequence = try box.decode(Int.self, forKey: .stagedSequence); operations = try box.decodeIfPresent([CloudKnowledgeOperation].self, forKey: .operations) ?? []; summaries = try box.decodeIfPresent([String].self, forKey: .summaries) ?? [] }
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        publicationRunID = try box.decodeIfPresent(String.self, forKey: .publicationRunID) ?? box.decode(String.self, forKey: .runID)
+        stagedSequence = try box.decode(Int.self, forKey: .stagedSequence)
+        operations = try box.decodeIfPresent([CloudKnowledgeOperation].self, forKey: .operations) ?? []
+        if let values = try? box.decode([String].self, forKey: .summaries) {
+            summaries = values
+        } else {
+            let counts = try box.decodeIfPresent([String: Int].self, forKey: .summaries) ?? [:]
+            summaries = counts.keys.sorted().map { Self.summaryLabel(operation: $0, count: counts[$0] ?? 0) }
+        }
+    }
     public func encode(to encoder: Encoder) throws { var box = encoder.container(keyedBy: CodingKeys.self); try box.encode(publicationRunID, forKey: .publicationRunID); try box.encode(stagedSequence, forKey: .stagedSequence); try box.encode(operations, forKey: .operations); try box.encode(summaries, forKey: .summaries) }
+    private static func summaryLabel(operation: String, count: Int) -> String {
+        let label = switch operation {
+        case "create": "新增"
+        case "update": "更新"
+        case "delete": "删除"
+        default: operation
+        }
+        return "\(label) \(count) 项知识变更"
+    }
 }
 
 public let cloudKnowledgeCreatorTermsVersion = "2026-07-13"
+
+public struct CloudKnowledgePublishingAgreementSection: Sendable, Equatable, Identifiable {
+    public var title: String
+    public var body: String
+    public var id: String { title }
+    public init(title: String, body: String) { self.title = title; self.body = body }
+}
+
+public enum CloudKnowledgePublishingAgreement {
+    public static let title = "知识库发布协议"
+    public static let operatorName = "杭州康纳快跑科技有限公司"
+    public static let version = cloudKnowledgeCreatorTermsVersion
+    public static let effectiveDate = "2026年7月13日"
+    public static let sections: [CloudKnowledgePublishingAgreementSection] = [
+        .init(
+            title: "一、协议范围",
+            body: "本协议是知识库创作者与杭州康纳快跑科技有限公司（以下简称“平台”）之间关于创建、提交、公开发布和治理远端知识库的约定。创作者勾选同意并点击发布，即表示已阅读并接受本协议当前版本。"
+        ),
+        .init(
+            title: "二、远端知识库的数据范围",
+            body: "远端知识库仅承载 Memory OS 的 L2 动态运行上下文、L3 可复用知识与 L4 稳定实体及关系，不接收 L0 原始私密上下文或 L1 会话工作记忆。平台可以对提交内容执行与本地 Memory OS 一致的结构校验、安全检查、去重、索引和版本管理；正常内容自动处理，发现异常时可以阻止发布或要求创作者处理。"
+        ),
+        .init(
+            title: "三、创作者保证",
+            body: "创作者保证对发布内容拥有合法权利或已取得充分授权，内容真实、合法且不侵犯他人的知识产权、隐私权、商业秘密及其他权益。创作者不得提交密码、密钥、访问令牌、未获授权的个人敏感信息、依法不得公开的信息，或通过内容诱导系统实施违法、有害行为。"
+        ),
+        .init(
+            title: "四、发布授权与订阅使用",
+            body: "知识库公开发布后，其他用户可以在知识市场查看、订阅，并在康纳同学中检索和使用其中的结构化知识。为提供上述服务，创作者授予平台一项非独占、全球范围、免许可费的必要许可，用于存储、复制、格式转换、索引、展示、分发和安全治理相关内容。该许可仅限于运营知识库及改进相关服务所必需的范围。"
+        ),
+        .init(
+            title: "五、版本、下架与治理",
+            body: "平台记录知识变更、发布状态和治理版本。创作者可以下架知识库；下架后平台停止新的公开展示和订阅，但不影响用户在下架前已经基于该知识生成的合法输出。对于涉嫌违法、侵权、泄密、安全风险或严重降低服务质量的内容，平台可以限制展示、暂停订阅或下架，并向创作者提供适用的申诉渠道。"
+        ),
+        .init(
+            title: "六、服务边界与责任",
+            body: "结构校验、安全检查及自动生成不能替代创作者对内容的最终审查。创作者对其发布内容及由此引发的第三方主张承担相应责任。平台会采取合理措施保护数据和维持服务，但不保证知识内容绝对准确、完整或持续可用；法律另有强制规定的除外。"
+        ),
+        .init(
+            title: "七、协议更新与争议处理",
+            body: "平台可以因法律、产品或治理规则变化更新本协议，并以新的版本号和生效日期展示；需要再次确认时，平台会在发布前提示。协议的订立、履行与解释适用中华人民共和国法律。争议应先友好协商；协商不成的，任何一方可向平台所在地有管辖权的人民法院提起诉讼。相关通知与联系可通过康纳同学内的账号或支持渠道进行。"
+        )
+    ]
+}
 
 public struct CloudKnowledgePublishRequest: Codable, Sendable, Equatable {
     public var expectedGovernanceVersion: Int; public var idempotencyKey: UUID; public var termsVersion: String; public var termsAccepted: Bool
@@ -50,7 +121,19 @@ public struct CloudKnowledgeCreatorAPIClient: CloudKnowledgeCreatorAPI, Sendable
     public init(baseURL: URL, transport: any ConnorBackendHTTPTransport = URLSession.shared, credentials: any CloudKnowledgeCredentialProvider = StoredCloudKnowledgeCredentialProvider()) {
         self.baseURL = baseURL; self.transport = transport; self.credentials = credentials
         let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase; encoder.dateEncodingStrategy = .iso8601; self.encoder = encoder
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase; decoder.dateDecodingStrategy = .iso8601; self.decoder = decoder
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        decoder.keyDecodingStrategy = .custom { codingPath in
+            let raw = codingPath.last?.stringValue ?? ""
+            let parts = raw.split(separator: "_")
+            let transformed = parts.enumerated().map { index, part -> String in
+                if index == 0 { return String(part) }
+                if part.lowercased() == "id" { return "ID" }
+                if part.lowercased() == "ids" { return "IDs" }
+                return part.prefix(1).uppercased() + part.dropFirst()
+            }.joined()
+            return CloudKnowledgeCreatorCodingKey(stringValue: transformed)!
+        }
+        self.decoder = decoder
     }
     public func createKnowledgeBase(_ draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases", method: "POST", body: draft) }
     public func updateKnowledgeBase(id: String, draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases/\(id)", method: "PATCH", body: draft) }
@@ -167,14 +250,22 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
     public var currentPublicationStatusLabel: String { snapshot.latestKnowledgeBaseDetail?.publicationStatus ?? (snapshot.knowledgeBaseID == nil ? "草稿" : "未发布") }
     public var currentEnforcementStatusLabel: String { snapshot.latestKnowledgeBaseDetail?.enforcementStatus ?? "clear" }
     public var currentGovernanceVersion: Int { snapshot.latestKnowledgeBaseDetail?.governanceVersion ?? 0 }
-    public func publishKnowledgeBase(termsAccepted: Bool) async {
-        guard let id = snapshot.knowledgeBaseID, let creatorAPI, let current = snapshot.latestKnowledgeBaseDetail else { return }
-        await perform {
+    @discardableResult
+    public func publishKnowledgeBase(termsAccepted: Bool) async -> String? {
+        guard let id = snapshot.knowledgeBaseID, let creatorAPI, let current = snapshot.latestKnowledgeBaseDetail else { return nil }
+        isWorking = true
+        errorMessage = nil
+        defer { isWorking = false }
+        do {
             let request = CloudKnowledgePublishRequest(expectedGovernanceVersion: current.governanceVersion, termsAccepted: termsAccepted)
             let detail = try await creatorAPI.publishKnowledgeBase(id: id, request: request)
             self.snapshot.latestKnowledgeBaseDetail = detail
             self.snapshot.knowledgeBaseID = detail.id
             self.persist()
+            return detail.id
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
     public func unpublishKnowledgeBase() async {
@@ -245,6 +336,7 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
             self.snapshot.stage = .validating
             self.currentConversationID = nil
             self.persist()
+            await self.finalizePublication()
             self.generationTask = nil
             self.generationDriverID = nil
         }
@@ -256,6 +348,14 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
     public func validatePublication() async {
         guard let runID = snapshot.runID, let publicationAPI else { snapshot.stage = .validating; persist(); return }
         await perform { self.applyValidation(try await publicationAPI.validate(runID: runID)) }
+    }
+    public func finalizePublication() async {
+        guard !isWorking else { return }
+        await validatePublication()
+        guard errorMessage == nil, snapshot.stage == .preview else { return }
+        await loadPreview()
+        guard errorMessage == nil, snapshot.preview != nil else { return }
+        await commitPublication()
     }
     public func applyValidation(_ result: CloudKnowledgeValidationResult) { snapshot.validationIssues = result.issues; snapshot.stage = result.valid ? .preview : .validating; persist() }
     public func markConflict() { snapshot.stage = .conflict; persist() }

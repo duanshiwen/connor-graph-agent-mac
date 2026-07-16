@@ -25,7 +25,7 @@ struct MailSettingsSectionTests {
 
         #expect(Set(icons).count == icons.count)
         #expect(ConnorSettingsSection.preferences.systemImage == "slider.horizontal.3")
-        #expect(ConnorSettingsSection.identity.subtitle == "登录、同步、知识市场")
+        #expect(ConnorSettingsSection.identity.subtitle == "登录、注册、账号资料")
     }
 
     @Test func mailSettingsSummaryShowsLocalEncryptedCredentialVaultCopy() {

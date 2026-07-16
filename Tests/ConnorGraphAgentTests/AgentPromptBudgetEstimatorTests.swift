@@ -45,8 +45,8 @@ import ConnorGraphAgent
 @Test func agentPromptBudgetEstimatorClassifiesBudgetStatusThresholds() {
     let estimator = AgentPromptBudgetEstimator()
 
-    #expect(estimator.status(estimatedTokenCount: 5_999) == .safe)
-    #expect(estimator.status(estimatedTokenCount: 6_000) == .warning)
-    #expect(estimator.status(estimatedTokenCount: 7_999) == .warning)
-    #expect(estimator.status(estimatedTokenCount: 8_000) == .over)
+    #expect(estimator.status(estimatedTokenCount: 119_999) == .safe)
+    #expect(estimator.status(estimatedTokenCount: 120_000) == .warning)
+    #expect(estimator.status(estimatedTokenCount: 159_999) == .warning)
+    #expect(estimator.status(estimatedTokenCount: 160_000) == .over)
 }

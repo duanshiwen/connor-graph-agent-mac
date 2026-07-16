@@ -80,7 +80,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .identity: "登录、同步、知识市场"
+        case .identity: "登录、注册、账号资料"
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
         case .calendar: "日程、账户能力、轻量管理"

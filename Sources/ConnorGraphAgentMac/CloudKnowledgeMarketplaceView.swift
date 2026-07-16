@@ -85,7 +85,13 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
                 Divider()
-                CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
+                CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions) { knowledgeBaseID in
+                    isPresentingCreator = false
+                    Task {
+                        await store.load()
+                        await store.loadDetail(id: knowledgeBaseID)
+                    }
+                }
             }
             .frame(minWidth: 760, idealWidth: 840, minHeight: 620, idealHeight: 700)
             .background(Color(nsColor: .windowBackgroundColor))
