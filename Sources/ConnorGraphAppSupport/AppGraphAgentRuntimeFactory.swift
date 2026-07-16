@@ -176,10 +176,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         if let memoryOSFacade {
             registry.registerMemoryOSReadTools(facade: memoryOSFacade)
         }
-        if let cloudKnowledgeConsumptionClient, let remoteKnowledgeBaseIDs, !remoteKnowledgeBaseIDs.isEmpty {
-            registry.registerCloudKnowledgeConsumptionTool(
+        if let cloudKnowledgeConsumptionClient {
+            registry.registerCloudKnowledgeConsumptionTools(
                 client: cloudKnowledgeConsumptionClient,
-                allowedKnowledgeBaseIDs: remoteKnowledgeBaseIDs
+                knowledgeBaseIDs: remoteKnowledgeBaseIDs ?? []
             )
         }
         let nativeSourceReferenceRecorder = memoryOSFacade.map { AppMemoryOSNativeSourceReferenceRecorder(facade: $0) }
