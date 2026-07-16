@@ -158,14 +158,6 @@ struct AgentChatComposerView: View {
 
                     Spacer(minLength: AgentChatLayout.spaceXS)
 
-                    RemoteKnowledgeBaseSelectionMenu(
-                        store: chatActions.dependencies.knowledgeMarketplace,
-                        explicitIDs: composerState.remoteKnowledgeBaseIDs,
-                        isDisabled: selectedSession == nil || composerState.isSubmitting,
-                        onSelectionChanged: { sendComposerAction(.setRemoteKnowledgeBaseIDs($0)) }
-                    )
-                    .layoutPriority(1)
-
                     modelSelectionMenu
                         .layoutPriority(2)
 
@@ -768,6 +760,7 @@ struct AgentChatComposerView: View {
             selectedSession: selectedSession,
             composerState: composerState,
             governanceConfig: chatActions.dependencies.governance.config,
+            knowledgeMarketplace: chatActions.dependencies.knowledgeMarketplace,
             hasRunningBackgroundTask: chatActions.run.hasRunningActiveSessionBackgroundTask,
             currentTextSelectionRange: { composerSelectionTracker.selectedRange },
             isSessionInfoPresented: $isSessionInfoPresented,
@@ -1067,7 +1060,7 @@ struct AgentChatComposerView: View {
 
 }
 
-private struct RemoteKnowledgeBaseSelectionMenu: View {
+struct RemoteKnowledgeBaseSelectionMenu: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
     var explicitIDs: [String]?
     var isDisabled: Bool
@@ -1090,7 +1083,8 @@ private struct RemoteKnowledgeBaseSelectionMenu: View {
                 systemImage: "books.vertical",
                 tint: selection.selectedIDs.isEmpty ? .secondary : .accentColor,
                 isActive: !selection.selectedIDs.isEmpty,
-                style: .compact
+                style: .prominent,
+                showsBorder: false
             )
         }
         .buttonStyle(.plain)

@@ -28,7 +28,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         anthropicVersion: String = "2023-06-01",
         extraHeaders: [String: String] = [:],
-        maxTokens: Int = 4096,
+        maxTokens: Int = 20_000,
         requestTimeout: TimeInterval = 300,
         featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions(),
         explicitVisionSupport: Bool? = nil
@@ -39,10 +39,15 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         self.authHeaderKind = authHeaderKind
         self.anthropicVersion = anthropicVersion
         self.extraHeaders = extraHeaders
-        self.maxTokens = maxTokens
+        self.maxTokens = Self.effectiveMaxTokens(requested: maxTokens, thinking: featureOptions.thinking)
         self.requestTimeout = requestTimeout
         self.featureOptions = featureOptions
         self.explicitVisionSupport = explicitVisionSupport
+    }
+
+    private static func effectiveMaxTokens(requested: Int, thinking: AnthropicThinkingConfig?) -> Int {
+        guard case .enabled(let budgetTokens, _) = thinking else { return requested }
+        return max(requested, budgetTokens + 10_000)
     }
 
     public init(
@@ -52,7 +57,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         anthropicVersion: String = "2023-06-01",
         extraHeaders: [String: String] = [:],
-        maxTokens: Int = 4096,
+        maxTokens: Int = 20_000,
         featureOptions: AnthropicCompatibleFeatureOptions
     ) {
         self.init(

@@ -150,13 +150,38 @@ private enum AnthropicFixtures {
     let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(object["model"] as? String == "claude-sonnet-test")
     #expect(object["system"] as? String == "Core instruction")
-    #expect(object["max_tokens"] as? Int == 4096)
+    #expect(object["max_tokens"] as? Int == 20_000)
     let messages = try #require(object["messages"] as? [[String: Any]])
     #expect(messages.count == 1)
     #expect(messages.first?["role"] as? String == "user")
     let content = try #require(messages.first?["content"] as? [[String: Any]])
     #expect(content.first?["type"] as? String == "text")
     #expect(content.first?["text"] as? String == "Hello")
+}
+
+@Test func anthropicThinkingBudgetLeavesRoomForToolOutput() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-test",
+            featureOptions: AnthropicCompatibleFeatureOptions(
+                thinking: .enabled(budgetTokens: 10_000, display: .omitted)
+            )
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Use a tool")
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(object["max_tokens"] as? Int == 20_000)
+    let thinking = try #require(object["thinking"] as? [String: Any])
+    #expect(thinking["budget_tokens"] as? Int == 10_000)
 }
 
 @Test func anthropicCompatibleProviderPreservesUnifiedAgentPromptAndTools() async throws {

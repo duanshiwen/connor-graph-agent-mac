@@ -24,4 +24,17 @@ struct KnowledgePublicationProgressTests {
         summary = KnowledgePublicationActivitySummary(store: store)
         #expect(summary.presentationState == .paused)
     }
+
+    @Test func pendingPublicationHasVisibleAutomaticCommitFallback() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ConnorGraphAgentMac/KnowledgePublicationProgressViews.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        #expect(source.contains(".task(id: store.snapshot.stage)"))
+        #expect(source.contains("await store.finalizePublication()"))
+        #expect(source.contains("\"提交知识变更\""))
+        #expect(source.contains("\"重试提交\""))
+    }
 }

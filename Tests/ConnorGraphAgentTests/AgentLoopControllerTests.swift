@@ -102,7 +102,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     #expect(configuration.maxToolIterations == 32)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 8_000)
+    #expect(configuration.promptMaxEstimatedTokens == 160_000)
     #expect(configuration.maxConsecutiveToolResultErrors == 0)
 }
 

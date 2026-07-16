@@ -4,6 +4,22 @@ import ConnorGraphAppSupport
 
 @Suite("Cloud Knowledge Phase 5 Tests")
 struct CloudKnowledgePhase5Tests {
+    @Test func creatorPreviewDecodesBackendSummaryCountsAndAcronymIDs() async throws {
+        let api = CloudKnowledgeCreatorAPIClient(
+            baseURL: URL(string: "http://localhost:8080")!,
+            transport: PreviewContractTransport(),
+            credentials: StaticCloudKnowledgeCredentialProvider(token: "token")
+        )
+
+        let preview = try await api.preview(runID: "run-1")
+
+        #expect(preview.publicationRunID == "run-1")
+        #expect(preview.stagedSequence == 12)
+        #expect(preview.summaries == ["新增 12 项知识变更"])
+        #expect(preview.operations.first?.operationID == "operation-1")
+        #expect(preview.operations.first?.searchContextID == "search-1")
+    }
+
     @Test @MainActor func creatorWorkflowPersistsAndRestoresSelectedConversationsAndProgress() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-creator-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -96,7 +112,8 @@ struct CloudKnowledgePhase5Tests {
         #expect(store.currentPublicationStatusLabel == "unpublished")
         #expect(store.currentEnforcementStatusLabel == "clear")
         #expect(store.currentGovernanceVersion == 1)
-        await store.publishKnowledgeBase(termsAccepted: true)
+        let publishedID = await store.publishKnowledgeBase(termsAccepted: true)
+        #expect(publishedID == "kb-1")
         #expect(store.currentPublicationStatusLabel == "published")
         #expect(store.currentGovernanceVersion == 2)
         await store.unpublishKnowledgeBase()
@@ -108,6 +125,18 @@ struct CloudKnowledgePhase5Tests {
         let restored = CloudKnowledgeCreatorStore(repository: repository, creatorAPI: api)
         #expect(restored.snapshot.latestKnowledgeBaseDetail?.enforcementStatus == "taken_down")
         #expect(restored.snapshot.latestKnowledgeBaseDetail?.governanceVersion == 4)
+    }
+
+    @Test func publishingAgreementIsVersionedAndNamesThePlatformAndRemoteMemoryScope() {
+        #expect(CloudKnowledgePublishingAgreement.version == cloudKnowledgeCreatorTermsVersion)
+        #expect(CloudKnowledgePublishingAgreement.operatorName == "杭州康纳快跑科技有限公司")
+        #expect(CloudKnowledgePublishingAgreement.sections.count >= 7)
+        let agreement = CloudKnowledgePublishingAgreement.sections.map(\.body).joined(separator: "\n")
+        #expect(agreement.contains("L2"))
+        #expect(agreement.contains("L3"))
+        #expect(agreement.contains("L4"))
+        #expect(agreement.contains("不接收 L0"))
+        #expect(agreement.contains("订阅"))
     }
 
     @Test @MainActor func generationTaskPausesCheckpointsAndResumesOnlyRemainingLocalConversations() async throws {
@@ -125,6 +154,45 @@ struct CloudKnowledgePhase5Tests {
         await store.waitForGenerationCompletion()
         #expect(store.snapshot.processedConversationIDs == ["one", "two", "three"])
         #expect(await recorder.ids == ["one", "two", "three"])
+    }
+
+    @Test @MainActor func completedGenerationAutomaticallyValidatesPreviewsAndCommits() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-auto-commit-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let api = CreatorPublicationFakeAPI()
+        let store = CloudKnowledgeCreatorStore(
+            repository: .init(fileURL: root.appendingPathComponent("snapshot.json")),
+            creatorAPI: api,
+            publicationAPI: api
+        )
+        store.toggleConversation("one")
+        store.attachRun(id: "run")
+        store.startGeneration { id in .init(summary: id) }
+
+        await store.waitForGenerationCompletion()
+
+        #expect(store.snapshot.stage == .completed)
+        #expect(store.snapshot.preview?.summaries == ["新增 1 项知识变更"])
+        #expect(await api.validationCount == 1)
+        #expect(await api.previewCount == 1)
+        #expect(await api.commitCount == 1)
+    }
+
+    @Test @MainActor func legacyEmptyPreviewCanResumeAutomaticCommit() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-resume-commit-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        let seed = CloudKnowledgeCreatorStore(repository: repository)
+        seed.attachRun(id: "run")
+        seed.advance(to: .preview)
+
+        let api = CreatorPublicationFakeAPI()
+        let restored = CloudKnowledgeCreatorStore(repository: repository, creatorAPI: api, publicationAPI: api)
+        await restored.finalizePublication()
+
+        #expect(restored.snapshot.stage == .completed)
+        #expect(restored.snapshot.preview?.stagedSequence == 1)
+        #expect(await api.commitCount == 1)
     }
 
     @Test @MainActor func conflictRecoveryRebasesAndCommitUsesPublicationAPI() async throws {
@@ -236,6 +304,14 @@ private final class CloudKnowledgeCreatorAPITransportRecorder: @unchecked Sendab
     }
 }
 
+private struct PreviewContractTransport: ConnorBackendHTTPTransport {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let json = #"{"data":{"publication_run_id":"run-1","staged_sequence":12,"operations":[{"operation_id":"operation-1","operation_type":"create","layer":"L3","decision":"create_new","search_context_id":"search-1","semantic_terms":["Connor"],"payload":{}}],"summaries":{"create":12},"generated_at":"2026-07-16T10:00:00Z"}}"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        return (Data(json.utf8), response)
+    }
+}
+
 private final class CloudKnowledgeCreatorAPIErrorTransport: @unchecked Sendable, ConnorBackendHTTPTransport {
     private var count = 0
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
@@ -262,12 +338,12 @@ private actor DetailTrackingCreatorAPI: CloudKnowledgeCreatorAPI {
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }
 
-private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI {
-    var rebasedSequence: Int?; var commitCount = 0
+private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI, CloudKnowledgeCreatorAPI {
+    var rebasedSequence: Int?; var validationCount = 0; var previewCount = 0; var commitCount = 0
     func createPublicationRun(knowledgeBaseID: String, request: CloudKnowledgeCreateRunRequest) async throws -> CloudKnowledgePublicationRun { .init(id: "run", knowledgeBaseID: knowledgeBaseID, clientRunID: request.clientRunID, expectedBaseSequence: request.expectedBaseSequence) }
     func publicationRun(id: String) async throws -> CloudKnowledgePublicationRun { .init(id: id, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: 0) }
     func appendOperations(runID: String, request: CloudKnowledgeOperationBatchRequest) async throws -> CloudKnowledgeOperationBatchResponse { .init(acceptedOperationIDs: [], stagedSequence: 0) }
-    func validate(runID: String) async throws -> CloudKnowledgeValidationResult { .init(valid: true, issues: [], stagedSequence: 0) }
+    func validate(runID: String) async throws -> CloudKnowledgeValidationResult { validationCount += 1; return .init(valid: true, issues: [], stagedSequence: 0) }
     func rebase(runID: String, request: CloudKnowledgeRebaseRequest) async throws -> CloudKnowledgePublicationRun { rebasedSequence = request.expectedBaseSequence; return .init(id: runID, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: request.expectedBaseSequence) }
     func commit(runID: String) async throws -> CloudKnowledgeCommitResult { commitCount += 1; return .init(publicationRunID: runID, knowledgeSequence: 10) }
     func abandon(runID: String) async throws {}
@@ -278,6 +354,6 @@ private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI {
     func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "published", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1) }
     func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "unpublished", enforcementStatus: "clear", governanceVersion: request.expectedGovernanceVersion + 1) }
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { .init(id: id, name: "Connor", slug: "connor", visibility: "public", currentSequence: 0, lifecycleStatus: "active", publicationStatus: "published", enforcementStatus: "clear", governanceVersion: 9, appealCount: 1) }
-    func preview(runID: String) async throws -> CloudKnowledgePreview { .init(runID: runID, stagedSequence: 0, operations: [], summaries: []) }
+    func preview(runID: String) async throws -> CloudKnowledgePreview { previewCount += 1; return .init(runID: runID, stagedSequence: 1, operations: [], summaries: ["新增 1 项知识变更"]) }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }

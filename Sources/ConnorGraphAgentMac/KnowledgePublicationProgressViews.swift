@@ -152,6 +152,12 @@ struct KnowledgePublicationProgressView: View {
             .padding(24)
         }
         .frame(minWidth: 760, minHeight: 520)
+        .task(id: store.snapshot.stage) {
+            if (store.snapshot.stage == .validating && store.snapshot.validationIssues.isEmpty)
+                || store.snapshot.stage == .preview {
+                await store.finalizePublication()
+            }
+        }
         .confirmationDialog("取消知识库发布？", isPresented: $confirmsCancellation) {
             Button("取消剩余处理", role: .destructive) { store.cancel() }
         } message: {
@@ -169,10 +175,14 @@ struct KnowledgePublicationProgressView: View {
                 Button("继续", systemImage: "play") { store.resume() }
                 Button("取消…", role: .destructive) { confirmsCancellation = true }
             case .validating:
-                Button("验证发布", systemImage: "checkmark.shield") { Task { await store.validatePublication() } }
+                Button("检查并提交", systemImage: "checkmark.shield") { Task { await store.finalizePublication() } }
+                    .disabled(store.isWorking)
             case .preview:
-                Button("返回知识市场", systemImage: "storefront") { }
-                    .disabled(true)
+                Button(store.errorMessage == nil ? "提交知识变更" : "重试提交", systemImage: "tray.and.arrow.down") {
+                    Task { await store.finalizePublication() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isWorking)
             case .conflict:
                 Label("需要在发布页处理冲突", systemImage: "arrow.triangle.2.circlepath")
             default: EmptyView()

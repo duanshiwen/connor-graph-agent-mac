@@ -5,9 +5,11 @@ import ConnorGraphAppSupport
 struct CloudKnowledgeCreatorView: View {
     @ObservedObject var store: CloudKnowledgeCreatorStore
     var sessions: [AgentSession]
+    var onPublished: ((String) -> Void)? = nil
     @State private var draft = CloudKnowledgeBaseDraft()
     @State private var appealStatement = ""
     @State private var creatorTermsAccepted = false
+    @State private var isPresentingPublishingAgreement = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,12 +22,26 @@ struct CloudKnowledgeCreatorView: View {
             stageContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
+            if store.snapshot.stage == .validating || store.snapshot.stage == .preview {
+                Divider()
+                pendingCommitBar
+            }
+
             Divider()
             publicationFooter
         }
         .onAppear {
             draft = store.snapshot.draft
-            Task { await store.refreshLatestKnowledgeBaseDetail() }
+            Task {
+                await store.refreshLatestKnowledgeBaseDetail()
+                if (store.snapshot.stage == .validating && store.snapshot.validationIssues.isEmpty)
+                    || store.snapshot.stage == .preview {
+                    await store.finalizePublication()
+                }
+            }
+        }
+        .sheet(isPresented: $isPresentingPublishingAgreement) {
+            publishingAgreement
         }
     }
 
@@ -204,7 +220,7 @@ struct CloudKnowledgeCreatorView: View {
     private var validation: some View {
         VStack(alignment: .leading, spacing: 12) {
             if store.snapshot.validationIssues.isEmpty {
-                summaryRow("等待 Publication Run 验证", systemImage: "checkmark.shield")
+                summaryRow("正在检查知识变更", systemImage: "checkmark.shield")
             } else {
                 ForEach(store.snapshot.validationIssues) { issue in
                     Label(issue.message, systemImage: issue.repairable ? "wrench.and.screwdriver" : "exclamationmark.octagon")
@@ -213,9 +229,10 @@ struct CloudKnowledgeCreatorView: View {
             }
             actionBar {
                 Spacer()
-                Button("加载变更预览") { Task { await store.loadPreview() } }
+                Button("修复后重试") { Task { await store.finalizePublication() } }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(store.snapshot.validationIssues.isEmpty || store.isWorking)
             }
         }
     }
@@ -239,12 +256,29 @@ struct CloudKnowledgeCreatorView: View {
             actionBar {
                 Button("返回修复") { store.advance(to: .validating) }
                     .controlSize(.large)
-                Spacer()
-                Button("确认并提交全部变更") { Task { await store.commitPublication() } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
             }
         }
+    }
+
+    private var pendingCommitBar: some View {
+        HStack(spacing: 12) {
+            Label(
+                store.snapshot.stage == .preview ? "知识变更待提交" : "正在检查知识变更",
+                systemImage: store.snapshot.stage == .preview ? "tray.and.arrow.down" : "checkmark.shield"
+            )
+            .font(.callout.weight(.medium))
+            Spacer()
+            if store.isWorking { ProgressView().controlSize(.small) }
+            Button(store.errorMessage == nil ? "提交知识变更" : "重试提交") {
+                Task { await store.finalizePublication() }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(store.isWorking || !store.snapshot.validationIssues.isEmpty)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 
     private var conflict: some View {
@@ -317,15 +351,34 @@ struct CloudKnowledgeCreatorView: View {
 
             if store.snapshot.knowledgeBaseID != nil {
                 HStack(spacing: 10) {
-                    Toggle("同意创作者发布条款（\(cloudKnowledgeCreatorTermsVersion)）", isOn: $creatorTermsAccepted)
+                    Toggle("", isOn: $creatorTermsAccepted)
                         .toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .accessibilityLabel("我已阅读并同意知识库发布协议")
+                    Text("我已阅读并同意")
+                        .font(.callout)
+                    Button("《知识库发布协议》") {
+                        isPresentingPublishingAgreement = true
+                    }
+                    .buttonStyle(.link)
                     Spacer()
                     Button("下架") { Task { await store.unpublishKnowledgeBase() } }
                         .disabled(store.currentPublicationStatusLabel != "published")
-                    Button("即时发布") { Task { await store.publishKnowledgeBase(termsAccepted: creatorTermsAccepted) } }
+                    Button("即时发布") {
+                        Task {
+                            if let id = await store.publishKnowledgeBase(termsAccepted: creatorTermsAccepted) {
+                                onPublished?(id)
+                            }
+                        }
+                    }
                         .buttonStyle(.borderedProminent)
                         .disabled(!canPublish)
                 }
+            } else {
+                Button("查看《知识库发布协议》") {
+                    isPresentingPublishingAgreement = true
+                }
+                .buttonStyle(.link)
             }
 
             if store.currentEnforcementStatusLabel == "taken_down" {
@@ -351,6 +404,69 @@ struct CloudKnowledgeCreatorView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(.bar)
+    }
+
+    private var publishingAgreement: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(CloudKnowledgePublishingAgreement.title)
+                        .font(.title2.bold())
+                    Text("版本 \(CloudKnowledgePublishingAgreement.version) · \(CloudKnowledgePublishingAgreement.effectiveDate)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    isPresentingPublishingAgreement = false
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+                .accessibilityLabel("关闭发布协议")
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Label(CloudKnowledgePublishingAgreement.operatorName, systemImage: "building.2")
+                        .font(.headline)
+
+                    ForEach(CloudKnowledgePublishingAgreement.sections) { section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(section.title)
+                                .font(.headline)
+                            Text(section.body)
+                                .font(.body)
+                                .lineSpacing(5)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
+            }
+
+            Divider()
+
+            HStack {
+                Text("发布时将记录本协议版本。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("同意并关闭") {
+                    creatorTermsAccepted = true
+                    isPresentingPublishingAgreement = false
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(16)
+        }
+        .frame(minWidth: 640, idealWidth: 720, minHeight: 560, idealHeight: 680)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func conversationSelection(for id: String) -> Binding<Bool> {
@@ -405,7 +521,7 @@ struct CloudKnowledgeCreatorView: View {
         case .confirm: "确认生成配置"
         case .generating: "正在生成知识"
         case .paused: "生成已暂停"
-        case .validating: "验证与修复"
+        case .validating: "正在检查并提交"
         case .preview: "变更预览"
         case .conflict: "并发冲突"
         case .completed: "发布完成"
