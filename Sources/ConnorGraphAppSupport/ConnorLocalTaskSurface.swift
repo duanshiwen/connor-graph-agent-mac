@@ -66,6 +66,9 @@ public enum ConnorTaskCLICommandID: String, Codable, Sendable, Equatable, Hashab
     case sessionTaskRecoverable
     case sessionTaskStop
     case sessionTaskRestore
+    case knowledgeMarketSource
+    case knowledgeMarketPrompt
+    case knowledgeMarketDebugExtract
 
     public var id: String { rawValue }
 }
@@ -191,6 +194,9 @@ public enum ConnorLocalTaskSurfaceCatalog {
         .init(id: .sessionTaskList, name: "tasks session list", usage: "connor tasks session list <session-id>", summary: "List session-scoped background tasks.", examples: ["connor tasks session list session-1"], apiRoute: .sessionTasks),
         .init(id: .sessionTaskRecoverable, name: "tasks session recoverable", usage: "connor tasks session recoverable <session-id>", summary: "List recoverable session-scoped background tasks.", examples: ["connor tasks session recoverable session-1"], apiRoute: .sessionRecoverableTasks),
         .init(id: .sessionTaskStop, name: "tasks session stop", usage: "connor tasks session stop <session-id> <task-id>", summary: "Stop a session-scoped background task intent.", riskLevel: .stateChanging, examples: ["connor tasks session stop session-1 session.session-1.background.task-1"], apiRoute: .sessionTaskStop),
-        .init(id: .sessionTaskRestore, name: "tasks session restore", usage: "connor tasks session restore <session-id> <task-id>", summary: "Restore a session-scoped background task intent.", riskLevel: .stateChanging, examples: ["connor tasks session restore session-1 session.session-1.background.task-1"], apiRoute: .sessionTaskRestore)
+        .init(id: .sessionTaskRestore, name: "tasks session restore", usage: "connor tasks session restore <session-id> <task-id>", summary: "Restore a session-scoped background task intent.", riskLevel: .stateChanging, examples: ["connor tasks session restore session-1 session.session-1.background.task-1"], apiRoute: .sessionTaskRestore),
+        .init(id: .knowledgeMarketSource, name: "knowledge-market source", usage: "connor knowledge-market source <session-id>", summary: "Preview the completed conversation turns used for knowledge extraction.", examples: ["connor knowledge-market source session-1"]),
+        .init(id: .knowledgeMarketPrompt, name: "knowledge-market prompt", usage: "connor knowledge-market prompt <session-id>", summary: "Preview the exact initial extraction messages and character counts.", examples: ["connor knowledge-market prompt session-1"]),
+        .init(id: .knowledgeMarketDebugExtract, name: "knowledge-market debug-extract", usage: "connor knowledge-market debug-extract <session-id> --knowledge-base <id> --publication-run <id>", summary: "Run extraction with complete per-iteration model and tool traces.", riskLevel: .stateChanging, examples: ["connor knowledge-market debug-extract session-1 --knowledge-base kb-1 --publication-run run-1 --format text"])
     ]
 }
