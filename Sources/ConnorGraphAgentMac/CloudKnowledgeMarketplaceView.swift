@@ -27,7 +27,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .padding(.vertical, 13)
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                     marketplaceSectionHeader("已订阅")
                     if store.library.subscribed.isEmpty {
                         emptyRow("暂未订阅知识库")
@@ -51,7 +51,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                         }
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, AppListCardLayout.horizontalInset)
                 .padding(.top, 6)
                 .padding(.bottom, 10)
             }
@@ -120,13 +120,13 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 }
                 Spacer(minLength: 8)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
             .background(
                 isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                in: AppListCardLayout.shape
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }

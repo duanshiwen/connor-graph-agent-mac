@@ -24,9 +24,7 @@ struct CraftSourceListPane: View {
                         isSelected: card.id == model.selectedCardID,
                         onSelect: { model.selectCard(card.id) }
                     )
-                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    .nativeListRowStyle()
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -386,18 +384,17 @@ private struct MCPSourceRow: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                AppListCardLayout.shape
+                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                AppListCardLayout.shape
                     .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.clear, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }

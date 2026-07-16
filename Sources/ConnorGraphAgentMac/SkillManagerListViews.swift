@@ -72,9 +72,7 @@ private struct SkillListRows: View {
                 onEdit: { model.presentEditDialog(card: card) },
                 onDelete: { model.requestDelete(card: card) }
             )
-            .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+            .nativeListRowStyle()
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -480,7 +478,7 @@ struct CraftSkillRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
             SkillRowIcon(iconName: iconName, accent: skillAccent, isSelected: isSelected)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -492,10 +490,10 @@ struct CraftSkillRow: View {
                 SkillRowBadgeLine(card: card, riskColor: riskColor, trustColor: trustColor)
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(AppListCardLayout.contentPadding)
+        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+        .background(rowBackgroundColor, in: AppListCardLayout.shape)
+        .contentShape(AppListCardLayout.shape)
         .onTapGesture(perform: onSelect)
     }
 
