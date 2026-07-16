@@ -67,10 +67,33 @@ struct AppUserIdentityStoreTests {
         #expect(try credentials.tokens() == nil)
         #expect(await transport.logoutRequestCount == 1)
     }
+
+    @Test @MainActor func failedRestoreKeepsCredentialsAvailableForRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorIdentityRetryTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let credentials = AppConnorAccountCredentialStore(store: LocalEncryptedCredentialStore(rootDirectory: root))
+        try credentials.saveTokens(.init(accessToken: "valid-access", refreshToken: "valid-refresh"))
+        let transport = IdentityTestTransport(currentUserFailureCount: 1)
+        let store = AppUserIdentityStore(baseURL: URL(string: "https://backend.example")!, credentials: credentials, transport: transport)
+
+        await store.restoreSession()
+        #expect(store.authenticationState == .signedOut)
+        #expect(store.hasStoredSession)
+        #expect(store.errorMessage != nil)
+
+        await store.restoreSession()
+        #expect(store.currentUser?.username == "shiwen")
+        #expect(store.errorMessage == nil)
+    }
 }
 
 private actor IdentityTestTransport: ConnorBackendHTTPTransport {
     private var requests: [URLRequest] = []
+    private var currentUserFailureCount: Int
+
+    init(currentUserFailureCount: Int = 0) {
+        self.currentUserFailureCount = currentUserFailureCount
+    }
 
     var refreshRequestCount: Int { requests.filter { $0.url?.path.hasSuffix("/users/public/refresh") == true }.count }
     var logoutRequestCount: Int { requests.filter { $0.url?.path.hasSuffix("/users/auth/logout") == true }.count }
@@ -85,6 +108,10 @@ private actor IdentityTestTransport: ConnorBackendHTTPTransport {
         let bearer = request.value(forHTTPHeaderField: "Authorization")
         switch path {
         case let value where value.hasSuffix("/users/auth/me"):
+            if currentUserFailureCount > 0 {
+                currentUserFailureCount -= 1
+                throw URLError(.networkConnectionLost)
+            }
             return response(request, status: 200, json: Self.userEnvelope)
         case let value where value.hasSuffix("/users/public/refresh"):
             return response(request, status: 200, json: Self.authEnvelope)

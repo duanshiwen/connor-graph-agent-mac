@@ -88,9 +88,7 @@ enum AppShellLayout {
     static let primarySidebarDefaultWidth: CGFloat = 210
     static let primarySidebarMaxWidth: CGFloat = 250
 
-    static let listColumnMinWidth: CGFloat = 220
-    static let listColumnDefaultWidth: CGFloat = 250
-    static let listColumnMaxWidth: CGFloat = 300
+    static let listColumnWidth: CGFloat = 300
 
     static let detailColumnMinWidth: CGFloat = 360
     static let shellMinWidth: CGFloat = 860
@@ -195,4 +193,3 @@ struct AppMetricCard: View {
         )
     }
 }
-
