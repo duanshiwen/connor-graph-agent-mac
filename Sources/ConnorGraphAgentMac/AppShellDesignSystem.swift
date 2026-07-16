@@ -98,6 +98,22 @@ enum AppShellLayout {
     static let hairlineOpacity: Double = 0.14
 }
 
+/// Shared metrics for selectable cards in every primary app list.
+/// The conversation card is the visual baseline; content-heavy cards may grow naturally.
+enum AppListCardLayout {
+    static let horizontalInset: CGFloat = 8
+    static let verticalInset: CGFloat = 8
+    static let spacing: CGFloat = 2
+    static let contentPadding: CGFloat = 10
+    static let contentSpacing: CGFloat = 6
+    static let cornerRadius: CGFloat = 10
+    static let minimumHeight: CGFloat = 72
+
+    static var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+}
+
 enum AppShellColors {
     static let detailBackground = Color(nsColor: .textBackgroundColor).opacity(0.18)
     static let cardBackground = Color(nsColor: .windowBackgroundColor)

@@ -447,9 +447,9 @@ private struct CalendarSectionScrollView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                         Text(section.title)
                             .font(AppListTypography.rowCaption)
                             .foregroundStyle(.secondary)
@@ -460,8 +460,8 @@ private struct CalendarSectionScrollView: View {
                     }
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, AppListCardLayout.horizontalInset)
+            .padding(.vertical, AppListCardLayout.verticalInset)
         }
         .scrollContentBackground(.hidden)
     }
@@ -491,8 +491,10 @@ private struct CalendarEventButton: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -537,13 +539,13 @@ private struct ContactsRowsScrollView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 4) {
+            VStack(spacing: AppListCardLayout.spacing) {
                 ForEach(rows) { row in
                     ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, AppListCardLayout.horizontalInset)
+            .padding(.vertical, AppListCardLayout.verticalInset)
         }
         .scrollContentBackground(.hidden)
     }
@@ -570,9 +572,8 @@ private struct ContactRowButton: View {
                 }
                 Spacer(minLength: 8)
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
             .background(rowBackground, in: rowShape)
             .contentShape(rowShape)
         }
@@ -583,13 +584,13 @@ private struct ContactRowButton: View {
     }
 
     private var rowShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        AppListCardLayout.shape
     }
 
     private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.12) }
+        if isSelected { return Color.accentColor.opacity(0.14) }
         if isHovering { return Color.secondary.opacity(0.08) }
-        return Color.clear
+        return Color(nsColor: .windowBackgroundColor)
     }
 }
 
@@ -616,12 +617,12 @@ struct CraftSessionListPane: View {
                     .padding(.top, 80)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: AppListCardLayout.spacing) {
                         ForEach(visibleSessions) { session in
                             sessionRow(session)
                         }
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, AppListCardLayout.horizontalInset)
                     .padding(.top, 6)
                     .padding(.bottom, 10)
                 }
@@ -685,10 +686,15 @@ struct CraftSessionListPane: View {
     }
 }
 
-private extension View {
+extension View {
     func nativeListRowStyle() -> some View {
         self
-            .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+            .listRowInsets(EdgeInsets(
+                top: AppListCardLayout.spacing / 2,
+                leading: AppListCardLayout.horizontalInset,
+                bottom: AppListCardLayout.spacing / 2,
+                trailing: AppListCardLayout.horizontalInset
+            ))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
     }
@@ -1177,7 +1183,7 @@ private struct TaskAutomationListRow: View {
                     .fill(severityColor)
                     .frame(width: 8, height: 8)
                     .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
@@ -1203,10 +1209,10 @@ private struct TaskAutomationListRow: View {
                     }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -1819,7 +1825,7 @@ private struct MailMessageListRow: View, Equatable {
                     .fill(message.flags.isRead ? Color.secondary.opacity(0.24) : Color.accentColor)
                     .frame(width: 8, height: 8)
                     .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
                         if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
                             Label(label, systemImage: image)
@@ -1855,13 +1861,13 @@ private struct MailMessageListRow: View, Equatable {
                     Text(presentation.snippetText)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -1949,7 +1955,7 @@ private struct RSSItemListRow: View {
                     .fill(item.state.isRead ? Color.secondary.opacity(0.24) : Color.orange)
                     .frame(width: 8, height: 8)
                     .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
                         Text(item.title)
                             .font(item.state.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
@@ -1970,13 +1976,13 @@ private struct RSSItemListRow: View {
                     Text(item.snippet)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -3200,21 +3206,21 @@ struct CraftSessionRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
             attentionIndicator
             leadingSessionIcon
             sessionTextContent
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(AppListCardLayout.contentPadding)
+        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+        .background(rowBackgroundColor, in: AppListCardLayout.shape)
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            AppListCardLayout.shape
                 .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
         )
         .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 2)
         .scaleEffect(attentionLevel == .interruptive && isAttentionPulseOn ? 1.012 : 1)
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(AppListCardLayout.shape)
         .onTapGesture {
             if !isEditingTitle { onSelect() }
         }
@@ -3489,7 +3495,7 @@ struct CraftSettingsListPane: View {
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-            VStack(spacing: 0) {
+            VStack(spacing: AppListCardLayout.spacing) {
                 ForEach(ConnorSettingsSection.allCases) { section in
                     SettingsCategoryRow(
                         title: section.title,
@@ -3517,7 +3523,7 @@ struct SettingsCategoryRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: AppShellLayout.spaceM) {
                 Image(systemName: systemImage)
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(width: 18)
@@ -3527,10 +3533,10 @@ struct SettingsCategoryRow: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
