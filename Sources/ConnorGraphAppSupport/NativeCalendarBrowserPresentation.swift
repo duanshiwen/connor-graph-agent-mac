@@ -14,10 +14,11 @@ public struct NativeCalendarBrowserPresentation: Sendable, Equatable {
         self.emptyMessage = emptyMessage
     }
 
-    public static func build(events: [CalendarEvent], calendar: Calendar = .current, timeZone: TimeZone = .current) -> NativeCalendarBrowserPresentation {
+    public static func build(events: [CalendarEvent], collections: [CalendarCollection] = [], calendar: Calendar = .current, timeZone: TimeZone = .current) -> NativeCalendarBrowserPresentation {
         guard !events.isEmpty else { return .empty }
         var calendar = calendar
         calendar.timeZone = timeZone
+        let calendarNamesByID = Dictionary(uniqueKeysWithValues: collections.map { ($0.id, $0.displayName) })
         let grouped = Dictionary(grouping: events.sorted { $0.start.date < $1.start.date }) { event in
             calendar.startOfDay(for: event.start.date)
         }
@@ -31,7 +32,13 @@ public struct NativeCalendarBrowserPresentation: Sendable, Equatable {
             NativeCalendarDaySectionPresentation(
                 id: ISO8601DateFormatter().string(from: day),
                 title: formatter.string(from: day),
-                events: (grouped[day] ?? []).map { NativeCalendarEventRowPresentation(event: $0, timeZone: timeZone) }
+                events: (grouped[day] ?? []).map {
+                    NativeCalendarEventRowPresentation(
+                        event: $0,
+                        calendarName: calendarNamesByID[$0.calendarID],
+                        timeZone: timeZone
+                    )
+                }
             )
         }
         return NativeCalendarBrowserPresentation(daySections: sections, eventCount: events.count)
@@ -54,16 +61,18 @@ public struct NativeCalendarEventRowPresentation: Sendable, Equatable, Identifia
     public var id: CalendarEventID
     public var title: String
     public var timeText: String
+    public var calendarName: String?
     public var location: String?
 
-    public init(id: CalendarEventID, title: String, timeText: String, location: String? = nil) {
+    public init(id: CalendarEventID, title: String, timeText: String, calendarName: String? = nil, location: String? = nil) {
         self.id = id
         self.title = title
         self.timeText = timeText
+        self.calendarName = calendarName
         self.location = location
     }
 
-    public init(event: CalendarEvent, timeZone: TimeZone = .current) {
+    public init(event: CalendarEvent, calendarName: String? = nil, timeZone: TimeZone = .current) {
         let formatter = DateFormatter()
         formatter.timeZone = timeZone
         formatter.dateFormat = "HH:mm"
@@ -71,6 +80,7 @@ public struct NativeCalendarEventRowPresentation: Sendable, Equatable, Identifia
             id: event.id,
             title: event.title,
             timeText: event.isAllDay ? "全天" : "\(formatter.string(from: event.start.date))–\(formatter.string(from: event.end.date))",
+            calendarName: calendarName,
             location: event.location
         )
     }

@@ -485,6 +485,19 @@ private struct CalendarEventButton: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if let calendarName = row.calendarName?.trimmingCharacters(in: .whitespacesAndNewlines), !calendarName.isEmpty {
+                    Label(calendarName, systemImage: "calendar")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            (isSelected ? Color.accentColor : Color.secondary).opacity(0.10),
+                            in: Capsule(style: .continuous)
+                        )
+                }
+
                 if let location = row.location, !location.isEmpty {
                     Label(location, systemImage: "mappin.and.ellipse")
                         .font(AppListTypography.rowSubtitle)

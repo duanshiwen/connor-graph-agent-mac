@@ -11,11 +11,15 @@ struct CalendarContactsPresentationTests {
             CalendarEvent(id: CalendarEventID(rawValue: "event-1"), calendarID: CalendarID(rawValue: "work"), title: "产品讨论", start: CalendarEventDateTime(date: base), end: CalendarEventDateTime(date: base.addingTimeInterval(3_600))),
             CalendarEvent(id: CalendarEventID(rawValue: "event-2"), calendarID: CalendarID(rawValue: "work"), title: "复盘", start: CalendarEventDateTime(date: base.addingTimeInterval(86_400)), end: CalendarEventDateTime(date: base.addingTimeInterval(90_000)))
         ]
+        let collections = [
+            CalendarCollection(id: CalendarID(rawValue: "work"), accountID: CalendarAccountID(rawValue: "local"), displayName: "工作")
+        ]
 
-        let presentation = NativeCalendarBrowserPresentation.build(events: events, calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(secondsFromGMT: 0)!)
+        let presentation = NativeCalendarBrowserPresentation.build(events: events, collections: collections, calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(secondsFromGMT: 0)!)
 
         #expect(presentation.daySections.count == 2)
         #expect(presentation.daySections.first?.events.first?.title == "产品讨论")
+        #expect(presentation.daySections.first?.events.first?.calendarName == "工作")
         #expect(presentation.eventCount == 2)
     }
 
