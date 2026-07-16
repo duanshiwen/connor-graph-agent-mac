@@ -131,6 +131,8 @@ final class AppCompositionRoot: ObservableObject {
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
                 await self.identityStore.restoreSession()
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
+                await self.runtime.reloadKnowledgeMarketplace()
+                guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
                 await self.runtime.reconcileStartupRefreshTasks()
                 guard self.startupCoordinator.acceptsResults(for: generation) else { throw CancellationError() }
                 let snapshot: AppMaintenanceBootstrapSnapshot?

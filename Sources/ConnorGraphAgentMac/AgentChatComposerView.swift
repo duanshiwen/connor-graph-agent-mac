@@ -158,6 +158,14 @@ struct AgentChatComposerView: View {
 
                     Spacer(minLength: AgentChatLayout.spaceXS)
 
+                    RemoteKnowledgeBaseSelectionMenu(
+                        store: chatActions.dependencies.knowledgeMarketplace,
+                        explicitIDs: composerState.remoteKnowledgeBaseIDs,
+                        isDisabled: selectedSession == nil || composerState.isSubmitting,
+                        onSelectionChanged: { sendComposerAction(.setRemoteKnowledgeBaseIDs($0)) }
+                    )
+                    .layoutPriority(1)
+
                     modelSelectionMenu
                         .layoutPriority(2)
 
@@ -1057,6 +1065,87 @@ struct AgentChatComposerView: View {
         }
     }
 
+}
+
+private struct RemoteKnowledgeBaseSelectionMenu: View {
+    @ObservedObject var store: CloudKnowledgeMarketplaceStore
+    var explicitIDs: [String]?
+    var isDisabled: Bool
+    var onSelectionChanged: ([String]?) -> Void
+    @State private var isPresented = false
+
+    private var available: [CloudMarketplaceKnowledgeBase] {
+        var seen = Set<String>()
+        return store.library.subscribed.filter { seen.insert($0.id).inserted }
+    }
+
+    private var selection: RemoteKnowledgeBaseSelection {
+        RemoteKnowledgeBaseSelection(available: available, explicitIDs: explicitIDs)
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            AgentComposerOptionBadge(
+                title: selection.label,
+                systemImage: "books.vertical",
+                tint: selection.selectedIDs.isEmpty ? .secondary : .accentColor,
+                isActive: !selection.selectedIDs.isEmpty,
+                style: .compact
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help("选择本会话允许访问的远端知识库")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("远端知识库").font(.headline)
+                    Spacer()
+                    Button(selection.isAllSelected ? "清除全选" : "全选") {
+                        onSelectionChanged(selection.toggleAllValue)
+                    }
+                    .disabled(available.isEmpty)
+                }
+                .padding(12)
+
+                Divider()
+
+                if available.isEmpty {
+                    ContentUnavailableView("暂无订阅", systemImage: "books.vertical")
+                        .frame(minHeight: 150)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(available) { knowledgeBase in
+                                Toggle(isOn: Binding(
+                                    get: { selection.selectedIDs.contains(knowledgeBase.id) },
+                                    set: { _ in onSelectionChanged(selection.toggling(knowledgeBase.id)) }
+                                )) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(knowledgeBase.name).lineLimit(1)
+                                        Text(knowledgeBase.id)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                }
+                                .toggleStyle(.checkbox)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .frame(maxHeight: 320)
+                }
+            }
+            .frame(width: 320)
+        }
+        .task {
+            if store.library.subscribed.isEmpty { await store.load() }
+        }
+    }
 }
 
 private struct ComposerModelSelectionLabel: View {
