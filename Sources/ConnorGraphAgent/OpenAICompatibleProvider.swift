@@ -442,7 +442,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         let toolCalls = message?.toolCalls?.map { call in
             AgentToolCall(id: call.id, name: call.function.name, argumentsJSON: call.function.arguments)
         } ?? []
-        let finishReason = AgentModelFinishReason(rawValue: choice?.finishReason ?? "") ?? .unknown
+        let finishReason = AgentModelFinishReason.openAICompatible(finishReason: choice?.finishReason)
         let usage = decoded.usage.map { AgentModelUsage(promptTokens: $0.promptTokens, completionTokens: $0.completionTokens, totalTokens: $0.totalTokens) }
         return AgentModelResponse(
             text: message?.content,
@@ -742,7 +742,7 @@ private struct OpenAIChatCompletionStreamAccumulator {
         var events: [AgentModelStreamEvent] = []
         for choice in chunk.choices {
             if let reason = choice.finishReason {
-                finishReason = AgentModelFinishReason(rawValue: reason) ?? .unknown
+                finishReason = AgentModelFinishReason.openAICompatible(finishReason: reason)
             }
             if let content = choice.delta.content, !content.isEmpty {
                 text += content
