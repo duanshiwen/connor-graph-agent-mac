@@ -51,6 +51,22 @@ private enum AnthropicFixtures {
     """#
 }
 
+@Test func providerFinishReasonsNormalizeIntoSharedLifecycleStates() {
+    #expect(AgentModelFinishReason.openAICompatible(finishReason: "stop") == .stop)
+    #expect(AgentModelFinishReason.openAICompatible(finishReason: "tool_calls") == .toolCalls)
+    #expect(AgentModelFinishReason.openAICompatible(finishReason: "length") == .length)
+    #expect(AgentModelFinishReason.openAICompatible(finishReason: "content_filter") == .contentFilter)
+    #expect(AgentModelFinishReason.openAICompatible(finishReason: "vendor_extension") == .unknown)
+
+    #expect(AgentModelFinishReason.anthropic(stopReason: "end_turn") == .stop)
+    #expect(AgentModelFinishReason.anthropic(stopReason: "tool_use") == .toolCalls)
+    #expect(AgentModelFinishReason.anthropic(stopReason: "max_tokens") == .length)
+    #expect(AgentModelFinishReason.anthropic(stopReason: "model_context_window_exceeded") == .length)
+    #expect(AgentModelFinishReason.anthropic(stopReason: "pause_turn") == .pause)
+    #expect(AgentModelFinishReason.anthropic(stopReason: "refusal") == .contentFilter)
+    #expect(AgentModelFinishReason.anthropic(stopReason: "vendor_extension") == .unknown)
+}
+
 @Test func anthropicBaseURLWithoutV1BuildsMessagesEndpoint() async throws {
     let client = AnthropicCapturingHTTPClient()
     let provider = AnthropicCompatibleProvider(

@@ -276,6 +276,84 @@ struct CloudKnowledgePhase3Tests {
         #expect(firstResponse.toolCallCharacterCount > 0)
     }
 
+    @Test func extractionRunnerCompletesOnNaturalStopWithoutToolCalls() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeNaturalStopProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "preamble-completion-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "preamble-completion", title: "Completion", messages: [
+            AgentMessage(role: .user, content: "Answer Cache 标准"),
+            AgentMessage(role: .assistant, content: "Answer Cache 是答案资产层。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner(maximumIterations: 4).generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(result.summary == "已完成知识整理")
+        #expect(await scripted.requestCount == 2)
+    }
+
+    @Test func extractionRunnerRejectsTruncatedModelResponse() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeLengthStopProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "truncated-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "truncated", title: "Truncated", messages: [
+            AgentMessage(role: .user, content: "Answer Cache 标准"),
+            AgentMessage(role: .assistant, content: "Answer Cache 是答案资产层。")
+        ])
+
+        await #expect(throws: CloudKnowledgeLLMGenerationError.modelResponseIncomplete(reason: "length")) {
+            try await CloudKnowledgeLLMGenerationRunner(maximumIterations: 4).generate(
+                session: session,
+                knowledgeBaseID: "kb",
+                publicationRunID: "run",
+                clientRunID: "client",
+                api: api,
+                provider: provider
+            )
+        }
+    }
+
+    @Test func extractionRunnerContinuesAfterProviderPause() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgePauseProvider()
+        let provider = AnyAgentModelProvider(
+            modelID: "pause-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "paused", title: "Paused", messages: [
+            AgentMessage(role: .user, content: "Answer Cache 标准"),
+            AgentMessage(role: .assistant, content: "Answer Cache 是答案资产层。")
+        ])
+
+        let result = try await CloudKnowledgeLLMGenerationRunner(maximumIterations: 4).generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider
+        )
+
+        #expect(result.summary == "已完成暂停后的知识整理")
+        #expect(await scripted.requestCount == 3)
+        #expect(await scripted.sawBoundedContinuation)
+    }
+
     @Test func writeAssistSearchContextCanDriveL3Write() async throws {
         let api = InMemoryCloudKnowledgeAPI()
         let scripted = CloudKnowledgeWriteAssistProvider()
@@ -363,7 +441,7 @@ private actor CloudKnowledgeScriptedProvider {
         case 2:
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor-publishing","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
         default:
-            return AgentModelResponse(text: CloudKnowledgeExtractionPrompt.completionMarker)
+            return AgentModelResponse(text: nil, finishReason: .stop)
         }
     }
 }
@@ -392,7 +470,60 @@ private actor CloudKnowledgeWriteAssistProvider {
         if requestCount == 2 {
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["answer-package"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
         }
-        return AgentModelResponse(text: "\(CloudKnowledgeExtractionPrompt.completionMarker)\n已完成知识整理")
+        return AgentModelResponse(text: "已完成知识整理", finishReason: .stop)
+    }
+}
+
+private actor CloudKnowledgeNaturalStopProvider {
+    var requestCount = 0
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        if requestCount == 1 {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "search", name: "cloud_kb_knowledge_context", argumentsJSON: #"{"query":"answer cache","limit":5}"#)],
+                finishReason: .toolCalls
+            )
+        }
+        return AgentModelResponse(text: "已完成知识整理", finishReason: .stop)
+    }
+}
+
+private actor CloudKnowledgeLengthStopProvider {
+    var requestCount = 0
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        if requestCount == 1 {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "search", name: "cloud_kb_knowledge_context", argumentsJSON: #"{"query":"answer cache","limit":5}"#)],
+                finishReason: .toolCalls
+            )
+        }
+        return AgentModelResponse(text: "未完整的总结", finishReason: .length)
+    }
+}
+
+private actor CloudKnowledgePauseProvider {
+    var requestCount = 0
+    var sawBoundedContinuation = false
+
+    func complete(_ request: AgentModelRequest) throws -> AgentModelResponse {
+        requestCount += 1
+        if requestCount == 1 {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "search", name: "cloud_kb_knowledge_context", argumentsJSON: #"{"query":"answer cache","limit":5}"#)],
+                finishReason: .toolCalls
+            )
+        }
+        if requestCount == 2 {
+            return AgentModelResponse(text: "服务端工具处理暂时暂停。", finishReason: .pause)
+        }
+        sawBoundedContinuation = request.messages.last?.content.contains("frozen candidate list") == true
+        return AgentModelResponse(text: "已完成暂停后的知识整理", finishReason: .stop)
     }
 }
 
