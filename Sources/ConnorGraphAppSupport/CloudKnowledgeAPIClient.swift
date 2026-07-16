@@ -60,6 +60,7 @@ public struct CloudKnowledgeAPIClient: CloudKnowledgeAPI, Sendable {
             let transformed = parts.enumerated().map { index, part -> String in
                 if index == 0 { return String(part) }
                 if part.lowercased() == "id" { return "ID" }
+                if part.lowercased() == "ids" { return "IDs" }
                 return part.prefix(1).uppercased() + part.dropFirst()
             }.joined()
             return CloudKnowledgeCodingKey(transformed)

@@ -107,13 +107,157 @@ public enum CloudKnowledgeExtractionPrompt {
     }
 }
 
+public enum CloudKnowledgeExtractionTraceEventKind: String, Codable, Sendable {
+    case modelRequest = "model_request"
+    case modelResponse = "model_response"
+    case modelError = "model_error"
+    case toolExecution = "tool_execution"
+    case toolResult = "tool_result"
+    case toolError = "tool_error"
+}
+
+public struct CloudKnowledgeExtractionToolDefinitionTrace: Codable, Sendable, Equatable {
+    public var name: String
+    public var description: String
+    public var inputSchemaJSON: String
+    public var inputExamplesJSON: String
+    public var characterCount: Int
+
+    public init(definition: AgentToolDefinition) {
+        self.name = definition.name
+        self.description = definition.description
+        self.inputSchemaJSON = Self.jsonString(definition.inputSchema.jsonObject)
+        self.inputExamplesJSON = Self.jsonString(definition.inputExamples.map { $0.mapValues(\.jsonCompatibleObject) })
+        self.characterCount = name.count + description.count + inputSchemaJSON.count + inputExamplesJSON.count
+    }
+
+    private static func jsonString(_ value: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8)
+        else { return "" }
+        return text
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, description
+        case inputSchemaJSON = "input_schema_json"
+        case inputExamplesJSON = "input_examples_json"
+        case characterCount = "character_count"
+    }
+}
+
+public struct CloudKnowledgeExtractionModelResponseTrace: Codable, Sendable, Equatable {
+    public var text: String?
+    public var toolCalls: [AgentToolCall]
+    public var usage: AgentModelUsage?
+    public var finishReason: AgentModelFinishReason
+    public var rawResponseJSON: String?
+    public var providerMetadata: AgentModelProviderMetadata?
+    public var warnings: [String]
+    public var characterCount: Int
+    public var textCharacterCount: Int
+    public var toolCallCharacterCount: Int
+    public var rawResponseCharacterCount: Int
+
+    public init(response: AgentModelResponse) {
+        self.text = response.text
+        self.toolCalls = response.toolCalls
+        self.usage = response.usage
+        self.finishReason = response.finishReason
+        self.rawResponseJSON = response.rawResponseJSON
+        self.providerMetadata = response.providerMetadata
+        self.warnings = response.warnings
+        self.textCharacterCount = response.text?.count ?? 0
+        self.toolCallCharacterCount = response.toolCalls.reduce(0) { $0 + $1.name.count + $1.argumentsJSON.count }
+        self.rawResponseCharacterCount = response.rawResponseJSON?.count ?? 0
+        self.characterCount = textCharacterCount + toolCallCharacterCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case toolCalls = "tool_calls"
+        case usage
+        case finishReason = "finish_reason"
+        case rawResponseJSON = "raw_response_json"
+        case providerMetadata = "provider_metadata"
+        case warnings
+        case characterCount = "character_count"
+        case textCharacterCount = "text_character_count"
+        case toolCallCharacterCount = "tool_call_character_count"
+        case rawResponseCharacterCount = "raw_response_character_count"
+    }
+}
+
+public struct CloudKnowledgeExtractionTraceEvent: Codable, Sendable, Equatable {
+    public var sequence: Int
+    public var iteration: Int
+    public var kind: CloudKnowledgeExtractionTraceEventKind
+    public var modelID: String
+    public var messages: [AgentModelMessage]?
+    public var tools: [CloudKnowledgeExtractionToolDefinitionTrace]?
+    public var temperature: Double?
+    public var messageCharacterCount: Int?
+    public var toolDefinitionCharacterCount: Int?
+    public var response: CloudKnowledgeExtractionModelResponseTrace?
+    public var toolCall: AgentToolCall?
+    public var toolResult: AgentToolResult?
+    public var error: String?
+
+    public init(
+        sequence: Int,
+        iteration: Int,
+        kind: CloudKnowledgeExtractionTraceEventKind,
+        modelID: String,
+        messages: [AgentModelMessage]? = nil,
+        tools: [CloudKnowledgeExtractionToolDefinitionTrace]? = nil,
+        temperature: Double? = nil,
+        messageCharacterCount: Int? = nil,
+        toolDefinitionCharacterCount: Int? = nil,
+        response: CloudKnowledgeExtractionModelResponseTrace? = nil,
+        toolCall: AgentToolCall? = nil,
+        toolResult: AgentToolResult? = nil,
+        error: String? = nil
+    ) {
+        self.sequence = sequence
+        self.iteration = iteration
+        self.kind = kind
+        self.modelID = modelID
+        self.messages = messages
+        self.tools = tools
+        self.temperature = temperature
+        self.messageCharacterCount = messageCharacterCount
+        self.toolDefinitionCharacterCount = toolDefinitionCharacterCount
+        self.response = response
+        self.toolCall = toolCall
+        self.toolResult = toolResult
+        self.error = error
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sequence, iteration, kind
+        case modelID = "model_id"
+        case messages, tools, temperature
+        case messageCharacterCount = "message_character_count"
+        case toolDefinitionCharacterCount = "tool_definition_character_count"
+        case response
+        case toolCall = "tool_call"
+        case toolResult = "tool_result"
+        case error
+    }
+}
+
+public typealias CloudKnowledgeExtractionTraceHandler = @Sendable (CloudKnowledgeExtractionTraceEvent) -> Void
+
 public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     public var maximumIterations: Int
     public var maximumToolCallsPerIteration: Int
+    public var maximumTotalToolErrors: Int
 
-    public init(maximumIterations: Int = 48, maximumToolCallsPerIteration: Int = 4) {
+    public init(maximumIterations: Int = 48, maximumToolCallsPerIteration: Int = 4, maximumTotalToolErrors: Int = 8) {
         self.maximumIterations = maximumIterations
         self.maximumToolCallsPerIteration = maximumToolCallsPerIteration
+        self.maximumTotalToolErrors = maximumTotalToolErrors
     }
 
     public func generate(
@@ -122,7 +266,8 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         publicationRunID: String,
         clientRunID: String,
         api: any CloudKnowledgeAPI,
-        provider: AnyAgentModelProvider
+        provider: AnyAgentModelProvider,
+        trace: CloudKnowledgeExtractionTraceHandler? = nil
     ) async throws -> CloudKnowledgeLocalGenerationResult {
         guard provider.capabilities.supportsToolCalling else {
             throw CloudKnowledgeLLMGenerationError.toolCallingUnsupported(modelID: provider.modelID)
@@ -151,14 +296,54 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         var searchCount = 0
         var decisionCount = 0
         var consecutiveErrors = 0
+        var totalToolErrors = 0
         var lastSignature: String?
         var repeatedSignatureCount = 0
         var lastToolError = "模型重复提交了相同的无效工具调用。"
         var searchMetadataByContextID: [String: CloudKnowledgeSearchMetadata] = [:]
+        var traceSequence = 0
 
-        for _ in 0..<maximumIterations {
+        func emit(_ event: CloudKnowledgeExtractionTraceEvent) {
+            trace?(event)
+            traceSequence += 1
+        }
+
+        for iterationIndex in 0..<maximumIterations {
             try Task.checkCancellation()
-            let response = try await provider.complete(AgentModelRequest(messages: messages, tools: registry.definitions, temperature: 0.1))
+            let iteration = iterationIndex + 1
+            let request = AgentModelRequest(messages: messages, tools: registry.definitions, temperature: 0.1)
+            let tracedTools = request.tools.map(CloudKnowledgeExtractionToolDefinitionTrace.init)
+            emit(CloudKnowledgeExtractionTraceEvent(
+                sequence: traceSequence,
+                iteration: iteration,
+                kind: .modelRequest,
+                modelID: provider.modelID,
+                messages: request.messages,
+                tools: tracedTools,
+                temperature: request.temperature,
+                messageCharacterCount: request.messages.reduce(0) { $0 + $1.content.count + ($1.toolCalls?.reduce(0) { $0 + $1.name.count + $1.argumentsJSON.count } ?? 0) },
+                toolDefinitionCharacterCount: tracedTools.reduce(0) { $0 + $1.characterCount }
+            ))
+            let response: AgentModelResponse
+            do {
+                response = try await provider.complete(request)
+            } catch {
+                emit(CloudKnowledgeExtractionTraceEvent(
+                    sequence: traceSequence,
+                    iteration: iteration,
+                    kind: .modelError,
+                    modelID: provider.modelID,
+                    error: error.localizedDescription
+                ))
+                throw error
+            }
+            emit(CloudKnowledgeExtractionTraceEvent(
+                sequence: traceSequence,
+                iteration: iteration,
+                kind: .modelResponse,
+                modelID: provider.modelID,
+                response: CloudKnowledgeExtractionModelResponseTrace(response: response)
+            ))
             let calls = Array(response.toolCalls.prefix(maximumToolCallsPerIteration))
             if calls.isEmpty {
                 guard searchCount > 0 else { throw CloudKnowledgeLLMGenerationError.modelDidNotSearch }
@@ -197,13 +382,17 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     toolCallID: call.id,
                     policyEngine: policy
                 )
+                var attemptedCall = call
                 do {
                     var executableCall = call
                     if let correctiveSearch = correctiveSearchCall(
                         for: call,
                         searchMetadataByContextID: searchMetadataByContextID
                     ) {
+                        attemptedCall = correctiveSearch
+                        emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolExecution, modelID: provider.modelID, toolCall: correctiveSearch))
                         let correctiveResult = try await registry.execute(correctiveSearch, context: executionContext)
+                        emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolResult, modelID: provider.modelID, toolCall: correctiveSearch, toolResult: correctiveResult))
                         searchCount += 1
                         recordSearchMetadata(
                             call: correctiveSearch,
@@ -216,7 +405,10 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     }
                     try validateSearchChannel(executableCall, searchMetadataByContextID: searchMetadataByContextID)
                     executableCall = normalizedWriteCall(executableCall, searchMetadataByContextID: searchMetadataByContextID)
+                    attemptedCall = executableCall
+                    emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolExecution, modelID: provider.modelID, toolCall: executableCall))
                     let result = try await registry.execute(executableCall, context: executionContext)
+                    emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolResult, modelID: provider.modelID, toolCall: executableCall, toolResult: result))
                     if isSearchTool(call.name) {
                         searchCount += 1
                         recordSearchMetadata(call: call, result: result, into: &searchMetadataByContextID)
@@ -228,10 +420,12 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
                     messages.append(AgentModelMessage(role: .tool, content: result.contentJSON ?? result.contentText, toolCallID: call.id, name: call.name))
                 } catch {
                     consecutiveErrors += 1
+                    totalToolErrors += 1
                     let diagnostic = (error as? AgentToolError)?.description ?? error.localizedDescription
                     lastToolError = String(diagnostic.prefix(240))
+                    emit(CloudKnowledgeExtractionTraceEvent(sequence: traceSequence, iteration: iteration, kind: .toolError, modelID: provider.modelID, toolCall: attemptedCall, error: diagnostic))
                     messages.append(AgentModelMessage(role: .tool, content: "Tool failed: \(lastToolError)", toolCallID: call.id, name: call.name))
-                    if consecutiveErrors >= 3 {
+                    if consecutiveErrors >= 3 || totalToolErrors >= maximumTotalToolErrors {
                         throw CloudKnowledgeLLMGenerationError.tooManyToolErrors(lastError: lastToolError)
                     }
                 }
@@ -249,7 +443,7 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
               let query = arguments.string("query"),
               let contentJSON = result.contentJSON,
               let data = contentJSON.data(using: .utf8),
-              let response = try? JSONDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
+              let response = try? cloudKnowledgeDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
         else { return }
         metadataByContextID[response.searchContextID] = CloudKnowledgeSearchMetadata(
             query: query,
@@ -325,9 +519,15 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     private func searchContextID(from result: AgentToolResult) -> String? {
         guard let contentJSON = result.contentJSON,
               let data = contentJSON.data(using: .utf8),
-              let response = try? JSONDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
+              let response = try? cloudKnowledgeDecoder().decode(CloudKnowledgeSearchResponse.self, from: data)
         else { return nil }
         return response.searchContextID
+    }
+
+    private func cloudKnowledgeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 
     private func replacingSearchContext(in call: AgentToolCall, with contextID: String) -> AgentToolCall {

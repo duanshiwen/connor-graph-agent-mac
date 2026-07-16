@@ -23,6 +23,42 @@ struct CloudKnowledgePhase3Tests {
         await #expect(throws: CloudKnowledgeError.publicationConflict(currentSequence: 9)) { try await client.commit(runID: "run-1") }
     }
 
+    @Test func apiClientDecodesPluralIDFieldsInOperationBatchResponse() async throws {
+        let transport = CloudKnowledgeHTTPTransport()
+        let client = CloudKnowledgeAPIClient(baseURL: URL(string: "https://backend.example")!, transport: transport, credentials: StaticCloudCredential())
+
+        let response = try await client.appendOperations(
+            runID: "run-1",
+            request: CloudKnowledgeOperationBatchRequest(operations: [
+                Self.operation(layer: .l3, contextID: "search-1", terms: ["answer cache"])
+            ])
+        )
+
+        #expect(response.acceptedOperationIDs == ["operation-1"])
+        #expect(response.stagedSequence == 3)
+    }
+
+    @Test func coordinatorRefreshesSequenceAfterAmbiguousWriteResponse() async throws {
+        let api = AmbiguousCloudKnowledgeAPI()
+        let context = CloudKnowledgePublishingContext(knowledgeBaseID: "kb", publicationRunID: "run", ownerUserID: "u", clientRunID: "client")
+        let coordinator = CloudKnowledgePublicationCoordinator(
+            api: api,
+            context: context,
+            run: .init(id: "run", knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: 0)
+        )
+        let search = coordinator.makeSearchClient()
+        let firstContext = try await search.search(channel: .knowledgeContext, request: .init(query: "answer cache", layers: [.l3]))
+
+        await #expect(throws: CloudKnowledgeError.invalidResponse) {
+            try await coordinator.stage([Self.operation(layer: .l3, contextID: firstContext.searchContextID, terms: ["answer cache"])])
+        }
+        #expect(await coordinator.run.currentStagedSequence == 1)
+
+        let secondContext = try await search.search(channel: .knowledgeContext, request: .init(query: "answer cache", layers: [.l3]))
+        try await coordinator.stage([Self.operation(layer: .l3, contextID: secondContext.searchContextID, terms: ["answer cache"], payloadText: "second")])
+        #expect(await coordinator.run.currentStagedSequence == 2)
+    }
+
     @Test func traceValidatorRejectsMissingIrrelevantAndStaleCoverage() throws {
         let context = CloudKnowledgePublishingContext(knowledgeBaseID: "kb", publicationRunID: "run", ownerUserID: "u", clientRunID: "c")
         let operation = Self.operation(layer: .l3, contextID: "search", terms: ["时序知识"])
@@ -77,7 +113,7 @@ struct CloudKnowledgePhase3Tests {
         let executor = CloudKnowledgeToolExecutor(coordinator: coordinator)
         let executionContext = AgentToolExecutionContext(runID: "agent-run", sessionID: "local", groupID: "g", userPrompt: "publish", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll))
         let search = try await executor.execute(toolName: "cloud_kb_knowledge_context", arguments: try AgentToolArguments(json: #"{"query":"Connor","limit":20}"#), context: executionContext)
-        let searchData = try #require(search.contentJSON?.data(using: String.Encoding.utf8)); let response = try JSONDecoder().decode(CloudKnowledgeSearchResponse.self, from: searchData)
+        let searchData = try #require(search.contentJSON?.data(using: String.Encoding.utf8)); let response = try JSONDecoder.cloudContract.decode(CloudKnowledgeSearchResponse.self, from: searchData)
         _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"search_context_id":"\#(response.searchContextID)","decision":"skip_duplicate","semantic_terms":["Connor"],"payload":{}}"#), context: executionContext)
         #expect(await api.operations.isEmpty)
         _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"search_context_id":"\#(response.searchContextID)","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor","valid_from":"2026-07-13T10:00:00Z","payload":{"title":"Connor"}}}"#), context: executionContext)
@@ -183,6 +219,63 @@ struct CloudKnowledgePhase3Tests {
         #expect(!prompt.contains("UNFINISHED_USER_MUST_NOT_LEAK"))
     }
 
+    @Test func extractionPromptPreviewReportsExactInitialMessagesAndCharacterCounts() throws {
+        let session = AgentSession(id: "preview-session", title: "Prompt preview", messages: [
+            AgentMessage(role: .user, content: "如何构建知识市场？"),
+            AgentMessage(role: .assistant, content: "先检索，再写入。")
+        ])
+
+        let source = CloudKnowledgeExtractionSourcePreview(session: session)
+        let preview = CloudKnowledgeExtractionPromptPreview(session: session, processingTime: Date(timeIntervalSince1970: 0))
+
+        #expect(source.turnCount == 1)
+        #expect(source.characterCount == "如何构建知识市场？".count + "先检索，再写入。".count)
+        #expect(preview.modelMessages.map(\.role) == [.system, .user])
+        #expect(preview.systemPromptCharacterCount == preview.modelMessages[0].content.count)
+        #expect(preview.userPromptCharacterCount == preview.modelMessages[1].content.count)
+        #expect(preview.totalMessageCharacterCount == preview.modelMessages.reduce(0) { $0 + $1.content.count })
+    }
+
+    @Test func extractionRunnerEmitsCompletePerIterationModelAndToolTrace() async throws {
+        let api = InMemoryCloudKnowledgeAPI()
+        let scripted = CloudKnowledgeScriptedProvider()
+        let recorder = CloudKnowledgeTraceRecorder()
+        let provider = AnyAgentModelProvider(
+            modelID: "trace-model",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            complete: { request in try await scripted.complete(request) }
+        )
+        let session = AgentSession(id: "trace-session", title: "Trace", messages: [
+            AgentMessage(role: .user, content: "Connor 使用结构化知识发布流程。"),
+            AgentMessage(role: .assistant, content: "发布前先检索。")
+        ])
+
+        _ = try await CloudKnowledgeLLMGenerationRunner().generate(
+            session: session,
+            knowledgeBaseID: "kb",
+            publicationRunID: "run",
+            clientRunID: "client",
+            api: api,
+            provider: provider,
+            trace: { recorder.append($0) }
+        )
+
+        let events = recorder.events
+        #expect(events.map(\.sequence) == Array(events.indices))
+        #expect(events.filter { $0.kind == .modelRequest }.count == 3)
+        #expect(events.filter { $0.kind == .modelResponse }.count == 3)
+        #expect(events.contains { $0.kind == .toolExecution })
+        #expect(events.contains { $0.kind == .toolResult })
+        let firstRequest = try #require(events.first { $0.kind == .modelRequest })
+        #expect(firstRequest.messages?.first?.content == CloudKnowledgeExtractionPrompt.systemInstruction)
+        #expect(firstRequest.messages?.last?.content.contains("source-conversation-turns-json") == true)
+        #expect(firstRequest.tools?.contains { $0.name == "cloud_kb_l3_update_knowledge" && $0.inputSchemaJSON.contains("search_context_id") } == true)
+        #expect(firstRequest.messageCharacterCount == firstRequest.messages?.reduce(0) { $0 + $1.content.count })
+        let firstResponse = try #require(events.first { $0.kind == .modelResponse }?.response)
+        #expect(firstResponse.toolCalls.first?.name == "cloud_kb_recent_context")
+        #expect(firstResponse.toolCallCharacterCount > 0)
+    }
+
     @Test func writeAssistSearchContextCanDriveL3Write() async throws {
         let api = InMemoryCloudKnowledgeAPI()
         let scripted = CloudKnowledgeWriteAssistProvider()
@@ -275,6 +368,19 @@ private actor CloudKnowledgeScriptedProvider {
     }
 }
 
+private final class CloudKnowledgeTraceRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [CloudKnowledgeExtractionTraceEvent] = []
+
+    var events: [CloudKnowledgeExtractionTraceEvent] {
+        lock.withLock { storage }
+    }
+
+    func append(_ event: CloudKnowledgeExtractionTraceEvent) {
+        lock.withLock { storage.append(event) }
+    }
+}
+
 private actor CloudKnowledgeWriteAssistProvider {
     var requestCount = 0
 
@@ -296,9 +402,37 @@ private actor CloudKnowledgeHTTPTransport: ConnorBackendHTTPTransport {
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         requests.append(request)
         if failWithConflict { return response(request, 409, #"{"code":"publication_conflict","message":"changed","current_sequence":9}"#) }
+        if request.url?.path.hasSuffix("/operations:batch") == true {
+            return response(request, 200, #"{"code":0,"data":{"accepted_operation_ids":["operation-1"],"staged_sequence":3}}"#)
+        }
         return response(request, 200, #"{"data":{"id":"run-1","knowledge_base_id":"kb 1","client_run_id":"client-1","expected_base_sequence":7,"current_staged_sequence":0,"status":"open","schema_version":"v2","created_at":"2026-07-13T10:00:00Z","updated_at":"2026-07-13T10:00:00Z","expires_at":"2026-07-14T10:00:00Z"}}"#)
     }
     private func response(_ request: URLRequest, _ status: Int, _ json: String) -> (Data, URLResponse) { (Data(json.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!) }
+}
+
+private actor AmbiguousCloudKnowledgeAPI: CloudKnowledgeAPI {
+    private var stagedSequence = 0
+    private var appendCount = 0
+
+    func createPublicationRun(knowledgeBaseID: String, request: CloudKnowledgeCreateRunRequest) async throws -> CloudKnowledgePublicationRun {
+        .init(id: "run", knowledgeBaseID: knowledgeBaseID, clientRunID: request.clientRunID, expectedBaseSequence: request.expectedBaseSequence)
+    }
+    func publicationRun(id: String) async throws -> CloudKnowledgePublicationRun {
+        .init(id: id, knowledgeBaseID: "kb", clientRunID: "client", expectedBaseSequence: 0, currentStagedSequence: stagedSequence, status: .staging)
+    }
+    func appendOperations(runID: String, request: CloudKnowledgeOperationBatchRequest) async throws -> CloudKnowledgeOperationBatchResponse {
+        appendCount += 1
+        stagedSequence += 1
+        if appendCount == 1 { throw CloudKnowledgeError.invalidResponse }
+        return .init(acceptedOperationIDs: request.operations.map(\.operationID), stagedSequence: stagedSequence)
+    }
+    func validate(runID: String) async throws -> CloudKnowledgeValidationResult { .init(valid: true, issues: [], stagedSequence: stagedSequence) }
+    func rebase(runID: String, request: CloudKnowledgeRebaseRequest) async throws -> CloudKnowledgePublicationRun { try await publicationRun(id: runID) }
+    func commit(runID: String) async throws -> CloudKnowledgeCommitResult { .init(publicationRunID: runID, knowledgeSequence: stagedSequence) }
+    func abandon(runID: String) async throws {}
+    func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse {
+        .init(searchContextID: "search-\(stagedSequence)", channel: channel, baseSequence: 0, stagedSequence: stagedSequence, results: [])
+    }
 }
 
 private actor InMemoryCloudKnowledgeAPI: CloudKnowledgeAPI {
@@ -315,6 +449,6 @@ private actor InMemoryCloudKnowledgeAPI: CloudKnowledgeAPI {
     func search(knowledgeBaseID: String, channel: CloudKnowledgeSearchChannel, request: CloudKnowledgeSearchRequest) async throws -> CloudKnowledgeSearchResponse {
         searchViews.append(request.view); searchStagedSequences.append(stagedSequence)
         let hits = operations.isEmpty ? [] : [CloudKnowledgeSearchHit(identityID: "staged-1", layer: .l3, kind: "reusable_knowledge", text: "Earlier staged knowledge", staged: true)]
-        return .init(searchContextID: "search-\(searchViews.count)", channel: channel, baseSequence: 4, stagedSequence: stagedSequence, results: hits)
+        return .init(searchContextID: "search-\(searchViews.count)", channel: channel, baseSequence: 4, stagedSequence: stagedSequence, expiresAt: Date().addingTimeInterval(600), results: hits)
     }
 }

@@ -95,8 +95,33 @@ public actor CloudKnowledgePublicationCoordinator {
     public init(api: any CloudKnowledgeAPI, context: CloudKnowledgePublishingContext, run: CloudKnowledgePublicationRun, traces: CloudKnowledgePublishingTraceStore = .init(), validator: CloudKnowledgePublishingTraceValidator = .init(), batcher: CloudKnowledgeBatcher = .init(), retry: CloudKnowledgeRetryPolicy = .init()) { self.api = api; self.context = context; self.run = run; self.traces = traces; self.validator = validator; self.batcher = batcher; self.retry = retry }
     public nonisolated func makeSearchClient() -> CloudKnowledgeSearchClient { CloudKnowledgeSearchClient(api: api, context: context, traces: traces) }
     public func stage(_ operations: [CloudKnowledgeOperation]) async throws {
-        for operation in operations { try validator.validate(operation: operation, trace: await traces.trace(id: operation.searchContextID), context: context, currentBaseSequence: run.expectedBaseSequence, currentStagedSequence: run.currentStagedSequence) }
-        for batch in try batcher.batches(operations) { let response = try await retry.run { try await api.appendOperations(runID: context.publicationRunID, request: CloudKnowledgeOperationBatchRequest(operations: batch)) }; run.currentStagedSequence = response.stagedSequence; run.status = .staging }
+        do {
+            try await validate(operations)
+        } catch CloudKnowledgeError.searchContextStale {
+            // A prior write can have reached the backend even when its response
+            // was lost or malformed. Refresh once before rejecting a newer trace.
+            try await refresh()
+            try await validate(operations)
+        }
+        for batch in try batcher.batches(operations) {
+            do {
+                let response = try await retry.run {
+                    try await api.appendOperations(runID: context.publicationRunID, request: CloudKnowledgeOperationBatchRequest(operations: batch))
+                }
+                run.currentStagedSequence = response.stagedSequence
+                run.status = .staging
+            } catch CloudKnowledgeError.invalidResponse {
+                // Reconcile local staged sequence after an ambiguous response.
+                // A later search can then observe any operation accepted remotely.
+                try? await refresh()
+                throw CloudKnowledgeError.invalidResponse
+            }
+        }
+    }
+    private func validate(_ operations: [CloudKnowledgeOperation]) async throws {
+        for operation in operations {
+            try validator.validate(operation: operation, trace: await traces.trace(id: operation.searchContextID), context: context, currentBaseSequence: run.expectedBaseSequence, currentStagedSequence: run.currentStagedSequence)
+        }
     }
     public func markLocalConversationProcessed(_ localID: String) { if !processedLocalConversationIDs.contains(localID) { processedLocalConversationIDs.append(localID) } }
     public func refresh() async throws { run = try await api.publicationRun(id: context.publicationRunID) }
