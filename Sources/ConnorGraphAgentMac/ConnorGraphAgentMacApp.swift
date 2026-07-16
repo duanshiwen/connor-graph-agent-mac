@@ -35,20 +35,19 @@ struct ConnorGraphAgentMacApp: App {
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
-            AppShellView(
-                graph: root.graph,
-                identityStore: root.identityStore,
-                noteImportModel: root.noteImportModel,
-                sendCommand: { root.sendWhenInteractive($0) }
-            )
-                .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
-                .toolbarBackground(.visible, for: .windowToolbar)
-                .task {
-                    await root.startupCoordinator.startIfNeeded()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                    root.startupCoordinator.shutdown()
-                }
+            AppStartupRootView(startupCoordinator: root.startupCoordinator) {
+                AppShellView(
+                    graph: root.graph,
+                    identityStore: root.identityStore,
+                    noteImportModel: root.noteImportModel,
+                    sendCommand: { root.sendWhenInteractive($0) }
+                )
+            }
+            .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
+            .toolbarBackground(.visible, for: .windowToolbar)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                root.startupCoordinator.shutdown()
+            }
         }
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
