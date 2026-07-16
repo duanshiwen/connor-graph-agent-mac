@@ -474,22 +474,23 @@ private struct CalendarEventButton: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                 Text(row.timeText)
                     .font(AppListTypography.rowCaption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 92, alignment: .leading)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.title)
-                        .font(AppListTypography.rowTitle)
-                        .foregroundStyle(.primary)
-                    if let location = row.location, !location.isEmpty {
-                        Text(location)
-                            .font(AppListTypography.rowSubtitle)
-                            .foregroundStyle(.secondary)
-                    }
+
+                Text(row.title)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let location = row.location, !location.isEmpty {
+                    Label(location, systemImage: "mappin.and.ellipse")
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer(minLength: 0)
             }
             .padding(AppListCardLayout.contentPadding)
             .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
