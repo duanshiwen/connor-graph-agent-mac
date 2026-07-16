@@ -90,8 +90,7 @@ struct AppRouteViewDependencyTests {
         let detailStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceDetailPane: View"))
         let listSource = source[listStart.lowerBound..<detailStart.lowerBound]
 
-        #expect(listSource.contains("Text(\"知识市场\")"))
-        #expect(listSource.contains("AppListTypography.header"))
+        #expect(listSource.contains("AppListPaneHeader(title: \"知识市场\")"))
         #expect(listSource.contains("Image(systemName: \"plus\")"))
         #expect(listSource.contains("Image(systemName: \"clock.arrow.circlepath\")"))
         #expect(listSource.contains("weight: .semibold"))
@@ -105,6 +104,26 @@ struct AppRouteViewDependencyTests {
         #expect(listSource.contains("creatorStore.prepareForNewKnowledgeBase()"))
         #expect(listSource.contains("KnowledgePublicationHistoryView(store: creatorStore)"))
         #expect(!listSource.contains("store.showPublisher()"))
+    }
+
+    @Test func listPaneHeadersCenterTitlesIndependentlyFromTrailingActions() throws {
+        let designSystem = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
+        let listPanes = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let marketplace = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        let sources = try String(contentsOf: projectSourceURL(named: "MCPSourceListViews.swift"), encoding: .utf8)
+        let skills = try String(contentsOf: projectSourceURL(named: "SkillManagerListViews.swift"), encoding: .utf8)
+
+        #expect(designSystem.contains("struct AppListPaneHeader<Actions: View>: View"))
+        #expect(designSystem.contains("ZStack"))
+        #expect(designSystem.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"日历\")"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"人际关系\")"))
+        #expect(listPanes.contains("AppListPaneHeader(title: kind.title)"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"邮件\")"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"RSS 阅读\")"))
+        #expect(marketplace.contains("AppListPaneHeader(title: \"知识市场\")"))
+        #expect(sources.contains("AppListPaneHeader(title: \"外部工具连接\""))
+        #expect(skills.contains("AppListPaneHeader(title: \"技能\")"))
     }
 
     @Test func knowledgePublicationHistorySupportsFilteringDetailsAndGuardedRemoval() throws {
