@@ -93,15 +93,31 @@ struct AppRouteViewDependencyTests {
         #expect(listSource.contains("Text(\"知识市场\")"))
         #expect(listSource.contains("AppListTypography.header"))
         #expect(listSource.contains("Image(systemName: \"plus\")"))
+        #expect(listSource.contains("Image(systemName: \"clock.arrow.circlepath\")"))
         #expect(listSource.contains("weight: .semibold"))
-        #expect(listSource.contains("LazyVStack(alignment: .leading, spacing: 2)"))
-        #expect(listSource.contains(".padding(.horizontal, 8)"))
+        #expect(listSource.contains("LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing)"))
+        #expect(listSource.contains(".padding(.horizontal, AppListCardLayout.horizontalInset)"))
         #expect(listSource.contains(".onAppear { store.showHome() }"))
         #expect(!listSource.contains("title: \"市场首页\""))
         #expect(listSource.contains("Color(nsColor: .windowBackgroundColor)"))
         #expect(listSource.contains(".sheet(isPresented: $isPresentingCreator)"))
         #expect(listSource.contains("CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)"))
+        #expect(listSource.contains("creatorStore.prepareForNewKnowledgeBase()"))
+        #expect(listSource.contains("KnowledgePublicationHistoryView(store: creatorStore)"))
         #expect(!listSource.contains("store.showPublisher()"))
+    }
+
+    @Test func knowledgePublicationHistorySupportsFilteringDetailsAndGuardedRemoval() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "KnowledgePublicationProgressViews.swift"), encoding: .utf8)
+        let historyStart = try #require(source.range(of: "struct KnowledgePublicationHistoryView: View"))
+        let historySource = source[historyStart.lowerBound...]
+
+        #expect(historySource.contains("store.publicationHistory"))
+        #expect(historySource.contains("KnowledgePublicationHistoryFilter.allCases"))
+        #expect(historySource.contains(".searchable(text: $query"))
+        #expect(historySource.contains("store.canRemovePublicationHistory(id: entry.id)"))
+        #expect(historySource.contains("store.removePublicationHistory(id: id)"))
+        #expect(historySource.contains("不会删除服务端知识库或已经提交的知识"))
     }
 
     @Test func accountSettingsReuseRuntimeKnowledgeStores() throws {

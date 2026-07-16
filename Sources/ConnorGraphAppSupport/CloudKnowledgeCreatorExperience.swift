@@ -104,15 +104,58 @@ public struct CloudKnowledgeCreatorSnapshotRepository: Sendable {
     public func clear() throws { if FileManager.default.fileExists(atPath: fileURL.path) { try FileManager.default.removeItem(at: fileURL) } }
 }
 
+public struct CloudKnowledgePublicationHistoryEntry: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { snapshot.clientRunID }
+    public var snapshot: CloudKnowledgeCreatorSnapshot
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(snapshot: CloudKnowledgeCreatorSnapshot, createdAt: Date? = nil) {
+        self.snapshot = snapshot
+        self.createdAt = createdAt ?? snapshot.updatedAt
+        self.updatedAt = snapshot.updatedAt
+    }
+}
+
+public struct CloudKnowledgePublicationHistoryRepository: Sendable {
+    public var fileURL: URL
+
+    public init(fileURL: URL) { self.fileURL = fileURL }
+
+    public func load() throws -> [CloudKnowledgePublicationHistoryEntry] {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([CloudKnowledgePublicationHistoryEntry].self, from: Data(contentsOf: fileURL))
+    }
+
+    public func save(_ entries: [CloudKnowledgePublicationHistoryEntry]) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(entries).write(to: fileURL, options: .atomic)
+    }
+}
+
 public struct CloudKnowledgeLocalGenerationResult: Sendable, Equatable { public var summary: String; public init(summary: String) { self.summary = summary } }
 public typealias CloudKnowledgeLocalGenerationCallback = @Sendable (_ localConversationID: String) async throws -> CloudKnowledgeLocalGenerationResult
 public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicationRunID: String) async throws -> Int
 
 @MainActor public final class CloudKnowledgeCreatorStore: ObservableObject {
     @Published public private(set) var snapshot: CloudKnowledgeCreatorSnapshot; @Published public private(set) var history: [CloudKnowledgeRevisionSummary] = []; @Published public private(set) var isWorking = false; @Published public private(set) var errorMessage: String?
+    @Published public private(set) var publicationHistory: [CloudKnowledgePublicationHistoryEntry]
     @Published public private(set) var currentConversationID: String?
-    private let repository: CloudKnowledgeCreatorSnapshotRepository; private let creatorAPI: (any CloudKnowledgeCreatorAPI)?; private let publicationAPI: (any CloudKnowledgeAPI)?; private var generationTask: Task<Void, Never>?; private var generationDriverID: UUID?; private var localGeneration: CloudKnowledgeLocalGenerationCallback?
-    public init(repository: CloudKnowledgeCreatorSnapshotRepository = .init(), creatorAPI: (any CloudKnowledgeCreatorAPI)? = nil, publicationAPI: (any CloudKnowledgeAPI)? = nil) { self.repository = repository; self.creatorAPI = creatorAPI; self.publicationAPI = publicationAPI; self.snapshot = (try? repository.load()) ?? .init() }
+    private let repository: CloudKnowledgeCreatorSnapshotRepository; private let publicationHistoryRepository: CloudKnowledgePublicationHistoryRepository; private let creatorAPI: (any CloudKnowledgeCreatorAPI)?; private let publicationAPI: (any CloudKnowledgeAPI)?; private var generationTask: Task<Void, Never>?; private var generationDriverID: UUID?; private var localGeneration: CloudKnowledgeLocalGenerationCallback?
+    public init(repository: CloudKnowledgeCreatorSnapshotRepository = .init(), historyRepository: CloudKnowledgePublicationHistoryRepository? = nil, creatorAPI: (any CloudKnowledgeCreatorAPI)? = nil, publicationAPI: (any CloudKnowledgeAPI)? = nil) {
+        self.repository = repository
+        self.publicationHistoryRepository = historyRepository ?? .init(fileURL: repository.fileURL.deletingLastPathComponent().appendingPathComponent("publication-history.json"))
+        self.creatorAPI = creatorAPI
+        self.publicationAPI = publicationAPI
+        self.snapshot = (try? repository.load()) ?? .init()
+        self.publicationHistory = (try? self.publicationHistoryRepository.load()) ?? []
+        recordCurrentSnapshotInHistory()
+    }
     public func updateDraft(_ draft: CloudKnowledgeBaseDraft) { snapshot.draft = draft; persist() }
     public func toggleConversation(_ id: String) { if snapshot.selectedConversationIDs.contains(id) { snapshot.selectedConversationIDs.removeAll { $0 == id } } else { snapshot.selectedConversationIDs.append(id) }; persist() }
     public func advance(to stage: CloudKnowledgeCreatorStage) { snapshot.stage = stage; persist() }
@@ -240,7 +283,30 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         }
     }
     public func loadHistory() async { guard let id = snapshot.knowledgeBaseID, let creatorAPI else { return }; await perform { self.history = try await creatorAPI.revisions(knowledgeBaseID: id, limit: 100) } }
+    public func prepareForNewKnowledgeBase() {
+        guard snapshot.stage == .cancelled || snapshot.stage == .completed else { return }
+        reset()
+    }
+    public func canRemovePublicationHistory(id: String) -> Bool {
+        snapshot.clientRunID != id || snapshot.stage == .cancelled || snapshot.stage == .completed
+    }
+    public func removePublicationHistory(id: String) {
+        guard canRemovePublicationHistory(id: id) else { return }
+        publicationHistory.removeAll { $0.id == id }
+        try? publicationHistoryRepository.save(publicationHistory)
+        if snapshot.clientRunID == id { reset() }
+    }
     public func reset() { generationTask?.cancel(); currentConversationID = nil; snapshot = .init(); history = []; errorMessage = nil; try? repository.clear() }
-    private func persist() { snapshot.updatedAt = Date(); try? repository.save(snapshot) }
+    private func persist() { snapshot.updatedAt = Date(); try? repository.save(snapshot); recordCurrentSnapshotInHistory() }
+    private func recordCurrentSnapshotInHistory() {
+        let hasMeaningfulState = snapshot.knowledgeBaseID != nil || snapshot.runID != nil || !snapshot.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasMeaningfulState else { return }
+        let createdAt = publicationHistory.first(where: { $0.id == snapshot.clientRunID })?.createdAt
+        let entry = CloudKnowledgePublicationHistoryEntry(snapshot: snapshot, createdAt: createdAt)
+        publicationHistory.removeAll { $0.id == entry.id }
+        publicationHistory.append(entry)
+        publicationHistory.sort { $0.updatedAt > $1.updatedAt }
+        try? publicationHistoryRepository.save(publicationHistory)
+    }
     private func perform(_ action: @escaping () async throws -> Void) async { isWorking = true; errorMessage = nil; defer { isWorking = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }

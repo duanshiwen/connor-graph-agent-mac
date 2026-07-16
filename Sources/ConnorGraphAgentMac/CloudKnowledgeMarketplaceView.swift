@@ -7,6 +7,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
     @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
     var sessions: [AgentSession]
     @State private var isPresentingCreator = false
+    @State private var isPresentingPublicationHistory = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,7 +15,18 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 Text("知识市场")
                     .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button { isPresentingCreator = true } label: {
+                Button { isPresentingPublicationHistory = true } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("发布历史")
+                .accessibilityLabel("发布历史")
+                Button {
+                    creatorStore.prepareForNewKnowledgeBase()
+                    isPresentingCreator = true
+                } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -82,6 +94,12 @@ struct CloudKnowledgeMarketplaceListPane: View {
             }
             .frame(minWidth: 760, idealWidth: 840, minHeight: 620, idealHeight: 700)
             .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .sheet(isPresented: $isPresentingPublicationHistory) {
+            KnowledgePublicationHistoryView(store: creatorStore) {
+                isPresentingPublicationHistory = false
+                isPresentingCreator = true
+            }
         }
     }
 

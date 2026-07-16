@@ -153,6 +153,68 @@ struct CloudKnowledgePhase5Tests {
         #expect(store.snapshot.selectedConversationIDs.isEmpty)
     }
 
+    @Test @MainActor func newKnowledgeBaseClearsTerminalWorkflowWithoutDiscardingRecoverableProgress() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-creator-new-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        let store = CloudKnowledgeCreatorStore(repository: repository)
+
+        store.updateDraft(.init(name: "Cancelled", slug: "cancelled"))
+        store.toggleConversation("old-session")
+        store.cancel()
+        store.prepareForNewKnowledgeBase()
+
+        #expect(store.snapshot.stage == .configure)
+        #expect(store.snapshot.knowledgeBaseID == nil)
+        #expect(store.snapshot.draft.name.isEmpty)
+        #expect(store.snapshot.selectedConversationIDs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: repository.fileURL.path))
+        #expect(store.publicationHistory.count == 1)
+        #expect(store.publicationHistory.first?.snapshot.stage == .cancelled)
+        #expect(store.publicationHistory.first?.snapshot.draft.name == "Cancelled")
+
+        store.updateDraft(.init(name: "Recoverable", slug: "recoverable"))
+        store.toggleConversation("active-session")
+        store.advance(to: .paused)
+        store.prepareForNewKnowledgeBase()
+
+        #expect(store.snapshot.stage == .paused)
+        #expect(store.snapshot.draft.name == "Recoverable")
+        #expect(store.snapshot.selectedConversationIDs == ["active-session"])
+    }
+
+    @Test @MainActor func publicationHistoryUpsertsProgressPersistsAndProtectsActiveWorkflow() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-publication-history-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let snapshotRepository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        let historyRepository = CloudKnowledgePublicationHistoryRepository(fileURL: root.appendingPathComponent("history.json"))
+        let store = CloudKnowledgeCreatorStore(repository: snapshotRepository, historyRepository: historyRepository)
+
+        store.updateDraft(.init(name: "History", slug: "history"))
+        let clientRunID = store.snapshot.clientRunID
+        store.toggleConversation("one")
+        store.advance(to: .generating)
+        store.noteProcessed(conversationID: "one", summary: "staged one operation")
+
+        #expect(store.publicationHistory.count == 1)
+        #expect(store.publicationHistory.first?.id == clientRunID)
+        #expect(store.publicationHistory.first?.snapshot.processedConversationIDs == ["one"])
+        #expect(!store.canRemovePublicationHistory(id: clientRunID))
+        store.removePublicationHistory(id: clientRunID)
+        #expect(store.publicationHistory.count == 1)
+
+        store.cancel()
+        #expect(store.canRemovePublicationHistory(id: clientRunID))
+        let restored = CloudKnowledgeCreatorStore(repository: snapshotRepository, historyRepository: historyRepository)
+        #expect(restored.publicationHistory.count == 1)
+        #expect(restored.publicationHistory.first?.snapshot.summaries == ["staged one operation"])
+
+        restored.removePublicationHistory(id: clientRunID)
+        #expect(restored.publicationHistory.isEmpty)
+        #expect(restored.snapshot.stage == .configure)
+        #expect((try historyRepository.load()).isEmpty)
+    }
+
 }
 
 private actor LocalGenerationRecorder {
@@ -219,4 +281,3 @@ private actor CreatorPublicationFakeAPI: CloudKnowledgeAPI {
     func preview(runID: String) async throws -> CloudKnowledgePreview { .init(runID: runID, stagedSequence: 0, operations: [], summaries: []) }
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { [] }
 }
-
