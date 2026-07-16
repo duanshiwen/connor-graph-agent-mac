@@ -226,3 +226,250 @@ struct KnowledgePublicationProgressView: View {
         }
     }
 }
+
+private enum KnowledgePublicationHistoryFilter: String, CaseIterable, Identifiable {
+    case all, active, completed, cancelled
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .active: "进行中"
+        case .completed: "已提交"
+        case .cancelled: "已取消"
+        }
+    }
+}
+
+struct KnowledgePublicationHistoryView: View {
+    @ObservedObject var store: CloudKnowledgeCreatorStore
+    var onOpenCurrentPublication: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var filter: KnowledgePublicationHistoryFilter = .all
+    @State private var query = ""
+    @State private var selectedID: String?
+    @State private var pendingRemovalID: String?
+
+    private var entries: [CloudKnowledgePublicationHistoryEntry] {
+        store.publicationHistory.filter { entry in
+            let matchesFilter = switch filter {
+            case .all: true
+            case .active: entry.snapshot.stage != .completed && entry.snapshot.stage != .cancelled
+            case .completed: entry.snapshot.stage == .completed
+            case .cancelled: entry.snapshot.stage == .cancelled
+            }
+            let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchesQuery = term.isEmpty
+                || entry.snapshot.draft.name.localizedCaseInsensitiveContains(term)
+                || entry.snapshot.draft.slug.localizedCaseInsensitiveContains(term)
+                || entry.snapshot.knowledgeBaseID?.localizedCaseInsensitiveContains(term) == true
+                || entry.snapshot.runID?.localizedCaseInsensitiveContains(term) == true
+            return matchesFilter && matchesQuery
+        }
+    }
+
+    private var selectedEntry: CloudKnowledgePublicationHistoryEntry? {
+        entries.first { $0.id == selectedID } ?? entries.first
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("发布历史").font(.title2.bold())
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+                .accessibilityLabel("关闭")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            if store.publicationHistory.isEmpty {
+                ContentUnavailableView("暂无发布历史", systemImage: "clock.arrow.circlepath")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    historyList
+                        .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
+                    historyDetail
+                        .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .frame(minWidth: 860, idealWidth: 960, minHeight: 600, idealHeight: 680)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { selectedID = entries.first?.id }
+        .onChange(of: entries.map(\.id)) { _, ids in
+            if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
+        }
+        .confirmationDialog("删除这条本地发布历史？", isPresented: Binding(
+            get: { pendingRemovalID != nil },
+            set: { if !$0 { pendingRemovalID = nil } }
+        ), titleVisibility: .visible) {
+            Button("删除历史记录", role: .destructive) {
+                if let id = pendingRemovalID { store.removePublicationHistory(id: id) }
+                pendingRemovalID = nil
+            }
+            Button("取消", role: .cancel) { pendingRemovalID = nil }
+        } message: {
+            Text("只会清理本机记录，不会删除服务端知识库或已经提交的知识。")
+        }
+    }
+
+    private var historyList: some View {
+        VStack(spacing: 0) {
+            Picker("状态", selection: $filter) {
+                ForEach(KnowledgePublicationHistoryFilter.allCases) { value in
+                    Text(value.title).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(12)
+
+            List(entries, selection: $selectedID) { entry in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: historyIcon(entry.snapshot.stage))
+                            .foregroundStyle(historyColor(entry.snapshot.stage))
+                        Text(entry.snapshot.draft.name.isEmpty ? "未命名知识库" : entry.snapshot.draft.name)
+                            .font(.body.weight(.medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(historyStageTitle(entry.snapshot.stage))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("\(entry.snapshot.processedConversationIDs.count) / \(entry.snapshot.selectedConversationIDs.count) 个会话 · \(entry.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+                .tag(entry.id)
+            }
+            .searchable(text: $query, placement: .sidebar, prompt: "搜索名称、ID 或 Run")
+        }
+    }
+
+    @ViewBuilder private var historyDetail: some View {
+        if let entry = selectedEntry {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: historyIcon(entry.snapshot.stage))
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(historyColor(entry.snapshot.stage))
+                            .frame(width: 38, height: 38)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.snapshot.draft.name.isEmpty ? "未命名知识库" : entry.snapshot.draft.name)
+                                .font(.title2.bold())
+                            Text(historyStageTitle(entry.snapshot.stage))
+                                .foregroundStyle(historyColor(entry.snapshot.stage))
+                        }
+                        Spacer()
+                        if entry.id == store.snapshot.clientRunID {
+                            Button("打开当前流程", systemImage: "arrow.up.right.square", action: onOpenCurrentPublication)
+                        }
+                        Button(role: .destructive) { pendingRemovalID = entry.id } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(!store.canRemovePublicationHistory(id: entry.id))
+                        .help(store.canRemovePublicationHistory(id: entry.id) ? "删除本地历史记录" : "当前任务进行中，不能删除")
+                    }
+
+                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
+                        historyRow("知识库 ID", entry.snapshot.knowledgeBaseID ?? "尚未创建")
+                        historyRow("Publication Run", entry.snapshot.runID ?? "尚未创建")
+                        historyRow("Client Run", entry.snapshot.clientRunID)
+                        historyRow("Slug", entry.snapshot.draft.slug.isEmpty ? "-" : entry.snapshot.draft.slug)
+                        historyRow("创建时间", entry.createdAt.formatted(date: .long, time: .shortened))
+                        historyRow("最后更新", entry.updatedAt.formatted(date: .long, time: .shortened))
+                    }
+                    .textSelection(.enabled)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("处理进度").font(.headline)
+                        ProgressView(
+                            value: Double(entry.snapshot.processedConversationIDs.count),
+                            total: Double(max(1, entry.snapshot.selectedConversationIDs.count))
+                        )
+                        Text("已处理 \(entry.snapshot.processedConversationIDs.count) / \(entry.snapshot.selectedConversationIDs.count) 个会话")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !entry.snapshot.summaries.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("处理摘要").font(.headline)
+                            ForEach(Array(entry.snapshot.summaries.enumerated()), id: \.offset) { _, summary in
+                                Label(summary, systemImage: "checkmark.circle")
+                            }
+                        }
+                    }
+
+                    if !entry.snapshot.validationIssues.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("验证问题").font(.headline)
+                            ForEach(entry.snapshot.validationIssues) { issue in
+                                Label(issue.message, systemImage: issue.repairable ? "wrench.and.screwdriver" : "exclamationmark.octagon")
+                                    .foregroundStyle(issue.repairable ? .orange : .red)
+                            }
+                        }
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            ContentUnavailableView("没有匹配的发布记录", systemImage: "line.3.horizontal.decrease.circle")
+        }
+    }
+
+    private func historyRow(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).lineLimit(2).truncationMode(.middle)
+        }
+    }
+
+    private func historyStageTitle(_ stage: CloudKnowledgeCreatorStage) -> String {
+        switch stage {
+        case .configure: "配置中"
+        case .conversations: "选择会话"
+        case .confirm: "等待确认"
+        case .generating: "生成中"
+        case .paused: "已暂停"
+        case .validating: "待验证"
+        case .preview: "待提交"
+        case .conflict: "存在冲突"
+        case .completed: "已提交"
+        case .cancelled: "已取消"
+        }
+    }
+
+    private func historyIcon(_ stage: CloudKnowledgeCreatorStage) -> String {
+        switch stage {
+        case .completed: "checkmark.circle.fill"
+        case .cancelled: "xmark.circle"
+        case .paused: "pause.circle.fill"
+        case .conflict: "exclamationmark.triangle.fill"
+        case .generating: "sparkles"
+        default: "clock"
+        }
+    }
+
+    private func historyColor(_ stage: CloudKnowledgeCreatorStage) -> Color {
+        switch stage {
+        case .completed: .green
+        case .cancelled: .secondary
+        case .conflict: .orange
+        case .paused: .yellow
+        default: .accentColor
+        }
+    }
+}
