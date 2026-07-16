@@ -354,7 +354,7 @@ final class CalendarFeatureModel {
     }
 
     private func rebuildPresentation() {
-        presentation = NativeCalendarBrowserPresentation.build(events: events)
+        presentation = NativeCalendarBrowserPresentation.build(events: events, collections: collections)
         if let selectedEventID, !events.contains(where: { $0.id == selectedEventID }) {
             self.selectedEventID = events.first?.id
         }
