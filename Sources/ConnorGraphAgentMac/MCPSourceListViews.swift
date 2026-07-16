@@ -50,26 +50,17 @@ private struct SourceListHeader: View {
     var onAdd: () -> Void
 
     var body: some View {
-        ZStack {
-            Text("外部工具连接")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-
-            HStack {
-                Spacer()
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .help("添加外部工具连接")
-                .accessibilityLabel("添加外部工具连接")
+        AppListPaneHeader(title: "外部工具连接", verticalPadding: 12) {
+            Button(action: onAdd) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .frame(width: 24, height: 24)
             }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .help("添加外部工具连接")
+            .accessibilityLabel("添加外部工具连接")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
     }
 }
 

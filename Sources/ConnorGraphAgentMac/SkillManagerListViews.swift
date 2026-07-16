@@ -31,25 +31,17 @@ private struct SkillListHeader: View {
     var onAdd: () -> Void
 
     var body: some View {
-        ZStack {
-            Text("技能")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-            HStack {
-                Spacer()
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .help("添加技能")
-                .accessibilityLabel("添加技能")
+        AppListPaneHeader(title: "技能") {
+            Button(action: onAdd) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .frame(width: 24, height: 24)
             }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .help("添加技能")
+            .accessibilityLabel("添加技能")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
     }
 }
 

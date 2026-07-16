@@ -11,10 +11,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("知识市场")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "知识市场") {
                 Button { isPresentingPublicationHistory = true } label: {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -35,8 +32,6 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 .help("添加知识库")
                 .accessibilityLabel("添加知识库")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {

@@ -75,11 +75,7 @@ struct CraftCalendarListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer(minLength: 24)
-                Text("日历")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "日历") {
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -89,8 +85,6 @@ struct CraftCalendarListPane: View {
                 .help("添加日历源")
                 .accessibilityLabel("添加日历源")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "日历") {
                 model.searchQuery = ""
@@ -519,10 +513,7 @@ struct CraftContactsListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("人际关系")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "人际关系") {
                 Button(action: { model.presentNewProfileEditor() }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -532,8 +523,6 @@ struct CraftContactsListPane: View {
                 .help("新建人物")
                 .accessibilityLabel("新建人物")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             if model.presentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
@@ -1122,10 +1111,7 @@ struct CraftTaskAutomationListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(kind.title)
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: kind.title) {
                 Button(action: { isPresentingCreateSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -1135,8 +1121,6 @@ struct CraftTaskAutomationListPane: View {
                 .help(kind.createButtonHelp)
                 .accessibilityLabel(kind.createButtonHelp)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             if cards.isEmpty {
                 ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text("\(kind.emptyDescription) 点击右上角 + 新建。"))
@@ -1543,10 +1527,7 @@ struct CraftMailListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("邮件")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "邮件") {
                 Button(action: { model.presentAddAccountSheet() }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -1556,8 +1537,6 @@ struct CraftMailListPane: View {
                 .help("添加邮件账户")
                 .accessibilityLabel("添加邮件账户")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "邮件") {
                 model.searchQuery = ""
@@ -1896,10 +1875,7 @@ struct CraftRSSListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("RSS 阅读")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "RSS 阅读") {
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -1909,8 +1885,6 @@ struct CraftRSSListPane: View {
                 .help("添加订阅源")
                 .accessibilityLabel("添加订阅源")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "RSS") {
                 model.searchQuery = ""

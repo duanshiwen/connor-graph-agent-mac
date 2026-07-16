@@ -18,6 +18,35 @@ enum AppListTypography {
     static let rowCaptionEmphasized: Font = .system(size: 12.5, weight: .semibold)
 }
 
+struct AppListPaneHeader<Actions: View>: View {
+    var title: String
+    var verticalPadding: CGFloat
+    @ViewBuilder var actions: Actions
+
+    init(title: String, verticalPadding: CGFloat = 13, @ViewBuilder actions: () -> Actions) {
+        self.title = title
+        self.verticalPadding = verticalPadding
+        self.actions = actions()
+    }
+
+    var body: some View {
+        ZStack {
+            Text(title)
+                .font(AppListTypography.header)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                actions
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 14)
+        .padding(.vertical, verticalPadding)
+    }
+}
+
 struct SidebarActionButtonLabel: View {
     var title: String
     var systemImage: String
