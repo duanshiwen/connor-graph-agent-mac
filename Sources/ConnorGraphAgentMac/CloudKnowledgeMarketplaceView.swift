@@ -26,17 +26,9 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            List {
-                marketplaceRow(
-                    title: "市场首页",
-                    caption: "推荐与分类",
-                    systemImage: "storefront",
-                    isSelected: store.selected == nil
-                ) {
-                    store.showHome()
-                }
-
-                Section("已订阅") {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    marketplaceSectionHeader("已订阅")
                     if store.library.subscribed.isEmpty {
                         emptyRow("暂未订阅知识库")
                     } else {
@@ -44,9 +36,8 @@ struct CloudKnowledgeMarketplaceListPane: View {
                             libraryRow(base, caption: base.owned ? "我发布的 · 已订阅" : "已订阅")
                         }
                     }
-                }
 
-                Section("我发布的") {
+                    marketplaceSectionHeader("我发布的")
                     if store.library.owned.isEmpty {
                         emptyRow("暂未发布知识库")
                     } else {
@@ -60,13 +51,15 @@ struct CloudKnowledgeMarketplaceListPane: View {
                         }
                     }
                 }
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
+                .padding(.bottom, 10)
             }
-            .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .contentMargins(.top, 6, for: .scrollContent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { store.showHome() }
         .task { if store.home.categories.isEmpty { await store.load() } }
         .sheet(isPresented: $isPresentingCreator) {
             VStack(spacing: 0) {
@@ -82,15 +75,12 @@ struct CloudKnowledgeMarketplaceListPane: View {
                     .help("关闭")
                     .accessibilityLabel("关闭")
                 }
-                .padding(16)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
                 Divider()
-                ScrollView {
-                    CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
-                        .frame(maxWidth: 760)
-                        .padding(24)
-                }
+                CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
             }
-            .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 700)
+            .frame(minWidth: 760, idealWidth: 840, minHeight: 620, idealHeight: 700)
             .background(Color(nsColor: .windowBackgroundColor))
         }
     }
@@ -139,7 +129,6 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-        .marketplaceListRowStyle()
     }
 
     private func emptyRow(_ title: String) -> some View {
@@ -148,7 +137,17 @@ struct CloudKnowledgeMarketplaceListPane: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .marketplaceListRowStyle()
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func marketplaceSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func publicationLabel(_ base: CloudMarketplaceKnowledgeBase) -> String {
@@ -298,13 +297,5 @@ struct MarketplaceStatusBadge: View {
             .foregroundStyle(emphasized ? Color.accentColor : Color.secondary)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background((emphasized ? Color.accentColor : Color.secondary).opacity(0.1), in: Capsule())
-    }
-}
-
-private extension View {
-    func marketplaceListRowStyle() -> some View {
-        listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
     }
 }

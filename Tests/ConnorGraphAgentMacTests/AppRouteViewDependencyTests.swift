@@ -25,6 +25,16 @@ struct AppRouteViewDependencyTests {
         #expect(!source.contains(".id(graph.shell.selection)"))
     }
 
+    @Test func listColumnUsesOneStableWidthAcrossRoutes() throws {
+        let shellSource = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
+        let designSource = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
+
+        #expect(shellSource.contains("width: AppShellLayout.listColumnWidth"))
+        #expect(!shellSource.contains("listColumnMinWidth"))
+        #expect(!shellSource.contains("listColumnMaxWidth"))
+        #expect(designSource.contains("static let listColumnWidth: CGFloat = 300"))
+    }
+
     @Test func listAndDetailSwitchesCoverEverySidebarRoute() throws {
         let source = try String(contentsOf: projectSourceURL(named: "AppRoutePaneViews.swift"), encoding: .utf8)
         for route in SidebarItem.allCases {
@@ -84,11 +94,26 @@ struct AppRouteViewDependencyTests {
         #expect(listSource.contains("AppListTypography.header"))
         #expect(listSource.contains("Image(systemName: \"plus\")"))
         #expect(listSource.contains("weight: .semibold"))
-        #expect(listSource.contains(".listStyle(.plain)"))
+        #expect(listSource.contains("LazyVStack(alignment: .leading, spacing: 2)"))
+        #expect(listSource.contains(".padding(.horizontal, 8)"))
+        #expect(listSource.contains(".onAppear { store.showHome() }"))
+        #expect(!listSource.contains("title: \"市场首页\""))
         #expect(listSource.contains("Color(nsColor: .windowBackgroundColor)"))
         #expect(listSource.contains(".sheet(isPresented: $isPresentingCreator)"))
         #expect(listSource.contains("CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)"))
         #expect(!listSource.contains("store.showPublisher()"))
+    }
+
+    @Test func accountSettingsReuseRuntimeKnowledgeStores() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "ConnorSettingsViews.swift"), encoding: .utf8)
+        let settingsStart = try #require(source.range(of: "struct ConnorSettingsDetailView: View"))
+        let calendarStart = try #require(source.range(of: "struct SettingsCalendarSection: View"))
+        let settingsSource = source[settingsStart.lowerBound..<calendarStart.lowerBound]
+
+        #expect(settingsSource.contains("creatorStore: graph.knowledgeCreator"))
+        #expect(settingsSource.contains("marketplaceStore: graph.knowledgeMarketplace"))
+        #expect(!settingsSource.contains("StateObject(wrappedValue: CloudKnowledgeCreatorStore"))
+        #expect(!settingsSource.contains("StateObject(wrappedValue: CloudKnowledgeMarketplaceStore"))
     }
 
     @Test func knowledgeMarketplaceDetailOnlyShowsHomeOrLibraryAndAllowsOwnerSubscription() throws {

@@ -49,19 +49,10 @@ enum SettingsListLayout {
 struct ConnorSettingsDetailView: View {
     let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
-    @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
-    @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
     init(graph: AppFeatureGraph, identityStore: AppUserIdentityStore) {
         self.graph = graph
         self.identityStore = identityStore
-        let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
-        _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
-            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: baseURL),
-            publicationAPI: CloudKnowledgeAPIClient(baseURL: baseURL)
-        ))
-        let marketplaceAPI = CloudKnowledgeMarketplaceAPIClient(baseURL: baseURL)
-        _cloudKnowledgeMarketplaceStore = StateObject(wrappedValue: CloudKnowledgeMarketplaceStore(api: marketplaceAPI))
     }
 
     var body: some View {
@@ -74,7 +65,12 @@ struct ConnorSettingsDetailView: View {
                 Group {
                     switch graph.shell.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: graph.chat.sessions.allSessions)
+                        UserIdentitySettingsView(
+                            identityStore: identityStore,
+                            creatorStore: graph.knowledgeCreator,
+                            marketplaceStore: graph.knowledgeMarketplace,
+                            sessions: graph.chat.sessions.allSessions
+                        )
                     case .app:
                         SettingsAppSection(model: graph.appSettings, inputModel: graph.inputSettings, openProjectHelp: graph.settingsActions.openProjectHelp)
                     case .ai:

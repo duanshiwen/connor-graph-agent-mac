@@ -53,12 +53,8 @@ struct AppShellView: View {
                 graph: graph,
                 selection: selectionBinding
             )
-                .frame(
-                    minWidth: AppShellLayout.listColumnMinWidth,
-                    idealWidth: AppShellLayout.listColumnDefaultWidth,
-                    maxWidth: AppShellLayout.listColumnMaxWidth,
-                    maxHeight: .infinity
-                )
+                .frame(width: AppShellLayout.listColumnWidth)
+                .frame(maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
                 .controlSize(.small)
 
