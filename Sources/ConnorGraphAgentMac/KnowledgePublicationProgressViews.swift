@@ -55,7 +55,7 @@ struct KnowledgePublicationToolbarProgressButton: View {
                 .frame(width: 21, height: 21)
                 .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .help(helpText)
             .accessibilityLabel("打开知识库发布进度")
             .accessibilityValue(helpText)
@@ -288,9 +288,8 @@ struct KnowledgePublicationHistoryView: View {
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("关闭")
                 .accessibilityLabel("关闭")
             }

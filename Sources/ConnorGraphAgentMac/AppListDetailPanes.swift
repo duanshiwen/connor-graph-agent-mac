@@ -78,10 +78,8 @@ struct CraftCalendarListPane: View {
             AppListPaneHeader(title: "日历") {
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加日历源")
                 .accessibilityLabel("添加日历源")
             }
@@ -516,10 +514,8 @@ struct CraftContactsListPane: View {
             AppListPaneHeader(title: "人际关系") {
                 Button(action: { model.presentNewProfileEditor() }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("新建人物")
                 .accessibilityLabel("新建人物")
             }
@@ -1114,10 +1110,8 @@ struct CraftTaskAutomationListPane: View {
             AppListPaneHeader(title: kind.title) {
                 Button(action: { isPresentingCreateSheet = true }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help(kind.createButtonHelp)
                 .accessibilityLabel(kind.createButtonHelp)
             }
@@ -1530,10 +1524,8 @@ struct CraftMailListPane: View {
             AppListPaneHeader(title: "邮件") {
                 Button(action: { model.presentAddAccountSheet() }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加邮件账户")
                 .accessibilityLabel("添加邮件账户")
             }
@@ -1878,10 +1870,8 @@ struct CraftRSSListPane: View {
             AppListPaneHeader(title: "RSS 阅读") {
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加订阅源")
                 .accessibilityLabel("添加订阅源")
             }
@@ -2480,13 +2470,13 @@ private struct PersonProfileDetailHero: View {
                 HStack(spacing: AppShellLayout.spaceS) {
                     Button("编辑", action: onEdit)
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(AppButtonLayout.controlSize)
                     Button("添加关系", action: onAddRelationship)
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(AppButtonLayout.controlSize)
                     Button("删除", role: .destructive, action: onDelete)
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(AppButtonLayout.controlSize)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -2813,7 +2803,7 @@ private struct TaskAutomationActionButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .controlSize(AppButtonLayout.controlSize)
         .help(title)
     }
 }

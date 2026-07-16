@@ -14,10 +14,8 @@ struct CloudKnowledgeMarketplaceListPane: View {
             AppListPaneHeader(title: "知识市场") {
                 Button { isPresentingPublicationHistory = true } label: {
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("发布历史")
                 .accessibilityLabel("发布历史")
                 Button {
@@ -25,10 +23,8 @@ struct CloudKnowledgeMarketplaceListPane: View {
                     isPresentingCreator = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加知识库")
                 .accessibilityLabel("添加知识库")
             }
@@ -75,10 +71,8 @@ struct CloudKnowledgeMarketplaceListPane: View {
                     Spacer()
                     Button { isPresentingCreator = false } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .frame(width: 24, height: 24)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.appIcon)
                     .help("关闭")
                     .accessibilityLabel("关闭")
                 }

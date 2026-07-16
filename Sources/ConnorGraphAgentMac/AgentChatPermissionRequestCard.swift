@@ -275,7 +275,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
                 Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
             }
             .buttonStyle(.bordered)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
 
             Button {
                 chatActions.approval.approvePendingApproval(approval)
@@ -284,7 +284,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
                 Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
         }
     }
 }

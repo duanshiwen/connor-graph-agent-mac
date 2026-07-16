@@ -136,11 +136,13 @@ struct ConnorGraphAgentMacApp: App {
                 model: root.noteImportModel,
                 importExecutionEnabled: root.featureFlags.noteImportEnabled
             )
+            .controlSize(AppButtonLayout.controlSize)
         }
         .defaultSize(width: 720, height: 560)
 
         Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: root.noteImportModel)
+                .controlSize(AppButtonLayout.controlSize)
         }
         .defaultSize(width: 900, height: 620)
 
@@ -149,6 +151,7 @@ struct ConnorGraphAgentMacApp: App {
                 store: root.graph.knowledgeCreator,
                 sessions: root.graph.chat.sessions.allSessions
             )
+            .controlSize(AppButtonLayout.controlSize)
         }
         .defaultSize(width: 860, height: 620)
     }

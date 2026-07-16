@@ -137,10 +137,8 @@ private struct AgentInlineAudioAttachmentView: View {
                 playback.togglePlayback()
             } label: {
                 Image(systemName: playback.state == .playing ? "pause.fill" : "play.fill")
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.appIcon)
             .disabled(localFileURL == nil || isUnavailable)
             .accessibilityLabel(playback.state == .playing ? "暂停音频" : "播放音频")
 

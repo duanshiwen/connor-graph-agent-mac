@@ -46,7 +46,7 @@ struct AppShellView: View {
                         maxHeight: .infinity
                     )
                     .background(.bar)
-                    .controlSize(.small)
+                    .controlSize(AppButtonLayout.controlSize)
             }
 
             CraftListPaneView(
@@ -56,7 +56,7 @@ struct AppShellView: View {
                 .frame(width: AppShellLayout.listColumnWidth)
                 .frame(maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
-                .controlSize(.small)
+                .controlSize(AppButtonLayout.controlSize)
 
             CraftDetailPaneView(
                 graph: graph,
@@ -65,7 +65,7 @@ struct AppShellView: View {
             )
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
-                .controlSize(.small)
+                .controlSize(AppButtonLayout.controlSize)
         }
         }
         }
@@ -142,7 +142,7 @@ struct AppShellView: View {
                             .font(.system(size: 20))
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
                 .accessibilityLabel(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
                 .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {

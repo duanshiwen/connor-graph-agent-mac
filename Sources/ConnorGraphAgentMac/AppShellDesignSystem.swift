@@ -53,7 +53,7 @@ struct SidebarActionButtonLabel: View {
     var fillsWidth: Bool = true
     var titleFont: Font = AppListTypography.actionTitle
     var iconFont: Font = AppListTypography.actionIcon
-    var minHeight: CGFloat = 24
+    var minHeight: CGFloat = AppButtonLayout.height
 
     var body: some View {
         Label {
@@ -125,6 +125,35 @@ enum AppShellLayout {
 
     static let contentMaxWidth: CGFloat = 780
     static let hairlineOpacity: Double = 0.14
+}
+
+/// Shared button metrics for every app surface. Native text buttons use the
+/// regular macOS control size; icon-only actions use one stable square target.
+enum AppButtonLayout {
+    static let controlSize: ControlSize = .regular
+    static let height: CGFloat = 32
+    static let iconButtonSize: CGFloat = 32
+    static let iconSize: CGFloat = 14
+}
+
+struct AppIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: AppButtonLayout.iconSize, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+            .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
+            .contentShape(Circle())
+            .background(
+                Color.secondary.opacity(configuration.isPressed ? 0.16 : 0.08),
+                in: Circle()
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == AppIconButtonStyle {
+    static var appIcon: AppIconButtonStyle { AppIconButtonStyle() }
 }
 
 /// Shared metrics for selectable cards in every primary app list.

@@ -90,7 +90,7 @@ struct UserIdentitySettingsView: View {
                                 Task { await retryStoredSession() }
                             }
                             .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            .controlSize(AppButtonLayout.controlSize)
                             .disabled(isSubmitting)
                         }
                     }
@@ -106,7 +106,7 @@ struct UserIdentitySettingsView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                     .disabled(isSubmitting)
                 }
             }

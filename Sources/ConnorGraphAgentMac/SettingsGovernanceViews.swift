@@ -18,7 +18,7 @@ struct SettingsLabelsSection: View {
             ) {
                 Button("新建标签…") { presentNewLabelEditor() }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
             }
 
             SettingsGroup(title: "标签") {
@@ -89,7 +89,7 @@ struct SettingsStatusesSection: View {
             ) {
                 Button("新建状态…") { presentNewStatusEditor() }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
             }
 
             SettingsGroup(title: "状态") {
