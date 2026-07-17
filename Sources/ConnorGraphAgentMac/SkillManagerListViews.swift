@@ -470,7 +470,7 @@ struct CraftSkillRow: View {
         HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
             SkillRowIcon(iconName: iconName, accent: skillAccent, isSelected: isSelected)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                 SkillRowTitleLine(card: card, isSelected: isSelected)
                 Text(card.subtitle)
                     .font(AppListTypography.rowSubtitle)

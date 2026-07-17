@@ -555,7 +555,7 @@ private struct ContactRowButton: View {
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(row.displayName)
                         .font(AppListTypography.rowTitle)
                         .foregroundStyle(.primary)
@@ -1788,16 +1788,6 @@ private struct MailMessageListRow: View, Equatable {
                     .padding(.top, 7)
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
-                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
-                            Label(label, systemImage: image)
-                                .font(AppTypography.microEmphasis)
-                                .labelStyle(.titleAndIcon)
-                                .foregroundStyle(mailDirectionBadgeForeground)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
-                                .lineLimit(1)
-                        }
                         Text(presentation.subjectText)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
                             .lineLimit(AppListCardLayout.titleLineLimit)
@@ -1812,9 +1802,23 @@ private struct MailMessageListRow: View, Equatable {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    Text(presentation.senderText)
-                        .font(AppListTypography.rowCaptionEmphasized)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
+                            Label(label, systemImage: image)
+                                .font(AppTypography.microEmphasis)
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(mailDirectionBadgeForeground)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
+                                .lineLimit(1)
+                        }
+                        Text(presentation.senderText)
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                    }
                     Text(presentation.contextText)
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
@@ -3190,7 +3194,7 @@ struct CraftSessionRow: View {
     }
 
     private var sessionTextContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
             HStack(alignment: .firstTextBaseline) {
                 if isEditingTitle {
                     TextField("会话标题", text: $titleDraft)
@@ -3465,7 +3469,7 @@ struct SettingsCategoryRow: View {
                 Image(systemName: systemImage)
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(title)
                         .font(AppListTypography.rowTitleSelected)
                         .lineLimit(AppListCardLayout.titleLineLimit)

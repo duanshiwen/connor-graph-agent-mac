@@ -234,9 +234,9 @@ enum AppListCardLayout {
     static let verticalInset: CGFloat = 6
     static let spacing: CGFloat = 0
     static let contentHorizontalPadding: CGFloat = 10
-    static let contentVerticalPadding: CGFloat = 8
+    static let contentVerticalPadding: CGFloat = 10
     static let contentPadding: CGFloat = 10
-    static let contentSpacing: CGFloat = 4
+    static let contentSpacing: CGFloat = 6
     static let cornerRadius: CGFloat = 6
     static let minimumHeight: CGFloat = 64
     static let titleLineLimit = 2
