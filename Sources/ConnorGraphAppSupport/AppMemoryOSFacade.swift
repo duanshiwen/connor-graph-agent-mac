@@ -618,6 +618,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 kind: draft.kind,
                 priority: 10,
                 payloadJSON: payload,
+                maxAttempts: .max,
                 nextRunAt: now,
                 idempotencyKey: "\(draft.kind):\(draft.captureEventIDs.joined(separator: ","))",
                 payloadHash: String(payload.hashValue),
@@ -662,7 +663,15 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "unsupported_background_job_kind", message: failed.errorMessage ?? leased.kind)]))
                 }
             } catch {
-                let failed = try recordQueueFailure(leased, errorCode: "background_ai_job_failed", errorMessage: String(describing: error), now: now)
+                let classification = MemoryOSBackgroundFailureClassifier().classify(error)
+                let failed = try recordQueueFailure(
+                    leased,
+                    errorCode: classification.errorCode,
+                    errorMessage: String(describing: error),
+                    now: now,
+                    retryable: classification.retryable,
+                    retryDelay: classification.retryDelay
+                )
                 try saveBackgroundJobAudit(eventType: "memory_os.background_job.model_failed", subjectID: leased.id, payload: ["error_code": failed.errorCode ?? "background_ai_job_failed", "status": failed.status.rawValue], now: now)
                 if failed.status == .deadLetter {
                     try saveBackgroundJobAudit(eventType: "memory_os.background_job.dead_lettered", subjectID: leased.id, payload: ["error_code": failed.errorCode ?? "background_ai_job_failed"], now: now)
@@ -688,8 +697,28 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return transitioned
     }
 
-    public func recordQueueFailure(_ item: MemoryOSQueueItem, errorCode: String, errorMessage: String, now: Date = Date()) throws -> MemoryOSQueueItem {
-        let transitioned = MemoryOSQueueTransitionService().markFailed(item, errorCode: errorCode, errorMessage: errorMessage, now: now)
+    public func recordQueueFailure(
+        _ item: MemoryOSQueueItem,
+        errorCode: String,
+        errorMessage: String,
+        now: Date = Date(),
+        retryable: Bool = true,
+        retryDelay: TimeInterval? = nil
+    ) throws -> MemoryOSQueueItem {
+        let isL1BackgroundJob = MemoryOSBackgroundJobKind.isL1KnowledgeKind(item.kind)
+        var failureItem = item
+        if isL1BackgroundJob {
+            failureItem.maxAttempts = .max
+        }
+        let effectiveRetryDelay = retryDelay ?? (isL1BackgroundJob && !retryable ? 3_600 : nil)
+        let transitioned = MemoryOSQueueTransitionService().markFailed(
+            failureItem,
+            errorCode: errorCode,
+            errorMessage: errorMessage,
+            now: now,
+            retryable: isL1BackgroundJob || retryable,
+            retryDelay: effectiveRetryDelay
+        )
         try store.enqueue(transitioned)
         try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: transitioned.attemptCount, status: transitioned.status, startedAt: item.lockedAt ?? now, finishedAt: now, errorCode: errorCode, errorMessage: errorMessage)
         if transitioned.status == .deadLetter {
@@ -697,6 +726,46 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         }
         try store.save(audit: MemoryOSAuditEvent(eventType: "memory_os.queue.failure", subjectID: item.id, payload: ["status": transitioned.status.rawValue, "error_code": errorCode], createdAt: now))
         return transitioned
+    }
+
+    public func recoverExpiredBackgroundQueueLeases(now: Date = Date(), limit: Int = 100) throws -> Int {
+        let expired = try store.expiredLeaseQueueItems(limit: limit, now: now)
+        for item in expired {
+            _ = try recordQueueFailure(
+                item,
+                errorCode: "background_worker_lease_expired",
+                errorMessage: "The previous background worker stopped before completing this job.",
+                now: now,
+                retryable: true,
+                retryDelay: 0
+            )
+            try saveBackgroundJobAudit(
+                eventType: "memory_os.background_job.expired_lease_recovered",
+                subjectID: item.id,
+                payload: ["previous_worker": item.lockedBy ?? "unknown"],
+                now: now
+            )
+        }
+        let legacyDeadLetters = try store.deadLetterQueueItems(kinds: MemoryOSBackgroundJobKind.l1ExecutableRawValues, limit: limit)
+        for item in legacyDeadLetters {
+            var recovered = item
+            recovered.status = .retryScheduled
+            recovered.maxAttempts = .max
+            recovered.nextRunAt = now
+            recovered.lockedAt = nil
+            recovered.lockedBy = nil
+            recovered.leaseExpiresAt = nil
+            recovered.updatedAt = now
+            try store.enqueue(recovered)
+            try store.deleteDeadLetter(queueItemID: recovered.id)
+            try saveBackgroundJobAudit(
+                eventType: "memory_os.background_job.dead_letter_recovered",
+                subjectID: recovered.id,
+                payload: ["previous_error_code": recovered.errorCode ?? "unknown"],
+                now: now
+            )
+        }
+        return expired.count + legacyDeadLetters.count
     }
 
     public func shouldRecover(queueItem: MemoryOSQueueItem, now: Date = Date()) -> Bool {

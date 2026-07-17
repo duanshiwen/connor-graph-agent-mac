@@ -365,7 +365,15 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
 public struct MemoryOSQueueTransitionService: Sendable {
     public init() {}
 
-    public func markFailed(_ item: MemoryOSQueueItem, errorCode: String, errorMessage: String, now: Date = Date(), recovery: MemoryOSRecoveryService = MemoryOSRecoveryService()) -> MemoryOSQueueItem {
+    public func markFailed(
+        _ item: MemoryOSQueueItem,
+        errorCode: String,
+        errorMessage: String,
+        now: Date = Date(),
+        recovery: MemoryOSRecoveryService = MemoryOSRecoveryService(),
+        retryable: Bool = true,
+        retryDelay: TimeInterval? = nil
+    ) -> MemoryOSQueueItem {
         var next = item
         next.attemptCount += 1
         next.errorCode = errorCode
@@ -374,12 +382,12 @@ public struct MemoryOSQueueTransitionService: Sendable {
         next.lockedBy = nil
         next.leaseExpiresAt = nil
         next.updatedAt = now
-        if next.attemptCount >= next.maxAttempts {
+        if !retryable || next.attemptCount >= next.maxAttempts {
             next.status = .deadLetter
             next.nextRunAt = now
         } else {
             next.status = .retryScheduled
-            next.nextRunAt = now.addingTimeInterval(recovery.nextRetryDelay(attemptCount: next.attemptCount))
+            next.nextRunAt = now.addingTimeInterval(retryDelay ?? recovery.nextRetryDelay(attemptCount: next.attemptCount))
         }
         return next
     }

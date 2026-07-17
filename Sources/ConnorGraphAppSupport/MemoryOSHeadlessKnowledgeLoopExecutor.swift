@@ -185,9 +185,14 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                     toolCallCount += 1
                     do {
                         log("  → \(call.name)(\(truncateJSON(call.argumentsJSON, max: 200)))")
-                        let result = try toolExecutor.execute(call, context: MemoryOSBackgroundToolExecutionContext(runID: runID, iteration: iteration))
+                        let replayedResult = try replayableToolResult(for: call, runID: runID)
+                        let result = try replayedResult ?? toolExecutor.execute(call, context: MemoryOSBackgroundToolExecutionContext(runID: runID, iteration: iteration))
                         let resultJSON = capped(result.contentJSON)
-                        try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, resultJSON: resultJSON, status: .succeeded, startedAt: toolStartedAt, finishedAt: now(), metadata: ["citations": result.citations.joined(separator: ",")]))
+                        try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, resultJSON: resultJSON, status: .succeeded, startedAt: toolStartedAt, finishedAt: now(), metadata: [
+                            "citations": result.citations.joined(separator: ","),
+                            "content_text": capped(result.contentText),
+                            "idempotent_replay": String(replayedResult != nil)
+                        ]))
                         let toolContent = result.contentText.isEmpty ? resultJSON : "\(result.contentText)\n\(resultJSON)"
                         let toolMessage = MemoryOSBackgroundLoopMessage(role: .tool, content: capped(toolContent), toolCallID: call.id, toolName: call.name)
                         messages.append(toolMessage)
@@ -218,6 +223,42 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
         for (index, message) in messages.enumerated() {
             try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: message.id, runID: runID, sequence: index, role: message.role, content: message.content, toolCallID: message.toolCallID, toolName: message.toolName, metadata: ["scope": "initial_stateless_batch"] ))
         }
+    }
+
+    private func replayableToolResult(for call: MemoryOSBackgroundToolCall, runID: String) throws -> MemoryOSBackgroundToolResult? {
+        let writeTools: Set<String> = [
+            "memory_os_l2_update_entities",
+            "memory_os_update_current_user_profile",
+            "memory_os_l3_update_beliefs",
+            "memory_os_l4_update_entities"
+        ]
+        guard writeTools.contains(call.name) else { return nil }
+        let arguments = normalizedJSON(call.argumentsJSON)
+        guard let previous = try store.backgroundToolCalls(runID: runID).last(where: {
+            $0.status == .succeeded
+                && $0.toolName == call.name
+                && normalizedJSON($0.argumentsJSON) == arguments
+                && $0.resultJSON != nil
+        }) else { return nil }
+        let citations = previous.metadata["citations"]?
+            .split(separator: ",")
+            .map(String.init) ?? []
+        return MemoryOSBackgroundToolResult(
+            callID: call.id,
+            name: call.name,
+            contentJSON: previous.resultJSON ?? "{}",
+            contentText: previous.metadata["content_text"] ?? "Reused the successful result from an earlier attempt of this background job.",
+            citations: citations
+        )
+    }
+
+    private func normalizedJSON(_ json: String) -> String {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let normalized = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let value = String(data: normalized, encoding: .utf8)
+        else { return json }
+        return value
     }
 
     private func capped(_ value: String) -> String {

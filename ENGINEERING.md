@@ -405,7 +405,7 @@ Job types（`MemoryOSBackgroundJobKind`）：
 - `memory.l1.unified_projection`：聚合 pending L1 captures，并把 operational facts 投影到 L2，把 stable entity/concept facts 投影到 L4。
 - `memory.l1.synthesize_knowledge`：从 L2 candidates 合成 L3 beliefs。
 
-Execution tracking 使用 `MemoryOSBackgroundRunDomain.swift`：记录每个 run 的完整 message/tool-call history，支持 idempotency keys、最多 3 次 retry 和 dead-letter queue。
+Execution tracking 使用 `MemoryOSBackgroundRunDomain.swift`：记录每个 run 的完整 message/tool-call history，并支持 idempotency keys。L1 AI 作业持续退避重试直至成功，不进入 dead-letter；其他队列仍可使用有限次数 retry 和 dead-letter queue。
 
 ---
 

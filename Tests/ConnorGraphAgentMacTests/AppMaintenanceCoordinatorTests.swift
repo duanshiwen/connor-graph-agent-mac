@@ -19,6 +19,47 @@ struct AppMaintenanceCoordinatorTests {
         #expect(runs == stopped)
     }
 
+    @Test func schedulerAlsoPollsPersistentBackgroundJobs() async throws {
+        let coordinator = AppMaintenanceCoordinator()
+        var backgroundRuns = 0
+        coordinator.runBackgroundJobs = { backgroundRuns += 1 }
+
+        coordinator.startScheduler(interval: 0.02)
+        try await Task.sleep(for: .milliseconds(75))
+        coordinator.stopScheduler()
+
+        #expect(backgroundRuns >= 2)
+    }
+
+    @Test func schedulerRunsDailySweepImmediatelyOnLaunch() async throws {
+        let coordinator = AppMaintenanceCoordinator()
+        var dailySweepRuns = 0
+        coordinator.runDailySweep = { dailySweepRuns += 1 }
+
+        coordinator.startScheduler(interval: 10)
+        try await Task.sleep(for: .milliseconds(30))
+        coordinator.stopScheduler()
+
+        #expect(dailySweepRuns == 1)
+    }
+
+    @Test func backgroundTriggerWhileWorkerIsBusyRunsAnotherBatch() async throws {
+        let coordinator = AppMaintenanceCoordinator()
+        var backgroundRuns = 0
+        coordinator.runBackgroundJobs = {
+            backgroundRuns += 1
+            if backgroundRuns == 1 {
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        }
+
+        coordinator.scheduleBackgroundJobs()
+        coordinator.scheduleBackgroundJobs()
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(backgroundRuns == 2)
+    }
+
     @Test func concurrentReconcileForSameScopeCoalesces() async throws {
         let coordinator = AppMaintenanceCoordinator()
         var calls = 0
