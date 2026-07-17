@@ -479,10 +479,7 @@ struct CraftSkillRow: View {
                 SkillRowBadgeLine(card: card, riskColor: riskColor, trustColor: trustColor)
             }
         }
-        .padding(AppListCardLayout.contentPadding)
-        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-        .background(rowBackgroundColor, in: AppListCardLayout.shape)
-        .contentShape(AppListCardLayout.shape)
+        .appListRowSurface(isSelected: isSelected)
         .onTapGesture(perform: onSelect)
     }
 
@@ -498,10 +495,6 @@ struct CraftSkillRow: View {
             Label("删除", systemImage: "trash")
         }
         .disabled(card.sourceTier != SkillSourceTier.user.rawValue)
-    }
-
-    private var rowBackgroundColor: Color {
-        isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
     }
 
     private var iconName: String {
