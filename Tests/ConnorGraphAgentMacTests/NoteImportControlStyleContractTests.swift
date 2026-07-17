@@ -30,14 +30,33 @@ struct NoteImportControlStyleContractTests {
         #expect(!center.contains("job.updatedAt, style: .relative"))
     }
 
+    @Test("Import options are always flattened")
+    func hierarchyOptionIsAbsent() throws {
+        let wizard = try source("NoteImportWizardView.swift")
+        let coordinator = try appSupportSource("NoteImportCoordinator.swift")
+        #expect(!wizard.contains("保留文件夹层级"))
+        #expect(coordinator.contains("flattenedOptions.preserveHierarchy = false"))
+    }
+
     @Test("Import center owns transient list selection without publishing during view updates")
     func localListSelection() throws {
         let center = try source("NoteImportCenterView.swift")
         #expect(center.contains("@State private var selectedJobID"))
-        #expect(center.contains("List(selection: $selectedJobID)"))
+        #expect(center.contains("List {"))
+        #expect(!center.contains("List(selection: $selectedJobID)"))
+        #expect(center.contains("selectedJobID = job.id"))
+        #expect(center.contains(".listRowBackground(selectedJobID == job.id"))
         #expect(center.contains(".task(id: selectedJobID)"))
         #expect(!center.contains("set: { newValue in model.selectJob(newValue) }"))
         #expect(!center.contains(".onChange(of: model.selectedJobID) { _, _ in model.reloadSelectedJobItems() }"))
+        #expect(!center.contains("model.ledger"))
+        #expect(center.contains("Task { await model.reloadJobs() }"))
+        #expect(center.contains("@State private var hasInitializedSelection = false"))
+        #expect(center.contains("guard hasInitializedSelection else { return }"))
+        #expect(center.contains("transaction.disablesAnimations = true"))
+        #expect(center.contains(".contentMargins(.top, 6, for: .scrollContent)"))
+        #expect(center.contains("Button(\"删除导入记录\""))
+        #expect(center.contains("已经导入的笔记会保留"))
     }
 
     @Test("Import center renders one state-driven pause or resume control")

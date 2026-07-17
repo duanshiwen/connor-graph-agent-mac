@@ -967,7 +967,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;
@@ -1004,7 +1004,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;

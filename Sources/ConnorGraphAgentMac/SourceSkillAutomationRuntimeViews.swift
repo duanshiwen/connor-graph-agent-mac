@@ -617,7 +617,7 @@ private struct SkillManagerTopBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
             Text(title)
-                .font(.system(size: 24, weight: .semibold))
+                .font(AppTypography.pageTitle)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if !subtitle.isEmpty {

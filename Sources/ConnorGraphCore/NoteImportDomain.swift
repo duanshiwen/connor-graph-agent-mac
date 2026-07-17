@@ -104,7 +104,7 @@ public struct NoteImportOptions: Codable, Sendable, Equatable {
     public init(
         recursivelyScan: Bool = true,
         importAttachments: Bool = true,
-        preserveHierarchy: Bool = true,
+        preserveHierarchy: Bool = false,
         duplicatePolicy: NoteImportDuplicatePolicy = .skipUnchanged,
         llmMode: NoteImportLLMMode = .automatic,
         llmConcurrency: Int = 1,
@@ -332,7 +332,8 @@ public struct NoteImportStateMachine: Sendable {
         .importing: [.processing, .paused, .cancelling, .completedWithIssues, .completed, .failed],
         .processing: [.paused, .cancelling, .completedWithIssues, .completed, .failed],
         .paused: [.scanning, .importing, .processing, .cancelling, .cancelled, .failed],
-        .cancelling: [.cancelled, .completedWithIssues, .failed]
+        .cancelling: [.cancelled, .completedWithIssues, .failed],
+        .completedWithIssues: [.importing, .processing]
     ]
 
     private static let itemTransitions: [NoteImportItemStatus: Set<NoteImportItemStatus>] = [
@@ -341,10 +342,11 @@ public struct NoteImportStateMachine: Sendable {
         .needsEncodingReview: [.validating, .ready, .parseFailed, .cancelled],
         .ready: [.creatingSession, .cancelled],
         .duplicateChanged: [.creatingSession, .cancelled],
-        .creatingSession: [.imported, .sessionFailed, .cancelled],
+        .creatingSession: [.ready, .imported, .sessionFailed, .cancelled],
         .imported: [.queuedForLLM, .completed, .attachmentFailed, .cancelled],
         .queuedForLLM: [.runningLLM, .cancelled],
-        .runningLLM: [.completed, .llmFailed, .cancelled],
+        .runningLLM: [.queuedForLLM, .completed, .llmFailed, .cancelled],
+        .sessionFailed: [.ready, .cancelled],
         .llmFailed: [.queuedForLLM, .cancelled],
         .attachmentFailed: [.imported, .cancelled],
         .parseFailed: [.validating, .cancelled]

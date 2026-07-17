@@ -15,6 +15,7 @@ final class NoteImportViewModel: ObservableObject {
     @Published var options = NoteImportOptions()
     @Published var notes: [ImportedNote] = []
     @Published var jobs: [NoteImportJobRecord] = []
+    @Published private(set) var sourceNamesByID: [String: String] = [:]
     @Published var selectedJobID: String?
     @Published var selectedJobItems: [NoteImportItemRecord] = []
     @Published var activity: Activity = .idle
@@ -45,7 +46,7 @@ final class NoteImportViewModel: ObservableObject {
         self.activityReader = ledger.map(NoteImportActivityReader.init(ledger:))
         self.error = configurationError
         self.monitoringInterval = monitoringInterval
-        reloadJobs()
+        Task { @MainActor [weak self] in await self?.reloadJobs() }
     }
 
     convenience init(configurationError: String) { self.init(configurationError: Optional(configurationError)) }
@@ -142,32 +143,32 @@ final class NoteImportViewModel: ObservableObject {
     }
 
     func startImport() async -> Bool {
-        guard let ledger, let coordinator, let sourceURL, !notes.isEmpty else {
+        guard ledger != nil, let coordinator, let sourceURL, !notes.isEmpty else {
             error = "没有可导入的笔记。"
             return false
         }
         activity = .starting
         error = nil
         do {
-            var source = NoteImportSourceRecord(kind: sourceKind, displayName: sourceURL.deletingPathExtension().lastPathComponent)
-            source = try sourceAccessService.authorize(url: sourceURL, source: source)
-            try ledger.saveSource(source)
-            let job = NoteImportJobRecord(sourceID: source.id, options: options)
-            try ledger.saveJob(job)
-            reloadJobs(selecting: job.id)
+            let job = try await coordinator.prepareImport(
+                sourceURL: sourceURL,
+                kind: sourceKind,
+                options: options
+            )
+            await reloadJobs(selecting: job.id)
             startJobMonitoring()
             activity = .importing(job.id)
             let adapter = adapterForCurrentSource()
-            let request = NoteImportScanRequest(sourceID: source.id, sourceURL: sourceURL, kind: sourceKind, options: options)
+            let request = NoteImportScanRequest(sourceID: job.sourceID, sourceURL: sourceURL, kind: sourceKind, options: job.options)
             _ = try await coordinator.scan(jobID: job.id, adapter: adapter, request: request)
-            reloadJobs(selecting: job.id)
+            await reloadJobs(selecting: job.id)
             await executionSupervisor?.ensureRunning(jobID: job.id)
             activity = .idle
             return true
         } catch {
             self.error = userFacing(error)
             activity = .idle
-            reloadJobs()
+            await reloadJobs()
             return false
         }
     }
@@ -175,8 +176,15 @@ final class NoteImportViewModel: ObservableObject {
     private func reloadMonitoredJobs() async -> Bool {
         guard let activityReader else { return false }
         do {
+            let monitoredJobID = selectedJobID
             let snapshot = try await activityReader.jobs()
+            let itemSnapshot: [NoteImportItemRecord]? = if let monitoredJobID {
+                try await activityReader.changedItems(jobID: monitoredJobID)
+            } else { nil }
             if snapshot != jobs { jobs = snapshot }
+            if selectedJobID == monitoredJobID, let itemSnapshot {
+                selectedJobItems = itemSnapshot
+            }
             await refreshRuntimeSnapshot()
             return hasDynamicallyChangingJobs
         } catch {
@@ -185,13 +193,24 @@ final class NoteImportViewModel: ObservableObject {
         }
     }
 
-    func reloadJobs(selecting jobID: String? = nil, reloadSelectedItems: Bool = true) {
-        guard let ledger else { return }
+    func reloadJobs(selecting jobID: String? = nil, reloadSelectedItems: Bool = true) async {
+        guard let activityReader else { return }
         do {
-            jobs = try ledger.jobs()
-            if let jobID { selectedJobID = jobID }
-            else if selectedJobID == nil { selectedJobID = jobs.first?.id }
-            if reloadSelectedItems { reloadSelectedJobItems() }
+            let jobSnapshot = try await activityReader.jobs()
+            let sourceSnapshot = try await activityReader.sourceNames()
+            let preferredID = jobID ?? selectedJobID
+            let targetID = preferredID.flatMap { preferred in
+                jobSnapshot.contains(where: { $0.id == preferred }) ? preferred : nil
+            } ?? jobSnapshot.first?.id
+            let itemSnapshot: [NoteImportItemRecord]? = if reloadSelectedItems, let targetID {
+                try await activityReader.items(jobID: targetID)
+            } else { nil }
+            if jobs != jobSnapshot { jobs = jobSnapshot }
+            if sourceNamesByID != sourceSnapshot { sourceNamesByID = sourceSnapshot }
+            selectedJobID = targetID
+            if let itemSnapshot, selectedJobID == targetID, selectedJobItems != itemSnapshot {
+                selectedJobItems = itemSnapshot
+            }
             if hasDynamicallyChangingJobs { startJobMonitoring() }
         } catch { self.error = userFacing(error) }
     }
@@ -219,16 +238,10 @@ final class NoteImportViewModel: ObservableObject {
         }
     }
 
-    func reloadSelectedJobItems() {
-        guard let ledger, let selectedJobID else { selectedJobItems = []; return }
-        do { selectedJobItems = try ledger.items(jobID: selectedJobID) }
-        catch { self.error = userFacing(error) }
-    }
-
     func recoverPersistedJobs() async {
         await executionSupervisor?.recoverPersistedJobs()
         await refreshRuntimeSnapshot()
-        reloadJobs(reloadSelectedItems: false)
+        await reloadJobs(reloadSelectedItems: false)
         startJobMonitoring()
     }
 
@@ -236,7 +249,7 @@ final class NoteImportViewModel: ObservableObject {
         guard let executionSupervisor, let id = selectedJobID else { return }
         await executionSupervisor.ensureRunning(jobID: id)
         await refreshRuntimeSnapshot()
-        reloadJobs(selecting: id)
+        await reloadJobs(selecting: id)
         startJobMonitoring()
     }
 
@@ -245,7 +258,7 @@ final class NoteImportViewModel: ObservableObject {
         do {
             try await executionSupervisor.requestPause(jobID: id)
             await refreshRuntimeSnapshot()
-            reloadJobs(selecting: id)
+            await reloadJobs(selecting: id)
         }
         catch { self.error = userFacing(error) }
     }
@@ -255,7 +268,7 @@ final class NoteImportViewModel: ObservableObject {
         do {
             try await executionSupervisor.resume(jobID: id)
             await refreshRuntimeSnapshot()
-            reloadJobs(selecting: id)
+            await reloadJobs(selecting: id)
             startJobMonitoring()
         } catch { self.error = userFacing(error) }
     }
@@ -265,9 +278,22 @@ final class NoteImportViewModel: ObservableObject {
         do {
             try await executionSupervisor.requestCancel(jobID: id)
             await refreshRuntimeSnapshot()
-            reloadJobs(selecting: id)
+            await reloadJobs(selecting: id)
         }
         catch { self.error = userFacing(error) }
+    }
+
+    func deleteJob(id: String) async {
+        guard let executionSupervisor,
+              jobs.first(where: { $0.id == id })?.status.isTerminal == true else { return }
+        do {
+            try await executionSupervisor.delete(jobID: id)
+            if selectedJobID == id {
+                selectedJobID = nil
+                selectedJobItems = []
+            }
+            await reloadJobs()
+        } catch { self.error = userFacing(error) }
     }
 
     func resetWizard() {
@@ -306,4 +332,3 @@ final class NoteImportViewModel: ObservableObject {
         return String(describing: error)
     }
 }
-
