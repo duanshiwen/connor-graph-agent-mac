@@ -61,6 +61,7 @@ final class ChatComposerModel {
     var activeSkillSlug: String?
     var activeSkillDisplayName: String?
     var remoteKnowledgeBaseIDs: [String]?
+    var allowedMCPToolNames: [String]?
     @ObservationIgnored private var isApplyingInput = false
     @ObservationIgnored var onInputChanged: (String) -> Void = { _ in }
 

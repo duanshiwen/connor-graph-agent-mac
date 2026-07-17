@@ -22,13 +22,13 @@ public enum MCPHTTPClientTransportError: Error, Sendable, Equatable, CustomStrin
     }
 }
 
-/// MCP Streamable HTTP transport, currently supporting the JSON response path.
+/// MCP Streamable HTTP transport supporting JSON and request-scoped SSE responses.
 ///
 /// Commercial safety boundaries:
 /// - Endpoint must be HTTPS unless it is loopback localhost for development.
 /// - Secrets are accepted only as HTTP headers supplied by Connor's credential boundary.
 /// - Query-string credentials are intentionally unsupported.
-/// - Request-scoped SSE streaming responses fail closed until the runtime has explicit stream handling.
+/// - Request-scoped SSE responses are buffered by URLSession and decoded as JSON-RPC events.
 public struct MCPHTTPClientTransport: MCPClientTransport {
     public var endpointURL: URL
     public var headers: [String: String]
@@ -58,15 +58,15 @@ public struct MCPHTTPClientTransport: MCPClientTransport {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw MCPHTTPClientTransportError.invalidHTTPResponse
         }
-        let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
-        if contentType.contains("text/event-stream") {
-            throw MCPHTTPClientTransportError.streamingResponseUnsupported
-        }
         guard (200..<300).contains(httpResponse.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
             throw MCPHTTPClientTransportError.httpStatus(httpResponse.statusCode, body)
         }
         guard message.id != nil else { return nil }
+        let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
+        if contentType.contains("text/event-stream") {
+            return try Self.decodeEventStream(data, expectedID: message.id)
+        }
         do {
             return try JSONDecoder().decode(MCPJSONRPCMessage.self, from: data)
         } catch {
@@ -75,6 +75,44 @@ public struct MCPHTTPClientTransport: MCPClientTransport {
     }
 
     public func close() async throws {}
+
+    static func decodeEventStream(_ data: Data, expectedID: MCPJSONRPCID?) throws -> MCPJSONRPCMessage {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw MCPHTTPClientTransportError.invalidResponseBody("SSE response is not valid UTF-8")
+        }
+
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        var eventDataLines: [String] = []
+        var decodingErrors: [String] = []
+
+        func decodeCurrentEvent() -> MCPJSONRPCMessage? {
+            defer { eventDataLines.removeAll(keepingCapacity: true) }
+            guard !eventDataLines.isEmpty else { return nil }
+            let payload = eventDataLines.joined(separator: "\n")
+            do {
+                let decoded = try JSONDecoder().decode(MCPJSONRPCMessage.self, from: Data(payload.utf8))
+                if expectedID == nil || decoded.id == expectedID { return decoded }
+            } catch {
+                decodingErrors.append(String(describing: error))
+            }
+            return nil
+        }
+
+        for line in normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if line.isEmpty {
+                if let response = decodeCurrentEvent() { return response }
+                continue
+            }
+            guard !line.hasPrefix(":"), line.hasPrefix("data:") else { continue }
+            var value = String(line.dropFirst(5))
+            if value.first == " " { value.removeFirst() }
+            eventDataLines.append(value)
+        }
+        if let response = decodeCurrentEvent() { return response }
+
+        let detail = decodingErrors.last ?? "No JSON-RPC event matched response id"
+        throw MCPHTTPClientTransportError.invalidResponseBody(detail)
+    }
 
     public static func validateEndpoint(_ url: URL) throws {
         guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(), !host.isEmpty else {

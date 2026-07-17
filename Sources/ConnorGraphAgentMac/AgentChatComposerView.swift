@@ -761,6 +761,7 @@ struct AgentChatComposerView: View {
             composerState: composerState,
             governanceConfig: chatActions.dependencies.governance.config,
             knowledgeMarketplace: chatActions.dependencies.knowledgeMarketplace,
+            sourceRuntime: chatActions.dependencies.sources,
             hasRunningBackgroundTask: chatActions.run.hasRunningActiveSessionBackgroundTask,
             currentTextSelectionRange: { composerSelectionTracker.selectedRange },
             isSessionInfoPresented: $isSessionInfoPresented,
@@ -1080,8 +1081,8 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
             AgentComposerOptionBadge(
                 title: selection.label,
                 systemImage: "books.vertical",
-                tint: selection.selectedIDs.isEmpty ? .secondary : .accentColor,
-                isActive: !selection.selectedIDs.isEmpty,
+                tint: .secondary,
+                isActive: false,
                 style: .prominent,
                 showsBorder: false
             )

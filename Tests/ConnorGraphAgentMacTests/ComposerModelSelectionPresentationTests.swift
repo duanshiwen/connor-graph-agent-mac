@@ -63,4 +63,30 @@ struct ComposerModelSelectionPresentationTests {
         #expect(emptySelection.selectedIDs.isEmpty)
         #expect(emptySelection.label == "知识库：未选择")
     }
+
+    @Test func mcpToolSelectionSupportsAutomaticSourceAndToolScopes() {
+        let automatic = MCPToolSelection(
+            availableToolNames: ["mcp__deepwiki__ask", "mcp__deepwiki__read", "mcp__github__search"],
+            explicitToolNames: nil
+        )
+        #expect(automatic.isAutomatic)
+        #expect(automatic.label == "MCP：自动")
+        #expect(automatic.selectedToolNames.count == 3)
+
+        let sourceDisabled = automatic.togglingSource(toolNames: ["mcp__deepwiki__ask", "mcp__deepwiki__read"])
+        #expect(sourceDisabled == ["mcp__github__search"])
+
+        let partial = MCPToolSelection(
+            availableToolNames: automatic.availableToolNames,
+            explicitToolNames: sourceDisabled
+        )
+        #expect(partial.label == "MCP：1/3")
+        #expect(partial.toggling("mcp__deepwiki__read") == ["mcp__deepwiki__read", "mcp__github__search"])
+
+        let disabled = MCPToolSelection(
+            availableToolNames: automatic.availableToolNames,
+            explicitToolNames: []
+        )
+        #expect(disabled.label == "MCP：关闭")
+    }
 }
