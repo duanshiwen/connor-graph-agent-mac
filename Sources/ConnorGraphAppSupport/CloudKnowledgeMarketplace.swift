@@ -58,7 +58,29 @@ public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifia
 }
 public struct CloudMarketplaceHome: Decodable, Sendable, Equatable { public var categories: [CloudMarketplaceCategory]; public var banners: [CloudMarketplaceBanner]; public var sections: [CloudMarketplaceSection]; public init(categories: [CloudMarketplaceCategory], banners: [CloudMarketplaceBanner] = [], sections: [CloudMarketplaceSection]) { self.categories = categories; self.banners = banners; self.sections = sections } }
 public struct CloudMarketplaceSearchRequest: Codable, Sendable, Equatable { public var query: String; public var categoryID: String?; public var limit: Int; public init(query: String, categoryID: String? = nil, limit: Int = 30) { self.query = query; self.categoryID = categoryID; self.limit = limit } }
-public struct CloudKnowledgeAnswerRequest: Codable, Sendable, Equatable { public var requestID: String; public var query: String; public var knowledgeBaseIDs: [String]; public var contextBudget: Int; public var limit: Int; public init(requestID: String = UUID().uuidString, query: String, knowledgeBaseIDs: [String], contextBudget: Int = 8_000, limit: Int = 20) { self.requestID = requestID; self.query = query; self.knowledgeBaseIDs = knowledgeBaseIDs; self.contextBudget = contextBudget; self.limit = limit }; private enum CodingKeys: String, CodingKey { case requestID = "requestId", query, knowledgeBaseIDs, contextBudget = "contextBudgetBytes", limit } }
+public struct CloudKnowledgeAnswerRequest: Codable, Sendable, Equatable {
+    public var requestID: String
+    public var query: String
+    public var knowledgeBaseIDs: [String]
+    public var contextBudget: Int
+    public var limit: Int
+
+    public init(requestID: String = UUID().uuidString, query: String, knowledgeBaseIDs: [String], contextBudget: Int = 8_000, limit: Int = 20) {
+        self.requestID = requestID
+        self.query = query
+        self.knowledgeBaseIDs = knowledgeBaseIDs
+        self.contextBudget = contextBudget
+        self.limit = limit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID = "request_id"
+        case query
+        case knowledgeBaseIDs = "knowledge_base_ids"
+        case contextBudget = "context_budget_bytes"
+        case limit
+    }
+}
 public struct CloudKnowledgeAnswerPartition: Codable, Sendable, Equatable { public var layer: CloudKnowledgeLayer; public var results: [CloudKnowledgeSearchHit]; public init(layer: CloudKnowledgeLayer, results: [CloudKnowledgeSearchHit]) { self.layer = layer; self.results = results } }
 public struct CloudKnowledgeAnswerResponse: Codable, Sendable, Equatable {
     public var requestID: String; public var channel: CloudKnowledgeSearchChannel?; public var partitions: [CloudKnowledgeAnswerPartition]; public var returnedBytes: Int?; public var knowledgeSequence: Int?
@@ -116,8 +138,10 @@ public actor CloudKnowledgeAuthorizationCache {
         await perform {
             async let home = self.api.home()
             async let library = self.api.library()
+            async let allKnowledgeBases = self.api.search(.init(query: "", limit: 100))
             self.home = try await home
             self.library = try await library
+            self.searchResults = try await allKnowledgeBases
             let subscribed = self.home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + self.library.subscribed
             for base in subscribed { await self.cache.authorize(base.id) }
             self.onLibraryChanged?()

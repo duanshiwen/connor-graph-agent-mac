@@ -49,7 +49,7 @@ private enum CloudKnowledgeContextToolSupport {
         )
         let text = partitions.map { partition in
             let rows = partition.results.enumerated().map { index, hit -> String in
-                let timestamp = hit.recordedAt.map { " [recorded_at: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
+                let timestamp = hit.updatedAt.map { " [updated_at: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
                 return "\(index + 1). \(hit.title ?? hit.stableKey ?? hit.kind): \(hit.text)\(timestamp)"
             }.joined(separator: "\n")
             return "## \(partition.layer.rawValue)\n\(rows.isEmpty ? "No results." : rows)"

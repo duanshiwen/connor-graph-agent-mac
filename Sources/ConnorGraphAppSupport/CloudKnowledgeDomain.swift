@@ -61,13 +61,13 @@ public struct CloudKnowledgeSearchHit: Codable, Sendable, Equatable, Identifiabl
     public var source: String?; public var identityID: String?; public var revisionID: String?; public var layer: CloudKnowledgeLayer; public var kind: String
     public var stableKey: String?; public var payload: CloudKnowledgeJSONValue?; public var score: Double?; public var stagedSequence: Int?
     public var title: String?; public var text: String; public var staged: Bool; public var hints: [String]
-    public var validFrom: Date?; public var validTo: Date?; public var recordedAt: Date?
+    public var validFrom: Date?; public var validTo: Date?; public var recordedAt: Date?; public var updatedAt: Date?
     public var id: String { revisionID ?? identityID ?? stableKey ?? "\(layer.rawValue):\(kind):\(text)" }
-    public init(identityID: String?, revisionID: String? = nil, layer: CloudKnowledgeLayer, kind: String, title: String? = nil, text: String, score: Double? = nil, staged: Bool = false, hints: [String] = [], source: String? = nil, stableKey: String? = nil, payload: CloudKnowledgeJSONValue? = nil, stagedSequence: Int? = nil, validFrom: Date? = nil, validTo: Date? = nil, recordedAt: Date? = nil) {
+    public init(identityID: String?, revisionID: String? = nil, layer: CloudKnowledgeLayer, kind: String, title: String? = nil, text: String, score: Double? = nil, staged: Bool = false, hints: [String] = [], source: String? = nil, stableKey: String? = nil, payload: CloudKnowledgeJSONValue? = nil, stagedSequence: Int? = nil, validFrom: Date? = nil, validTo: Date? = nil, recordedAt: Date? = nil, updatedAt: Date? = nil) {
         self.source = source; self.identityID = identityID; self.revisionID = revisionID; self.layer = layer; self.kind = kind; self.stableKey = stableKey; self.payload = payload; self.score = score; self.stagedSequence = stagedSequence; self.title = title; self.text = text; self.staged = staged; self.hints = hints
-        self.validFrom = validFrom; self.validTo = validTo; self.recordedAt = recordedAt
+        self.validFrom = validFrom; self.validTo = validTo; self.recordedAt = recordedAt; self.updatedAt = updatedAt ?? recordedAt
     }
-    private enum CodingKeys: String, CodingKey { case source, identityID, revisionID, layer, kind, stableKey, payload, score, stagedSequence, title, text, staged, hints, validFrom, validTo, recordedAt }
+    private enum CodingKeys: String, CodingKey { case source, identityID, revisionID, layer, kind, stableKey, payload, score, stagedSequence, title, text, staged, hints, validFrom, validTo, recordedAt, updatedAt }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         source = try box.decodeIfPresent(String.self, forKey: .source)
@@ -89,6 +89,7 @@ public struct CloudKnowledgeSearchHit: Codable, Sendable, Equatable, Identifiabl
         validFrom = try box.decodeIfPresent(Date.self, forKey: .validFrom)
         validTo = try box.decodeIfPresent(Date.self, forKey: .validTo)
         recordedAt = try box.decodeIfPresent(Date.self, forKey: .recordedAt)
+        updatedAt = try box.decodeIfPresent(Date.self, forKey: .updatedAt) ?? recordedAt
     }
     private static func string(in payload: CloudKnowledgeJSONValue?, keys: [String]) -> String? {
         guard case .object(let object)? = payload else { return nil }

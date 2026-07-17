@@ -2020,6 +2020,7 @@ final class AppRuntimeLifecycle {
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
         let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
+        let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
             var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
                 ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -2049,7 +2050,8 @@ final class AppRuntimeLifecycle {
                         permissionMode: configuration.permissionMode,
                         configuration: configuration,
                         sessionWorkspace: sessionState?.workspace,
-                        sessionLLMOverride: sessionState?.llmOverride
+                        sessionLLMOverride: sessionState?.llmOverride,
+                        remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs
                     ) : nil
                     try Task.checkCancellation()
                     return NewSessionPreparationResult.success(
