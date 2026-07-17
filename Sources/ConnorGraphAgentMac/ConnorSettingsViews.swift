@@ -338,7 +338,7 @@ struct SettingsAppSection: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .controlSize(.large)
+                    .controlSize(AppButtonLayout.controlSize)
                     .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 }
                 .frame(minHeight: SettingsListLayout.rowMinHeight)
@@ -1398,7 +1398,7 @@ struct AIConnectionSetupView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 .onChange(of: xiaomiMiMoConnectionMode) { _, _ in applyXiaomiMiMoConnectionMode() }
 
                 Text(xiaomiMiMoConnectionMode.subtitle)
@@ -1455,7 +1455,7 @@ struct AIConnectionSetupView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
             .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
             .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
         }
@@ -1480,7 +1480,7 @@ struct AIConnectionSetupView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
@@ -1510,7 +1510,7 @@ struct AIConnectionSetupView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        .controlSize(.large)
+                        .controlSize(AppButtonLayout.controlSize)
                         .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
                         .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
                     }
@@ -1527,7 +1527,7 @@ struct AIConnectionSetupView: View {
                                 }
                             }
                             .pickerStyle(.segmented)
-                            .controlSize(.large)
+                            .controlSize(AppButtonLayout.controlSize)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -1689,7 +1689,7 @@ struct AIConnectionSetupView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedModel) { _, newValue in
                     if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }

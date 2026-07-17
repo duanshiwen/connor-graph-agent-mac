@@ -23,10 +23,14 @@ public struct RefreshingCloudKnowledgeCredentialProvider: CloudKnowledgeCredenti
     private let session: ConnorBackendAuthenticatedSession
     public init(session: ConnorBackendAuthenticatedSession) { self.session = session }
     public func accessToken() async throws -> String {
-        do { return try await session.accessToken() } catch { throw CloudKnowledgeError.unauthorized }
+        do { return try await session.accessToken() }
+        catch where AppBackendConnectionFailure.isUnreachable(error) { throw error }
+        catch { throw CloudKnowledgeError.unauthorized }
     }
     public func refreshedAccessToken(afterRejectedToken token: String) async throws -> String {
-        do { return try await session.refreshAccessToken(afterRejectedToken: token) } catch { throw CloudKnowledgeError.unauthorized }
+        do { return try await session.refreshAccessToken(afterRejectedToken: token) }
+        catch where AppBackendConnectionFailure.isUnreachable(error) { throw error }
+        catch { throw CloudKnowledgeError.unauthorized }
     }
 }
 

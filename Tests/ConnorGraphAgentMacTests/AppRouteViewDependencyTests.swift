@@ -177,6 +177,23 @@ struct AppRouteViewDependencyTests {
         #expect(detailSource.contains("store.subscribe(id: base.id)"))
     }
 
+    @Test func knowledgeMarketplaceHomeShowsAllPublishedKnowledgeBases() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        #expect(source.contains("marketplaceSection(title: marketplaceBrowseTitle, bases: store.searchResults)"))
+        #expect(source.contains("return \"全部知识库\""))
+        #expect(!source.contains("ForEach(store.home.sections)"))
+    }
+
+    @Test func newSessionRuntimeKeepsTheEffectiveRemoteKnowledgeScope() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppRuntimeLifecycle.swift"), encoding: .utf8)
+        let preparationStart = try #require(source.range(of: "private func createSessionOptimistically"))
+        let preparationEnd = try #require(source.range(of: "func waitForNewSessionPreparation"))
+        let preparationSource = source[preparationStart.lowerBound..<preparationEnd.lowerBound]
+
+        #expect(preparationSource.contains("let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)"))
+        #expect(preparationSource.contains("remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs"))
+    }
+
     @Test func knowledgePublicationToolbarButtonOwnsItsDynamicVisibility() throws {
         let shellSource = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
         let progressSource = try String(contentsOf: projectSourceURL(named: "KnowledgePublicationProgressViews.swift"), encoding: .utf8)

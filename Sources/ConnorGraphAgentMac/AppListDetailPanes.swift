@@ -1358,11 +1358,8 @@ private struct AddTaskAutomationSheet: View {
                         RSSSetupRow("消息", labelWidth: Layout.labelWidth, alignment: .top) {
                             TextEditor(text: $message)
                                 .font(AgentChatTypography.body)
-                                .scrollContentBackground(.hidden)
-                                .padding(8)
                                 .frame(minHeight: 118)
-                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+                                .appFormTextEditor()
                         }
                         RSSSetupHint(kind == .scheduled ? "到达时间后，Connor 会创建一个新会话并发送这段消息。" : "当会话状态切换到所选状态时，Connor 会向该会话发送这段消息。")
                     }

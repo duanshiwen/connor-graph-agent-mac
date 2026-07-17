@@ -68,6 +68,28 @@ struct AppUserIdentityStoreTests {
         #expect(await transport.logoutRequestCount == 1)
     }
 
+    @Test @MainActor func offlineLogoutKeepsTheLocalSessionAndSkipsTheRequest() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorIdentityOfflineLogoutTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let credentials = AppConnorAccountCredentialStore(store: LocalEncryptedCredentialStore(rootDirectory: root))
+        try credentials.saveTokens(.init(accessToken: "expired-access", refreshToken: "valid-refresh"))
+        let transport = IdentityTestTransport()
+        let store = AppUserIdentityStore(
+            baseURL: URL(string: "https://backend.example")!,
+            credentials: credentials,
+            transport: transport,
+            networkIsAvailable: { false }
+        )
+        await store.restoreSession()
+
+        await store.logout()
+
+        #expect(store.currentUser?.username == "shiwen")
+        #expect(try credentials.tokens() != nil)
+        #expect(store.errorMessage == "当前没有网络连接。")
+        #expect(await transport.logoutRequestCount == 0)
+    }
+
     @Test @MainActor func failedRestoreKeepsCredentialsAvailableForRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorIdentityRetryTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -20,8 +20,12 @@ public actor ChatSessionListRefreshCoordinator {
         preserving existingSessions: [AgentSession] = []
     ) throws -> ChatSessionListRefreshResult {
         let existingByID = Dictionary(uniqueKeysWithValues: existingSessions.map { ($0.id, $0) })
+        let persistedMessageCounts = try repository.loadSessionMessageCounts()
         let all = try repository.loadSessionMetadata().map { metadata in
             guard let existing = existingByID[metadata.id], !existing.messages.isEmpty else { return metadata }
+            guard existing.messages.count == persistedMessageCounts[metadata.id] else {
+                return try repository.loadSession(id: metadata.id) ?? metadata
+            }
             var merged = metadata
             merged.messages = existing.messages
             return merged

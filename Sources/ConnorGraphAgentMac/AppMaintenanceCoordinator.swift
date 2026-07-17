@@ -28,6 +28,7 @@ final class AppMaintenanceCoordinator {
     private var generation = 0
     private var isShutdown = false
     private var isRunningBackgroundJobs = false
+    private var needsBackgroundJobsRerun = false
     private var lastDailySweep: Date?
     private var hasScheduledRepair = false
     private let memoryWorker = AppMemoryOSMaintenanceWorker()
@@ -63,8 +64,14 @@ final class AppMaintenanceCoordinator {
         guard !isShutdown, schedulerTimer == nil else { return }
         isSchedulerRunning = true
         runScheduledTasksOnce()
+        scheduleDailySweep()
+        scheduleBackgroundJobs()
         schedulerTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.runScheduledTasksOnce() }
+            MainActor.assumeIsolated {
+                self?.runScheduledTasksOnce()
+                self?.scheduleDailySweep()
+                self?.scheduleBackgroundJobs()
+            }
         }
     }
 
@@ -114,7 +121,11 @@ final class AppMaintenanceCoordinator {
     }
 
     func scheduleBackgroundJobs() {
-        guard !isShutdown, backgroundJobsTask == nil else { return }
+        guard !isShutdown else { return }
+        guard backgroundJobsTask == nil else {
+            needsBackgroundJobsRerun = true
+            return
+        }
         let currentGeneration = generation
         backgroundJobsTask = Task { [weak self] in
             guard let self,
@@ -123,6 +134,10 @@ final class AppMaintenanceCoordinator {
             await self.runBackgroundJobs()
             guard self.generation == currentGeneration else { return }
             self.backgroundJobsTask = nil
+            if self.needsBackgroundJobsRerun {
+                self.needsBackgroundJobsRerun = false
+                self.scheduleBackgroundJobs()
+            }
         }
     }
 
@@ -142,7 +157,7 @@ final class AppMaintenanceCoordinator {
     func runMemoryBackgroundJobs(
         facade: AppMemoryOSFacade?,
         aiExecutorProvider: BackgroundAIExecutorProvider?,
-        onError: @escaping (String) -> Void
+        onStatus: @escaping (String?) -> Void
     ) async {
         guard !isShutdown, !isRunningBackgroundJobs, let facade else { return }
         isRunningBackgroundJobs = true
@@ -160,16 +175,16 @@ final class AppMaintenanceCoordinator {
             AppPerformanceLog.chatTurnLogger.info(
                 "memoryOS.backgroundJobs.completed projectionRuns=\(summary.projectionRunCount, privacy: .public) aiRuns=\(summary.aiJobRunCount, privacy: .public) duration=\(milliseconds, privacy: .public)ms"
             )
+            onStatus(summary.attentionMessage)
         } catch {
             guard !isShutdown else { return }
-            onError(String(describing: error))
+            onStatus(String(describing: error))
         }
     }
 
     func runMemoryDailySweep(facade: AppMemoryOSFacade?, now: Date = Date()) async {
         guard !isShutdown, let facade else { return }
         guard lastDailySweep.map({ now.timeIntervalSince($0) > 86_400 }) ?? true else { return }
-        lastDailySweep = now
         do {
             let startedAt = ContinuousClock.now
             let items = try await memoryWorker.runDailySweep(facade: facade, now: now)
@@ -179,6 +194,10 @@ final class AppMaintenanceCoordinator {
             AppPerformanceLog.chatTurnLogger.info(
                 "memoryOS.dailySweep.completed queued=\(items.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms"
             )
+            lastDailySweep = now
+            if !items.isEmpty {
+                scheduleBackgroundJobs()
+            }
         } catch {
             AppPerformanceLog.chatTurnLogger.warning(
                 "memoryOS.dailySweep.failed error=\(String(describing: error), privacy: .public)"
@@ -257,6 +276,7 @@ final class AppMaintenanceCoordinator {
         }
         stopScheduler()
         backgroundJobsTask?.cancel(); backgroundJobsTask = nil
+        needsBackgroundJobsRerun = false
         dailySweepTask?.cancel(); dailySweepTask = nil
         repairTask?.cancel(); repairTask = nil
         for task in reconcileTasks.values { task.cancel() }

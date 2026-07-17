@@ -202,9 +202,11 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     try store.upsertSession(new)
 
     let sessions = try store.recentSessionMetadata(limit: 10)
+    let messageCounts = try store.sessionMessageCounts()
 
     #expect(sessions.map(\.id) == ["session-new", "session-old"])
     #expect(sessions.allSatisfy { $0.messages.isEmpty })
+    #expect(messageCounts == ["session-old": 1, "session-new": 0])
     #expect(try store.session(id: "session-old")?.messages.map(\.content) == ["large transcript"])
 }
 

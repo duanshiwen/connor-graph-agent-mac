@@ -18,12 +18,12 @@ import ConnorGraphCore
 
     #expect(summary.state == .completed)
     #expect(summary.statusText == "已完成")
-    #expect(summary.toolNames == ["Glob", "graph_search"])
+    #expect(summary.toolNames == ["查找文件", "搜索知识图谱"])
     #expect(summary.toolCallCount == 2)
     #expect(summary.toolSuccessCount == 2)
     #expect(summary.toolFailureCount == 0)
-    #expect(summary.compactToolText == "使用 Glob、graph_search")
-    #expect(summary.subtitle == "使用 Glob、graph_search · 6 个底层事件")
+    #expect(summary.compactToolText == "查找文件、搜索知识图谱")
+    #expect(summary.subtitle == "查找文件、搜索知识图谱")
 }
 
 @Test func summarizesToolActivitiesWithCraftStyleNames() {
@@ -56,9 +56,9 @@ import ConnorGraphCore
 
     let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
 
-    #expect(summary.toolNames == ["Read File", "Swift: 编译项目"])
-    #expect(summary.compactToolText == "使用 Read File、Swift: 编译项目")
-    #expect(summary.subtitle == "使用 Read File、Swift: 编译项目 · 3 个底层事件")
+    #expect(summary.toolNames == ["读取文件", "编译 Swift 项目"])
+    #expect(summary.compactToolText == "读取文件、编译 Swift 项目")
+    #expect(summary.subtitle == "读取文件、编译 Swift 项目")
 }
 
 @Test func keepsRunningTurnWhenOneToolFailsButRunContinues() {
@@ -74,10 +74,10 @@ import ConnorGraphCore
 
     #expect(summary.state == .running)
     #expect(summary.statusText == "正在处理")
-    #expect(summary.toolNames == ["Read", "Bash"])
+    #expect(summary.toolNames == ["读取文件", "执行终端命令"])
     #expect(summary.toolFailureCount == 1)
     #expect(summary.primaryErrorMessage == "Call 1 · file not found")
-    #expect(summary.subtitle == "正在使用 Read、Bash · 4 个底层事件")
+    #expect(summary.subtitle == "正在执行：读取文件、执行终端命令")
 }
 
 @Test func marksTurnFailedOnlyWhenRunFails() {
@@ -92,10 +92,10 @@ import ConnorGraphCore
 
     #expect(summary.state == .failed)
     #expect(summary.statusText == "已失败")
-    #expect(summary.toolNames == ["Bash"])
+    #expect(summary.toolNames == ["执行终端命令"])
     #expect(summary.toolFailureCount == 1)
     #expect(summary.primaryErrorMessage == "Call 1 · command timed out")
-    #expect(summary.subtitle == "Bash 失败：Call 1 · command timed out · 使用 Bash · 3 个底层事件")
+    #expect(summary.subtitle == "执行终端命令失败：Call 1 · command timed out · 执行终端命令")
 }
 
 @Test func summarizesManyToolsWithCompactText() {
@@ -109,9 +109,9 @@ import ConnorGraphCore
 
     let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
 
-    #expect(summary.toolNames == ["Glob", "Bash", "graph_search", "browser_tool"])
-    #expect(summary.compactToolText == "使用 Glob、Bash、graph_search 等 4 个工具")
-    #expect(summary.subtitle == "使用 Glob、Bash、graph_search 等 4 个工具 · 4 个底层事件")
+    #expect(summary.toolNames == ["查找文件", "执行终端命令", "搜索知识图谱", "执行网页操作"])
+    #expect(summary.compactToolText == "查找文件、执行终端命令、搜索知识图谱等 4 项操作")
+    #expect(summary.subtitle == "查找文件、执行终端命令、搜索知识图谱等 4 项操作")
 }
 
 @Test func marksRunningTurnFromProcessState() {
@@ -126,7 +126,7 @@ import ConnorGraphCore
     #expect(summary.state == .running)
     #expect(summary.statusText == "正在处理")
     #expect(summary.title == "第 10 轮 · 正在处理")
-    #expect(summary.subtitle == "正在使用 browser_tool · 2 个底层事件")
+    #expect(summary.subtitle == "正在执行：执行网页操作")
 }
 
 @Test func marksTurnWaitingForPermissionWhenPermissionIsRequested() {
@@ -140,7 +140,28 @@ import ConnorGraphCore
     #expect(summary.state == .waitingForPermission)
     #expect(summary.statusText == "等待确认")
     #expect(summary.hasPermissionRequest)
-    #expect(summary.subtitle == "等待权限确认 · 未调用工具 · 1 个底层事件")
+    #expect(summary.subtitle == "等待权限确认 · 未调用工具")
+}
+
+@Test func localizesRegisteredToolFamiliesAndFutureToolFallbacks() {
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mail_send_draft", semanticKind: .unknown) == "发送邮件")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "rss_sync_source", semanticKind: .unknown) == "同步 RSS 订阅源")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "memory_os_l4_neighbors", semanticKind: .unknown) == "查看实体关系")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "cloud_kb_future_operation", semanticKind: .unknown) == "执行知识库操作")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mcp__lark__search", semanticKind: .unknown) == "调用外部工具")
+}
+
+@Test func toolSummaryCountsInvocationsInsteadOfLifecycleEvents() {
+    let summary = AgentTurnActivitySummaryBuilder().summary(
+        process: makeProcess(state: .completed, turnNumber: 14),
+        events: [
+            event(kind: "toolRequested", title: "Tool requested: get_current_time", detail: "Call 1", severity: .info),
+            event(kind: "toolStarted", title: "Tool running: get_current_time", detail: "Call 1", severity: .info),
+            event(kind: "toolFinished", title: "Tool finished: get_current_time", detail: "Call 1", severity: .success)
+        ]
+    )
+
+    #expect(summary.toolSummaries.first?.compactCountText == "获取当前时间")
 }
 
 private func makeProcess(state: AgentChatTurnProcessState, turnNumber: Int) -> AgentChatTurnProcessPresentation {

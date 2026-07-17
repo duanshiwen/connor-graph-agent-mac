@@ -345,16 +345,22 @@ public final class AppUserIdentityStore: ObservableObject {
     private let api: ConnorBackendAPIClient
     private let credentials: AppConnorAccountCredentialStore
     private let authenticatedSession: ConnorBackendAuthenticatedSession
+    private let networkIsAvailable: @MainActor () -> Bool
+    private let serverIsReachable: @MainActor () -> Bool
 
     public init(
         baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!,
         credentials: AppConnorAccountCredentialStore = .init(),
-        transport: any ConnorBackendHTTPTransport = URLSession.shared
+        transport: any ConnorBackendHTTPTransport = URLSession.shared,
+        networkIsAvailable: @escaping @MainActor () -> Bool = { true },
+        serverIsReachable: @escaping @MainActor () -> Bool = { true }
     ) {
         let api = ConnorBackendAPIClient(baseURL: baseURL, transport: transport)
         self.api = api
         self.credentials = credentials
         self.authenticatedSession = ConnorBackendAuthenticatedSession(api: api, credentials: credentials)
+        self.networkIsAvailable = networkIsAvailable
+        self.serverIsReachable = serverIsReachable
     }
 
     public var currentUser: ConnorRemoteUserIdentity? {
@@ -386,10 +392,12 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     public func login(username: String, password: String) async {
+        guard requireNetwork() else { return }
         await authenticate { try await self.api.login(username: username, password: password) }
     }
 
     public func register(username: String, email: String, password: String) async {
+        guard requireNetwork() else { return }
         await authenticate { try await self.api.register(username: username, email: email, password: password) }
     }
 
@@ -424,6 +432,7 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     public func logout() async {
+        guard requireNetwork() else { return }
         let tokens = try? credentials.tokens()
         if let tokens {
             try? await api.logout(
@@ -434,6 +443,19 @@ public final class AppUserIdentityStore: ObservableObject {
         await authenticatedSession.clearRefreshState()
         clearLocalSession(state: .signedOut)
         errorMessage = nil
+    }
+
+    @discardableResult
+    private func requireNetwork() -> Bool {
+        guard networkIsAvailable() else {
+            errorMessage = "当前没有网络连接。"
+            return false
+        }
+        guard serverIsReachable() else {
+            errorMessage = "当前无法连接到康纳服务器。"
+            return false
+        }
+        return true
     }
 
     private func clearLocalSession(state: ConnorAuthenticationState) {

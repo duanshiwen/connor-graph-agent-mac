@@ -448,7 +448,6 @@ private struct AgentChatConversationView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
     @Binding var isSessionInfoPresented: Bool
-    @State private var activityDetailEvent: AgentEventPresentation?
     @State private var selectedToolInvocation: AgentToolInvocationPresentation?
     @State private var expandedApprovalID: String?
     @State private var lastObservedSessionID: String?
@@ -610,11 +609,18 @@ private struct AgentChatConversationView: View {
         visibleMessageLimit = nextLimit
     }
 
-    private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
+    private func initialActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation]? {
         if process.id == latestProcessID, !model.run.eventTimeline.isEmpty {
             return model.run.eventTimeline
         }
-        let restoredEvents = chatActions.run.restoredAgentEventTimeline(for: process)
+        return nil
+    }
+
+    private func loadActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) async -> [AgentEventPresentation] {
+        if let initial = initialActivityEvents(for: process, latestProcessID: latestProcessID) {
+            return initial
+        }
+        let restoredEvents = await chatActions.run.restoredAgentEventTimeline(for: process)
         if !restoredEvents.isEmpty {
             return restoredEvents
         }
@@ -645,9 +651,9 @@ private struct AgentChatConversationView: View {
                 AgentAssistantHeaderView()
                 AgentChatTurnProcessRow(
                     process: process,
-                    events: activityEvents(for: process, latestProcessID: latestProcessID),
-                    onOpenDetail: { event in
-                        activityDetailEvent = event
+                    initialEvents: initialActivityEvents(for: process, latestProcessID: latestProcessID),
+                    loadEvents: {
+                        await loadActivityEvents(for: process, latestProcessID: latestProcessID)
                     },
                     onOpenToolInvocation: { invocation in
                         selectedToolInvocation = invocation
@@ -776,14 +782,6 @@ private struct AgentChatConversationView: View {
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
-        .overlay {
-            if let event = activityDetailEvent, selectedToolInvocation == nil {
-                AgentActivityDetailOverlay(event: event) {
-                    activityDetailEvent = nil
-                }
-                .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
-            }
-        }
         .overlay {
             if let invocation = selectedToolInvocation {
                 AgentToolInvocationDetailOverlay(invocation: invocation) {

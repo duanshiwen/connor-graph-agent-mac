@@ -261,6 +261,10 @@ final class ChatSessionCoordinator {
         return (updated, didRemove)
     }
 
+    func synchronize(_ session: AgentSession) {
+        replaceInLists(session)
+    }
+
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true

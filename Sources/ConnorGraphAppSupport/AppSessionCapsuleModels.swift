@@ -47,6 +47,7 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
     public var attachmentSummary: AppSessionAttachmentSummary?
     public var llmOverride: SessionLLMOverride?
     public var remoteKnowledgeBaseIDs: [String]?
+    public var allowedMCPToolNames: [String]?
     public var anchorState: SessionAnchorState?
 
     public init(
@@ -61,6 +62,7 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
         attachmentSummary: AppSessionAttachmentSummary? = nil,
         llmOverride: SessionLLMOverride? = nil,
         remoteKnowledgeBaseIDs: [String]? = nil,
+        allowedMCPToolNames: [String]? = nil,
         anchorState: SessionAnchorState? = nil
     ) {
         self.schemaVersion = schemaVersion
@@ -74,6 +76,7 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
         self.attachmentSummary = attachmentSummary
         self.llmOverride = llmOverride
         self.remoteKnowledgeBaseIDs = remoteKnowledgeBaseIDs
+        self.allowedMCPToolNames = allowedMCPToolNames
         self.anchorState = anchorState
     }
 }

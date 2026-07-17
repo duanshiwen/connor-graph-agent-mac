@@ -15,6 +15,7 @@ enum AgentComposerAction {
     case setPermissionMode(AgentPermissionMode)
     case setSessionStatus(AgentSessionStatus)
     case setRemoteKnowledgeBaseIDs([String]?)
+    case setAllowedMCPToolNames([String]?)
     case toggleBrowserWorkspaceVisibility
     case toggleSpeechTranscription
     case beginSpeechTranscription(NSRange?)

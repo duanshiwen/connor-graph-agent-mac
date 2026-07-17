@@ -194,6 +194,9 @@ final class AppRuntimeLifecycle {
         chatFeatureModel.composer.remoteKnowledgeBaseIDs = sessionID.flatMap {
             chatWorkspaceCoordinator.stateSnapshotsBySessionID[$0]?.remoteKnowledgeBaseIDs
         }
+        chatFeatureModel.composer.allowedMCPToolNames = sessionID.flatMap {
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[$0]?.allowedMCPToolNames
+        }
     }
 
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? {
@@ -581,14 +584,44 @@ final class AppRuntimeLifecycle {
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
         let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
-        let cloudKnowledgeAPI = CloudKnowledgeAPIClient(baseURL: backendBaseURL)
+        AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
+        let backendTransport = BackendConnectivityTrackingTransport()
+        let accountCredentials = AppConnorAccountCredentialStore()
+        let authenticatedSession = ConnorBackendAuthenticatedSession(
+            api: ConnorBackendAPIClient(baseURL: backendBaseURL, transport: backendTransport),
+            credentials: accountCredentials
+        )
+        let cloudCredentials = RefreshingCloudKnowledgeCredentialProvider(session: authenticatedSession)
+        let refreshRejectedToken: @Sendable (String) async throws -> String = { rejectedToken in
+            try await cloudCredentials.refreshedAccessToken(afterRejectedToken: rejectedToken)
+        }
+        let cloudKnowledgeAPI = CloudKnowledgeAPIClient(
+            baseURL: backendBaseURL,
+            transport: backendTransport,
+            credentials: cloudCredentials,
+            refreshRejectedToken: refreshRejectedToken
+        )
         self.cloudKnowledgeAPI = cloudKnowledgeAPI
-        let cloudKnowledgeMarketplaceAPI = CloudKnowledgeMarketplaceAPIClient(baseURL: backendBaseURL)
+        let cloudKnowledgeMarketplaceAPI = CloudKnowledgeMarketplaceAPIClient(
+            baseURL: backendBaseURL,
+            transport: backendTransport,
+            credentials: cloudCredentials,
+            refreshRejectedToken: refreshRejectedToken
+        )
         let cloudKnowledgeAuthorizationCache = CloudKnowledgeAuthorizationCache()
-        self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
+        self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(
+            api: cloudKnowledgeMarketplaceAPI,
+            cache: cloudKnowledgeAuthorizationCache,
+            networkIsAvailable: { AppNetworkConnectivity.shared.isConnected },
+            serverIsReachable: { AppBackendConnectivity.shared.isReachable }
+        )
         self.cloudKnowledgeConsumptionClient = CloudKnowledgeConsumptionClient(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
-            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: backendBaseURL),
+            creatorAPI: CloudKnowledgeCreatorAPIClient(
+                baseURL: backendBaseURL,
+                credentials: cloudCredentials,
+                refreshRejectedToken: refreshRejectedToken
+            ),
             publicationAPI: cloudKnowledgeAPI
         )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
@@ -829,7 +862,7 @@ final class AppRuntimeLifecycle {
                 submit: { [weak self] in await self?.submitChat(prompt: $0, clearComposer: $1, displayPrompt: $2, attachments: $3, personReferences: $4) },
                 cancel: { [weak self] in self?.cancelActiveChatRun() },
                 permission: { [weak self] in self?.setAgentPermissionMode($0) },
-                timeline: { [weak self] in self?.restoredAgentEventTimeline(for: $0) ?? [] },
+                timeline: { [weak self] in await self?.restoredAgentEventTimeline(for: $0) ?? [] },
                 markdown: { [weak self] in self?.markdownPersistentCacheContext(messageID: $0) },
                 copy: { [weak self] in self?.copyAssistantMessageToPasteboard($0) },
                 export: { [weak self] in self?.exportAssistantMessageToFile($0, now: $1) },
@@ -839,7 +872,8 @@ final class AppRuntimeLifecycle {
                 thinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectThinkingLevel($0) },
                 defaultThinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectDefaultThinkingLevel($0) },
                 reloadModels: { [weak self] in await self?.aiConnectionsModel.reloadModelConnections() },
-                remoteKnowledge: { [weak self] in self?.setSessionRemoteKnowledgeBaseIDs($0) }
+                remoteKnowledge: { [weak self] in self?.setSessionRemoteKnowledgeBaseIDs($0) },
+                mcpTools: { [weak self] in self?.setSessionAllowedMCPToolNames($0) }
             ),
             browser: browserFeatureModel,
             calendar: calendarFeatureModel,
@@ -1094,7 +1128,14 @@ final class AppRuntimeLifecycle {
             await self.maintenanceCoordinator.runMemoryBackgroundJobs(
                 facade: self.memoryOSFacade,
                 aiExecutorProvider: self.backgroundAIExecutorProvider,
-                onError: { [weak self] in self?.errorMessage = $0 }
+                onStatus: { [weak self] status in
+                    guard let self else { return }
+                    if let status {
+                        self.errorMessage = status
+                    } else if self.errorMessage?.hasPrefix("Memory OS ") == true {
+                        self.errorMessage = nil
+                    }
+                }
             )
         }
         maintenanceCoordinator.runDailySweep = { [weak self] in
@@ -1658,7 +1699,8 @@ final class AppRuntimeLifecycle {
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
-            remoteKnowledgeBaseIDs: effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
+            remoteKnowledgeBaseIDs: effectiveRemoteKnowledgeBaseIDs(sessionID: session.id),
+            allowedMCPToolNames: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.allowedMCPToolNames
         )
     }
 
@@ -1719,7 +1761,7 @@ final class AppRuntimeLifecycle {
     }
 
     private func effectiveRemoteKnowledgeBaseIDs(sessionID: String) -> [String] {
-        let available = Set(knowledgeMarketplaceStore.library.subscribed.map(\.id))
+        let available = Set(knowledgeMarketplaceStore.library.availableForConsumption.map(\.id))
         let explicit = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.remoteKnowledgeBaseIDs
         return (explicit.map { Set($0).intersection(available) } ?? available).sorted()
     }
@@ -1733,6 +1775,19 @@ final class AppRuntimeLifecycle {
         state.updatedAt = Date()
         chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
         chatFeatureModel.composer.remoteKnowledgeBaseIDs = state.remoteKnowledgeBaseIDs
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        rebuildNativeSessionManagerForActiveSession()
+    }
+
+    private func setSessionAllowedMCPToolNames(_ names: [String]?) {
+        guard let sessionID = chatFeatureModel.sessions.selectedSessionID else { return }
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
+            ?? (try? chatSessionRepository?.loadSessionState(sessionID: sessionID))
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.allowedMCPToolNames = names.map { Array(Set($0)).sorted() }
+        state.updatedAt = Date()
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+        chatFeatureModel.composer.allowedMCPToolNames = state.allowedMCPToolNames
         try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
         rebuildNativeSessionManagerForActiveSession()
     }
@@ -2020,6 +2075,7 @@ final class AppRuntimeLifecycle {
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
         let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
+        let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
             var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
                 ?? AppSessionStateSnapshot(sessionID: sessionID)
@@ -2049,7 +2105,9 @@ final class AppRuntimeLifecycle {
                         permissionMode: configuration.permissionMode,
                         configuration: configuration,
                         sessionWorkspace: sessionState?.workspace,
-                        sessionLLMOverride: sessionState?.llmOverride
+                        sessionLLMOverride: sessionState?.llmOverride,
+                        remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
+                        allowedMCPToolNames: sessionState?.allowedMCPToolNames
                     ) : nil
                     try Task.checkCancellation()
                     return NewSessionPreparationResult.success(
@@ -2356,7 +2414,7 @@ final class AppRuntimeLifecycle {
         }
     }
 
-    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) async -> [AgentEventPresentation] {
         guard process.state == .completed,
               let chatSessionRepository,
               let sessionID = chatFeatureModel.sessions.selectedSessionID
@@ -2367,19 +2425,31 @@ final class AppRuntimeLifecycle {
             chatRunCoordinator.cacheProcessTimeline([], key: cacheKey)
             return []
         }
-        do {
-            let runs = try chatSessionRepository.loadRuns(sessionID: sessionID, statuses: nil, limit: 200)
-            guard let run = runs.first(where: { $0.metadata["user_message_id"] == sourceUserMessageID }) else {
-                chatRunCoordinator.cacheProcessTimeline([], key: cacheKey)
+        let restored = await Task.detached(priority: .userInitiated) { () -> [AgentEventPresentation] in
+            do {
+                let runs = try chatSessionRepository.loadRuns(sessionID: sessionID, statuses: nil, limit: 200)
+                guard let run = runs.first(where: { $0.metadata["user_message_id"] == sourceUserMessageID }) else { return [] }
+                let restorer = AgentEventPresentationRestorer()
+                let runEvents = try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil)
+                let runPresentations = restorer.presentations(from: runEvents)
+                if !runPresentations.isEmpty { return runPresentations }
+                let journalEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: nil)
+                    .filter { $0.runID == run.id }
+                    .sorted { lhs, rhs in
+                        switch (lhs.sequence, rhs.sequence) {
+                        case let (left?, right?): return left < right
+                        case (.some, .none): return true
+                        case (.none, .some): return false
+                        case (.none, .none): return lhs.createdAt < rhs.createdAt
+                        }
+                    }
+                return restorer.presentations(from: journalEvents)
+            } catch {
                 return []
             }
-            let restored = try restoreAgentEventTimeline(runID: run.id, sessionID: sessionID)
-            chatRunCoordinator.cacheProcessTimeline(restored, key: cacheKey)
-            return restored
-        } catch {
-            chatRunCoordinator.cacheProcessTimeline([], key: cacheKey)
-            return []
-        }
+        }.value
+        chatRunCoordinator.cacheProcessTimeline(restored, key: cacheKey)
+        return restored
     }
 
     private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {
@@ -2887,6 +2957,7 @@ final class AppRuntimeLifecycle {
                 )
                 chatSessionCoordinator.adoptDirectSelection(response.session.id)
             }
+            chatSessionCoordinator.synchronize(response.session)
             chatApprovalCoordinator.reload()
             globalSearchFeatureModel.upsertSessionIndex(response.session)
             scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
@@ -2916,6 +2987,7 @@ final class AppRuntimeLifecycle {
                     transcript: recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
                 )
             }
+            chatSessionCoordinator.synchronize(recoveredSession)
             chatApprovalCoordinator.reload()
             chatRunCoordinator.clearPendingCancellation(sessionID: submittingSessionID)
             if case NativeSessionManagerError.runCancelled = error {
@@ -3123,7 +3195,7 @@ extension AppRuntimeLifecycle {
             },
             cancel: { [weak model] in model?.cancelActiveChatRun() },
             permission: { [weak model] in model?.setAgentPermissionMode($0) },
-            timeline: { [weak model] in model?.restoredAgentEventTimeline(for: $0) ?? [] },
+            timeline: { [weak model] in await model?.restoredAgentEventTimeline(for: $0) ?? [] },
             markdown: { [weak model] in model?.markdownPersistentCacheContext(messageID: $0) },
             copy: { [weak model] in model?.copyAssistantMessageToPasteboard($0) },
             export: { [weak model] in model?.exportAssistantMessageToFile($0, now: $1) },
@@ -3133,7 +3205,8 @@ extension AppRuntimeLifecycle {
             thinking: { [weak aiRuntime] in aiRuntime?.selectThinkingLevel($0) },
             defaultThinking: { [weak aiRuntime] in aiRuntime?.selectDefaultThinkingLevel($0) },
             reloadModels: { [weak aiConnections] in await aiConnections?.reloadModelConnections() },
-            remoteKnowledge: { [weak model] in model?.setSessionRemoteKnowledgeBaseIDs($0) }
+            remoteKnowledge: { [weak model] in model?.setSessionRemoteKnowledgeBaseIDs($0) },
+            mcpTools: { [weak model] in model?.setSessionAllowedMCPToolNames($0) }
         )
         let chatActions = ChatFeatureActions(
             session: session,
@@ -3158,6 +3231,7 @@ extension AppRuntimeLifecycle {
                 governance: model.governanceModel,
                 aiConnections: aiConnections,
                 knowledgeMarketplace: model.knowledgeMarketplaceStore,
+                sources: model.sourceRuntimeModel,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },
                 sessionHasLLMOverride: { [weak aiRuntime] in aiRuntime?.sessionHasOverride ?? false }
             )

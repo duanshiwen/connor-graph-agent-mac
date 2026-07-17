@@ -36,7 +36,19 @@ private enum CloudKnowledgeContextToolSupport {
             contextBudget: max(1_000, min(arguments.int("context_budget") ?? 8_000, 32_000)),
             limit: max(1, min(arguments.int("limit") ?? 20, 100))
         )
-        let response = try await client.context(request, channel: channel)
+        let response: CloudKnowledgeAnswerResponse
+        do {
+            response = try await client.context(request, channel: channel)
+        } catch where AppBackendConnectionFailure.isUnreachable(error) {
+            let message = "The remote knowledge service cannot be reached right now. Continue without remote knowledge context, do not reuse remote knowledge from an earlier run, and tell the user when this missing context affects the answer."
+            return AgentToolResult(
+                toolCallID: context.toolCallID,
+                toolName: toolName,
+                contentText: message,
+                contentJSON: "{\"available\":false,\"reason\":\"backend_unreachable\",\"partitions\":[]}",
+                citations: []
+            )
+        }
         let partitions = response.partitions
             .filter { allowedLayers.contains($0.layer) }
             .map { CloudKnowledgeAnswerPartition(layer: $0.layer, results: $0.results.filter { allowedLayers.contains($0.layer) }) }
@@ -49,7 +61,7 @@ private enum CloudKnowledgeContextToolSupport {
         )
         let text = partitions.map { partition in
             let rows = partition.results.enumerated().map { index, hit -> String in
-                let timestamp = hit.recordedAt.map { " [recorded_at: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
+                let timestamp = hit.updatedAt.map { " [updated_at: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
                 return "\(index + 1). \(hit.title ?? hit.stableKey ?? hit.kind): \(hit.text)\(timestamp)"
             }.joined(separator: "\n")
             return "## \(partition.layer.rawValue)\n\(rows.isEmpty ? "No results." : rows)"
