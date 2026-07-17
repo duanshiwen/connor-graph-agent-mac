@@ -103,6 +103,31 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         #expect(captured[1].contains("First batch prompt") == false)
         #expect(try store.backgroundMessages(runID: "run-2").map(\.content) == ["Second batch prompt"])
     }
+
+    @Test func retryReusesSuccessfulWriteToolResultInsteadOfWritingTwice() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
+        try store.migrate()
+        let model = RetryWriteLoopModel()
+        let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+            model: model,
+            toolExecutor: MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store)),
+            store: store
+        )
+        let request = MemoryOSBackgroundModelRequest(
+            jobID: "retry-job",
+            kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            schemaName: "MemoryOSL1UnifiedProjectionOutput",
+            artifactType: "memory_os_l1_unified_projection",
+            prompt: "Write once even if the model connection fails later.",
+            metadata: ["background_run_id": "retry-run"]
+        )
+
+        #expect(throws: RetryWriteLoopModel.Failure.self) { try executor.execute(request) }
+        _ = try executor.execute(request)
+
+        #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "1")
+        #expect(try store.backgroundToolCalls(runID: "retry-run").contains { $0.metadata["idempotent_replay"] == "true" })
+    }
 }
 
 private final class ScriptedLoopModel: MemoryOSBackgroundToolLoopModel, @unchecked Sendable {
@@ -126,6 +151,28 @@ private final class CapturingLoopModel: MemoryOSBackgroundToolLoopModel, @unchec
     func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
         capturedInitialMessageContents.append(request.messages.map(\.content).joined(separator: "\n"))
         return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
+    }
+}
+
+private final class RetryWriteLoopModel: MemoryOSBackgroundToolLoopModel, @unchecked Sendable {
+    enum Failure: Error { case disconnected }
+
+    let modelID = "retry-write-loop-model"
+    private var invocation = 0
+    private let arguments = #"{"beliefs":[{"statement":"Retries must be idempotent.","domain":"engineering"}]}"#
+
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+        invocation += 1
+        switch invocation {
+        case 1:
+            return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-1", name: "memory_os_l3_update_beliefs", argumentsJSON: arguments)])
+        case 2:
+            throw Failure.disconnected
+        case 3:
+            return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-2", name: "memory_os_l3_update_beliefs", argumentsJSON: arguments)])
+        default:
+            return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
+        }
     }
 }
 

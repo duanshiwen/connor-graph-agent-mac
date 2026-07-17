@@ -334,6 +334,34 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """).map(decodeQueueItem)
     }
 
+    public func expiredLeaseQueueItems(limit: Int = 100, now: Date = Date()) throws -> [MemoryOSQueueItem] {
+        try query(sql: """
+        SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
+        FROM memory_l1_processing_queue
+        WHERE status IN ('leased', 'processing')
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at < \(quote(iso(now)))
+        ORDER BY lease_expires_at ASC
+        LIMIT \(limit)
+        """).map(decodeQueueItem)
+    }
+
+    public func deadLetterQueueItems(kinds: [String], limit: Int = 100) throws -> [MemoryOSQueueItem] {
+        guard !kinds.isEmpty else { return [] }
+        let kindList = kinds.map(quote).joined(separator: ", ")
+        return try query(sql: """
+        SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
+        FROM memory_l1_processing_queue
+        WHERE status = 'dead_letter' AND kind IN (\(kindList))
+        ORDER BY updated_at ASC
+        LIMIT \(limit)
+        """).map(decodeQueueItem)
+    }
+
+    public func deleteDeadLetter(queueItemID: String) throws {
+        try execute("DELETE FROM memory_l1_dead_letter_queue WHERE queue_item_id = \(quote(queueItemID));")
+    }
+
     public func leaseQueueItem(id: String, workerID: String, now: Date = Date(), leaseDuration: TimeInterval = 300) throws -> MemoryOSQueueItem? {
         guard var item = try queueItem(id: id) else { return nil }
         guard [.pending, .retryScheduled].contains(item.status), item.nextRunAt <= now else { return nil }

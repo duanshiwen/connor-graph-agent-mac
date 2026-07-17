@@ -1128,7 +1128,14 @@ final class AppRuntimeLifecycle {
             await self.maintenanceCoordinator.runMemoryBackgroundJobs(
                 facade: self.memoryOSFacade,
                 aiExecutorProvider: self.backgroundAIExecutorProvider,
-                onError: { [weak self] in self?.errorMessage = $0 }
+                onStatus: { [weak self] status in
+                    guard let self else { return }
+                    if let status {
+                        self.errorMessage = status
+                    } else if self.errorMessage?.hasPrefix("Memory OS ") == true {
+                        self.errorMessage = nil
+                    }
+                }
             )
         }
         maintenanceCoordinator.runDailySweep = { [weak self] in
