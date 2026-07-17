@@ -1068,8 +1068,7 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
     @State private var isPresented = false
 
     private var available: [CloudMarketplaceKnowledgeBase] {
-        var seen = Set<String>()
-        return store.library.subscribed.filter { seen.insert($0.id).inserted }
+        store.library.availableForConsumption
     }
 
     private var selection: RemoteKnowledgeBaseSelection {
@@ -1105,7 +1104,11 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
                 Divider()
 
                 if available.isEmpty {
-                    ContentUnavailableView("暂无订阅", systemImage: "books.vertical")
+                    ContentUnavailableView(
+                        "暂无可用知识库",
+                        systemImage: "books.vertical",
+                        description: Text("订阅知识库，或发布自己的知识库后会显示在这里。")
+                    )
                         .frame(minHeight: 150)
                 } else {
                     ScrollView {
@@ -1137,7 +1140,7 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
             .frame(width: 320)
         }
         .task {
-            if store.library.subscribed.isEmpty { await store.load() }
+            if store.library.availableForConsumption.isEmpty { await store.load() }
         }
     }
 }

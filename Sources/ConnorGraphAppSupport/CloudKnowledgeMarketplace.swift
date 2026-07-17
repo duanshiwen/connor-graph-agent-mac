@@ -49,6 +49,18 @@ public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
     public var subscribed: [CloudMarketplaceKnowledgeBase]
     public var owned: [CloudMarketplaceKnowledgeBase]
 
+    public var availableForConsumption: [CloudMarketplaceKnowledgeBase] {
+        var valuesByID: [String: CloudMarketplaceKnowledgeBase] = [:]
+        var orderedIDs: [String] = []
+
+        for base in subscribed + owned.filter({ $0.publicationStatus == "published" }) {
+            if valuesByID[base.id] == nil { orderedIDs.append(base.id) }
+            valuesByID[base.id] = Self.merge(valuesByID[base.id], with: base)
+        }
+
+        return orderedIDs.compactMap { valuesByID[$0] }
+    }
+
     private enum CodingKeys: String, CodingKey { case subscribed, owned }
 
     public init(subscribed: [CloudMarketplaceKnowledgeBase] = [], owned: [CloudMarketplaceKnowledgeBase] = []) {

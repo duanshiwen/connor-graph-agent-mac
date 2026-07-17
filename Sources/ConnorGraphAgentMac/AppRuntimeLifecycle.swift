@@ -1740,7 +1740,7 @@ final class AppRuntimeLifecycle {
     }
 
     private func effectiveRemoteKnowledgeBaseIDs(sessionID: String) -> [String] {
-        let available = Set(knowledgeMarketplaceStore.library.subscribed.map(\.id))
+        let available = Set(knowledgeMarketplaceStore.library.availableForConsumption.map(\.id))
         let explicit = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.remoteKnowledgeBaseIDs
         return (explicit.map { Set($0).intersection(available) } ?? available).sorted()
     }
