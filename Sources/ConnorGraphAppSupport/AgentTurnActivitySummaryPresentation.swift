@@ -25,7 +25,7 @@ public struct AgentTurnActivityToolSummary: Sendable, Equatable, Identifiable {
     }
 
     public var totalCount: Int {
-        requestedCount + runningCount + successCount + failureCount
+        max(requestedCount, runningCount, successCount + failureCount)
     }
 
     public var compactCountText: String {
@@ -164,11 +164,11 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         var parts: [String] = []
         switch state {
         case .running:
-            let runningToolText = compactToolText == "未调用工具" ? compactToolText : compactToolText.replacingOccurrences(of: "使用 ", with: "正在使用 ")
+            let runningToolText = compactToolText == "未调用工具" ? compactToolText : "正在执行：\(compactToolText)"
             parts.append(runningToolText)
         case .failed:
             if let firstFailedTool, let primaryErrorMessage {
-                parts.append("\(firstFailedTool) 失败：\(primaryErrorMessage)")
+                parts.append("\(firstFailedTool)失败：\(primaryErrorMessage)")
             } else if let primaryErrorMessage {
                 parts.append("失败：\(primaryErrorMessage)")
             }
@@ -182,16 +182,15 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         case .completed:
             parts.append(compactToolText)
         }
-        parts.append("\(eventCount) 个底层事件")
         return parts.joined(separator: " · ")
     }
 
     private func compactToolText(for toolNames: [String]) -> String {
         guard !toolNames.isEmpty else { return "未调用工具" }
         if toolNames.count <= 3 {
-            return "使用 \(toolNames.joined(separator: "、"))"
+            return toolNames.joined(separator: "、")
         }
-        return "使用 \(toolNames.prefix(3).joined(separator: "、")) 等 \(toolNames.count) 个工具"
+        return "\(toolNames.prefix(3).joined(separator: "、"))等 \(toolNames.count) 项操作"
     }
 
     private func toolSummaries(from events: [AgentEventPresentation]) -> [AgentTurnActivityToolSummary] {
@@ -226,7 +225,11 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
 
     private func parseToolEvent(_ event: AgentEventPresentation) -> (name: String, phase: ToolPhase)? {
         if let activity = event.toolActivity {
-            let name = activity.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = AgentToolDisplayNameResolver.displayName(
+                rawToolName: activity.rawToolName,
+                semanticKind: activity.semanticKind,
+                fallbackTitle: activity.title
+            )
             guard !name.isEmpty else { return nil }
             return (name, phase(from: activity.phase))
         }
@@ -239,7 +242,8 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
             ("Tool approved: ", .requested)
         ]
         for mapping in mappings where event.title.hasPrefix(mapping.prefix) {
-            let name = String(event.title.dropFirst(mapping.prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawName = String(event.title.dropFirst(mapping.prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = AgentToolDisplayNameResolver.displayName(rawToolName: rawName, semanticKind: .unknown, fallbackTitle: rawName)
             guard !name.isEmpty else { return nil }
             return (name, mapping.phase)
         }
