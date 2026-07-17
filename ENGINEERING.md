@@ -517,7 +517,9 @@ dist/Connor-<version>-macOS-x86_64.dmg
 1. 使用 Release 配置为指定架构构建 Swift 应用和 Rust Search Kernel。
 2. 对 App 内所有 Mach-O 文件、嵌套 bundle 和主 App 依次执行 Ad-hoc 签名。
 3. 使用 `codesign --verify --deep --strict` 校验 bundle 完整性。
-4. 生成包含 Applications 快捷方式和首次打开说明的压缩 DMG。
+4. 审计每个 Mach-O 文件，确保全部为 Ad-hoc 签名且未残留 Team ID。
+5. 确认主 App 签名包含 `com.apple.security.cs.disable-library-validation`。Ad-hoc 签名没有共同 Team ID；启用 Hardened Runtime 时若缺少该 entitlement，dyld 会在启动阶段拒绝加载 MailCore 等内嵌 framework。
+6. 生成包含 Applications 快捷方式和首次打开说明的压缩 DMG。
 
 可选参数和环境变量可通过以下命令查看：
 
