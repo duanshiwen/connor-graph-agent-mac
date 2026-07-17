@@ -4,6 +4,8 @@ import ConnorGraphAppSupport
 
 struct UserIdentitySettingsView: View {
     @ObservedObject var identityStore: AppUserIdentityStore
+    @ObservedObject var connectivity: AppNetworkConnectivity = .shared
+    @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
     @State private var mode: AuthenticationMode = .login
     @State private var username = ""
     @State private var email = ""
@@ -29,7 +31,7 @@ struct UserIdentitySettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .task(id: identityStore.currentUser?.id) {
-            if identityStore.currentUser == nil, identityStore.hasStoredSession, !didRetryStoredSession {
+            if connectivity.isConnected, identityStore.currentUser == nil, identityStore.hasStoredSession, !didRetryStoredSession {
                 didRetryStoredSession = true
                 await identityStore.restoreSession()
             }
@@ -80,7 +82,11 @@ struct UserIdentitySettingsView: View {
                     }
                 }
 
-                if case .expired = identityStore.authenticationState {
+                if !connectivity.isConnected {
+                    statusMessage("当前没有网络连接，登录和注册暂不可用。", systemImage: "wifi.slash", color: .orange)
+                } else if backendConnectivity.state == .unreachable {
+                    statusMessage("当前无法连接到康纳服务器，登录和注册暂不可用。", systemImage: "exclamationmark.icloud", color: .orange)
+                } else if case .expired = identityStore.authenticationState {
                     statusMessage("登录已失效，请重新登录。", systemImage: "exclamationmark.circle", color: .orange)
                 } else if let error = visibleError {
                     HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceS) {
@@ -91,7 +97,7 @@ struct UserIdentitySettingsView: View {
                             }
                             .buttonStyle(.bordered)
                             .controlSize(AppButtonLayout.controlSize)
-                            .disabled(isSubmitting)
+                            .disabled(isSubmitting || !canUseAccountService)
                         }
                     }
                 }
@@ -107,7 +113,7 @@ struct UserIdentitySettingsView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(AppButtonLayout.controlSize)
-                    .disabled(isSubmitting)
+                    .disabled(isSubmitting || !canUseAccountService)
                 }
             }
 
@@ -141,6 +147,12 @@ struct UserIdentitySettingsView: View {
                     Spacer()
                     Button("退出登录", role: .destructive) { Task { await identityStore.logout() } }
                         .buttonStyle(.bordered)
+                        .disabled(!canUseAccountService)
+                }
+                if !connectivity.isConnected {
+                    statusMessage("当前没有网络连接，退出登录暂不可用。", systemImage: "wifi.slash", color: .orange)
+                } else if backendConnectivity.state == .unreachable {
+                    statusMessage("当前无法连接到康纳服务器，退出登录暂不可用。", systemImage: "exclamationmark.icloud", color: .orange)
                 }
                 Divider()
                 SettingsValueRow(title: "角色", value: user.role)
@@ -204,6 +216,10 @@ struct UserIdentitySettingsView: View {
             if password != confirmation { return "两次输入的密码不一致。" }
         }
         return nil
+    }
+
+    private var canUseAccountService: Bool {
+        connectivity.isConnected && backendConnectivity.state != .unreachable
     }
 
     private var visibleError: String? {

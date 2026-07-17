@@ -208,9 +208,22 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var errorMessage: String?
     public var onLibraryChanged: (() -> Void)?
     private let api: any CloudKnowledgeMarketplaceAPI; private let cache: CloudKnowledgeAuthorizationCache
+    private let networkIsAvailable: @MainActor () -> Bool
+    private let serverIsReachable: @MainActor () -> Bool
     private var isLoadingMarketplace = false
-    public init(api: any CloudKnowledgeMarketplaceAPI, cache: CloudKnowledgeAuthorizationCache = .init()) { self.api = api; self.cache = cache }
+    public init(
+        api: any CloudKnowledgeMarketplaceAPI,
+        cache: CloudKnowledgeAuthorizationCache = .init(),
+        networkIsAvailable: @escaping @MainActor () -> Bool = { true },
+        serverIsReachable: @escaping @MainActor () -> Bool = { true }
+    ) {
+        self.api = api
+        self.cache = cache
+        self.networkIsAvailable = networkIsAvailable
+        self.serverIsReachable = serverIsReachable
+    }
     public func load() async {
+        guard requireNetwork() else { return }
         guard !isLoadingMarketplace else { return }
         isLoadingMarketplace = true
         defer { isLoadingMarketplace = false }
@@ -227,23 +240,29 @@ public actor CloudKnowledgeAuthorizationCache {
         }
     }
     public func loadHome() async { await load() }
-    public func search(query: String, categoryID: String? = nil) async { await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
+    public func search(query: String, categoryID: String? = nil) async { guard requireNetwork() else { return }; await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
     public func showHome() { selected = nil; showsPublisher = false }
     public func showPublisher() { selected = nil; showsPublisher = true }
     public func loadDetail(id: String) async {
+        guard requireNetwork() else { return }
         showsPublisher = false
         if selected?.id != id, let cached = cachedKnowledgeBase(id: id) { selected = cached }
         await perform { self.selected = try await self.api.detail(id: id) }
     }
-    public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
-    public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
-    public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { (try? await api.search(.init(query: query, limit: 6))) ?? [] }
+    public func subscribe(id: String) async { guard requireNetwork() else { return }; await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
+    public func unsubscribe(id: String) async { guard requireNetwork() else { return }; await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
+    public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { guard networkIsAvailable(), serverIsReachable() else { return [] }; return (try? await api.search(.init(query: query, limit: 6))) ?? [] }
     public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
     private func cachedKnowledgeBase(id: String) -> CloudMarketplaceKnowledgeBase? {
         searchResults.first(where: { $0.id == id })
             ?? library.subscribed.first(where: { $0.id == id })
             ?? library.owned.first(where: { $0.id == id })
             ?? home.sections.lazy.flatMap(\.knowledgeBases).first(where: { $0.id == id })
+    }
+    @discardableResult private func requireNetwork() -> Bool {
+        guard networkIsAvailable() else { errorMessage = "当前没有网络连接。"; return false }
+        guard serverIsReachable() else { errorMessage = "当前无法连接到康纳服务器。"; return false }
+        return true
     }
     private func perform(_ action: @escaping () async throws -> Void) async { isLoading = true; errorMessage = nil; defer { isLoading = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }
