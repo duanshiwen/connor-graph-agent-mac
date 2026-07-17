@@ -42,10 +42,17 @@ final class AppCompositionRoot: ObservableObject {
 
     static func live() -> AppCompositionRoot {
         AppStartupPerformance.measure("StartupLightConstruction") {
+            let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
+            AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
             let placeholder = AppRuntimeLifecycle.placeholder()
             let root = AppCompositionRoot(
                 runtime: placeholder,
-                identityStore: AppUserIdentityStore(),
+                identityStore: AppUserIdentityStore(
+                    baseURL: backendBaseURL,
+                    transport: BackendConnectivityTrackingTransport(),
+                    networkIsAvailable: { AppNetworkConnectivity.shared.isConnected },
+                    serverIsReachable: { AppBackendConnectivity.shared.isReachable }
+                ),
                 noteImportModel: NoteImportViewModel(configurationError: "导入功能正在准备中…"),
                 featureFlags: AppFeatureFlags.load(),
                 bootstrapActor: AppBootstrapActor()

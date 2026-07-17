@@ -581,9 +581,11 @@ final class AppRuntimeLifecycle {
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
         let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
+        AppBackendConnectivity.shared.configure(baseURL: backendBaseURL)
+        let backendTransport = BackendConnectivityTrackingTransport()
         let accountCredentials = AppConnorAccountCredentialStore()
         let authenticatedSession = ConnorBackendAuthenticatedSession(
-            api: ConnorBackendAPIClient(baseURL: backendBaseURL),
+            api: ConnorBackendAPIClient(baseURL: backendBaseURL, transport: backendTransport),
             credentials: accountCredentials
         )
         let cloudCredentials = RefreshingCloudKnowledgeCredentialProvider(session: authenticatedSession)
@@ -592,17 +594,24 @@ final class AppRuntimeLifecycle {
         }
         let cloudKnowledgeAPI = CloudKnowledgeAPIClient(
             baseURL: backendBaseURL,
+            transport: backendTransport,
             credentials: cloudCredentials,
             refreshRejectedToken: refreshRejectedToken
         )
         self.cloudKnowledgeAPI = cloudKnowledgeAPI
         let cloudKnowledgeMarketplaceAPI = CloudKnowledgeMarketplaceAPIClient(
             baseURL: backendBaseURL,
+            transport: backendTransport,
             credentials: cloudCredentials,
             refreshRejectedToken: refreshRejectedToken
         )
         let cloudKnowledgeAuthorizationCache = CloudKnowledgeAuthorizationCache()
-        self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
+        self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(
+            api: cloudKnowledgeMarketplaceAPI,
+            cache: cloudKnowledgeAuthorizationCache,
+            networkIsAvailable: { AppNetworkConnectivity.shared.isConnected },
+            serverIsReachable: { AppBackendConnectivity.shared.isReachable }
+        )
         self.cloudKnowledgeConsumptionClient = CloudKnowledgeConsumptionClient(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
             creatorAPI: CloudKnowledgeCreatorAPIClient(

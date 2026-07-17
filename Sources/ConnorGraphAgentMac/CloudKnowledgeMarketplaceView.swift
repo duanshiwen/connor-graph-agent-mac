@@ -5,6 +5,8 @@ import ConnorGraphAppSupport
 struct CloudKnowledgeMarketplaceListPane: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
     @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
+    @ObservedObject var connectivity: AppNetworkConnectivity = .shared
+    @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
     var sessions: [AgentSession]
     @State private var isPresentingCreator = false
     @State private var isPresentingPublicationHistory = false
@@ -18,6 +20,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 .buttonStyle(.appIcon)
                 .help("发布历史")
                 .accessibilityLabel("发布历史")
+                .disabled(!canUseMarketplace)
                 Button {
                     creatorStore.prepareForNewKnowledgeBase()
                     isPresentingCreator = true
@@ -27,43 +30,60 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 .buttonStyle(.appIcon)
                 .help("添加知识库")
                 .accessibilityLabel("添加知识库")
+                .disabled(!canUseMarketplace)
             }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
-                    marketplaceSectionHeader("已订阅")
-                    if store.library.subscribed.isEmpty {
-                        emptyRow("暂未订阅知识库")
-                    } else {
-                        ForEach(store.library.subscribed) { base in
-                            libraryRow(base, caption: base.owned ? "我发布的 · 已订阅" : "已订阅")
+            if canUseMarketplace {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
+                        marketplaceSectionHeader("已订阅")
+                        if store.library.subscribed.isEmpty {
+                            emptyRow("暂未订阅知识库")
+                        } else {
+                            ForEach(store.library.subscribed) { base in
+                                libraryRow(base, caption: base.owned ? "我发布的 · 已订阅" : "已订阅")
+                            }
                         }
-                    }
 
-                    marketplaceSectionHeader("我发布的")
-                    if store.library.owned.isEmpty {
-                        emptyRow("暂未发布知识库")
-                    } else {
-                        ForEach(store.library.owned) { base in
-                            libraryRow(
-                                base,
-                                caption: base.subscribed
-                                    ? "\(publicationLabel(base)) · 已订阅"
-                                    : publicationLabel(base)
-                            )
+                        marketplaceSectionHeader("我发布的")
+                        if store.library.owned.isEmpty {
+                            emptyRow("暂未发布知识库")
+                        } else {
+                            ForEach(store.library.owned) { base in
+                                libraryRow(
+                                    base,
+                                    caption: base.subscribed
+                                        ? "\(publicationLabel(base)) · 已订阅"
+                                        : publicationLabel(base)
+                                )
+                            }
                         }
                     }
+                    .padding(.horizontal, AppListCardLayout.horizontalInset)
+                    .padding(.top, 6)
+                    .padding(.bottom, 10)
                 }
-                .padding(.horizontal, AppListCardLayout.horizontalInset)
-                .padding(.top, 6)
-                .padding(.bottom, 10)
+                .scrollContentBackground(.hidden)
+            } else {
+                Label(marketplaceUnavailableTitle, systemImage: marketplaceUnavailableSystemImage)
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(AppListCardLayout.horizontalInset)
             }
-            .scrollContentBackground(.hidden)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { store.showHome() }
-        .task { if store.home.categories.isEmpty { await store.load() } }
+        .task { if canUseMarketplace, store.home.categories.isEmpty { await store.load() } }
+        .onChange(of: connectivity.isConnected) { _, isConnected in
+            if isConnected { Task { await store.load() } }
+            else { store.showHome() }
+        }
+        .onChange(of: backendConnectivity.state) { _, state in
+            if state == .reachable { Task { await store.load() } }
+            else if state == .unreachable { store.showHome() }
+        }
         .sheet(isPresented: $isPresentingCreator) {
             VStack(spacing: 0) {
                 HStack {
@@ -166,21 +186,57 @@ struct CloudKnowledgeMarketplaceListPane: View {
     private func publicationLabel(_ base: CloudMarketplaceKnowledgeBase) -> String {
         base.publicationStatus == "published" ? "已发布" : "未发布"
     }
+
+    private var canUseMarketplace: Bool { connectivity.isConnected && backendConnectivity.state != .unreachable }
+    private var marketplaceUnavailableTitle: String { connectivity.isConnected ? "当前无法连接到康纳服务器" : "当前没有网络连接" }
+    private var marketplaceUnavailableSystemImage: String { connectivity.isConnected ? "exclamationmark.icloud" : "wifi.slash" }
 }
 
 struct CloudKnowledgeMarketplaceDetailPane: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
+    @ObservedObject var connectivity: AppNetworkConnectivity = .shared
+    @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
     @State private var selectedCategoryID: String?
 
     var body: some View {
         Group {
-            if let selected = store.selected {
+            if !canUseMarketplace {
+                unavailableMarketplaceHome
+            } else if let selected = store.selected {
                 marketplaceDetail(selected)
             } else {
                 marketplaceHome
             }
         }
         .background(AppShellColors.detailBackground)
+        .onChange(of: connectivity.isConnected) { _, isConnected in
+            guard isConnected else { return }
+            store.showHome()
+            Task { await store.load() }
+        }
+        .onChange(of: backendConnectivity.state) { _, state in
+            guard state == .reachable else { return }
+            store.showHome()
+            Task { await store.load() }
+        }
+    }
+
+    private var unavailableMarketplaceHome: some View {
+        ContentUnavailableView {
+            Label(marketplaceUnavailableTitle, systemImage: marketplaceUnavailableSystemImage)
+        } description: {
+            Text(marketplaceUnavailableDescription)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(28)
+    }
+
+    private var canUseMarketplace: Bool { connectivity.isConnected && backendConnectivity.state != .unreachable }
+    private var marketplaceUnavailableTitle: String { connectivity.isConnected ? "当前无法连接到康纳服务器" : "当前没有网络连接" }
+    private var marketplaceUnavailableSystemImage: String { connectivity.isConnected ? "exclamationmark.icloud" : "wifi.slash" }
+    private var marketplaceUnavailableDescription: String {
+        let recovery = connectivity.isConnected ? "服务器恢复后" : "网络恢复后"
+        return "知识市场用于发现、订阅并使用社区发布的结构化知识库。\(recovery)将自动加载首页内容。"
     }
 
     private var marketplaceHome: some View {
@@ -216,7 +272,7 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
             .frame(maxWidth: 980, alignment: .leading)
             .padding(28)
         }
-        .task { if store.home.categories.isEmpty { await store.load() } }
+        .task { if canUseMarketplace, store.home.categories.isEmpty { await store.load() } }
     }
 
     private func marketplaceSection(title: String, bases: [CloudMarketplaceKnowledgeBase]) -> some View {

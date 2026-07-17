@@ -186,6 +186,43 @@ struct CloudKnowledgePhase6Tests {
         #expect(await api.contextRequests.count == 2)
     }
 
+    @Test func contextToolReturnsActionableResultWhenBackendIsUnreachable() async throws {
+        let api = MarketplaceFakeAPI()
+        await api.makeContextUnreachable()
+        let cache = CloudKnowledgeAuthorizationCache()
+        await cache.authorize("kb-1")
+        let tool = CloudKnowledgeKnowledgeContextTool(
+            client: CloudKnowledgeConsumptionClient(api: api, cache: cache),
+            knowledgeBaseIDs: ["kb-1"]
+        )
+        let arguments = try AgentToolArguments(json: #"{"query":"Connor"}"#)
+        let context = AgentToolExecutionContext(
+            runID: "run",
+            sessionID: "session",
+            groupID: "group",
+            userPrompt: "query",
+            toolCallID: "tool",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+
+        let result = try await tool.execute(arguments: arguments, context: context)
+
+        #expect(result.error == nil)
+        #expect(result.contentText.contains("cannot be reached"))
+        #expect(result.contentJSON?.contains("backend_unreachable") == true)
+        #expect(result.citations.isEmpty)
+    }
+
+    @Test @MainActor func marketplaceStoreDoesNotRequestWhenServerIsKnownToBeUnreachable() async {
+        let api = MarketplaceFakeAPI()
+        let store = CloudKnowledgeMarketplaceStore(api: api, serverIsReachable: { false })
+
+        await store.load()
+
+        #expect(store.errorMessage == "当前无法连接到康纳服务器。")
+        #expect(await api.searchRequests.isEmpty)
+    }
+
     @Test func runtimeAlwaysRegistersRemoteKnowledgeToolsAndReflectsCurrentSessionScope() throws {
         let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-consumption-runtime-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: databaseURL) }
@@ -219,6 +256,7 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
     var searchRequests: [CloudMarketplaceSearchRequest] = []
     var contextRequests: [CloudKnowledgeAnswerRequest] = []
     var contextChannels: [CloudKnowledgeSearchChannel] = []
+    var contextIsUnreachable = false
     func home() async throws -> CloudMarketplaceHome { .init(categories: [.init(id: "agent", name: "AI Agent", parentID: nil, icon: nil), .init(id: "economics", name: "经济学", parentID: nil, icon: nil)], banners: [.init(id: "b", title: "本周精选", subtitle: nil, imageURL: nil, actionURL: nil)], sections: [.init(id: "hero", title: "精选", layout: "hero", knowledgeBases: [base]), .init(id: "new", title: "最新", layout: "grid", knowledgeBases: [])]) }
     func categories() async throws -> [CloudMarketplaceCategory] { try await home().categories }
     func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] { searchRequests.append(request); return [base] }
@@ -240,6 +278,7 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
         ], returnedBytes: 30, knowledgeSequence: 4)
     }
     func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse {
+        if contextIsUnreachable { throw URLError(.cannotConnectToHost) }
         contextRequests.append(request)
         contextChannels.append(channel)
         if request.knowledgeBaseIDs.count > 1 {
@@ -249,6 +288,7 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
         response.channel = channel
         return response
     }
+    func makeContextUnreachable() { contextIsUnreachable = true }
     private var base: CloudMarketplaceKnowledgeBase { .init(id: "kb-1", name: "Connor", description: "Agent OS", categoryID: "agent", subscriberCount: 10, subscribed: true, publicationStatus: "published") }
 }
 

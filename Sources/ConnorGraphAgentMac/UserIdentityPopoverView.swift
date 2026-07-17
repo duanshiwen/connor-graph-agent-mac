@@ -3,6 +3,8 @@ import ConnorGraphAppSupport
 
 struct UserIdentityPopoverView: View {
     @ObservedObject var identityStore: AppUserIdentityStore
+    @ObservedObject var connectivity: AppNetworkConnectivity = .shared
+    @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
     var openIdentitySettings: () -> Void
 
     var body: some View {
@@ -28,6 +30,12 @@ struct UserIdentityPopoverView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
+                .disabled(!canUseAccountService)
+                if !connectivity.isConnected {
+                    serviceStatus("当前没有网络连接", systemImage: "wifi.slash")
+                } else if backendConnectivity.state == .unreachable {
+                    serviceStatus("当前无法连接到康纳服务器", systemImage: "exclamationmark.icloud")
+                }
             case .restoring:
                 ProgressView("正在恢复登录状态…")
             case .signedOut, .expired:
@@ -39,9 +47,24 @@ struct UserIdentityPopoverView: View {
                     Text("登录或注册").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                if !connectivity.isConnected {
+                    serviceStatus("当前没有网络连接", systemImage: "wifi.slash")
+                } else if backendConnectivity.state == .unreachable {
+                    serviceStatus("当前无法连接到康纳服务器", systemImage: "exclamationmark.icloud")
+                }
             }
         }
         .padding(16)
         .frame(width: 270)
+    }
+
+    private var canUseAccountService: Bool {
+        connectivity.isConnected && backendConnectivity.state != .unreachable
+    }
+
+    private func serviceStatus(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
