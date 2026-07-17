@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac 工程说明
 
-文档更新时间：2026-07-15 GMT+8  
+文档更新时间：2026-07-18 GMT+8
 定位：本文件记录 Connor Graph Agent Mac 的工程架构、边界、运行布局、Memory OS、开发命令和质量约束。普通用户使用说明请看 [README.md](README.md)。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -474,6 +474,58 @@ Search Kernel：
 cd SearchKernel
 cargo build
 ```
+
+### 9.1 打包未公证的 macOS 安装包
+
+在没有 Apple Developer Program 和 Developer ID 证书时，发布脚本会对应用及其嵌入代码进行 Ad-hoc 签名，并生成 DMG。该产物无法通过 Apple 公证；用户首次启动仍需通过 Control 点击选择“打开”并确认一次，但不需要运行终端命令。
+
+构建要求：
+
+- 支持 Swift 6 和 macOS 14 SDK 的 Xcode。
+- rustup 管理的 Rust 工具链。
+- `aarch64-apple-darwin` 和 `x86_64-apple-darwin` 两个 Rust 编译目标。
+- 首次构建可以访问 Swift Package 依赖源。
+
+安装 Rust 编译目标：
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+```
+
+同时构建 Apple 芯片和 Intel 两个安装包：
+
+```bash
+Scripts/package-macos-ad-hoc.sh --arch all
+```
+
+也可以只构建单个架构：
+
+```bash
+Scripts/package-macos-ad-hoc.sh --arch arm64
+Scripts/package-macos-ad-hoc.sh --arch x86_64
+```
+
+默认产物：
+
+```text
+dist/Connor-<version>-macOS-arm64.dmg
+dist/Connor-<version>-macOS-x86_64.dmg
+```
+
+脚本执行以下步骤：
+
+1. 使用 Release 配置为指定架构构建 Swift 应用和 Rust Search Kernel。
+2. 对 App 内所有 Mach-O 文件、嵌套 bundle 和主 App 依次执行 Ad-hoc 签名。
+3. 使用 `codesign --verify --deep --strict` 校验 bundle 完整性。
+4. 生成包含 Applications 快捷方式和首次打开说明的压缩 DMG。
+
+可选参数和环境变量可通过以下命令查看：
+
+```bash
+Scripts/package-macos-ad-hoc.sh --help
+```
+
+`spctl --assess` 拒绝该产物属于预期结果，因为 Ad-hoc 签名不能建立 Developer ID 信任链。不要通过 `xattr -cr`、关闭 Gatekeeper 或要求用户运行终端命令来掩盖这一限制。
 
 诊断命令：
 
