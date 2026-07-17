@@ -108,7 +108,11 @@ private struct InvocationBuilder {
             semanticKind: semanticKind,
             phase: phase,
             severity: severity,
-            title: title ?? toolName,
+            title: AgentToolDisplayNameResolver.displayName(
+                rawToolName: toolName,
+                semanticKind: semanticKind,
+                fallbackTitle: title
+            ),
             subtitle: subtitle,
             target: target,
             icon: icon ?? "wrench.and.screwdriver",
