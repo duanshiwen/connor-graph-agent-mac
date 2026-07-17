@@ -26,6 +26,7 @@ struct AgentComposerStore {
             displayMode: isNoteBeforeFirstMessage ? .note : .normal,
             selectedModel: actions.dependencies.aiConnections.selectedModel,
             sessionHasLLMOverride: actions.dependencies.sessionHasLLMOverride(),
+            remoteKnowledgeBaseIDs: model.composer.remoteKnowledgeBaseIDs,
             permissionMode: actions.dependencies.permissionMode(),
             selectedSessionStatus: selectedSession?.governance.status,
             isSpeechTranscriptionEnabled: actions.dependencies.inputSettings.sessionSpeechTranscriptionEnabled,
@@ -59,6 +60,8 @@ struct AgentComposerStore {
             actions.run.setAgentPermissionMode(mode)
         case .setSessionStatus(let status):
             DispatchQueue.main.async { actions.session.setSelectedSessionStatus(status) }
+        case .setRemoteKnowledgeBaseIDs(let ids):
+            actions.run.setSessionRemoteKnowledgeBaseIDs(ids)
         case .toggleBrowserWorkspaceVisibility:
             actions.dependencies.browser.toggleWorkspaceVisibility()
         case .toggleSpeechTranscription:

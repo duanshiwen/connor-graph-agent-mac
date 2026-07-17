@@ -60,6 +60,7 @@ final class ChatComposerModel {
     var speechProvisionalTranscript: String?
     var activeSkillSlug: String?
     var activeSkillDisplayName: String?
+    var remoteKnowledgeBaseIDs: [String]?
     @ObservationIgnored private var isApplyingInput = false
     @ObservationIgnored var onInputChanged: (String) -> Void = { _ in }
 

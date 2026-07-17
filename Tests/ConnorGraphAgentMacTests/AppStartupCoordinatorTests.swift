@@ -1,9 +1,26 @@
+import Foundation
 import Testing
 @testable import ConnorGraphAgentMac
 
 @MainActor
 @Suite("App Startup Coordinator Tests")
 struct AppStartupCoordinatorTests {
+    @Test func mainWindowShowsInitializationSurfaceUntilInteractiveStartupIsReady() throws {
+        let appSource = try String(
+            contentsOf: startupProjectSourceURL(named: "ConnorGraphAgentMacApp.swift"),
+            encoding: .utf8
+        )
+        let shellSource = try String(
+            contentsOf: startupProjectSourceURL(named: "AppShellViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(appSource.contains("AppStartupRootView(startupCoordinator: root.startupCoordinator)"))
+        #expect(shellSource.contains("if startupCoordinator.isInteractiveReady"))
+        #expect(shellSource.contains("AppInitializationView(startupCoordinator: startupCoordinator)"))
+        #expect(shellSource.contains("await startupCoordinator.retry()"))
+    }
+
     @Test func stagesRunInDependencyOrderExactlyOnceAcrossConcurrentStarts() async {
         var calls: [String] = []
         let coordinator = makeCoordinator(calls: { calls.append($0) })
@@ -89,4 +106,13 @@ struct AppStartupCoordinatorTests {
     }
 
     private enum TestFailure: Error { case expected }
+}
+
+private func startupProjectSourceURL(named filename: String) -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Sources/ConnorGraphAgentMac")
+        .appendingPathComponent(filename)
 }

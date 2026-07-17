@@ -241,7 +241,7 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
             rawAssistantContentJSON: rawContentJSON.isEmpty ? nil : "[" + rawContentJSON.joined(separator: ",") + "]",
             stopReason: stopReason
         )
-        let finishReason: AgentModelFinishReason = stopReason == "tool_use" ? .toolCalls : (stopReason == "max_tokens" ? .length : .stop)
+        let finishReason = AgentModelFinishReason.anthropic(stopReason: stopReason)
         return AgentModelResponse(
             text: textParts.isEmpty ? nil : textParts.joined(separator: ""),
             toolCalls: toolCalls,

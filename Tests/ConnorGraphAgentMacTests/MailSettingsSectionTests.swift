@@ -20,6 +20,14 @@ struct MailSettingsSectionTests {
         #expect(ConnorSettingsSection.rss.systemImage == "dot.radiowaves.left.and.right")
     }
 
+    @Test func settingsSectionsUseDistinctIconsAndDescribeConnorAccountCapabilities() {
+        let icons = ConnorSettingsSection.allCases.map(\.systemImage)
+
+        #expect(Set(icons).count == icons.count)
+        #expect(ConnorSettingsSection.preferences.systemImage == "slider.horizontal.3")
+        #expect(ConnorSettingsSection.identity.subtitle == "登录、注册、账号资料")
+    }
+
     @Test func mailSettingsSummaryShowsLocalEncryptedCredentialVaultCopy() {
         let summary = MailSettingsSummaryPresentation(presentation: .empty)
 

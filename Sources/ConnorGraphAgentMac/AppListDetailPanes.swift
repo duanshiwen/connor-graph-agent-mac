@@ -75,22 +75,14 @@ struct CraftCalendarListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer(minLength: 24)
-                Text("日历")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "日历") {
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加日历源")
                 .accessibilityLabel("添加日历源")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "日历") {
                 model.searchQuery = ""
@@ -447,9 +439,9 @@ private struct CalendarSectionScrollView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                         Text(section.title)
                             .font(AppListTypography.rowCaption)
                             .foregroundStyle(.secondary)
@@ -460,8 +452,8 @@ private struct CalendarSectionScrollView: View {
                     }
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, AppListCardLayout.horizontalInset)
+            .padding(.vertical, AppListCardLayout.verticalInset)
         }
         .scrollContentBackground(.hidden)
     }
@@ -474,25 +466,41 @@ private struct CalendarEventButton: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                 Text(row.timeText)
                     .font(AppListTypography.rowCaption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 92, alignment: .leading)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.title)
-                        .font(AppListTypography.rowTitle)
-                        .foregroundStyle(.primary)
-                    if let location = row.location, !location.isEmpty {
-                        Text(location)
-                            .font(AppListTypography.rowSubtitle)
-                            .foregroundStyle(.secondary)
-                    }
+
+                Text(row.title)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let calendarName = row.calendarName?.trimmingCharacters(in: .whitespacesAndNewlines), !calendarName.isEmpty {
+                    Label(calendarName, systemImage: "calendar")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            (isSelected ? Color.accentColor : Color.secondary).opacity(0.10),
+                            in: Capsule(style: .continuous)
+                        )
                 }
-                Spacer(minLength: 0)
+
+                if let location = row.location, !location.isEmpty {
+                    Label(location, systemImage: "mappin.and.ellipse")
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
-            .padding(10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -503,21 +511,14 @@ struct CraftContactsListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("人际关系")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "人际关系") {
                 Button(action: { model.presentNewProfileEditor() }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("新建人物")
                 .accessibilityLabel("新建人物")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             if model.presentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
@@ -537,13 +538,13 @@ private struct ContactsRowsScrollView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 4) {
+            VStack(spacing: AppListCardLayout.spacing) {
                 ForEach(rows) { row in
                     ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, AppListCardLayout.horizontalInset)
+            .padding(.vertical, AppListCardLayout.verticalInset)
         }
         .scrollContentBackground(.hidden)
     }
@@ -570,9 +571,8 @@ private struct ContactRowButton: View {
                 }
                 Spacer(minLength: 8)
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
             .background(rowBackground, in: rowShape)
             .contentShape(rowShape)
         }
@@ -583,13 +583,13 @@ private struct ContactRowButton: View {
     }
 
     private var rowShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        AppListCardLayout.shape
     }
 
     private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.12) }
+        if isSelected { return Color.accentColor.opacity(0.14) }
         if isHovering { return Color.secondary.opacity(0.08) }
-        return Color.clear
+        return Color(nsColor: .windowBackgroundColor)
     }
 }
 
@@ -604,8 +604,8 @@ struct CraftSessionListPane: View {
             Text(sessionListTitle)
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+                .padding(.horizontal, AppShellLayout.paneHeaderHorizontalPadding)
+                .padding(.vertical, AppShellLayout.paneHeaderVerticalPadding)
 
             ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
                 model.sessions.searchQuery = ""
@@ -616,14 +616,14 @@ struct CraftSessionListPane: View {
                     .padding(.top, 80)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: AppListCardLayout.spacing) {
                         ForEach(visibleSessions) { session in
                             sessionRow(session)
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 6)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, AppListCardLayout.horizontalInset)
+                    .padding(.top, AppShellLayout.spaceS)
+                    .padding(.bottom, AppShellLayout.spaceM)
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -685,10 +685,15 @@ struct CraftSessionListPane: View {
     }
 }
 
-private extension View {
+extension View {
     func nativeListRowStyle() -> some View {
         self
-            .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+            .listRowInsets(EdgeInsets(
+                top: AppListCardLayout.spacing / 2,
+                leading: AppListCardLayout.horizontalInset,
+                bottom: AppListCardLayout.spacing / 2,
+                trailing: AppListCardLayout.horizontalInset
+            ))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
     }
@@ -879,7 +884,7 @@ struct AddRSSSourceSheet: View {
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(isEditing ? "修改 RSS 订阅源" : "添加 RSS 订阅源")
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text(isEditing ? "更新显示名称或 Feed URL。源注册、缓存清理和审计继续由 Native RSS Runtime 托管。" : "支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1102,21 +1107,14 @@ struct CraftTaskAutomationListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(kind.title)
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: kind.title) {
                 Button(action: { isPresentingCreateSheet = true }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help(kind.createButtonHelp)
                 .accessibilityLabel(kind.createButtonHelp)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             if cards.isEmpty {
                 ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text("\(kind.emptyDescription) 点击右上角 + 新建。"))
@@ -1177,7 +1175,7 @@ private struct TaskAutomationListRow: View {
                     .fill(severityColor)
                     .frame(width: 8, height: 8)
                     .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
@@ -1203,10 +1201,10 @@ private struct TaskAutomationListRow: View {
                     }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -1414,7 +1412,7 @@ private struct AddTaskAutomationSheet: View {
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(kind.createButtonHelp)
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text(kind == .scheduled ? "创建一个按时间触发的用户任务，到点后新建会话并发送消息。" : "创建一个由会话状态变化触发的用户任务，状态命中后向该会话发送消息。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1523,21 +1521,14 @@ struct CraftMailListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("邮件")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "邮件") {
                 Button(action: { model.presentAddAccountSheet() }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加邮件账户")
                 .accessibilityLabel("添加邮件账户")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "邮件") {
                 model.searchQuery = ""
@@ -1819,7 +1810,7 @@ private struct MailMessageListRow: View, Equatable {
                     .fill(message.flags.isRead ? Color.secondary.opacity(0.24) : Color.accentColor)
                     .frame(width: 8, height: 8)
                     .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
                         if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
                             Label(label, systemImage: image)
@@ -1855,13 +1846,13 @@ private struct MailMessageListRow: View, Equatable {
                     Text(presentation.snippetText)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -1876,21 +1867,14 @@ struct CraftRSSListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("RSS 阅读")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            AppListPaneHeader(title: "RSS 阅读") {
                 Button(action: { model.isPresentingAddSourceSheet = true }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help("添加订阅源")
                 .accessibilityLabel("添加订阅源")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
 
             ListSearchFilterBanner(query: model.searchQuery, sourceTitle: "RSS") {
                 model.searchQuery = ""
@@ -1949,7 +1933,7 @@ private struct RSSItemListRow: View {
                     .fill(item.state.isRead ? Color.secondary.opacity(0.24) : Color.orange)
                     .frame(width: 8, height: 8)
                     .padding(.top, 7)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
                         Text(item.title)
                             .font(item.state.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
@@ -1970,13 +1954,13 @@ private struct RSSItemListRow: View {
                     Text(item.snippet)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
@@ -2125,7 +2109,7 @@ private struct CalendarEventHero: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 Text(event.title)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -2486,13 +2470,13 @@ private struct PersonProfileDetailHero: View {
                 HStack(spacing: AppShellLayout.spaceS) {
                     Button("编辑", action: onEdit)
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(AppButtonLayout.controlSize)
                     Button("添加关系", action: onAddRelationship)
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(AppButtonLayout.controlSize)
                     Button("删除", role: .destructive, action: onDelete)
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(AppButtonLayout.controlSize)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -2685,7 +2669,7 @@ private struct TaskAutomationHero: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 Text(card.title)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -2819,7 +2803,7 @@ private struct TaskAutomationActionButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .controlSize(AppButtonLayout.controlSize)
         .help(title)
     }
 }
@@ -3200,21 +3184,21 @@ struct CraftSessionRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
             attentionIndicator
             leadingSessionIcon
             sessionTextContent
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(AppListCardLayout.contentPadding)
+        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+        .background(rowBackgroundColor, in: AppListCardLayout.shape)
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            AppListCardLayout.shape
                 .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
         )
         .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 2)
         .scaleEffect(attentionLevel == .interruptive && isAttentionPulseOn ? 1.012 : 1)
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(AppListCardLayout.shape)
         .onTapGesture {
             if !isEditingTitle { onSelect() }
         }
@@ -3489,7 +3473,7 @@ struct CraftSettingsListPane: View {
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-            VStack(spacing: 0) {
+            VStack(spacing: AppListCardLayout.spacing) {
                 ForEach(ConnorSettingsSection.allCases) { section in
                     SettingsCategoryRow(
                         title: section.title,
@@ -3517,7 +3501,7 @@ struct SettingsCategoryRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: AppShellLayout.spaceM) {
                 Image(systemName: systemImage)
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(width: 18)
@@ -3527,10 +3511,10 @@ struct SettingsCategoryRow: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }

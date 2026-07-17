@@ -7,15 +7,65 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
+/// App-wide semantic type scale based on the macOS system text styles.
+/// Text roles stay consistent while still respecting the user's system settings.
+enum AppTypography {
+    static let pageTitle: Font = .title3.weight(.semibold)
+    static let paneTitle: Font = .headline.weight(.semibold)
+    static let sectionTitle: Font = .headline.weight(.semibold)
+    static let body: Font = .body
+    static let bodyEmphasis: Font = .body.weight(.semibold)
+    static let callout: Font = .callout
+    static let calloutEmphasis: Font = .callout.weight(.semibold)
+    static let meta: Font = .subheadline
+    static let metaEmphasis: Font = .subheadline.weight(.semibold)
+    static let caption: Font = .caption
+    static let captionEmphasis: Font = .caption.weight(.semibold)
+    static let micro: Font = .caption2
+    static let microEmphasis: Font = .caption2.weight(.semibold)
+    static let monoMeta: Font = .system(.subheadline, design: .monospaced)
+    static let monoMetaEmphasis: Font = .system(.subheadline, design: .monospaced).weight(.semibold)
+    static let monoMicro: Font = .system(.caption2, design: .monospaced)
+}
+
 enum AppListTypography {
-    static let actionTitle: Font = .system(size: 13.5, weight: .regular)
-    static let actionIcon: Font = .system(size: 14.5, weight: .medium)
-    static let header: Font = .system(size: 15.5, weight: .semibold)
-    static let rowTitle: Font = .system(size: 14.5, weight: .regular)
-    static let rowTitleSelected: Font = .system(size: 14.5, weight: .semibold)
-    static let rowSubtitle: Font = .system(size: 12.5)
-    static let rowCaption: Font = .system(size: 12.5)
-    static let rowCaptionEmphasized: Font = .system(size: 12.5, weight: .semibold)
+    static let actionTitle = AppTypography.body
+    static let actionIcon = AppTypography.bodyEmphasis
+    static let header = AppTypography.paneTitle
+    static let rowTitle = AppTypography.body
+    static let rowTitleSelected = AppTypography.bodyEmphasis
+    static let rowSubtitle = AppTypography.meta
+    static let rowCaption = AppTypography.caption
+    static let rowCaptionEmphasized = AppTypography.captionEmphasis
+}
+
+struct AppListPaneHeader<Actions: View>: View {
+    var title: String
+    var verticalPadding: CGFloat
+    @ViewBuilder var actions: Actions
+
+    init(title: String, verticalPadding: CGFloat = AppShellLayout.paneHeaderVerticalPadding, @ViewBuilder actions: () -> Actions) {
+        self.title = title
+        self.verticalPadding = verticalPadding
+        self.actions = actions()
+    }
+
+    var body: some View {
+        ZStack {
+            Text(title)
+                .font(AppListTypography.header)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            HStack(spacing: AppShellLayout.spaceS) {
+                Spacer(minLength: 0)
+                actions
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, AppShellLayout.paneHeaderHorizontalPadding)
+        .padding(.vertical, verticalPadding)
+    }
 }
 
 struct SidebarActionButtonLabel: View {
@@ -24,7 +74,7 @@ struct SidebarActionButtonLabel: View {
     var fillsWidth: Bool = true
     var titleFont: Font = AppListTypography.actionTitle
     var iconFont: Font = AppListTypography.actionIcon
-    var minHeight: CGFloat = 24
+    var minHeight: CGFloat = AppButtonLayout.height
 
     var body: some View {
         Label {
@@ -78,7 +128,13 @@ enum AppShellLayout {
     static let spaceS: CGFloat = 8
     static let spaceM: CGFloat = 12
     static let spaceL: CGFloat = 16
-    static let spaceXL: CGFloat = 22
+    static let spaceXL: CGFloat = 24
+
+    static let paneHeaderHorizontalPadding: CGFloat = 16
+    static let paneHeaderVerticalPadding: CGFloat = 12
+    static let pageHorizontalPadding: CGFloat = 24
+    static let pageVerticalPadding: CGFloat = 20
+    static let sectionSpacing: CGFloat = 24
 
     static let radiusS: CGFloat = 8
     static let radiusM: CGFloat = 12
@@ -88,9 +144,7 @@ enum AppShellLayout {
     static let primarySidebarDefaultWidth: CGFloat = 210
     static let primarySidebarMaxWidth: CGFloat = 250
 
-    static let listColumnMinWidth: CGFloat = 220
-    static let listColumnDefaultWidth: CGFloat = 250
-    static let listColumnMaxWidth: CGFloat = 300
+    static let listColumnWidth: CGFloat = 300
 
     static let detailColumnMinWidth: CGFloat = 360
     static let shellMinWidth: CGFloat = 860
@@ -98,6 +152,51 @@ enum AppShellLayout {
 
     static let contentMaxWidth: CGFloat = 780
     static let hairlineOpacity: Double = 0.14
+}
+
+/// Shared button metrics for every app surface. Native text buttons use the
+/// regular macOS control size; icon-only actions use one stable square target.
+enum AppButtonLayout {
+    static let controlSize: ControlSize = .regular
+    static let height: CGFloat = 32
+    static let iconButtonSize: CGFloat = 32
+    static let iconSize: CGFloat = 14
+}
+
+struct AppIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: AppButtonLayout.iconSize, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+            .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
+            .contentShape(Circle())
+            .background(
+                Color.secondary.opacity(configuration.isPressed ? 0.16 : 0.08),
+                in: Circle()
+            )
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == AppIconButtonStyle {
+    static var appIcon: AppIconButtonStyle { AppIconButtonStyle() }
+}
+
+/// Shared metrics for selectable cards in every primary app list.
+/// The conversation card is the visual baseline; content-heavy cards may grow naturally.
+enum AppListCardLayout {
+    static let horizontalInset: CGFloat = 12
+    static let verticalInset: CGFloat = 8
+    static let spacing: CGFloat = 4
+    static let contentPadding: CGFloat = 12
+    static let contentSpacing: CGFloat = 8
+    static let cornerRadius: CGFloat = 10
+    static let minimumHeight: CGFloat = 76
+
+    static var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
 }
 
 enum AppShellColors {
@@ -195,4 +294,3 @@ struct AppMetricCard: View {
         )
     }
 }
-

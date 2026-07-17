@@ -11,7 +11,7 @@ struct PersonRelationshipEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("添加关系")
-                .font(.title2.weight(.semibold))
+                .font(AppTypography.pageTitle)
             Text("为 \(sourceDisplayName) 添加结构化人际关系。当前用户不会出现在 @ 人物选择中；如关系目标是你本人，请选择“当前用户”。")
                 .font(.callout)
                 .foregroundStyle(.secondary)

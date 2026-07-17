@@ -19,6 +19,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case rss = "RSS"
     case sources = "Sources"
     case skills = "Skills"
+    case knowledgeMarketplace = "知识市场"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -79,7 +80,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .identity: "登录、资料与知识库"
+        case .identity: "登录、注册、账号资料"
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
         case .calendar: "日程、账户能力、轻量管理"
@@ -105,7 +106,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .labels: "tag"
         case .statuses: "circle.dashed"
         case .shortcuts: "command"
-        case .preferences: "person.crop.circle"
+        case .preferences: "slider.horizontal.3"
         }
     }
 }

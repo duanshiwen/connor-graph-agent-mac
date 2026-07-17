@@ -20,6 +20,7 @@ enum AppMenuPresentation {
     static let importCenterTitle = "导入中心…"
     static let noteImportWizardWindowID = "note-import-wizard"
     static let noteImportCenterWindowID = "note-import-center"
+    static let knowledgePublicationProgressWindowID = "knowledge-publication-progress"
 }
 
 @main
@@ -34,20 +35,19 @@ struct ConnorGraphAgentMacApp: App {
 
     var body: some Scene {
         Window("康纳同学", id: "main") {
-            AppShellView(
-                graph: root.graph,
-                identityStore: root.identityStore,
-                noteImportModel: root.noteImportModel,
-                sendCommand: { root.sendWhenInteractive($0) }
-            )
-                .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
-                .toolbarBackground(.visible, for: .windowToolbar)
-                .task {
-                    await root.startupCoordinator.startIfNeeded()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                    root.startupCoordinator.shutdown()
-                }
+            AppStartupRootView(startupCoordinator: root.startupCoordinator) {
+                AppShellView(
+                    graph: root.graph,
+                    identityStore: root.identityStore,
+                    noteImportModel: root.noteImportModel,
+                    sendCommand: { root.sendWhenInteractive($0) }
+                )
+            }
+            .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
+            .toolbarBackground(.visible, for: .windowToolbar)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                root.startupCoordinator.shutdown()
+            }
         }
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
@@ -135,13 +135,24 @@ struct ConnorGraphAgentMacApp: App {
                 model: root.noteImportModel,
                 importExecutionEnabled: root.featureFlags.noteImportEnabled
             )
+            .controlSize(AppButtonLayout.controlSize)
         }
         .defaultSize(width: 720, height: 560)
 
         Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: root.noteImportModel)
+                .controlSize(AppButtonLayout.controlSize)
         }
         .defaultSize(width: 900, height: 620)
+
+        Window("知识库发布进度", id: AppMenuPresentation.knowledgePublicationProgressWindowID) {
+            KnowledgePublicationProgressView(
+                store: root.graph.knowledgeCreator,
+                sessions: root.graph.chat.sessions.allSessions
+            )
+            .controlSize(AppButtonLayout.controlSize)
+        }
+        .defaultSize(width: 860, height: 620)
     }
 }
 

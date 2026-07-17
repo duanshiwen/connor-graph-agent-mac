@@ -47,6 +47,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var personProfileStore: (any PersonProfileStore)?
     public var mailRuntime: MailRuntime?
     public var rssRuntime: RSSRuntime?
+    public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
@@ -64,6 +65,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         personProfileStore: (any PersonProfileStore)? = nil,
         mailRuntime: MailRuntime? = nil,
         rssRuntime: RSSRuntime? = nil,
+        cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
@@ -79,6 +81,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.personProfileStore = personProfileStore
         self.mailRuntime = mailRuntime
         self.rssRuntime = rssRuntime
+        self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
@@ -90,10 +93,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
-        sessionLLMOverride: SessionLLMOverride? = nil
+        sessionLLMOverride: SessionLLMOverride? = nil,
+        remoteKnowledgeBaseIDs: [String]? = nil
     ) -> AgentLoopChatController<AnyAgentModelProvider> {
         AgentLoopChatController(
-            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride),
+            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs),
             session: session,
             groupID: groupID,
             memoryOSFacade: makeMemoryOSFacade()
@@ -105,10 +109,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
-        sessionLLMOverride: SessionLLMOverride? = nil
+        sessionLLMOverride: SessionLLMOverride? = nil,
+        remoteKnowledgeBaseIDs: [String]? = nil
     ) -> NativeSessionManager {
         NativeSessionManager(
-            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride)),
+            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
@@ -158,7 +163,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
-        sessionLLMOverride: SessionLLMOverride? = nil
+        sessionLLMOverride: SessionLLMOverride? = nil,
+        remoteKnowledgeBaseIDs: [String]? = nil
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
@@ -169,6 +175,12 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let memoryOSFacade = makeMemoryOSFacade()
         if let memoryOSFacade {
             registry.registerMemoryOSReadTools(facade: memoryOSFacade)
+        }
+        if let cloudKnowledgeConsumptionClient {
+            registry.registerCloudKnowledgeConsumptionTools(
+                client: cloudKnowledgeConsumptionClient,
+                knowledgeBaseIDs: remoteKnowledgeBaseIDs ?? []
+            )
         }
         let nativeSourceReferenceRecorder = memoryOSFacade.map { AppMemoryOSNativeSourceReferenceRecorder(facade: $0) }
         let settings = (try? settingsRepository.loadSettings()) ?? .default

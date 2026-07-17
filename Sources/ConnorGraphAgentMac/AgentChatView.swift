@@ -132,10 +132,8 @@ private struct AgentChatToastView: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(.secondary)
             .accessibilityLabel("关闭提示")
         }
@@ -1217,4 +1215,3 @@ private struct ArtifactPathRow: View {
         }
     }
 }
-

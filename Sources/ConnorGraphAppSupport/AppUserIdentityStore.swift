@@ -362,6 +362,10 @@ public final class AppUserIdentityStore: ObservableObject {
         return nil
     }
 
+    public var hasStoredSession: Bool {
+        (try? credentials.tokens()) != nil
+    }
+
     public func restoreSession() async {
         authenticationState = .restoring
         errorMessage = nil

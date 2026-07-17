@@ -12,6 +12,7 @@ final class GlobalSearchFeatureModel {
         case chatSession(String)
         case nativeResult(NativeSearchResult)
         case browserHistoryRecord(BrowserHistoryRecord)
+        case knowledgeBase(String)
         case showAll(GlobalSearchSectionKind, query: String)
     }
 
@@ -36,6 +37,7 @@ final class GlobalSearchFeatureModel {
     @ObservationIgnored var sessionsProvider: () -> [AgentSession] = { [] }
     @ObservationIgnored var fallbackNativeSearchProvider: (NativeSearchSourceKind, String, Int) -> [NativeSearchResult] = { _, _, _ in [] }
     @ObservationIgnored var defaultSearchURLProvider: (String) -> URL? = { _ in nil }
+    @ObservationIgnored var knowledgeMarketplaceSearchProvider: (String) async -> [CloudMarketplaceKnowledgeBase] = { _ in [] }
     @ObservationIgnored var onDestination: ((Destination) -> Void)?
 
     init(
@@ -56,6 +58,7 @@ final class GlobalSearchFeatureModel {
         }
         var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
         items.append(contentsOf: previewState.chatSessionResults.map { .chatSession($0.id) })
+        items.append(contentsOf: previewState.knowledgeBaseResults.map { .knowledgeBase($0.id) })
         items.append(contentsOf: previewState.calendarResults.map { .nativeResult($0.id) })
         items.append(contentsOf: previewState.rssResults.map { .nativeResult($0.id) })
         items.append(contentsOf: previewState.mailResults.map { .nativeResult($0.id) })
@@ -118,6 +121,7 @@ final class GlobalSearchFeatureModel {
             let results = previewState.calendarResults + previewState.rssResults + previewState.mailResults + previewState.browserHistoryResults
             guard let result = results.first(where: { $0.id == resultID }) else { return }
             openResult(result)
+        case .knowledgeBase(let id): openKnowledgeBase(id)
         }
     }
 
@@ -171,6 +175,12 @@ final class GlobalSearchFeatureModel {
         onDestination?(.nativeResult(result))
     }
 
+    func openKnowledgeBase(_ id: String) {
+        recordHistoryIfNeeded(query)
+        dismissOverlay()
+        onDestination?(.knowledgeBase(id))
+    }
+
     func showAllResults(kind: GlobalSearchSectionKind) {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         dismissOverlay()
@@ -195,13 +205,27 @@ final class GlobalSearchFeatureModel {
         guard canApply(query: trimmed, generation: generation) else { return }
         previewState = GlobalSearchPreviewState(
             query: trimmed,
-            loadingSections: [.calendar, .rss, .mail, .browserHistory],
+            loadingSections: [.knowledgeMarketplace, .calendar, .rss, .mail, .browserHistory],
             chatSessionResults: chatResults,
             searchTokens: tokens,
             errorMessage: nil
         )
         normalizeSelection()
-        await refreshNativeSections(query: trimmed, tokens: tokens, generation: generation)
+        async let marketplace: Void = refreshKnowledgeMarketplace(query: trimmed, tokens: tokens, generation: generation)
+        async let native: Void = refreshNativeSections(query: trimmed, tokens: tokens, generation: generation)
+        _ = await (marketplace, native)
+    }
+
+    private func refreshKnowledgeMarketplace(query: String, tokens: [String], generation: UInt64) async {
+        let results = await knowledgeMarketplaceSearchProvider(query)
+        guard canApply(query: query, generation: generation) else { return }
+        var state = previewState
+        state.query = query
+        state.searchTokens = tokens
+        state.knowledgeBaseResults = results
+        state.loadingSections.remove(.knowledgeMarketplace)
+        previewState = state
+        normalizeSelection()
     }
 
     nonisolated static func userFacingErrorMessage(for error: Error) -> String? {
@@ -362,6 +386,7 @@ final class GlobalSearchFeatureModel {
         case .rss: state.rssResults = result.results
         case .mail: state.mailResults = result.results
         case .browserHistory: state.browserHistoryResults = result.results
+        case .knowledgeMarketplace: break
         }
         previewState = state; normalizeSelection()
     }

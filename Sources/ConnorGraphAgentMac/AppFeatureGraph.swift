@@ -86,6 +86,8 @@ final class AppFeatureGraph {
     let mail: MailFeatureModel
     let browser: BrowserFeatureModel
     let globalSearch: GlobalSearchFeatureModel
+    let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
+    let knowledgeCreator: CloudKnowledgeCreatorStore
     let rss: RSSFeatureModel
     let skills: SkillRuntimeFeatureModel
     let appSettings: AppSettingsFeatureModel
@@ -114,6 +116,8 @@ final class AppFeatureGraph {
         mail: MailFeatureModel,
         browser: BrowserFeatureModel,
         globalSearch: GlobalSearchFeatureModel,
+        knowledgeMarketplace: CloudKnowledgeMarketplaceStore,
+        knowledgeCreator: CloudKnowledgeCreatorStore,
         rss: RSSFeatureModel,
         skills: SkillRuntimeFeatureModel,
         appSettings: AppSettingsFeatureModel,
@@ -141,6 +145,8 @@ final class AppFeatureGraph {
         self.mail = mail
         self.browser = browser
         self.globalSearch = globalSearch
+        self.knowledgeMarketplace = knowledgeMarketplace
+        self.knowledgeCreator = knowledgeCreator
         self.rss = rss
         self.skills = skills
         self.appSettings = appSettings

@@ -760,6 +760,7 @@ struct AgentChatComposerView: View {
             selectedSession: selectedSession,
             composerState: composerState,
             governanceConfig: chatActions.dependencies.governance.config,
+            knowledgeMarketplace: chatActions.dependencies.knowledgeMarketplace,
             hasRunningBackgroundTask: chatActions.run.hasRunningActiveSessionBackgroundTask,
             currentTextSelectionRange: { composerSelectionTracker.selectedRange },
             isSessionInfoPresented: $isSessionInfoPresented,
@@ -1059,6 +1060,88 @@ struct AgentChatComposerView: View {
 
 }
 
+struct RemoteKnowledgeBaseSelectionMenu: View {
+    @ObservedObject var store: CloudKnowledgeMarketplaceStore
+    var explicitIDs: [String]?
+    var isDisabled: Bool
+    var onSelectionChanged: ([String]?) -> Void
+    @State private var isPresented = false
+
+    private var available: [CloudMarketplaceKnowledgeBase] {
+        var seen = Set<String>()
+        return store.library.subscribed.filter { seen.insert($0.id).inserted }
+    }
+
+    private var selection: RemoteKnowledgeBaseSelection {
+        RemoteKnowledgeBaseSelection(available: available, explicitIDs: explicitIDs)
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            AgentComposerOptionBadge(
+                title: selection.label,
+                systemImage: "books.vertical",
+                tint: selection.selectedIDs.isEmpty ? .secondary : .accentColor,
+                isActive: !selection.selectedIDs.isEmpty,
+                style: .prominent,
+                showsBorder: false
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help("选择本会话允许访问的远端知识库")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("远端知识库").font(.headline)
+                    Spacer()
+                    Button(selection.isAllSelected ? "清除全选" : "全选") {
+                        onSelectionChanged(selection.toggleAllValue)
+                    }
+                    .disabled(available.isEmpty)
+                }
+                .padding(12)
+
+                Divider()
+
+                if available.isEmpty {
+                    ContentUnavailableView("暂无订阅", systemImage: "books.vertical")
+                        .frame(minHeight: 150)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(available) { knowledgeBase in
+                                Toggle(isOn: Binding(
+                                    get: { selection.selectedIDs.contains(knowledgeBase.id) },
+                                    set: { _ in onSelectionChanged(selection.toggling(knowledgeBase.id)) }
+                                )) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(knowledgeBase.name).lineLimit(1)
+                                        Text(knowledgeBase.id)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                }
+                                .toggleStyle(.checkbox)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .frame(maxHeight: 320)
+                }
+            }
+            .frame(width: 320)
+        }
+        .task {
+            if store.library.subscribed.isEmpty { await store.load() }
+        }
+    }
+}
+
 private struct ComposerModelSelectionLabel: View {
     let presentation: ComposerModelSelectionPresentation
     var foreground: Color
@@ -1259,12 +1342,10 @@ private struct ComposerFormatBar: View {
 
             Button(action: onInsertImage) {
                 Label("图片", systemImage: "photo")
-                    .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                     .labelStyle(.iconOnly)
-                    .frame(width: 26, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(.secondary)
             .help("插入图片")
             .accessibilityLabel("插入图片")
@@ -1273,7 +1354,7 @@ private struct ComposerFormatBar: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .frame(height: 28)
+        .frame(height: AppButtonLayout.iconButtonSize + 6)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
 
@@ -1282,14 +1363,11 @@ private struct ComposerFormatBar: View {
             if let shortcut {
                 Text(shortcut)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .frame(width: 26, height: 22)
             } else {
                 Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 26, height: 22)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.appIcon)
         .foregroundStyle(.secondary)
         .help(shortcut.map { "\($0) (\(buttonHelpLabel(systemImage: systemImage)))" } ?? buttonHelpLabel(systemImage: systemImage))
         .accessibilityLabel(buttonAccessibilityLabel(systemImage: systemImage, shortcut: shortcut))

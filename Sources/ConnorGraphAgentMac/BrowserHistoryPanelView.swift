@@ -38,7 +38,7 @@ struct BrowserHistoryPanelView: View {
     // MARK: - Header
 
     private var headerBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: AppShellLayout.spaceS) {
             Image(systemName: "clock.arrow.circlepath")
                 .font(BrowserFloatingTypography.popoverTitle)
                 .foregroundStyle(.secondary)
@@ -47,25 +47,22 @@ struct BrowserHistoryPanelView: View {
             Spacer()
             Button(action: { model.toggleHistoryPanel() }) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .help("关闭历史面板")
             .accessibilityLabel("关闭历史面板")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
     }
 
     // MARK: - Search
 
     private var searchBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: AppShellLayout.spaceS) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(BrowserFloatingTypography.hint)
                 .foregroundStyle(.tertiary)
             TextField("搜索网址、标题或正文", text: searchText)
                 .textFieldStyle(.plain)
@@ -75,7 +72,7 @@ struct BrowserHistoryPanelView: View {
                     model.filterHistory(query: "")
                 }) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(AppTypography.caption)
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
@@ -83,8 +80,8 @@ struct BrowserHistoryPanelView: View {
                 .accessibilityLabel("清空历史搜索")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
     }
 
     // MARK: - Empty State
@@ -92,7 +89,7 @@ struct BrowserHistoryPanelView: View {
     private var emptyState: some View {
         let isSearching = !model.historySearchQuery.isEmpty
 
-        return VStack(spacing: 8) {
+        return VStack(spacing: AppShellLayout.spaceS) {
             Spacer()
             Image(systemName: "clock")
                 .font(.system(size: 32))
@@ -101,11 +98,11 @@ struct BrowserHistoryPanelView: View {
                 .font(BrowserFloatingTypography.hint.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(isSearching ? "换个关键词试试，或者回到浏览器继续打开新的网页。" : "你在康纳同学里打开过的网页会出现在这里。之后可以从历史记录回到资料现场，继续和会话一起工作。")
-                .font(.system(size: 11))
+                .font(AppTypography.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
-                .padding(.horizontal, 18)
+                .padding(.horizontal, AppShellLayout.spaceL)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -131,18 +128,18 @@ struct BrowserHistoryPanelView: View {
                     }
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, AppShellLayout.spaceS)
         }
     }
 
     @ViewBuilder
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(AppTypography.captionEmphasis)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.top, AppShellLayout.spaceM)
+            .padding(.bottom, AppShellLayout.spaceXS)
     }
 
     // MARK: - Footer
@@ -150,19 +147,19 @@ struct BrowserHistoryPanelView: View {
     private var footerBar: some View {
         HStack {
             Text("\(model.filteredHistoryRecords.count) 条记录")
-                .font(.system(size: 11))
+                .font(AppTypography.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
             Button(action: { clearConfirmation = true }) {
                 Text("清空")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(AppTypography.captionEmphasis)
                     .foregroundStyle(.red)
             }
             .buttonStyle(.plain)
             .disabled(model.historyRecords.isEmpty)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
         .confirmationDialog("确认清空所有浏览历史？", isPresented: $clearConfirmation, titleVisibility: .visible) {
             Button("清空所有历史", role: .destructive) {
                 model.clearHistory()
@@ -186,37 +183,37 @@ private struct BrowserHistoryRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 8) {
+            HStack(spacing: AppShellLayout.spaceS) {
                 favicon
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                     Text(displayTitle)
                         .font(BrowserFloatingTypography.pageTitle)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    HStack(spacing: 4) {
+                    HStack(spacing: AppShellLayout.spaceXS) {
                         Text(displayURL)
-                            .font(.system(size: 11))
+                            .font(BrowserFloatingTypography.pageURL)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
                 }
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 2) {
+                Spacer(minLength: AppShellLayout.spaceXS)
+                VStack(alignment: .trailing, spacing: AppShellLayout.spaceXS) {
                     Text(record.sessionTitle)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(AppTypography.microEmphasis)
                         .foregroundStyle(Color.accentColor)
                         .lineLimit(1)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Color.accentColor.opacity(0.10), in: Capsule())
                     Text(timeString)
-                        .font(.system(size: 10).monospacedDigit())
+                        .font(AppTypography.monoMicro.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.vertical, AppShellLayout.spaceS)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

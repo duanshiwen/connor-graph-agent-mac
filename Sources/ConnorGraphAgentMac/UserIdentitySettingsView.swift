@@ -4,9 +4,6 @@ import ConnorGraphAppSupport
 
 struct UserIdentitySettingsView: View {
     @ObservedObject var identityStore: AppUserIdentityStore
-    @ObservedObject var creatorStore: CloudKnowledgeCreatorStore
-    @ObservedObject var marketplaceStore: CloudKnowledgeMarketplaceStore
-    var sessions: [AgentSession]
     @State private var mode: AuthenticationMode = .login
     @State private var username = ""
     @State private var email = ""
@@ -14,6 +11,7 @@ struct UserIdentitySettingsView: View {
     @State private var confirmation = ""
     @State private var isSubmitting = false
     @State private var didAttemptSubmit = false
+    @State private var didRetryStoredSession = false
 
     enum AuthenticationMode: String, CaseIterable, Identifiable {
         case login = "登录"
@@ -31,76 +29,94 @@ struct UserIdentitySettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .task(id: identityStore.currentUser?.id) {
-            if identityStore.currentUser != nil { await identityStore.refreshLibraries() }
-        }
-        .onChange(of: mode) { _, _ in didAttemptSubmit = false }
-        .onChange(of: identityStore.authenticationState) { _, state in
-            if state == .signedOut || state == .expired {
-                creatorStore.reset()
-                Task { await marketplaceStore.clearSession() }
+            if identityStore.currentUser == nil, identityStore.hasStoredSession, !didRetryStoredSession {
+                didRetryStoredSession = true
+                await identityStore.restoreSession()
             }
         }
+        .onChange(of: mode) { _, _ in didAttemptSubmit = false }
     }
 
     private var authenticationView: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(Color.accentColor.opacity(0.12)).frame(width: 72, height: 72)
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 38, weight: .medium)).foregroundStyle(Color.accentColor)
-                }
-                Text("康纳账号").font(.system(size: 24, weight: .semibold))
-                Text("登录后管理你创建和订阅的知识库")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            SettingsGroup(title: "账号访问") {
+                HStack(spacing: SettingsListLayout.spaceM) {
+                    ZStack {
+                        Circle().fill(Color.accentColor.opacity(0.12))
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .frame(width: 48, height: 48)
 
-            VStack(spacing: 18) {
+                    VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                        Text(mode == .login ? "登录康纳账号" : "创建康纳账号")
+                            .font(SettingsListTypography.rowTitleSelected)
+                        Text("登录后同步账号资料和登录状态。")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Divider()
+
                 Picker("账号操作", selection: $mode) {
                     ForEach(AuthenticationMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .frame(width: SettingsListLayout.pickerControlWidth)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(spacing: 12) {
-                    accountField("用户名", text: $username, systemImage: "person")
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                    accountField("用户名", placeholder: "请输入用户名", text: $username, systemImage: "person")
                     if mode == .register {
-                        accountField("邮箱", text: $email, systemImage: "envelope")
+                        accountField("邮箱", placeholder: "name@example.com", text: $email, systemImage: "envelope")
                     }
-                    accountSecureField("密码", text: $password, systemImage: "lock")
+                    accountSecureField("密码", placeholder: "请输入密码", text: $password, systemImage: "lock")
                     if mode == .register {
-                        accountSecureField("确认密码", text: $confirmation, systemImage: "lock.rotation")
+                        accountSecureField("确认密码", placeholder: "再次输入密码", text: $confirmation, systemImage: "lock.rotation")
                     }
                 }
 
                 if case .expired = identityStore.authenticationState {
                     statusMessage("登录已失效，请重新登录。", systemImage: "exclamationmark.circle", color: .orange)
                 } else if let error = visibleError {
-                    statusMessage(error, systemImage: "exclamationmark.circle", color: .red)
-                }
-
-                Button { Task { await submit() } } label: {
-                    HStack(spacing: 8) {
-                        if isSubmitting { ProgressView().controlSize(.small) }
-                        Text(mode == .login ? "登录" : "创建账号").fontWeight(.semibold)
+                    HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceS) {
+                        statusMessage(error, systemImage: "exclamationmark.triangle", color: .red)
+                        if identityStore.hasStoredSession {
+                            Button("重新连接") {
+                                Task { await retryStoredSession() }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(AppButtonLayout.controlSize)
+                            .disabled(isSubmitting)
+                        }
                     }
-                    .frame(maxWidth: .infinity).frame(height: 22)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(isSubmitting)
-            }
-            .padding(24)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.quaternary))
-            .shadow(color: .black.opacity(0.04), radius: 12, y: 4)
 
-            Label("康纳账号与本地会话、偏好和 Memory OS 相互独立", systemImage: "lock.shield")
-                .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button { Task { await submit() } } label: {
+                        HStack(spacing: SettingsListLayout.spaceS) {
+                            if isSubmitting { ProgressView().controlSize(.small) }
+                            Text(mode == .login ? "登录" : "创建账号")
+                                .font(SettingsListTypography.actionTitle)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(AppButtonLayout.controlSize)
+                    .disabled(isSubmitting)
+                }
+            }
+
+            SettingsGroup(title: "同步与隐私") {
+                accountCapabilityRow(systemImage: "arrow.triangle.2.circlepath", title: "账号同步", subtitle: "同步账号资料和登录状态。")
+                Divider()
+                accountCapabilityRow(systemImage: "lock.shield", title: "本地数据独立", subtitle: "本地会话、偏好和 Memory OS 不会随账号同步。")
+            }
         }
-        .frame(maxWidth: 460)
-        .padding(.top, 28)
-        .padding(.horizontal, 32)
     }
 
     private var restoringView: some View {
@@ -118,12 +134,12 @@ struct UserIdentitySettingsView: View {
                 HStack(spacing: SettingsListLayout.spaceL) {
                     IdentityAvatarView(user: user, size: 64)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(user.displayName).font(.title3.weight(.semibold))
+                        Text(user.displayName).font(AppTypography.pageTitle)
                         Text("@\(user.username)").foregroundStyle(.secondary)
                         Text(user.email).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("退出登录", role: .destructive) { creatorStore.reset(); Task { await identityStore.logout() } }
+                    Button("退出登录", role: .destructive) { Task { await identityStore.logout() } }
                         .buttonStyle(.bordered)
                 }
                 Divider()
@@ -132,54 +148,52 @@ struct UserIdentitySettingsView: View {
                 SettingsValueRow(title: "注册时间", value: user.createdAt.formatted(date: .long, time: .omitted))
             }
 
-            libraryGroup(title: "我创建的知识库", emptyMessage: "你还没有创建知识库。", libraries: identityStore.ownedKnowledgeBases)
-            CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions)
-            libraryGroup(title: "我订阅的知识库", emptyMessage: "你还没有订阅知识库。", libraries: identityStore.subscribedKnowledgeBases.map(\.knowledgeBase))
-            CloudKnowledgeMarketplaceView(store: marketplaceStore)
-
-            if identityStore.isLoadingLibraries { ProgressView("正在刷新知识库…") }
-            if let error = identityStore.errorMessage { Text(error).font(SettingsListTypography.rowCaption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("刷新") { Task { await identityStore.refreshLibraries() } }.disabled(identityStore.isLoadingLibraries) }
         }
     }
 
-    private func accountField(_ title: String, text: Binding<String>, systemImage: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage).foregroundStyle(.secondary).frame(width: 18)
-            TextField(title, text: text).textFieldStyle(.plain)
+    private func accountField(_ title: String, placeholder: String, text: Binding<String>, systemImage: String) -> some View {
+        HStack(spacing: SettingsListLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(SettingsListTypography.rowTitleSelected)
+                .frame(width: 100, alignment: .leading)
+            TextField(placeholder, text: text)
+                .font(SettingsListTypography.rowTitle)
+                .textFieldStyle(.roundedBorder)
         }
-        .padding(.horizontal, 13).frame(height: 42)
-        .background(.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(.quaternary))
+        .frame(minHeight: SettingsListLayout.fieldHeight)
     }
 
-    private func accountSecureField(_ title: String, text: Binding<String>, systemImage: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage).foregroundStyle(.secondary).frame(width: 18)
-            SecureField(title, text: text).textFieldStyle(.plain)
+    private func accountSecureField(_ title: String, placeholder: String, text: Binding<String>, systemImage: String) -> some View {
+        HStack(spacing: SettingsListLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(SettingsListTypography.rowTitleSelected)
+                .frame(width: 100, alignment: .leading)
+            SecureField(placeholder, text: text)
+                .font(SettingsListTypography.rowTitle)
+                .textFieldStyle(.roundedBorder)
         }
-        .padding(.horizontal, 13).frame(height: 42)
-        .background(.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(.quaternary))
+        .frame(minHeight: SettingsListLayout.fieldHeight)
     }
 
     private func statusMessage(_ text: String, systemImage: String, color: Color) -> some View {
         Label(text, systemImage: systemImage)
-            .font(.caption).foregroundStyle(color)
+            .font(SettingsListTypography.rowCaption).foregroundStyle(color)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func libraryGroup(title: String, emptyMessage: String, libraries: [ConnorKnowledgeBaseSummary]) -> some View {
-        SettingsGroup(title: title) {
-            if libraries.isEmpty {
-                Text(emptyMessage).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(libraries.enumerated()), id: \.element.id) { index, library in
-                    KnowledgeLibraryIdentityRow(library: library)
-                    if index < libraries.count - 1 { Divider() }
-                }
+    private func accountCapabilityRow(systemImage: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: SettingsListLayout.spaceM) {
+            Image(systemName: systemImage)
+                .font(SettingsListTypography.icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
+            Spacer()
         }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 
     private var formError: String? {
@@ -209,6 +223,12 @@ struct UserIdentitySettingsView: View {
         }
         if identityStore.currentUser != nil { password = ""; confirmation = "" }
     }
+
+    private func retryStoredSession() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+        await identityStore.restoreSession()
+    }
 }
 
 struct IdentityAvatarView: View {
@@ -234,24 +254,5 @@ struct IdentityAvatarView: View {
             Text(String(user.displayName.prefix(1)).uppercased())
                 .font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(Color.accentColor)
         }
-    }
-}
-
-private struct KnowledgeLibraryIdentityRow: View {
-    var library: ConnorKnowledgeBaseSummary
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "books.vertical").font(.title3).foregroundStyle(.orange).frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(library.name).font(SettingsListTypography.rowTitleSelected)
-                Text([library.category, library.visibility, "\(library.subscriberCount) 位订阅者"].compactMap { $0 }.joined(separator: " · "))
-                    .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-                if let description = library.description, !description.isEmpty {
-                    Text(description).font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-            Spacer()
-        }
-        .frame(minHeight: SettingsListLayout.prominentRowMinHeight)
     }
 }

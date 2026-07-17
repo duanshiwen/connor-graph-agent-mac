@@ -88,6 +88,7 @@ struct AppGlobalSearchOverlayView: View {
                 tokenChips
 
                 chatSessionSection(results: state.chatSessionResults)
+                knowledgeMarketplaceSection(results: state.knowledgeBaseResults)
                 resultSection(kind: .calendar, results: state.calendarResults)
                 resultSection(kind: .rss, results: state.rssResults)
                 resultSection(kind: .mail, results: state.mailResults)
@@ -313,6 +314,52 @@ struct AppGlobalSearchOverlayView: View {
         .padding(.bottom, 2)
     }
 
+    private func knowledgeMarketplaceSection(results: [CloudMarketplaceKnowledgeBase]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: GlobalSearchSectionKind.knowledgeMarketplace.systemImage)
+                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary).frame(width: 16)
+                Text(GlobalSearchSectionKind.knowledgeMarketplace.title)
+                    .font(AppListTypography.rowCaptionEmphasized).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button("查看全部 ›") { model.showAllResults(kind: .knowledgeMarketplace) }
+                    .buttonStyle(.plain)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(results.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                    .disabled(query.isEmpty || results.isEmpty)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS).padding(.top, AppShellLayout.spaceXS)
+
+            if state.isSectionLoading(.knowledgeMarketplace), results.isEmpty {
+                GlobalSearchLoadingSourceRow()
+            } else if results.isEmpty {
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.knowledgeMarketplace.emptyTitle)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(results.prefix(3)) { result in
+                        Button { model.openKnowledgeBase(result.id) } label: {
+                            HStack(spacing: AppShellLayout.spaceS) {
+                                Image(systemName: "books.vertical.fill").foregroundStyle(Color.accentColor).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(result.name).font(AppListTypography.rowTitle).lineLimit(1)
+                                    Text([result.ownerName.map { "由 \($0) 发布" }, result.owned ? "我发布的" : (result.subscribed ? "已订阅" : "未订阅")].compactMap { $0 }.joined(separator: " · "))
+                                        .font(AppListTypography.rowCaption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                MarketplaceStatusBadge(base: result)
+                            }
+                            .padding(.horizontal, AppShellLayout.spaceS).padding(.vertical, 7)
+                            .background(stateSelected(.knowledgeBase(result.id)) ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
+    }
+
     private func stateSelected(_ item: GlobalSearchSelectableItem) -> Bool {
         model.selectedItem == item
     }
@@ -323,10 +370,8 @@ struct AppGlobalSearchOverlayView: View {
                 browserHistoryPage = max(0, currentPage - 1)
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(currentPage == 0 ? Color.secondary.opacity(0.35) : Color.accentColor)
             .disabled(currentPage == 0)
             .help("上一页浏览历史")
@@ -340,10 +385,8 @@ struct AppGlobalSearchOverlayView: View {
                 browserHistoryPage = min(pageCount - 1, currentPage + 1)
             } label: {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appIcon)
             .foregroundStyle(currentPage >= pageCount - 1 ? Color.secondary.opacity(0.35) : Color.accentColor)
             .disabled(currentPage >= pageCount - 1)
             .help("下一页浏览历史")

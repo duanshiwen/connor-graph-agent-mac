@@ -15,11 +15,11 @@ struct SidebarDisclosure<Content: View>: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 content
             }
-            .padding(.leading, 12)
-            .padding(.top, 3)
+            .padding(.leading, AppShellLayout.spaceM)
+            .padding(.top, AppShellLayout.spaceXS)
         } label: {
             Label(title, systemImage: systemImage)
                 .font(AppListTypography.rowTitleSelected)
@@ -40,7 +40,7 @@ struct SidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: AppShellLayout.spaceS) {
                 Image(systemName: systemImage)
                     .frame(width: 16)
                     .foregroundStyle(iconColor)
@@ -48,13 +48,13 @@ struct SidebarRow: View {
                     .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                     .lineLimit(1)
                     .foregroundStyle(textColor)
-                Spacer(minLength: 4)
+                Spacer(minLength: AppShellLayout.spaceXS)
                 if let count {
                     SidebarRowCountText(count: count, isVisible: isHovering || isSelected)
                 }
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.vertical, AppShellLayout.spaceS)
             .background(selectionBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
@@ -106,7 +106,7 @@ struct SidebarMutedText: View {
         Text(text)
             .font(AppListTypography.rowSubtitle)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.vertical, AppShellLayout.spaceS)
     }
 }

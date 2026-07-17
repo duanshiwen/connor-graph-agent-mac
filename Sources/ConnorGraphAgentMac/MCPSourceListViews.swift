@@ -24,9 +24,7 @@ struct CraftSourceListPane: View {
                         isSelected: card.id == model.selectedCardID,
                         onSelect: { model.selectCard(card.id) }
                     )
-                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                    .nativeListRowStyle()
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -52,26 +50,14 @@ private struct SourceListHeader: View {
     var onAdd: () -> Void
 
     var body: some View {
-        ZStack {
-            Text("外部工具连接")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-
-            HStack {
-                Spacer()
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .help("添加外部工具连接")
-                .accessibilityLabel("添加外部工具连接")
+        AppListPaneHeader(title: "外部工具连接", verticalPadding: 12) {
+            Button(action: onAdd) {
+                Image(systemName: "plus")
             }
+            .buttonStyle(.appIcon)
+            .help("添加外部工具连接")
+            .accessibilityLabel("添加外部工具连接")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
     }
 }
 
@@ -227,7 +213,7 @@ private struct MCPSourceAddSheet: View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(draft.isEditing ? "编辑外部工具连接" : "添加外部工具连接")
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text("连接本机命令或 HTTP 工具服务。凭据会安全保存在本机，不写入连接配置。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -386,18 +372,17 @@ private struct MCPSourceRow: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppListCardLayout.contentPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                AppListCardLayout.shape
+                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                AppListCardLayout.shape
                     .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.clear, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+            .contentShape(AppListCardLayout.shape)
         }
         .buttonStyle(.plain)
     }
