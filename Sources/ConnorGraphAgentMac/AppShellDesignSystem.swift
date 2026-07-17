@@ -33,11 +33,11 @@ enum AppListTypography {
     static let actionTitle = AppTypography.body
     static let actionIcon = AppTypography.bodyEmphasis
     static let header = AppTypography.paneTitle
-    static let rowTitle = AppTypography.body
-    static let rowTitleSelected = AppTypography.bodyEmphasis
-    static let rowSubtitle = AppTypography.meta
-    static let rowCaption = AppTypography.caption
-    static let rowCaptionEmphasized = AppTypography.captionEmphasis
+    static let rowTitle: Font = .system(size: 14)
+    static let rowTitleSelected: Font = .system(size: 14, weight: .semibold)
+    static let rowSubtitle: Font = .system(size: 12.5)
+    static let rowCaption: Font = .system(size: 12)
+    static let rowCaptionEmphasized: Font = .system(size: 12, weight: .semibold)
 }
 
 struct AppListPaneHeader<Actions: View>: View {
@@ -226,19 +226,65 @@ extension ButtonStyle where Self == AppIconButtonStyle {
     static var appIcon: AppIconButtonStyle { AppIconButtonStyle() }
 }
 
-/// Shared metrics for selectable cards in every primary app list.
-/// The conversation card is the visual baseline; content-heavy cards may grow naturally.
+/// Shared metrics for selectable rows in every primary app list.
+/// Rows keep a compact macOS rhythm, use a stable minimum height, and grow only
+/// when their content needs another line.
 enum AppListCardLayout {
-    static let horizontalInset: CGFloat = 12
-    static let verticalInset: CGFloat = 8
-    static let spacing: CGFloat = 4
-    static let contentPadding: CGFloat = 12
-    static let contentSpacing: CGFloat = 8
-    static let cornerRadius: CGFloat = 10
-    static let minimumHeight: CGFloat = 76
+    static let horizontalInset: CGFloat = 8
+    static let verticalInset: CGFloat = 6
+    static let spacing: CGFloat = 0
+    static let contentHorizontalPadding: CGFloat = 10
+    static let contentVerticalPadding: CGFloat = 10
+    static let contentPadding: CGFloat = 10
+    static let contentSpacing: CGFloat = 6
+    static let cornerRadius: CGFloat = 6
+    static let minimumHeight: CGFloat = 64
+    static let titleLineLimit = 2
+    static let separatorLeadingInset: CGFloat = 10
 
     static var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+}
+
+private struct AppListRowSurfaceModifier: ViewModifier {
+    var isSelected: Bool
+    var backgroundColor: Color?
+
+    @Environment(\.controlActiveState) private var controlActiveState
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, AppListCardLayout.contentHorizontalPadding)
+            .padding(.vertical, AppListCardLayout.contentVerticalPadding)
+            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+            .background(resolvedBackgroundColor, in: AppListCardLayout.shape)
+            .overlay(alignment: .bottom) {
+                if !isSelected {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor).opacity(0.55))
+                        .frame(height: 1)
+                        .padding(.leading, AppListCardLayout.separatorLeadingInset)
+                }
+            }
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+    }
+
+    private var resolvedBackgroundColor: Color {
+        if let backgroundColor { return backgroundColor }
+        if isSelected {
+            return Color.accentColor.opacity(controlActiveState == .active ? 0.18 : 0.10)
+        }
+        if isHovering { return Color.secondary.opacity(0.07) }
+        return .clear
+    }
+}
+
+extension View {
+    func appListRowSurface(isSelected: Bool, backgroundColor: Color? = nil) -> some View {
+        modifier(AppListRowSurfaceModifier(isSelected: isSelected, backgroundColor: backgroundColor))
     }
 }
 

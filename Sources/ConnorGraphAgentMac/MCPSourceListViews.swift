@@ -349,11 +349,11 @@ private struct MCPSourceRow: View {
                 }
                 .frame(width: 36, height: 36)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         Spacer(minLength: 0)
                         Circle()
                             .fill(rowColor)
@@ -372,17 +372,7 @@ private struct MCPSourceRow: View {
                     }
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(
-                AppListCardLayout.shape
-                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
-            )
-            .overlay(
-                AppListCardLayout.shape
-                    .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.clear, lineWidth: 1)
-            )
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
