@@ -1691,7 +1691,7 @@ private struct MailDirectionFilterChips: View {
             ForEach(MailMessageDirectionFilter.allCases, id: \.self) { filter in
                 Button(action: { selection = filter }) {
                     Text(filter.mailListChipTitle)
-                        .font(.system(size: 12, weight: selection == filter ? .semibold : .medium))
+                        .font(selection == filter ? AppListTypography.rowCaptionEmphasized : AppListTypography.rowCaption)
                         .foregroundStyle(selection == filter ? Color.accentColor : Color.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -1811,7 +1811,7 @@ private struct MailMessageListRow: View, Equatable {
                     HStack(spacing: 6) {
                         if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
                             Label(label, systemImage: image)
-                                .font(.system(size: 10.5, weight: .semibold))
+                                .font(AppTypography.microEmphasis)
                                 .labelStyle(.titleAndIcon)
                                 .foregroundStyle(mailDirectionBadgeForeground)
                                 .padding(.horizontal, 7)

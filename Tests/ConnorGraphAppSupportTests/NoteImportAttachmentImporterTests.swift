@@ -45,6 +45,25 @@ struct NoteImportAttachmentImporterTests {
         await #expect(throws: NoteImportAttachmentImporterError.self) { _ = try await importer.importAttachment(.init(sourcePath: file.path, displayName: "bad.txt", contentHash: "wrong"), sessionID: fixture.session.id) }
     }
 
+    @Test("Rejects attachment paths outside the authorized import root")
+    func rejectsPathTraversal() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let authorized = fixture.root.appendingPathComponent("authorized", isDirectory: true)
+        try FileManager.default.createDirectory(at: authorized, withIntermediateDirectories: true)
+        let outside = fixture.root.appendingPathComponent("outside.txt")
+        try Data("private".utf8).write(to: outside)
+        let importer = NoteImportAttachmentImporter(store: fixture.attachmentStore)
+        let lease = NoteImportSourceAccessLease(rootURL: authorized, didStart: false)
+
+        await #expect(throws: NoteImportSourceAccessError.pathEscapesAuthorizedRoot) {
+            _ = try await importer.importAttachment(
+                .init(sourcePath: outside.path, displayName: "outside.txt"),
+                sessionID: fixture.session.id,
+                authorizedRoot: lease
+            )
+        }
+    }
+
     private final class Fixture: @unchecked Sendable {
         let root: URL; let chat: AppChatSessionRepository; let attachmentStore: AppSessionAttachmentStore; let session: AgentSession
         init() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); let store = try SQLiteGraphKernelStore(path: root.appendingPathComponent("db.sqlite").path); try store.migrate(); chat = AppChatSessionRepository(store: store); session = try chat.createSession(title: "Note"); attachmentStore = AppSessionAttachmentStore(paths: AppStoragePaths(applicationSupportDirectory: root.appendingPathComponent("support"))) }

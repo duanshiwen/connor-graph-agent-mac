@@ -84,17 +84,30 @@ public struct AppChatSessionRepository: Sendable {
     /// previous empty-session insert followed by a load and full messages_json
     /// rewrite for every imported note.
     public func createImportedNoteSession(
+        id: String = UUID().uuidString,
         title: String,
         content: String,
+        messageID: String = UUID().uuidString,
         attachments: [AgentMessageAttachmentRef] = [],
         createdAt: Date = Date()
     ) throws -> AgentSession {
+        if var existing = try loadSession(id: id) {
+            if let index = existing.messages.firstIndex(where: { $0.id == messageID }) {
+                existing.messages[index].content = content
+                existing.messages[index].attachments = attachments
+            } else {
+                existing.messages.append(AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments))
+            }
+            existing.governance.kind = .note
+            existing.updatedAt = max(existing.updatedAt, createdAt)
+            return try saveSession(existing)
+        }
         var governance = AgentSessionGovernanceMetadata.default
         governance.kind = .note
         let session = AgentSession(
-            id: UUID().uuidString,
+            id: id,
             title: title,
-            messages: [AgentMessage(role: .user, content: content, createdAt: createdAt, attachments: attachments)],
+            messages: [AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments)],
             createdAt: createdAt,
             updatedAt: createdAt,
             governance: governance
@@ -102,6 +115,38 @@ public struct AppChatSessionRepository: Sendable {
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
         return session
+    }
+
+    public func upsertImportedNoteMessage(
+        sessionID: String,
+        messageID: String,
+        content: String,
+        attachments: [AgentMessageAttachmentRef],
+        createdAt: Date
+    ) throws -> AgentSession {
+        guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        let previousMessageCount = session.messages.count
+        if let index = session.messages.firstIndex(where: { $0.id == messageID }) {
+            session.messages[index].content = content
+            session.messages[index].attachments = attachments
+        } else {
+            session.messages.append(AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments))
+        }
+        session.governance.kind = .note
+        session.updatedAt = max(session.updatedAt, createdAt)
+        return try saveSession(session, previousMessageCount: previousMessageCount)
+    }
+
+    @discardableResult
+    public func trimMessagesAfterImportedNote(sessionID: String, messageID: String) throws -> AgentSession {
+        guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        guard let index = session.messages.firstIndex(where: { $0.id == messageID }) else {
+            throw AppChatSessionRepositoryError.sessionNotFound("\(sessionID):\(messageID)")
+        }
+        guard index + 1 < session.messages.count else { return session }
+        session.messages.removeSubrange((index + 1)..<session.messages.endIndex)
+        session.updatedAt = Date()
+        return try saveSession(session)
     }
 
     @discardableResult

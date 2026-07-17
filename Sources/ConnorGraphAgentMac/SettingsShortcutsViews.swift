@@ -23,7 +23,7 @@ struct ShortcutRecorderSheet: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
                 Text((capturedShortcut ?? currentShortcut).displayText)
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .font(.system(.title, design: .rounded).weight(.semibold))
                     .monospaced()
             }
             .frame(height: 86)

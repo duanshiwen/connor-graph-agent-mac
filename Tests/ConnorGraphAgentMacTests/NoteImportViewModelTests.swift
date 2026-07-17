@@ -59,6 +59,7 @@ struct NoteImportViewModelTests {
             normalizedTextHash: "normalized"
         ))
         let model = NoteImportViewModel(ledger: fixture.repository)
+        await model.reloadJobs()
 
         await model.selectJob("second")
 
@@ -77,7 +78,9 @@ struct NoteImportViewModelTests {
             discoveredCount: 4,
             importedCount: 1
         ))
+        try fixture.repository.saveItem(NoteImportItemRecord(id: "completed", jobID: "job", sourceID: "source", sourceIdentity: "completed.md", title: "Completed", status: .completed, rawByteHash: "raw", normalizedTextHash: "text"))
         let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+        await model.reloadJobs()
 
         #expect(model.activitySummary.progressFraction == 0.25)
         #expect(model.isMonitoringJobs)
@@ -105,7 +108,11 @@ struct NoteImportViewModelTests {
             status: .awaitingReview,
             discoveredCount: 392
         ))
+        for index in 0..<5 {
+            try fixture.repository.saveItem(NoteImportItemRecord(id: "completed-\(index)", jobID: "job", sourceID: "source", sourceIdentity: "completed-\(index).md", title: "Completed", status: .completed, rawByteHash: "raw-\(index)", normalizedTextHash: "text-\(index)"))
+        }
         let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+        await model.reloadJobs()
 
         #expect(model.selectedJob?.status == .awaitingReview)
         #expect(model.isMonitoringJobs)
@@ -122,6 +129,30 @@ struct NoteImportViewModelTests {
         try fixture.repository.saveJob(running)
         await waitUntil { model.selectedJob?.status == .completed }
         await waitUntil { !model.isMonitoringJobs }
+    }
+
+    @Test("Monitoring refreshes selected Markdown item states and completion count")
+    func monitoringRefreshesSelectedItems() async throws {
+        let fixture = try ImportLedgerFixture()
+        try fixture.repository.saveSource(.init(id: "source", kind: .markdownFolder, displayName: "Notes"))
+        try fixture.repository.saveJob(.init(id: "job", sourceID: "source", status: .processing, discoveredCount: 1))
+        try fixture.repository.saveItem(.init(id: "item", jobID: "job", sourceID: "source", sourceIdentity: "nested/note.md", relativePath: "nested/note.md", title: "Note", status: .ready, rawByteHash: "raw", normalizedTextHash: "text"))
+        let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+        await model.reloadJobs()
+        #expect(model.selectedJobItems.first?.status == .ready)
+
+        _ = try fixture.repository.transitionItem(id: "item", to: .creatingSession)
+        let loadedImported = try fixture.repository.item(id: "item")
+        var imported = try #require(loadedImported)
+        imported.status = .imported
+        try fixture.repository.saveItem(imported)
+        _ = try fixture.repository.transitionItem(id: "item", to: .completed)
+
+        await waitUntil {
+            model.selectedJobItems.first?.status == .completed
+                && model.selectedJob?.importedCount == 1
+        }
+        #expect(model.activitySummary.progressFraction == 1)
     }
 
     @Test("Resume replaces a legacy paused snapshot and executes remaining work")
@@ -166,6 +197,7 @@ struct NoteImportViewModelTests {
             coordinator: coordinator,
             monitoringInterval: .milliseconds(10)
         )
+        await model.reloadJobs()
 
         #expect(model.activitySummary.presentationState == .paused)
         #expect(!model.isMonitoringJobs)
@@ -180,7 +212,7 @@ struct NoteImportViewModelTests {
     }
 
     @Test("Cancelled jobs with a persisted request timestamp do not keep polling")
-    func cancelledJobsDoNotPoll() throws {
+    func cancelledJobsDoNotPoll() async throws {
         let fixture = try ImportLedgerFixture()
         try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
         var cancelled = NoteImportJobRecord(
@@ -195,13 +227,14 @@ struct NoteImportViewModelTests {
         try fixture.repository.saveJob(cancelled)
 
         let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+        await model.reloadJobs()
 
         #expect(model.selectedJob?.status == .cancelled)
         #expect(!model.isMonitoringJobs)
     }
 
     @Test("Static paused jobs are loaded without high frequency monitoring")
-    func pausedJobsDoNotPoll() throws {
+    func pausedJobsDoNotPoll() async throws {
         let fixture = try ImportLedgerFixture()
         try fixture.repository.saveSource(NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"))
         try fixture.repository.saveJob(NoteImportJobRecord(
@@ -212,8 +245,43 @@ struct NoteImportViewModelTests {
             importedCount: 2
         ))
         let model = NoteImportViewModel(ledger: fixture.repository, monitoringInterval: .milliseconds(10))
+        await model.reloadJobs()
         #expect(model.activitySummary.presentationState == .paused)
         #expect(!model.isMonitoringJobs)
+    }
+
+    @Test("Repeated imports of the same path reuse one authorized source")
+    func reusesStableSource() async throws {
+        let fixture = try ImportLedgerFixture()
+        let notes = fixture.directory.appendingPathComponent("notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        try Data("# Note\nBody".utf8).write(to: notes.appendingPathComponent("note.md"))
+        let chat = AppChatSessionRepository(store: fixture.graphStore)
+        let service = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: ResumeTestBackend(), sessionRepository: chat, session: session)
+        }
+        let access = NoteImportSourceAccessService(codec: TestBookmarkCodec())
+        let coordinator = NoteImportCoordinator(ledger: fixture.repository, sessionService: service, sourceAccessService: access)
+        let model = NoteImportViewModel(
+            ledger: fixture.repository,
+            coordinator: coordinator,
+            sourceAccessService: access,
+            monitoringInterval: .milliseconds(10)
+        )
+        model.sourceKind = .markdownFolder
+        model.sourceURL = notes
+        model.notes = [.init(sourceKind: .markdownFolder, sourceIdentity: "note.md", title: "Note", markdownContent: "Body", rawByteHash: "raw", normalizedTextHash: "text")]
+        model.options.llmMode = .disabled
+
+        #expect(await model.startImport())
+        await waitUntil { model.jobs.first?.status.isTerminal == true }
+        model.notes = [.init(sourceKind: .markdownFolder, sourceIdentity: "note.md", title: "Note", markdownContent: "Body", rawByteHash: "raw", normalizedTextHash: "text")]
+        #expect(await model.startImport())
+        await waitUntil { model.jobs.first?.status.isTerminal == true }
+
+        #expect(try fixture.repository.sources().count == 1)
+        #expect(try fixture.repository.jobs().count == 2)
+        #expect(try fixture.repository.jobs().allSatisfy { !$0.options.preserveHierarchy })
     }
 
     private func waitUntil(
@@ -232,6 +300,16 @@ struct NoteImportViewModelTests {
 private struct ResumeTestBackend: AgentBackend {
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { $0.finish() }
+    }
+}
+
+private struct TestBookmarkCodec: NoteImportBookmarkCoding {
+    func createBookmark(for url: URL) throws -> Data { Data(url.standardizedFileURL.path.utf8) }
+    func resolveBookmark(_ data: Data) throws -> (url: URL, isStale: Bool) {
+        guard let path = String(data: data, encoding: .utf8) else {
+            throw NoteImportSourceAccessError.bookmarkResolutionFailed("invalid test bookmark")
+        }
+        return (URL(fileURLWithPath: path), false)
     }
 }
 

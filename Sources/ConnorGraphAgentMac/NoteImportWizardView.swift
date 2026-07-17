@@ -120,7 +120,6 @@ struct NoteImportWizardView: View {
         Form {
             Section("内容") {
                 Toggle("导入附件", isOn: $model.options.importAttachments)
-                Toggle("保留文件夹层级", isOn: $model.options.preserveHierarchy)
                 Picker("遇到重复笔记", selection: $model.options.duplicatePolicy) {
                     Text("跳过未变化的内容").tag(NoteImportDuplicatePolicy.skipUnchanged)
                     Text("作为更新追加").tag(NoteImportDuplicatePolicy.appendUpdate)

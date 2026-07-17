@@ -130,7 +130,19 @@ public struct AgentMarkdownBlockParser: Sendable {
                 result.append(.orderedItem(number: item.number, text: item.text))
             } else if trimmed.hasPrefix(">") {
                 flushParagraph()
-                result.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))
+                var quoteLines: [String] = []
+                var quoteIndex = index
+                while quoteIndex < lines.count {
+                    let candidate = lines[quoteIndex].trimmingCharacters(in: .whitespaces)
+                    guard candidate.hasPrefix(">") else { break }
+                    quoteLines.append(String(candidate.dropFirst()).trimmingCharacters(in: .whitespaces))
+                    quoteIndex += 1
+                }
+                if let quote = normalizedQuoteText(quoteLines) {
+                    result.append(.quote(quote))
+                }
+                index = quoteIndex
+                continue
             } else {
                 paragraph.append(rawLine.trimmingCharacters(in: .whitespaces))
             }
@@ -139,7 +151,28 @@ public struct AgentMarkdownBlockParser: Sendable {
 
         if isInCodeBlock, !codeLines.isEmpty { result.append(.code(language: codeLanguage, text: codeLines.joined(separator: "\n"))) }
         flushParagraph()
+        while result.first.map({ if case .spacer = $0 { return true }; return false }) == true {
+            result.removeFirst()
+        }
+        while result.last.map({ if case .spacer = $0 { return true }; return false }) == true {
+            result.removeLast()
+        }
         return result
+    }
+
+    private func normalizedQuoteText(_ lines: [String]) -> String? {
+        var start = lines.startIndex
+        var end = lines.endIndex
+        while start < end, lines[start].isEmpty { start += 1 }
+        while end > start, lines[lines.index(before: end)].isEmpty { end = lines.index(before: end) }
+        guard start < end else { return nil }
+
+        var normalized: [String] = []
+        for line in lines[start..<end] {
+            if line.isEmpty, normalized.last?.isEmpty == true { continue }
+            normalized.append(line)
+        }
+        return normalized.joined(separator: "\n")
     }
 
     private func parseFenceLanguage(_ line: String) -> String? {
