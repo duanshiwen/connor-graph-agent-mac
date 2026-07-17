@@ -36,6 +36,23 @@ struct CloudKnowledgePhase6Tests {
         #expect(library.owned.first?.owned == true)
     }
 
+    @Test func marketplaceLibraryMakesPublishedOwnedKnowledgeBasesAvailableForConsumption() {
+        let library = CloudMarketplaceLibrary(
+            subscribed: [
+                .init(id: "subscribed", name: "Subscribed", subscribed: true),
+                .init(id: "owned-published", name: "Owned duplicate", subscribed: true, owned: true, publicationStatus: "published")
+            ],
+            owned: [
+                .init(id: "owned-published", name: "Owned published", owned: true, publicationStatus: "published"),
+                .init(id: "owned-draft", name: "Owned draft", owned: true, publicationStatus: "unpublished")
+            ]
+        )
+
+        #expect(library.availableForConsumption.map(\.id) == ["subscribed", "owned-published"])
+        #expect(library.availableForConsumption.last?.owned == true)
+        #expect(library.availableForConsumption.last?.subscribed == true)
+    }
+
     @Test @MainActor func marketplaceHomeRendersDynamicBackendSectionsWithoutHardcodedCategories() async {
         let api = MarketplaceFakeAPI(); let cache = CloudKnowledgeAuthorizationCache(); let store = CloudKnowledgeMarketplaceStore(api: api, cache: cache)
         await store.loadHome()
