@@ -30,6 +30,14 @@ struct NoteImportControlStyleContractTests {
         #expect(!center.contains("job.updatedAt, style: .relative"))
     }
 
+    @Test("Import options are always flattened")
+    func hierarchyOptionIsAbsent() throws {
+        let wizard = try source("NoteImportWizardView.swift")
+        let views = try source("NoteImportViews.swift")
+        #expect(!wizard.contains("保留文件夹层级"))
+        #expect(views.contains("flattenedOptions.preserveHierarchy = false"))
+    }
+
     @Test("Import center owns transient list selection without publishing during view updates")
     func localListSelection() throws {
         let center = try source("NoteImportCenterView.swift")
