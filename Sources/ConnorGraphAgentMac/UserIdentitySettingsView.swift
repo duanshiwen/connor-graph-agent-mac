@@ -114,7 +114,7 @@ struct UserIdentitySettingsView: View {
             SettingsGroup(title: "同步与隐私") {
                 accountCapabilityRow(systemImage: "arrow.triangle.2.circlepath", title: "账号同步", subtitle: "同步账号资料和登录状态。")
                 Divider()
-                accountCapabilityRow(systemImage: "lock.shield", title: "本地数据独立", subtitle: "本地会话、偏好和 Memory OS 不会随账号同步。")
+                accountCapabilityRow(systemImage: "lock.shield", title: "设备间同步", subtitle: "本地数据、设置和 Memory OS 会在你的不同设备间同步，但不会上传到云端。")
             }
         }
     }
