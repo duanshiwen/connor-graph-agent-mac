@@ -191,6 +191,32 @@ codesign \
 echo "Verifying code signature..."
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
+echo "Auditing embedded code signing identities..."
+while IFS= read -r -d '' candidate; do
+  if ! /usr/bin/file -b "$candidate" | /usr/bin/grep -q 'Mach-O'; then
+    continue
+  fi
+
+  signature_details="$(codesign -dvvv "$candidate" 2>&1)"
+  if ! /usr/bin/grep -q '^Signature=adhoc$' <<<"$signature_details"; then
+    echo "error: embedded code is not ad-hoc signed: $candidate" >&2
+    exit 1
+  fi
+  if ! /usr/bin/grep -q '^TeamIdentifier=not set$' <<<"$signature_details"; then
+    echo "error: embedded code retains a Team ID: $candidate" >&2
+    exit 1
+  fi
+done < <(find "$APP_PATH/Contents" -type f -print0)
+
+library_validation_disabled="$(
+  codesign -d --entitlements :- "$APP_PATH" 2>/dev/null |
+    plutil -extract 'com\.apple\.security\.cs\.disable-library-validation' raw -o - - 2>/dev/null || true
+)"
+if [[ "$library_validation_disabled" != "true" ]]; then
+  echo "error: app signature does not disable library validation for ad-hoc frameworks" >&2
+  exit 1
+fi
+
 if [[ -z "$VERSION" ]]; then
   VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 fi
