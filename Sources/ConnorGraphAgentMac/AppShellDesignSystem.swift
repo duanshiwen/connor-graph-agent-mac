@@ -163,6 +163,48 @@ enum AppButtonLayout {
     static let iconSize: CGFloat = 14
 }
 
+/// Native macOS form defaults shared by every window. Individual search and
+/// title fields can still opt into `.plain` when their container supplies the
+/// border and focus treatment.
+struct AppFormThemeModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .controlSize(AppButtonLayout.controlSize)
+            .textFieldStyle(.roundedBorder)
+    }
+}
+
+struct AppFormTextEditorModifier: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .background(
+                Color(nsColor: isEnabled ? .textBackgroundColor : .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(
+                        Color(nsColor: .separatorColor).opacity(isEnabled ? 0.65 : 0.35),
+                        lineWidth: 1
+                    )
+            }
+    }
+}
+
+extension View {
+    func appFormTheme() -> some View {
+        modifier(AppFormThemeModifier())
+    }
+
+    func appFormTextEditor() -> some View {
+        modifier(AppFormTextEditorModifier())
+    }
+}
+
 struct AppIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

@@ -321,9 +321,7 @@ struct SettingsPreferencesSection: View {
                 TextEditor(text: $model.notes)
                     .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .appFormTextEditor()
             }
         }
     }
@@ -362,7 +360,7 @@ private struct SettingsGenderIdentityRow: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
             }
             .frame(minHeight: SettingsListLayout.rowMinHeight)

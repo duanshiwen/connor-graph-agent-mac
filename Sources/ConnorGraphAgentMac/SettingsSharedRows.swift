@@ -223,7 +223,7 @@ struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
             Picker(title, selection: $selection) { content }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
                 .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
         }
         .frame(minHeight: SettingsListLayout.rowMinHeight)

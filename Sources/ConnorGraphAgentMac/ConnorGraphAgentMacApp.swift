@@ -43,6 +43,7 @@ struct ConnorGraphAgentMacApp: App {
                     sendCommand: { root.sendWhenInteractive($0) }
                 )
             }
+            .appFormTheme()
             .preferredColorScheme(root.graph.appSettings.appearanceMode.colorScheme)
             .toolbarBackground(.visible, for: .windowToolbar)
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
@@ -135,13 +136,13 @@ struct ConnorGraphAgentMacApp: App {
                 model: root.noteImportModel,
                 importExecutionEnabled: root.featureFlags.noteImportEnabled
             )
-            .controlSize(AppButtonLayout.controlSize)
+            .appFormTheme()
         }
         .defaultSize(width: 720, height: 560)
 
         Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: root.noteImportModel)
-                .controlSize(AppButtonLayout.controlSize)
+                .appFormTheme()
         }
         .defaultSize(width: 900, height: 620)
 
@@ -150,7 +151,7 @@ struct ConnorGraphAgentMacApp: App {
                 store: root.graph.knowledgeCreator,
                 sessions: root.graph.chat.sessions.allSessions
             )
-            .controlSize(AppButtonLayout.controlSize)
+            .appFormTheme()
         }
         .defaultSize(width: 860, height: 620)
     }

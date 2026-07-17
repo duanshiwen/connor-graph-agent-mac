@@ -48,7 +48,70 @@ public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Ident
 public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
     public var subscribed: [CloudMarketplaceKnowledgeBase]
     public var owned: [CloudMarketplaceKnowledgeBase]
-    public init(subscribed: [CloudMarketplaceKnowledgeBase] = [], owned: [CloudMarketplaceKnowledgeBase] = []) { self.subscribed = subscribed; self.owned = owned }
+
+    private enum CodingKeys: String, CodingKey { case subscribed, owned }
+
+    public init(subscribed: [CloudMarketplaceKnowledgeBase] = [], owned: [CloudMarketplaceKnowledgeBase] = []) {
+        let normalized = Self.normalize(subscribed: subscribed, owned: owned)
+        self.subscribed = normalized.subscribed
+        self.owned = normalized.owned
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            subscribed: try container.decodeIfPresent([CloudMarketplaceKnowledgeBase].self, forKey: .subscribed) ?? [],
+            owned: try container.decodeIfPresent([CloudMarketplaceKnowledgeBase].self, forKey: .owned) ?? []
+        )
+    }
+
+    private static func normalize(
+        subscribed rawSubscribed: [CloudMarketplaceKnowledgeBase],
+        owned rawOwned: [CloudMarketplaceKnowledgeBase]
+    ) -> (subscribed: [CloudMarketplaceKnowledgeBase], owned: [CloudMarketplaceKnowledgeBase]) {
+        var valuesByID: [String: CloudMarketplaceKnowledgeBase] = [:]
+        var subscribedIDs: [String] = []
+        var ownedIDs: [String] = []
+
+        for var base in rawSubscribed {
+            base.subscribed = true
+            valuesByID[base.id] = merge(valuesByID[base.id], with: base)
+            appendUnique(base.id, to: &subscribedIDs)
+            if base.owned { appendUnique(base.id, to: &ownedIDs) }
+        }
+
+        for var base in rawOwned {
+            base.owned = true
+            valuesByID[base.id] = merge(valuesByID[base.id], with: base)
+            appendUnique(base.id, to: &ownedIDs)
+            if base.subscribed { appendUnique(base.id, to: &subscribedIDs) }
+        }
+
+        return (
+            subscribedIDs.compactMap { valuesByID[$0] },
+            ownedIDs.compactMap { valuesByID[$0] }
+        )
+    }
+
+    private static func appendUnique(_ id: String, to ids: inout [String]) {
+        if !ids.contains(id) { ids.append(id) }
+    }
+
+    private static func merge(
+        _ current: CloudMarketplaceKnowledgeBase?,
+        with incoming: CloudMarketplaceKnowledgeBase
+    ) -> CloudMarketplaceKnowledgeBase {
+        guard var current else { return incoming }
+        current.subscribed = current.subscribed || incoming.subscribed
+        current.owned = current.owned || incoming.owned
+        current.subscriberCount = max(current.subscriberCount, incoming.subscriberCount)
+        if current.description == nil { current.description = incoming.description }
+        if current.categoryID == nil { current.categoryID = incoming.categoryID }
+        if current.ownerID == nil { current.ownerID = incoming.ownerID }
+        if current.ownerName == nil { current.ownerName = incoming.ownerName }
+        if current.publicationStatus == nil { current.publicationStatus = incoming.publicationStatus }
+        return current
+    }
 }
 public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifiable {
     public var id: String; public var title: String; public var layout: String; public var knowledgeBases: [CloudMarketplaceKnowledgeBase]

@@ -5,7 +5,6 @@ import ConnorGraphAppSupport
 struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
     var events: [AgentEventPresentation]
-    var onOpenDetail: (AgentEventPresentation) -> Void
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
     @State private var isExpanded: Bool = false
     @State private var startedAt: Date = Date()
@@ -26,7 +25,6 @@ struct AgentChatTurnProcessRow: View {
                         events: visibleEvents,
                         isRunning: process.state == .running,
                         startedAt: startedAt,
-                        onOpenDetail: onOpenDetail,
                         onOpenToolInvocation: onOpenToolInvocation
                     )
                     .padding(.leading, AgentChatLayout.iconButtonSize + AgentChatLayout.spaceM)
@@ -95,9 +93,7 @@ struct AgentTurnActivitySummaryDetailView: View {
     var events: [AgentEventPresentation]
     var isRunning: Bool
     var startedAt: Date
-    var onOpenDetail: (AgentEventPresentation) -> Void
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void
-    @State private var showsRawEvents = false
 
     var body: some View {
         let toolInvocations = AgentToolInvocationAssembler().invocations(from: events)
@@ -132,23 +128,6 @@ struct AgentTurnActivitySummaryDetailView: View {
                 AgentActivityLoadingRow(startedAt: startedAt)
                     .padding(.leading, -AgentChatLayout.spaceM)
             }
-
-            DisclosureGroup(isExpanded: $showsRawEvents) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    ForEach(events) { event in
-                        Button(action: { onOpenDetail(event) }) {
-                            AgentActivityEventRow(event: event)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, AgentChatLayout.spaceXS)
-            } label: {
-                Label("查看底层事件（\(events.count)）", systemImage: "ladybug")
-                    .font(AgentChatTypography.micro.weight(.medium))
-                    .foregroundStyle(.tertiary)
-            }
-            .tint(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -400,4 +379,3 @@ enum AgentActivityFallbackEvents {
         return items
     }
 }
-
