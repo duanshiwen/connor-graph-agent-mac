@@ -73,6 +73,15 @@ public actor NoteImportExecutionSupervisor {
         ensureRunning(jobID: jobID, recovering: tasks[jobID] == nil)
     }
 
+    public func delete(jobID: String) async throws {
+        guard tasks[jobID] == nil else {
+            throw AppNoteImportRepositoryError.jobControlUnavailable("Active import tasks cannot be deleted")
+        }
+        try await coordinator.delete(jobID: jobID)
+        states.removeValue(forKey: jobID)
+        errors.removeValue(forKey: jobID)
+    }
+
     public func snapshot() -> NoteImportRuntimeSnapshot {
         NoteImportRuntimeSnapshot(statesByJobID: states, errorsByJobID: errors)
     }

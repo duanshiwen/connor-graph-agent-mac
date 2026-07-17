@@ -81,3 +81,35 @@ import ConnorGraphAppSupport
         .unorderedItem("Bullet item")
     ])
 }
+
+@Test func markdownBlockParserCollapsesEmptyQuoteMarkersAndBoundaryWhitespace() {
+    let blocks = AgentMarkdownBlockParser().parse("""
+
+    > 没有 DT，AI 只是口号。
+    >
+    >
+    > 有 DT，AI 才有燃料。
+    >
+    >
+
+    ## 适用判断
+
+    """)
+
+    #expect(blocks == [
+        .quote("没有 DT，AI 只是口号。\n\n有 DT，AI 才有燃料。"),
+        .spacer,
+        .heading(level: 2, text: "适用判断")
+    ])
+}
+
+@Test func markdownBlockParserDropsQuoteBlocksContainingOnlyMarkers() {
+    let blocks = AgentMarkdownBlockParser().parse("""
+    Before
+    >
+    >
+    After
+    """)
+
+    #expect(blocks == [.paragraph("Before"), .paragraph("After")])
+}

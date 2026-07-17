@@ -54,6 +54,9 @@ enum AgentChatTypography {
     static let sessionTitleEmphasis = AppTypography.bodyEmphasis
     static let body = AppTypography.body
     static let bodyEmphasis = AppTypography.bodyEmphasis
+    static var messageBody: Font {
+        .system(size: NSFont.preferredFont(forTextStyle: .body).pointSize + 1)
+    }
     static let callout = AppTypography.callout
     static let calloutEmphasis = AppTypography.calloutEmphasis
     static let meta = AppTypography.meta
@@ -64,7 +67,7 @@ enum AgentChatTypography {
     static let monoMetaEmphasis = AppTypography.monoMetaEmphasis
     static let monoMicro = AppTypography.monoMicro
 
-    static var composerNSFont: NSFont { .systemFont(ofSize: 16) }
+    static var composerNSFont: NSFont { .preferredFont(forTextStyle: .body) }
 }
 
 enum AgentChatLayout {

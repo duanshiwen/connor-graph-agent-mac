@@ -83,6 +83,30 @@ struct AppNoteImportRepositoryTests {
         #expect(projected.failedCount == 1)
         #expect(try fixture.repository.job(id: "job")?.importedCount == 0)
     }
+
+    @Test("Deletes only terminal import records and preserves imported sessions")
+    func deletesTerminalJobRecords() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        let graph = try SQLiteGraphKernelStore(path: fixture.path)
+        let sessions = AppChatSessionRepository(store: graph)
+        let session = try sessions.createImportedNoteSession(title: "Imported", content: "Body")
+        try fixture.repository.saveJob(.init(id: "completed", sourceID: source.id, status: .completed, discoveredCount: 1, importedCount: 1))
+        try fixture.repository.saveItem(.init(id: "item", jobID: "completed", sourceID: source.id, sourceIdentity: "note.md", title: "Imported", status: .completed, sessionID: session.id, rawByteHash: "raw", normalizedTextHash: "text"))
+
+        try fixture.repository.deleteJob(id: "completed")
+
+        #expect(try fixture.repository.job(id: "completed") == nil)
+        #expect(try fixture.repository.item(id: "item") == nil)
+        #expect(try fixture.repository.source(id: source.id) != nil)
+        #expect(try sessions.loadSession(id: session.id) != nil)
+
+        try fixture.repository.saveJob(.init(id: "active", sourceID: source.id, status: .processing))
+        #expect(throws: AppNoteImportRepositoryError.jobControlUnavailable("Active import tasks cannot be deleted")) {
+            try fixture.repository.deleteJob(id: "active")
+        }
+    }
     @Test("Persists a recoverable job across repository reopen")
     func persistsRecoverableJob() throws {
         let fixture = try Fixture()

@@ -35,7 +35,7 @@ struct AgentAttachmentShelfView: View {
                             .font(AgentChatTypography.microEmphasis)
                             .lineLimit(1)
                         Text(statusText(for: attachment))
-                            .font(.system(size: 10.5))
+                            .font(AgentChatTypography.micro)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }

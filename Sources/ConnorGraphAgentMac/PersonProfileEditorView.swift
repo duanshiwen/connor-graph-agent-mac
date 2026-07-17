@@ -98,7 +98,7 @@ struct PersonProfileEditorView: View {
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(presentation.title)
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text(presentation.subtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)

@@ -26,6 +26,7 @@ enum AppTypography {
     static let monoMeta: Font = .system(.subheadline, design: .monospaced)
     static let monoMetaEmphasis: Font = .system(.subheadline, design: .monospaced).weight(.semibold)
     static let monoMicro: Font = .system(.caption2, design: .monospaced)
+    static let monoMicroEmphasis: Font = .system(.caption2, design: .monospaced).weight(.semibold)
 }
 
 enum AppListTypography {

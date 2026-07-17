@@ -1143,7 +1143,7 @@ struct AIConnectionSetupView: View {
                 }
                 if let githubDeviceCode {
                     Text(githubDeviceCode.userCode)
-                        .font(.system(size: 38, weight: .bold, design: .monospaced))
+                        .font(.system(.largeTitle, design: .monospaced).weight(.bold))
                         .kerning(4)
                         .padding(.horizontal, 28)
                         .padding(.vertical, 18)

@@ -259,7 +259,7 @@ struct AgentChatMessageRow: View {
             if let browserPromptFoldingParts {
                 BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts)
             } else {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
+                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.messageBody)
             }
         } else {
             assistantMarkdownBody
@@ -269,9 +269,10 @@ struct AgentChatMessageRow: View {
     private var assistantMarkdownBody: some View {
         AgentMarkdownPreviewText(
             markdown: row.message.content,
-            font: AgentChatTypography.body,
+            font: AgentChatTypography.messageBody,
             persistentCacheContext: persistentCacheContext
         )
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, AgentChatLayout.assistantMessageTrailingPadding)
     }
@@ -371,13 +372,13 @@ struct AgentAssistantHeaderView: View {
                     .foregroundStyle(.primary.opacity(0.85))
                 HStack(spacing: 4) {
                     Text(subtitle)
-                        .font(.system(size: 10))
+                        .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
                     Text("·")
-                        .font(.system(size: 10))
+                        .font(AgentChatTypography.micro)
                         .foregroundStyle(.quaternary)
                     Text(slogan)
-                        .font(.system(size: 9))
+                        .font(AppTypography.micro)
                         .foregroundStyle(.tertiary)
                         .lineLimit(2)
                 }
@@ -410,7 +411,7 @@ struct BrowserPromptFoldedMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             if !parts.leadingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: AgentChatTypography.body)
+                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: AgentChatTypography.messageBody)
             }
 
             DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
@@ -430,9 +431,8 @@ struct BrowserPromptFoldedMessageView: View {
             .tint(.primary)
 
             if !parts.trailingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: AgentChatTypography.body)
+                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: AgentChatTypography.messageBody)
             }
         }
     }
 }
-

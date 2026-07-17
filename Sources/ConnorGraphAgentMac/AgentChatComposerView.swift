@@ -1011,7 +1011,7 @@ struct AgentChatComposerView: View {
                 Image(systemName: "info.circle")
                     .font(.system(size: 10))
                 Text("在输入框中输入 / 也可唤出此列表")
-                    .font(.system(size: 10))
+                    .font(AgentChatTypography.micro)
             }
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 8)
@@ -1366,7 +1366,7 @@ private struct ComposerFormatBar: View {
         Button(action: action) {
             if let shortcut {
                 Text(shortcut)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(AppTypography.monoMicroEmphasis)
             } else {
                 Image(systemName: systemImage)
             }

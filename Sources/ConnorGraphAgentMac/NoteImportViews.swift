@@ -198,7 +198,10 @@ final class NoteImportViewModel: ObservableObject {
         do {
             let jobSnapshot = try await activityReader.jobs()
             let sourceSnapshot = try await activityReader.sourceNames()
-            let targetID = jobID ?? selectedJobID ?? jobSnapshot.first?.id
+            let preferredID = jobID ?? selectedJobID
+            let targetID = preferredID.flatMap { preferred in
+                jobSnapshot.contains(where: { $0.id == preferred }) ? preferred : nil
+            } ?? jobSnapshot.first?.id
             let itemSnapshot: [NoteImportItemRecord]? = if reloadSelectedItems, let targetID {
                 try await activityReader.items(jobID: targetID)
             } else { nil }
@@ -278,6 +281,19 @@ final class NoteImportViewModel: ObservableObject {
             await reloadJobs(selecting: id)
         }
         catch { self.error = userFacing(error) }
+    }
+
+    func deleteJob(id: String) async {
+        guard let executionSupervisor,
+              jobs.first(where: { $0.id == id })?.status.isTerminal == true else { return }
+        do {
+            try await executionSupervisor.delete(jobID: id)
+            if selectedJobID == id {
+                selectedJobID = nil
+                selectedJobItems = []
+            }
+            await reloadJobs()
+        } catch { self.error = userFacing(error) }
     }
 
     func resetWizard() {

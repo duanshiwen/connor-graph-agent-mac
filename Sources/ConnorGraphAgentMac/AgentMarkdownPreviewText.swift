@@ -86,6 +86,7 @@ struct AgentMarkdownPreviewText: View {
             Text(markdown)
                 .font(AgentChatTypography.monoMeta)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .deferredPreview:
             VStack(alignment: .leading, spacing: 7) {
@@ -97,6 +98,7 @@ struct AgentMarkdownPreviewText: View {
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
             }
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
         case .compiledDocument:
@@ -108,6 +110,7 @@ struct AgentMarkdownPreviewText: View {
                     omittedBlocksIndicator(count: renderWindow.omittedBlockCount)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
         }
@@ -119,10 +122,12 @@ struct AgentMarkdownPreviewText: View {
         case .heading(let level, _, let inline):
             Text(inline)
                 .font(headingFont(level))
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .paragraph(_, let inline):
             Text(inline)
                 .font(font)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .unorderedItem(_, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -131,6 +136,7 @@ struct AgentMarkdownPreviewText: View {
                     .frame(width: 12, alignment: .trailing)
                 Text(inline)
                     .font(font)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 4)
@@ -143,19 +149,22 @@ struct AgentMarkdownPreviewText: View {
                     .frame(width: 22, alignment: .trailing)
                 Text(inline)
                     .font(font)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 2)
         case .quote(_, let inline):
-            HStack(alignment: .top, spacing: 8) {
+            Text(inline)
+                .font(font)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.28))
                     .frame(width: 3)
-                Text(inline)
-                    .font(font)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+                }
         case .taskItem(let isCompleted, _, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
@@ -166,6 +175,7 @@ struct AgentMarkdownPreviewText: View {
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .primary)
                     .strikethrough(isCompleted, color: .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 4)
@@ -178,6 +188,7 @@ struct AgentMarkdownPreviewText: View {
                 }
                 Text(text)
                     .font(AgentChatTypography.monoMeta)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(8)
@@ -231,6 +242,7 @@ struct AgentMarkdownPreviewText: View {
         Text(renderTableCellInline(text))
             .font(isHeader ? font.weight(.semibold) : font)
             .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(minWidth: 92, maxWidth: .infinity, alignment: alignment)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
@@ -280,4 +292,3 @@ extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
-

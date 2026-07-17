@@ -6,13 +6,15 @@ struct NoteImportCenterView: View {
     @ObservedObject var model: NoteImportViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var confirmsCancellation = false
+    @State private var confirmsDeletion = false
+    @State private var pendingDeletionJobID: String?
     @State private var pendingControlJobID: String?
     @State private var selectedJobID: String?
     @State private var hasInitializedSelection = false
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedJobID) {
+            List {
                 if !activeJobs.isEmpty { Section("进行中") { ForEach(activeJobs) { jobRow($0) } } }
                 if !issueJobs.isEmpty { Section("需要处理") { ForEach(issueJobs) { jobRow($0) } } }
                 if !completedJobs.isEmpty { Section("已完成") { ForEach(completedJobs) { jobRow($0) } } }
@@ -48,6 +50,12 @@ struct NoteImportCenterView: View {
         .confirmationDialog("取消剩余导入？", isPresented: $confirmsCancellation) {
             Button("取消剩余导入", role: .destructive) { Task { await model.cancelSelectedJob() } }
         } message: { Text("已经创建的笔记会保留，尚未开始的项目不会导入。") }
+        .confirmationDialog("删除这条导入记录？", isPresented: $confirmsDeletion) {
+            Button("删除导入记录", role: .destructive) {
+                guard let id = pendingDeletionJobID else { return }
+                Task { await model.deleteJob(id: id) }
+            }
+        } message: { Text("只会删除导入过程记录和暂存数据，已经导入的笔记会保留。") }
         .alert("导入中心", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("好") { model.error = nil } } message: { Text(model.error ?? "") }
     }
 
@@ -68,17 +76,33 @@ struct NoteImportCenterView: View {
             job: job,
             runtimeState: model.runtimeSnapshot.state(for: job.id)
         )
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(model.sourceNamesByID[job.sourceID] ?? "笔记导入").fontWeight(.medium).lineLimit(1); Spacer() }
-            jobProgress(job)
-            HStack {
-                Text(presentation.displayName)
-                Spacer()
-                Text("\(NoteImportActivitySummary.processedCount(for: job))/\(job.discoveredCount)")
+        return Button {
+            selectedJobID = job.id
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(model.sourceNamesByID[job.sourceID] ?? "笔记导入").fontWeight(.medium).lineLimit(1); Spacer() }
+                jobProgress(job)
+                HStack {
+                    Text(presentation.displayName)
+                    Spacer()
+                    Text("\(NoteImportActivitySummary.processedCount(for: job))/\(job.discoveredCount)")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }.padding(.vertical, 5).tag(job.id)
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(selectedJobID == job.id ? Color.accentColor.opacity(0.14) : Color.clear)
+        .contextMenu {
+            if job.status.isTerminal {
+                Button("删除导入记录", systemImage: "trash", role: .destructive) {
+                    selectedJobID = job.id
+                    pendingDeletionJobID = job.id
+                    confirmsDeletion = true
+                }
+            }
+        }
     }
 
     private func jobDetail(_ job: NoteImportJobRecord) -> some View {
@@ -127,6 +151,12 @@ struct NoteImportCenterView: View {
             }
             if !job.status.isTerminal, job.cancelRequestedAt == nil, job.status != .cancelling {
                 Button("取消…", role: .destructive) { confirmsCancellation = true }
+            }
+            if job.status.isTerminal {
+                Button("删除记录…", systemImage: "trash", role: .destructive) {
+                    pendingDeletionJobID = job.id
+                    confirmsDeletion = true
+                }
             }
         }
     }
