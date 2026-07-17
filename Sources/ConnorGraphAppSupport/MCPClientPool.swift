@@ -57,8 +57,12 @@ public actor MCPClientPool: MCPToolRouting {
         self.credentialStore = credentialStore
     }
 
-    public nonisolated static func loadEnabledPersistedCatalog(repository: AppMCPSourceRuntimeRepository) throws -> [MCPSourceToolDescriptor] {
+    public nonisolated static func loadEnabledPersistedCatalog(
+        repository: AppMCPSourceRuntimeRepository,
+        allowedToolNames: [String]? = nil
+    ) throws -> [MCPSourceToolDescriptor] {
         let configurations = try repository.list().filter { $0.status == .enabled }
+        let allowedNames = allowedToolNames.map(Set.init)
         var catalog: [MCPSourceToolDescriptor] = []
         for configuration in configurations {
             let descriptors = try repository.loadToolCatalog(sourceID: configuration.sourceID)
@@ -77,7 +81,7 @@ public actor MCPClientPool: MCPToolRouting {
                     definitionFingerprint: descriptor.definitionFingerprint,
                     integrityStatus: descriptor.integrityStatus
                 )
-            })
+            }.filter { allowedNames?.contains($0.name) ?? true })
         }
         return catalog.sorted { $0.name < $1.name }
     }

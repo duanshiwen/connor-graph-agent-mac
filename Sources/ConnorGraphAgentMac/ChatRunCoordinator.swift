@@ -122,7 +122,8 @@ final class ChatRunCoordinator {
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
         sessionLLMOverride: SessionLLMOverride? = nil,
-        remoteKnowledgeBaseIDs: [String]? = nil
+        remoteKnowledgeBaseIDs: [String]? = nil,
+        allowedMCPToolNames: [String]? = nil
     ) -> NativeSessionManager? {
         runtimeFactory?.makeNativeSessionManager(
             session: session,
@@ -130,7 +131,8 @@ final class ChatRunCoordinator {
             configuration: configuration,
             sessionWorkspace: sessionWorkspace,
             sessionLLMOverride: sessionLLMOverride,
-            remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs
+            remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
+            allowedMCPToolNames: allowedMCPToolNames
         )
     }
 

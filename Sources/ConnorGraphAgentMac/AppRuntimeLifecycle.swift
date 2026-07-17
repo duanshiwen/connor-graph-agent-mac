@@ -194,6 +194,9 @@ final class AppRuntimeLifecycle {
         chatFeatureModel.composer.remoteKnowledgeBaseIDs = sessionID.flatMap {
             chatWorkspaceCoordinator.stateSnapshotsBySessionID[$0]?.remoteKnowledgeBaseIDs
         }
+        chatFeatureModel.composer.allowedMCPToolNames = sessionID.flatMap {
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[$0]?.allowedMCPToolNames
+        }
     }
 
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? {
@@ -869,7 +872,8 @@ final class AppRuntimeLifecycle {
                 thinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectThinkingLevel($0) },
                 defaultThinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectDefaultThinkingLevel($0) },
                 reloadModels: { [weak self] in await self?.aiConnectionsModel.reloadModelConnections() },
-                remoteKnowledge: { [weak self] in self?.setSessionRemoteKnowledgeBaseIDs($0) }
+                remoteKnowledge: { [weak self] in self?.setSessionRemoteKnowledgeBaseIDs($0) },
+                mcpTools: { [weak self] in self?.setSessionAllowedMCPToolNames($0) }
             ),
             browser: browserFeatureModel,
             calendar: calendarFeatureModel,
@@ -1688,7 +1692,8 @@ final class AppRuntimeLifecycle {
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
-            remoteKnowledgeBaseIDs: effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
+            remoteKnowledgeBaseIDs: effectiveRemoteKnowledgeBaseIDs(sessionID: session.id),
+            allowedMCPToolNames: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.allowedMCPToolNames
         )
     }
 
@@ -1763,6 +1768,19 @@ final class AppRuntimeLifecycle {
         state.updatedAt = Date()
         chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
         chatFeatureModel.composer.remoteKnowledgeBaseIDs = state.remoteKnowledgeBaseIDs
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        rebuildNativeSessionManagerForActiveSession()
+    }
+
+    private func setSessionAllowedMCPToolNames(_ names: [String]?) {
+        guard let sessionID = chatFeatureModel.sessions.selectedSessionID else { return }
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
+            ?? (try? chatSessionRepository?.loadSessionState(sessionID: sessionID))
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.allowedMCPToolNames = names.map { Array(Set($0)).sorted() }
+        state.updatedAt = Date()
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+        chatFeatureModel.composer.allowedMCPToolNames = state.allowedMCPToolNames
         try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
         rebuildNativeSessionManagerForActiveSession()
     }
@@ -2081,7 +2099,8 @@ final class AppRuntimeLifecycle {
                         configuration: configuration,
                         sessionWorkspace: sessionState?.workspace,
                         sessionLLMOverride: sessionState?.llmOverride,
-                        remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs
+                        remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
+                        allowedMCPToolNames: sessionState?.allowedMCPToolNames
                     ) : nil
                     try Task.checkCancellation()
                     return NewSessionPreparationResult.success(
@@ -3179,7 +3198,8 @@ extension AppRuntimeLifecycle {
             thinking: { [weak aiRuntime] in aiRuntime?.selectThinkingLevel($0) },
             defaultThinking: { [weak aiRuntime] in aiRuntime?.selectDefaultThinkingLevel($0) },
             reloadModels: { [weak aiConnections] in await aiConnections?.reloadModelConnections() },
-            remoteKnowledge: { [weak model] in model?.setSessionRemoteKnowledgeBaseIDs($0) }
+            remoteKnowledge: { [weak model] in model?.setSessionRemoteKnowledgeBaseIDs($0) },
+            mcpTools: { [weak model] in model?.setSessionAllowedMCPToolNames($0) }
         )
         let chatActions = ChatFeatureActions(
             session: session,
@@ -3204,6 +3224,7 @@ extension AppRuntimeLifecycle {
                 governance: model.governanceModel,
                 aiConnections: aiConnections,
                 knowledgeMarketplace: model.knowledgeMarketplaceStore,
+                sources: model.sourceRuntimeModel,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },
                 sessionHasLLMOverride: { [weak aiRuntime] in aiRuntime?.sessionHasOverride ?? false }
             )

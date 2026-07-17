@@ -65,6 +65,7 @@ extension ChatComposerCommanding {
     func selectDefaultLLMThinkingLevel(_ level: AppLLMThinkingLevel)
     func reloadLLMModelConnections() async
     func setSessionRemoteKnowledgeBaseIDs(_ ids: [String]?)
+    func setSessionAllowedMCPToolNames(_ names: [String]?)
 }
 
 extension ChatRunCommanding {
@@ -103,6 +104,7 @@ struct ChatFeatureDependencies {
     let governance: GovernanceFeatureModel
     let aiConnections: AIConnectionsFeatureModel
     let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
+    let sources: SourceRuntimeFeatureModel
     let permissionMode: () -> AgentPermissionMode
     let sessionHasLLMOverride: () -> Bool
 }
@@ -183,6 +185,7 @@ final class ClosureChatRunPort: ChatRunCommanding {
     let defaultThinkingAction: (AppLLMThinkingLevel) -> Void
     let reloadModelsAction: () async -> Void
     let remoteKnowledgeAction: ([String]?) -> Void
+    let mcpToolsAction: ([String]?) -> Void
     var activeSessionBackgroundTasks: [AppSessionBackgroundTask] { backgroundTasks() }
     var hasRunningActiveSessionBackgroundTask: Bool { hasBackgroundTask() }
     var latestChatSummaryFreshness: AgentSessionSummaryFreshness? { summaryFreshness() }
@@ -201,8 +204,9 @@ final class ClosureChatRunPort: ChatRunCommanding {
     func selectDefaultLLMThinkingLevel(_ level: AppLLMThinkingLevel) { defaultThinkingAction(level) }
     func reloadLLMModelConnections() async { await reloadModelsAction() }
     func setSessionRemoteKnowledgeBaseIDs(_ ids: [String]?) { remoteKnowledgeAction(ids) }
-    init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void) {
-        self.backgroundTasks = backgroundTasks; self.hasBackgroundTask = hasBackgroundTask; self.summaryFreshness = summaryFreshness; self.summaryContext = summaryContext; submitAction = submit; cancelAction = cancel; permissionAction = permission; timelineAction = timeline; markdownAction = markdown; copyAction = copy; exportAction = export; downloadAction = download; clearOverrideAction = clearOverride; selectModelAction = selectModel; thinkingAction = thinking; defaultThinkingAction = defaultThinking; reloadModelsAction = reloadModels; remoteKnowledgeAction = remoteKnowledge
+    func setSessionAllowedMCPToolNames(_ names: [String]?) { mcpToolsAction(names) }
+    init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void, mcpTools: @escaping ([String]?) -> Void) {
+        self.backgroundTasks = backgroundTasks; self.hasBackgroundTask = hasBackgroundTask; self.summaryFreshness = summaryFreshness; self.summaryContext = summaryContext; submitAction = submit; cancelAction = cancel; permissionAction = permission; timelineAction = timeline; markdownAction = markdown; copyAction = copy; exportAction = export; downloadAction = download; clearOverrideAction = clearOverride; selectModelAction = selectModel; thinkingAction = thinking; defaultThinkingAction = defaultThinking; reloadModelsAction = reloadModels; remoteKnowledgeAction = remoteKnowledge; mcpToolsAction = mcpTools
     }
 }
 

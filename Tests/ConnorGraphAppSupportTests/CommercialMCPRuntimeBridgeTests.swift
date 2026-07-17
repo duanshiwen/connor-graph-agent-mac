@@ -57,6 +57,18 @@ import ConnorGraphStore
     let definitions = controller.toolRegistry.definitions.map { $0.name }
     #expect(definitions.contains("mcp__fixture__echo"))
 
+    let disabledController = factory.makeAgentLoopController(
+        permissionMode: .readOnly,
+        allowedMCPToolNames: []
+    )
+    #expect(!disabledController.toolRegistry.definitions.map(\.name).contains("mcp__fixture__echo"))
+
+    let explicitlyEnabledController = factory.makeAgentLoopController(
+        permissionMode: .readOnly,
+        allowedMCPToolNames: ["mcp__fixture__echo"]
+    )
+    #expect(explicitlyEnabledController.toolRegistry.definitions.map(\.name).contains("mcp__fixture__echo"))
+
     let result = try await controller.toolRegistry.execute(
         AgentToolCall(name: "mcp__fixture__echo", argumentsJSON: #"{"text":"hello runtime bridge"}"#),
         context: AgentToolExecutionContext(
