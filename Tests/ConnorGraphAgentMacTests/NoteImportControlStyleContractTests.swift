@@ -48,6 +48,10 @@ struct NoteImportControlStyleContractTests {
         #expect(!center.contains(".onChange(of: model.selectedJobID) { _, _ in model.reloadSelectedJobItems() }"))
         #expect(!center.contains("model.ledger"))
         #expect(center.contains("Task { await model.reloadJobs() }"))
+        #expect(center.contains("@State private var hasInitializedSelection = false"))
+        #expect(center.contains("guard hasInitializedSelection else { return }"))
+        #expect(center.contains("transaction.disablesAnimations = true"))
+        #expect(center.contains(".contentMargins(.top, 6, for: .scrollContent)"))
     }
 
     @Test("Import center renders one state-driven pause or resume control")

@@ -155,8 +155,6 @@ struct UserIdentitySettingsView: View {
                     statusMessage("当前无法连接到康纳服务器，退出登录暂不可用。", systemImage: "exclamationmark.icloud", color: .orange)
                 }
                 Divider()
-                SettingsValueRow(title: "角色", value: user.role)
-                Divider()
                 SettingsValueRow(title: "注册时间", value: user.createdAt.formatted(date: .long, time: .omitted))
             }
 
