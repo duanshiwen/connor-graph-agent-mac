@@ -29,6 +29,19 @@ private final class FlakyCoordinatorBackend: AgentBackend, @unchecked Sendable {
     }
 }
 
+private final class ImportedSessionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sessions: [AgentSession] = []
+
+    func append(_ session: AgentSession) {
+        lock.withLock { sessions.append(session) }
+    }
+
+    var snapshot: [AgentSession] {
+        lock.withLock { sessions }
+    }
+}
+
 private struct SingleNoteAdapter: NoteImportSourceAdapter {
     let note: ImportedNote
     var sourceKind: NoteImportSourceKind { note.sourceKind }
@@ -52,7 +65,8 @@ struct NoteImportCoordinatorTests {
         let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes"); try ledger.saveSource(source)
         let job = NoteImportJobRecord(id: "job", sourceID: source.id, options: .init(llmMode: .automatic)); try ledger.saveJob(job)
         let sessionService = HeadlessNoteSessionService(repository: chat) { session in NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session) }
-        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: sessionService)
+        let recorder = ImportedSessionRecorder()
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: sessionService, onSessionImported: recorder.append)
         let request = NoteImportScanRequest(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
         #expect(try await coordinator.scan(jobID: job.id, adapter: MarkdownFolderNoteImportAdapter(), request: request).status == .awaitingReview)
         #expect(try await coordinator.execute(jobID: job.id).status == .completed)
@@ -60,6 +74,8 @@ struct NoteImportCoordinatorTests {
         #expect(progress.discovered == 2); #expect(progress.completed == 2); #expect(progress.failed == 0)
         let sessions = try chat.loadRecentSessions(limit: 10)
         #expect(sessions.count == 2); #expect(sessions.allSatisfy { $0.governance.kind == .note && $0.messages.count == 3 })
+        #expect(Set(recorder.snapshot.map(\.id)) == Set(sessions.map(\.id)))
+        #expect(sessions.allSatisfy { session in recorder.snapshot.contains { $0.id == session.id && $0.messages.count == session.messages.count } })
     }
 
     @Test("Resumes an imported item at the LLM phase without recreating its session")

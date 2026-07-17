@@ -59,6 +59,10 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         )
     }
 
+    public func loadSession(id: String) throws -> AgentSession? {
+        try repository.loadSession(id: id)
+    }
+
     public func upsertImportedNoteMessage(
         sessionID: String,
         messageID: String,
