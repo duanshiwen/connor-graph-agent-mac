@@ -142,7 +142,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(title)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .lineLimit(AppListCardLayout.titleLineLimit)

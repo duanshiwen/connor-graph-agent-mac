@@ -349,7 +349,7 @@ private struct MCPSourceRow: View {
                 }
                 .frame(width: 36, height: 36)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
