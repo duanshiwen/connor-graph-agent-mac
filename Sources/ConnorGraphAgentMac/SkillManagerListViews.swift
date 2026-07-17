@@ -549,7 +549,7 @@ private struct SkillRowTitleLine: View {
         HStack(spacing: 6) {
             Text(card.title)
                 .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                .lineLimit(1)
+                .lineLimit(AppListCardLayout.titleLineLimit)
             Spacer(minLength: 4)
             Text(card.sourceTier)
                 .font(AppListTypography.rowCaption)

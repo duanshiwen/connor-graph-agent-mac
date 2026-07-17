@@ -353,7 +353,7 @@ private struct MCPSourceRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         Spacer(minLength: 0)
                         Circle()
                             .fill(rowColor)
