@@ -56,6 +56,28 @@ import ConnorGraphAppSupport
     #expect(!methodSource.contains("selection = item"))
 }
 
+@Test func appSurfacesShareSemanticTypographyAndSpacingTokens() throws {
+    let designSystem = try String(
+        contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"),
+        encoding: .utf8
+    )
+    let chatDesignSystem = try String(
+        contentsOf: projectSourceURL(named: "AgentChatDesignSystem.swift"),
+        encoding: .utf8
+    )
+    let browserDesignSystem = try String(
+        contentsOf: projectSourceURL(named: "BrowserWorkspaceFloatingViews.swift"),
+        encoding: .utf8
+    )
+
+    #expect(designSystem.contains("enum AppTypography"))
+    #expect(designSystem.contains("static let body: Font = .body"))
+    #expect(designSystem.contains("static let pageHorizontalPadding: CGFloat = 24"))
+    #expect(chatDesignSystem.contains("static let body = AppTypography.body"))
+    #expect(chatDesignSystem.contains("static let spaceM = AppShellLayout.spaceM"))
+    #expect(browserDesignSystem.contains("static let messageBody = AppTypography.body"))
+}
+
 @MainActor
 @Test func shellSettingsAndFocusHaveNarrowStateOwnership() {
     let model = AppShellFeatureModel()

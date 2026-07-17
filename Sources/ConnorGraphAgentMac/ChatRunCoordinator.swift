@@ -121,14 +121,16 @@ final class ChatRunCoordinator {
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
-        sessionLLMOverride: SessionLLMOverride? = nil
+        sessionLLMOverride: SessionLLMOverride? = nil,
+        remoteKnowledgeBaseIDs: [String]? = nil
     ) -> NativeSessionManager? {
         runtimeFactory?.makeNativeSessionManager(
             session: session,
             permissionMode: permissionMode,
             configuration: configuration,
             sessionWorkspace: sessionWorkspace,
-            sessionLLMOverride: sessionLLMOverride
+            sessionLLMOverride: sessionLLMOverride,
+            remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs
         )
     }
 

@@ -26,7 +26,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         maxConsecutiveToolResultErrors: Int = 0,
         stopAfterTurnWhenBudgetExceeded: Bool = false,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
-        promptMaxEstimatedTokens: Int = 8_000,
+        promptMaxEstimatedTokens: Int = 160_000,
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
@@ -70,7 +70,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 0
         self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
-        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 8_000
+        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 160_000
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
         self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()

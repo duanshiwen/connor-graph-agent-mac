@@ -31,13 +31,13 @@ struct AgentAttachmentInspectorView: View {
     }
 
     private var header: some View {
-        HStack(spacing: AgentChatLayout.spaceM) {
+        HStack(spacing: AppShellLayout.spaceM) {
             Image(systemName: iconName(for: attachment.kind))
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(ConnorCraftPalette.accent)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(attachment.displayName)
-                    .font(.title3.weight(.semibold))
+                    .font(AppTypography.pageTitle)
                     .lineLimit(2)
                 Text("Attachment OS Inspector")
                     .font(AgentChatTypography.meta)

@@ -101,6 +101,20 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     let decoded = try JSONDecoder().decode(AppSessionStateSnapshot.self, from: json.data(using: .utf8)!)
     #expect(decoded.sessionID == "old-session")
     #expect(decoded.llmOverride == nil)
+    #expect(decoded.remoteKnowledgeBaseIDs == nil)
+}
+
+@Test func sessionStateSnapshotPreservesExplicitRemoteKnowledgeScope() throws {
+    let snapshot = AppSessionStateSnapshot(
+        sessionID: "knowledge-session",
+        remoteKnowledgeBaseIDs: ["kb-2", "kb-1"]
+    )
+    let decoded = try JSONDecoder().decode(AppSessionStateSnapshot.self, from: JSONEncoder().encode(snapshot))
+    #expect(decoded.remoteKnowledgeBaseIDs == ["kb-2", "kb-1"])
+
+    let disabled = AppSessionStateSnapshot(sessionID: "disabled", remoteKnowledgeBaseIDs: [])
+    let disabledDecoded = try JSONDecoder().decode(AppSessionStateSnapshot.self, from: JSONEncoder().encode(disabled))
+    #expect(disabledDecoded.remoteKnowledgeBaseIDs == [])
 }
 
 // MARK: - Factory uses session override

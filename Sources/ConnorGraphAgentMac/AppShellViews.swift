@@ -7,6 +7,92 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
+struct AppStartupRootView<Content: View>: View {
+    @Bindable var startupCoordinator: AppStartupCoordinator
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack {
+            if startupCoordinator.isInteractiveReady {
+                content
+                    .transition(.opacity)
+            } else {
+                AppInitializationView(startupCoordinator: startupCoordinator)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: startupCoordinator.isInteractiveReady)
+        .task {
+            await startupCoordinator.startIfNeeded()
+        }
+    }
+}
+
+private struct AppInitializationView: View {
+    @Bindable var startupCoordinator: AppStartupCoordinator
+
+    var body: some View {
+        VStack(spacing: AppShellLayout.spaceL) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 72, height: 72)
+                .padding(.bottom, AppShellLayout.spaceS)
+                .accessibilityHidden(true)
+
+            VStack(spacing: AppShellLayout.spaceS) {
+                Text("康纳同学")
+                    .font(AppTypography.pageTitle)
+
+                if startupCoordinator.phase == .failed {
+                    Text("初始化失败")
+                        .font(AppTypography.bodyEmphasis)
+                        .foregroundStyle(.red)
+
+                    Text(startupCoordinator.failureMessage ?? "无法完成应用初始化。")
+                        .font(AppTypography.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .frame(maxWidth: 420)
+                } else {
+                    ProgressView()
+                        .controlSize(.regular)
+                        .accessibilityLabel("应用正在初始化")
+
+                    Text(startupStatusText)
+                        .font(AppTypography.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if startupCoordinator.phase == .failed {
+                Button("重新尝试") {
+                    Task { await startupCoordinator.retry() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(AppButtonLayout.controlSize)
+            }
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var startupStatusText: String {
+        switch startupCoordinator.phase {
+        case .lightConstruction:
+            "正在准备应用…"
+        case .coreBootstrap:
+            "正在加载本地数据…"
+        case .interactiveReady, .contentReady, .maintenanceReady:
+            "即将完成…"
+        case .failed:
+            "初始化失败"
+        }
+    }
+}
+
 struct AppShellView: View {
     let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
@@ -46,21 +132,17 @@ struct AppShellView: View {
                         maxHeight: .infinity
                     )
                     .background(.bar)
-                    .controlSize(.small)
+                    .controlSize(AppButtonLayout.controlSize)
             }
 
             CraftListPaneView(
                 graph: graph,
                 selection: selectionBinding
             )
-                .frame(
-                    minWidth: AppShellLayout.listColumnMinWidth,
-                    idealWidth: AppShellLayout.listColumnDefaultWidth,
-                    maxWidth: AppShellLayout.listColumnMaxWidth,
-                    maxHeight: .infinity
-                )
+                .frame(width: AppShellLayout.listColumnWidth)
+                .frame(maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
-                .controlSize(.small)
+                .controlSize(AppButtonLayout.controlSize)
 
             CraftDetailPaneView(
                 graph: graph,
@@ -69,7 +151,7 @@ struct AppShellView: View {
             )
                 .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
-                .controlSize(.small)
+                .controlSize(AppButtonLayout.controlSize)
         }
         }
         }
@@ -128,6 +210,10 @@ struct AppShellView: View {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
+                KnowledgePublicationToolbarProgressButton(store: graph.knowledgeCreator) {
+                    openWindow(id: AppMenuPresentation.knowledgePublicationProgressWindowID)
+                }
+
                 if noteImportModel.activitySummary.isVisible {
                     NoteImportToolbarProgressButton(summary: noteImportModel.activitySummary) {
                         openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
@@ -142,7 +228,7 @@ struct AppShellView: View {
                             .font(.system(size: 20))
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.appIcon)
                 .help(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
                 .accessibilityLabel(identityStore.currentUser.map { "打开用户菜单，当前用户：\($0.displayName)" } ?? "打开用户菜单，尚未登录")
                 .popover(isPresented: $isIdentityPopoverPresented, arrowEdge: .bottom) {

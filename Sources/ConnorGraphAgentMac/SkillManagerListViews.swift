@@ -31,25 +31,14 @@ private struct SkillListHeader: View {
     var onAdd: () -> Void
 
     var body: some View {
-        ZStack {
-            Text("技能")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-            HStack {
-                Spacer()
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .help("添加技能")
-                .accessibilityLabel("添加技能")
+        AppListPaneHeader(title: "技能") {
+            Button(action: onAdd) {
+                Image(systemName: "plus")
             }
+            .buttonStyle(.appIcon)
+            .help("添加技能")
+            .accessibilityLabel("添加技能")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
     }
 }
 
@@ -72,9 +61,7 @@ private struct SkillListRows: View {
                 onEdit: { model.presentEditDialog(card: card) },
                 onDelete: { model.requestDelete(card: card) }
             )
-            .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+            .nativeListRowStyle()
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -219,13 +206,13 @@ private struct SkillRequestDialogLayout<TextEditorContent: View, ActionsContent:
     @ViewBuilder var actions: () -> ActionsContent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
             SkillRequestDialogHeader(iconName: iconName, title: title, description: description)
             textEditor()
             SkillRequestStatusMessage(message: statusMessage, isSubmitting: isSubmitting, isFailure: isFailure)
             actions()
         }
-        .padding(22)
+        .padding(AppShellLayout.spaceXL)
         .frame(width: 520)
     }
 }
@@ -236,9 +223,9 @@ private struct SkillRequestDialogHeader: View {
     var description: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
                     .fill(Color.accentColor.opacity(0.14))
                 Image(systemName: iconName)
                     .font(.system(size: 20, weight: .semibold))
@@ -246,11 +233,11 @@ private struct SkillRequestDialogHeader: View {
             }
             .frame(width: 48, height: 48)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(AppTypography.pageTitle)
                 Text(description)
-                    .font(.callout)
+                    .font(AppTypography.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -480,7 +467,7 @@ struct CraftSkillRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
             SkillRowIcon(iconName: iconName, accent: skillAccent, isSelected: isSelected)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -492,10 +479,10 @@ struct CraftSkillRow: View {
                 SkillRowBadgeLine(card: card, riskColor: riskColor, trustColor: trustColor)
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(AppListCardLayout.contentPadding)
+        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
+        .background(rowBackgroundColor, in: AppListCardLayout.shape)
+        .contentShape(AppListCardLayout.shape)
         .onTapGesture(perform: onSelect)
     }
 

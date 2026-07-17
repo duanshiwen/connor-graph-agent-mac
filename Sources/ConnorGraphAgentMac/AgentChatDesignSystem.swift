@@ -48,41 +48,41 @@ enum AgentChatTypography {
     static let chevronIconSize: CGFloat = 13
     static let sendIconSize: CGFloat = 15
 
-    static let title: Font = .system(size: 15.5, weight: .semibold)
-    static let sectionTitle: Font = .headline.weight(.semibold)
-    static let sessionTitle: Font = .system(size: 15, weight: .regular)
-    static let sessionTitleEmphasis: Font = .system(size: 15, weight: .semibold)
-    static let body: Font = .system(size: 15)
-    static let bodyEmphasis: Font = .system(size: 15, weight: .semibold)
-    static let callout: Font = .system(size: 14)
-    static let calloutEmphasis: Font = .system(size: 14, weight: .semibold)
-    static let meta: Font = .system(size: 13)
-    static let metaEmphasis: Font = .system(size: 13, weight: .semibold)
-    static let micro: Font = .system(size: 12)
-    static let microEmphasis: Font = .system(size: 12, weight: .semibold)
-    static let monoMeta: Font = .system(size: 13, design: .monospaced)
-    static let monoMetaEmphasis: Font = .system(size: 13, weight: .semibold, design: .monospaced)
-    static let monoMicro: Font = .system(size: 12, design: .monospaced)
+    static let title = AppTypography.paneTitle
+    static let sectionTitle = AppTypography.sectionTitle
+    static let sessionTitle = AppTypography.body
+    static let sessionTitleEmphasis = AppTypography.bodyEmphasis
+    static let body = AppTypography.body
+    static let bodyEmphasis = AppTypography.bodyEmphasis
+    static let callout = AppTypography.callout
+    static let calloutEmphasis = AppTypography.calloutEmphasis
+    static let meta = AppTypography.meta
+    static let metaEmphasis = AppTypography.metaEmphasis
+    static let micro = AppTypography.caption
+    static let microEmphasis = AppTypography.captionEmphasis
+    static let monoMeta = AppTypography.monoMeta
+    static let monoMetaEmphasis = AppTypography.monoMetaEmphasis
+    static let monoMicro = AppTypography.monoMicro
 
     static var composerNSFont: NSFont { .systemFont(ofSize: 16) }
 }
 
 enum AgentChatLayout {
-    static let spaceXS: CGFloat = 3
-    static let spaceS: CGFloat = 6
-    static let spaceM: CGFloat = 10
-    static let spaceL: CGFloat = 14
-    static let spaceXL: CGFloat = 20
+    static let spaceXS = AppShellLayout.spaceXS
+    static let spaceS = AppShellLayout.spaceS
+    static let spaceM = AppShellLayout.spaceM
+    static let spaceL = AppShellLayout.spaceL
+    static let spaceXL = AppShellLayout.spaceXL
 
-    static let radiusS: CGFloat = 7
-    static let radiusM: CGFloat = 10
-    static let radiusL: CGFloat = 14
-    static let radiusXL: CGFloat = 18
+    static let radiusS = AppShellLayout.radiusS
+    static let radiusM = AppShellLayout.radiusM
+    static let radiusL = AppShellLayout.radiusL
+    static let radiusXL: CGFloat = 20
 
     static let hairlineOpacity: Double = 0.14
-    static let chipHeight: CGFloat = 30
-    static let iconButtonSize: CGFloat = 32
-    static let primaryButtonSize: CGFloat = 34
+    static let chipHeight = AppButtonLayout.height
+    static let iconButtonSize = AppButtonLayout.iconButtonSize
+    static let primaryButtonSize = AppButtonLayout.iconButtonSize
     static let hitTargetSize: CGFloat = 44
     static let activityRowMinHeight: CGFloat = 24
     static let composerTextMinHeight: CGFloat = 56
@@ -101,8 +101,8 @@ enum AgentChatLayout {
     static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.70
     static let processMaxWidth: CGFloat = chatContentMaxWidth
     static let messageSideInset: CGFloat = 0
-    static let messageBubbleHorizontalPadding: CGFloat = 14
-    static let messageBubbleVerticalPadding: CGFloat = 11
+    static let messageBubbleHorizontalPadding = AppShellLayout.spaceL
+    static let messageBubbleVerticalPadding = AppShellLayout.spaceM
     static let assistantMessageTrailingPadding: CGFloat = 4
 
     static let avatarSize: CGFloat = 28

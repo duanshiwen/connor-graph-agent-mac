@@ -5,7 +5,7 @@ import ConnorGraphCore
 public enum CloudKnowledgePublishingPrompt {
     public static let instruction = """
     You are producing remote Cloud Knowledge inside a user-confirmed Publication Run. These rules are mandatory:
-    - Raw local conversations never leave this device. Analyze them only with the user's selected local model. Send only structured knowledge operations through cloud tools.
+    - Raw conversations may be sent to the user's configured model provider for analysis, but must never be sent to the Connor knowledge backend or included in cloud tool payloads. Send only derived structured knowledge operations through cloud tools.
     - Keep L2 recent operational state separate from L3 reusable knowledge and L4 stable entities/relations.
     - Before every semantic group of writes, search the combined committed + current-run staged view. Use cloud_kb_recent_context for L2 and cloud_kb_knowledge_context for L3/L4. Later conversations must search again so they see earlier staged changes.
     - If a search summary is insufficient, read or expand records before deciding.
@@ -20,7 +20,12 @@ public enum CloudKnowledgePublishingPrompt {
 public actor CloudKnowledgeToolExecutor {
     private let coordinator: CloudKnowledgePublicationCoordinator
     private let searchClient: CloudKnowledgeSearchClient
-    public init(coordinator: CloudKnowledgePublicationCoordinator) { self.coordinator = coordinator; self.searchClient = coordinator.makeSearchClient() }
+    private let blockedVerbatimFragments: [String]
+    public init(coordinator: CloudKnowledgePublicationCoordinator, sourceTexts: [String] = []) {
+        self.coordinator = coordinator
+        self.searchClient = coordinator.makeSearchClient()
+        self.blockedVerbatimFragments = Self.verbatimFragments(sourceTexts)
+    }
 
     public func execute(toolName: String, arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         switch toolName {
@@ -52,6 +57,9 @@ public actor CloudKnowledgeToolExecutor {
         guard let terms = arguments.array("semantic_terms")?.compactMap(\.stringValue), !terms.isEmpty else { throw AgentToolError.invalidArguments("semantic_terms is required") }
         guard case .object(let payloadValue) = arguments.values["payload"] else { throw AgentToolError.invalidArguments("payload object is required") }
         let candidatePayload = try payloadValue.mapValues(Self.cloudValue)
+        if Self.containsBlockedVerbatimText(candidatePayload, fragments: blockedVerbatimFragments) {
+            throw AgentToolError.invalidArguments("payload contains a long verbatim excerpt from the source conversation; summarize it into structured knowledge instead")
+        }
         if decision == .skipDuplicate || decision == .reuseIdentity || decision == .recordConflict {
             let localDecision: [String: String] = ["decision": decision.rawValue, "status": "not_staged"]
             return try encodedResult(localDecision, toolName: toolName, summary: "Recorded local \(decision.rawValue) decision; no remote write was staged.", context: context)
@@ -99,6 +107,26 @@ public actor CloudKnowledgeToolExecutor {
     private static func cloudValue(_ value: SendableJSONValue) throws -> CloudKnowledgeJSONValue {
         switch value { case .string(let v): .string(v); case .int(let v): .int(v); case .double(let v): .double(v); case .bool(let v): .bool(v); case .object(let v): .object(try v.mapValues(cloudValue)); case .array(let v): .array(try v.map(cloudValue)); case .null: .null }
     }
+    private static func verbatimFragments(_ sourceTexts: [String]) -> [String] {
+        sourceTexts.compactMap { text in
+            let normalized = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard normalized.count >= 160 else { return nil }
+            return String(normalized.prefix(120)).lowercased()
+        }
+    }
+    private static func containsBlockedVerbatimText(_ payload: [String: CloudKnowledgeJSONValue], fragments: [String]) -> Bool {
+        guard !fragments.isEmpty else { return false }
+        func strings(in value: CloudKnowledgeJSONValue) -> [String] {
+            switch value {
+            case .string(let value): [value]
+            case .object(let object): object.values.flatMap(strings)
+            case .array(let array): array.flatMap(strings)
+            case .int, .double, .bool, .null: []
+            }
+        }
+        let payloadText = payload.values.flatMap(strings).joined(separator: " ").replacingOccurrences(of: "\n", with: " ").lowercased()
+        return fragments.contains { payloadText.contains($0) }
+    }
     private func encodedResult<T: Encodable>(_ value: T, toolName: String, summary: String, context: AgentToolExecutionContext) throws -> AgentToolResult {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         return AgentToolResult(toolCallID: context.toolCallID, toolName: toolName, contentText: summary, contentJSON: String(data: try encoder.encode(value), encoding: .utf8))
@@ -113,21 +141,39 @@ public struct CloudKnowledgeAgentTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerCloudKnowledgePublicationTools(executor: CloudKnowledgeToolExecutor) {
+    mutating func registerCloudKnowledgePublicationTools(executor: CloudKnowledgeToolExecutor, includeValidation: Bool = true) {
         let searchSchema = AgentToolInputSchema.closedObject(properties: ["query": .string(description: "Semantic query for existing committed and staged knowledge."), "limit": .integer(description: "Maximum results, 1 through 100.")], required: ["query", "limit"])
+        let candidatePayloadSchema = AgentToolInputSchema.object(properties: [
+            "kind": .string(description: "Required for create_new. Canonical durable kind, for example reusable_knowledge, entity, or relation."),
+            "stable_key": .string(description: "Required for create_new. Deterministic lowercase kebab-case identity key derived from the knowledge, never a UUID."),
+            "valid_from": .string(description: "Required for create_new, revise_existing, and record_temporal_change. ISO-8601 timestamp."),
+            "valid_to": .string(description: "Optional ISO-8601 timestamp when the knowledge stops being valid."),
+            "confidence": .number(description: "Optional confidence from 0 through 1."),
+            "source_identity_id": .string(description: "Optional existing source identity returned by search."),
+            "predicate": .string(description: "Optional relation predicate."),
+            "target_identity_id": .string(description: "Optional existing relation target identity returned by search."),
+            "payload": .object(properties: [
+                "title": .string(description: "Short derived title."),
+                "summary": .string(description: "Concise derived summary."),
+                "text": .string(description: "Reusable knowledge text summarized from the conversation.")
+            ], required: [])
+        ], required: [])
         let writeSchema = AgentToolInputSchema.object(properties: [
             "search_context_id": .string(description: "Relevant search context returned by a preceding cloud search."),
             "decision": .stringEnumeration(values: CloudKnowledgeDecision.allCases.map(\.rawValue), description: "Required post-search decision."),
             "semantic_terms": .array(items: .string(description: "Term covered by the search."), description: "Semantic terms for trace validation."),
             "target_identity_id": .string(description: "Existing identity returned by search, when applicable."),
             "expected_revision_id": .string(description: "Existing revision returned by search, when applicable."),
-            "payload": .object(properties: [:], required: [])
+            "payload": candidatePayloadSchema
         ], required: ["search_context_id", "decision", "semantic_terms", "payload"])
         register(CloudKnowledgeAgentTool(name: "cloud_kb_recent_context", description: "Search combined committed and current-run staged L2 recent operational knowledge. Returns a mandatory search_context_id for covered L2 writes.", inputSchema: searchSchema, executor: executor))
         register(CloudKnowledgeAgentTool(name: "cloud_kb_knowledge_context", description: "Search combined committed and current-run staged L3/L4 durable knowledge and entities. Returns a mandatory search_context_id.", inputSchema: searchSchema, executor: executor))
         register(CloudKnowledgeAgentTool(name: "cloud_kb_read_record", description: "Read more detail for a knowledge record through write-assist search without exposing provenance or raw conversations.", inputSchema: searchSchema, executor: executor))
         register(CloudKnowledgeAgentTool(name: "cloud_kb_expand_entity", description: "Expand an entity neighborhood through write-assist search before an L4 decision.", inputSchema: searchSchema, executor: executor))
-        for (name, description) in [("cloud_kb_l2_update_entities", "Stage L2 operational entity changes."), ("cloud_kb_l3_update_knowledge", "Stage L3 reusable knowledge changes."), ("cloud_kb_l4_update_entities", "Stage L4 stable entity changes."), ("cloud_kb_update_relations", "Stage temporal relation changes."), ("cloud_kb_retract_knowledge", "Stage a governed retract operation.")] { register(CloudKnowledgeAgentTool(name: name, description: description + " Security context is injected locally and cannot be supplied by the model.", inputSchema: writeSchema, executor: executor)) }
-        register(CloudKnowledgeAgentTool(name: "cloud_kb_validate_publication", description: "Validate all staged operations before user preview and commit.", inputSchema: .closedObject(properties: [:], required: []), executor: executor))
+        let createPayloadGuidance = " For decision=create_new, payload must be exactly shaped like {kind, stable_key, valid_from, payload:{title, summary, text}}; kind, stable_key, valid_from, and the nested payload object are mandatory."
+        for (name, description) in [("cloud_kb_l2_update_entities", "Stage L2 operational entity changes."), ("cloud_kb_l3_update_knowledge", "Stage L3 reusable knowledge changes."), ("cloud_kb_l4_update_entities", "Stage L4 stable entity changes."), ("cloud_kb_update_relations", "Stage temporal relation changes."), ("cloud_kb_retract_knowledge", "Stage a governed retract operation.")] { register(CloudKnowledgeAgentTool(name: name, description: description + createPayloadGuidance + " Security context is injected locally and cannot be supplied by the model.", inputSchema: writeSchema, executor: executor)) }
+        if includeValidation {
+            register(CloudKnowledgeAgentTool(name: "cloud_kb_validate_publication", description: "Validate all staged operations before user preview and commit.", inputSchema: .closedObject(properties: [:], required: []), executor: executor))
+        }
     }
 }

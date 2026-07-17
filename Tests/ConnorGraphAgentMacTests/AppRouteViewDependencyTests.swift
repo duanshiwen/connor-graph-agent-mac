@@ -25,6 +25,16 @@ struct AppRouteViewDependencyTests {
         #expect(!source.contains(".id(graph.shell.selection)"))
     }
 
+    @Test func listColumnUsesOneStableWidthAcrossRoutes() throws {
+        let shellSource = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
+        let designSource = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
+
+        #expect(shellSource.contains("width: AppShellLayout.listColumnWidth"))
+        #expect(!shellSource.contains("listColumnMinWidth"))
+        #expect(!shellSource.contains("listColumnMaxWidth"))
+        #expect(designSource.contains("static let listColumnWidth: CGFloat = 300"))
+    }
+
     @Test func listAndDetailSwitchesCoverEverySidebarRoute() throws {
         let source = try String(contentsOf: projectSourceURL(named: "AppRoutePaneViews.swift"), encoding: .utf8)
         for route in SidebarItem.allCases {
@@ -35,6 +45,16 @@ struct AppRouteViewDependencyTests {
     @Test func routePaneSourceBelongsToXcodeAppTarget() throws {
         let project = try String(contentsOf: xcodeProjectURL(), encoding: .utf8)
         let sourcePath = "Sources/ConnorGraphAgentMac/AppRoutePaneViews.swift"
+
+        #expect(project.contains("\(sourcePath) */ = {isa = PBXFileReference"))
+        #expect(project.contains("\(sourcePath) in Sources */ = {isa = PBXBuildFile"))
+        #expect(project.components(separatedBy: "\(sourcePath) */,").count - 1 == 1)
+        #expect(project.components(separatedBy: "\(sourcePath) in Sources */,").count - 1 == 1)
+    }
+
+    @Test func knowledgePublicationProgressViewsBelongToXcodeAppTarget() throws {
+        let project = try String(contentsOf: xcodeProjectURL(), encoding: .utf8)
+        let sourcePath = "Sources/ConnorGraphAgentMac/KnowledgePublicationProgressViews.swift"
 
         #expect(project.contains("\(sourcePath) */ = {isa = PBXFileReference"))
         #expect(project.contains("\(sourcePath) in Sources */ = {isa = PBXBuildFile"))
@@ -64,6 +84,126 @@ struct AppRouteViewDependencyTests {
         #expect(!implementation.contains("totalUnreadCount"))
     }
 
+    @Test func knowledgeMarketplaceListMatchesNativeListAndPresentsCreatorFromAddButton() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        let listStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceListPane: View"))
+        let detailStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceDetailPane: View"))
+        let listSource = source[listStart.lowerBound..<detailStart.lowerBound]
+
+        #expect(listSource.contains("AppListPaneHeader(title: \"知识市场\")"))
+        #expect(listSource.contains("Image(systemName: \"plus\")"))
+        #expect(listSource.contains("Image(systemName: \"clock.arrow.circlepath\")"))
+        #expect(listSource.contains("weight: .semibold"))
+        #expect(listSource.contains("LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing)"))
+        #expect(listSource.contains(".padding(.horizontal, AppListCardLayout.horizontalInset)"))
+        #expect(listSource.contains(".onAppear { store.showHome() }"))
+        #expect(!listSource.contains("title: \"市场首页\""))
+        #expect(listSource.contains("Color(nsColor: .windowBackgroundColor)"))
+        #expect(listSource.contains(".sheet(isPresented: $isPresentingCreator)"))
+        #expect(listSource.contains("CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions) { knowledgeBaseID in"))
+        #expect(listSource.contains("isPresentingCreator = false"))
+        #expect(listSource.contains("await store.load()"))
+        #expect(listSource.contains("await store.loadDetail(id: knowledgeBaseID)"))
+        let creatorSource = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeCreatorView.swift"), encoding: .utf8)
+        #expect(creatorSource.contains("Button(\"查看《知识库发布协议》\")"))
+        #expect(creatorSource.contains("CloudKnowledgePublishingAgreement.operatorName"))
+        #expect(listSource.contains("creatorStore.prepareForNewKnowledgeBase()"))
+        #expect(listSource.contains("KnowledgePublicationHistoryView(store: creatorStore)"))
+        #expect(!listSource.contains("store.showPublisher()"))
+    }
+
+    @Test func listPaneHeadersCenterTitlesIndependentlyFromTrailingActions() throws {
+        let designSystem = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
+        let listPanes = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let marketplace = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        let sources = try String(contentsOf: projectSourceURL(named: "MCPSourceListViews.swift"), encoding: .utf8)
+        let skills = try String(contentsOf: projectSourceURL(named: "SkillManagerListViews.swift"), encoding: .utf8)
+
+        #expect(designSystem.contains("struct AppListPaneHeader<Actions: View>: View"))
+        #expect(designSystem.contains("ZStack"))
+        #expect(designSystem.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"日历\")"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"人际关系\")"))
+        #expect(listPanes.contains("AppListPaneHeader(title: kind.title)"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"邮件\")"))
+        #expect(listPanes.contains("AppListPaneHeader(title: \"RSS 阅读\")"))
+        #expect(marketplace.contains("AppListPaneHeader(title: \"知识市场\")"))
+        #expect(sources.contains("AppListPaneHeader(title: \"外部工具连接\""))
+        #expect(skills.contains("AppListPaneHeader(title: \"技能\")"))
+    }
+
+    @Test func knowledgePublicationHistorySupportsFilteringDetailsAndGuardedRemoval() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "KnowledgePublicationProgressViews.swift"), encoding: .utf8)
+        let historyStart = try #require(source.range(of: "struct KnowledgePublicationHistoryView: View"))
+        let historySource = source[historyStart.lowerBound...]
+
+        #expect(historySource.contains("store.publicationHistory"))
+        #expect(historySource.contains("KnowledgePublicationHistoryFilter.allCases"))
+        #expect(historySource.contains(".searchable(text: $query"))
+        #expect(historySource.contains("store.canRemovePublicationHistory(id: entry.id)"))
+        #expect(historySource.contains("store.removePublicationHistory(id: id)"))
+        #expect(historySource.contains("不会删除服务端知识库或已经提交的知识"))
+    }
+
+    @Test func accountSettingsStayIndependentFromKnowledgeStores() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "ConnorSettingsViews.swift"), encoding: .utf8)
+        let settingsStart = try #require(source.range(of: "struct ConnorSettingsDetailView: View"))
+        let calendarStart = try #require(source.range(of: "struct SettingsCalendarSection: View"))
+        let settingsSource = source[settingsStart.lowerBound..<calendarStart.lowerBound]
+
+        #expect(settingsSource.contains("UserIdentitySettingsView(identityStore: identityStore)"))
+        #expect(!settingsSource.contains("creatorStore: graph.knowledgeCreator"))
+        #expect(!settingsSource.contains("marketplaceStore: graph.knowledgeMarketplace"))
+        #expect(!settingsSource.contains("StateObject(wrappedValue: CloudKnowledgeCreatorStore"))
+        #expect(!settingsSource.contains("StateObject(wrappedValue: CloudKnowledgeMarketplaceStore"))
+
+        let accountSource = try String(contentsOf: projectSourceURL(named: "UserIdentitySettingsView.swift"), encoding: .utf8)
+        #expect(!accountSource.contains("我创建的知识库"))
+        #expect(!accountSource.contains("我订阅的知识库"))
+        #expect(!accountSource.contains("CloudKnowledgeCreatorView("))
+        #expect(!accountSource.contains("CloudKnowledgeMarketplaceDetailPane("))
+    }
+
+    @Test func knowledgeMarketplaceDetailOnlyShowsHomeOrLibraryAndAllowsOwnerSubscription() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeMarketplaceView.swift"), encoding: .utf8)
+        let detailStart = try #require(source.range(of: "struct CloudKnowledgeMarketplaceDetailPane: View"))
+        let badgeStart = try #require(source.range(of: "struct MarketplaceStatusBadge: View"))
+        let detailSource = source[detailStart.lowerBound..<badgeStart.lowerBound]
+
+        #expect(!detailSource.contains("CloudKnowledgeCreatorView"))
+        #expect(!detailSource.contains("store.showsPublisher"))
+        #expect(!detailSource.contains("if !base.owned"))
+        #expect(detailSource.contains("if base.subscribed"))
+        #expect(detailSource.contains("store.subscribe(id: base.id)"))
+    }
+
+    @Test func knowledgePublicationToolbarButtonOwnsItsDynamicVisibility() throws {
+        let shellSource = try String(contentsOf: projectSourceURL(named: "AppShellViews.swift"), encoding: .utf8)
+        let progressSource = try String(contentsOf: projectSourceURL(named: "KnowledgePublicationProgressViews.swift"), encoding: .utf8)
+
+        #expect(shellSource.contains("KnowledgePublicationToolbarProgressButton(store: graph.knowledgeCreator)"))
+        #expect(!shellSource.contains("if KnowledgePublicationActivitySummary(store: graph.knowledgeCreator).isVisible"))
+        #expect(progressSource.contains("@ObservedObject var store: CloudKnowledgeCreatorStore"))
+        #expect(progressSource.contains("if summary.isVisible"))
+    }
+
+    @Test func remoteKnowledgeSelectorLivesAfterSessionStatusAndUsesBorderlessProminentStyle() throws {
+        let optionBar = try String(contentsOf: projectSourceURL(named: "Composer/AgentComposerOptionBar.swift"), encoding: .utf8)
+        let composer = try String(contentsOf: projectSourceURL(named: "AgentChatComposerView.swift"), encoding: .utf8)
+
+        let status = try #require(optionBar.range(of: "sessionStatusMenu(selectedSession)"))
+        let remote = try #require(optionBar.range(of: "RemoteKnowledgeBaseSelectionMenu("))
+        let spacer = try #require(optionBar.range(of: "Spacer(minLength: AgentChatLayout.spaceS)"))
+        #expect(status.lowerBound < remote.lowerBound)
+        #expect(remote.lowerBound < spacer.lowerBound)
+        #expect(composer.contains("style: .prominent,\n                showsBorder: false"))
+
+        let footerStart = try #require(composer.range(of: "HStack(spacing: AgentChatLayout.spaceS) {"))
+        let optionRowStart = try #require(composer.range(of: "private var optionBadgeRow"))
+        let footer = composer[footerStart.lowerBound..<optionRowStart.lowerBound]
+        #expect(!footer.contains("RemoteKnowledgeBaseSelectionMenu("))
+    }
+
     private func routeCaseName(_ route: SidebarItem) -> String {
         switch route {
         case .entities: "entities"
@@ -82,6 +222,7 @@ struct AppRouteViewDependencyTests {
         case .rss: "rss"
         case .sources: "sources"
         case .skills: "skills"
+        case .knowledgeMarketplace: "knowledgeMarketplace"
         case .llmSettings: "llmSettings"
         }
     }

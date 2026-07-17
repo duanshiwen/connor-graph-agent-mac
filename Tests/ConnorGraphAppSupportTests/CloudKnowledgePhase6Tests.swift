@@ -1,6 +1,8 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphAppSupport
+import ConnorGraphStore
 
 @Suite("Cloud Knowledge Phase 6 Tests")
 struct CloudKnowledgePhase6Tests {
@@ -55,10 +57,80 @@ struct CloudKnowledgePhase6Tests {
         #expect(await cache.isAuthorized("kb-1") == false)
         await #expect(throws: (any Error).self) { try await client.answer(.init(query: "Connor", knowledgeBaseIDs: ["kb-1"])) }
     }
+
+    @Test func contextToolsInjectTheSessionKnowledgeScopeAndKeepLayersSeparate() async throws {
+        let api = MarketplaceFakeAPI()
+        let cache = CloudKnowledgeAuthorizationCache()
+        await cache.authorize("kb-1")
+        await cache.authorize("kb-2")
+        let recentTool = CloudKnowledgeRecentContextTool(
+            client: CloudKnowledgeConsumptionClient(api: api, cache: cache),
+            knowledgeBaseIDs: ["kb-1"]
+        )
+        let knowledgeTool = CloudKnowledgeKnowledgeContextTool(
+            client: CloudKnowledgeConsumptionClient(api: api, cache: cache),
+            knowledgeBaseIDs: ["kb-1"]
+        )
+        let arguments = try AgentToolArguments(json: #"{"query":"Connor","context_budget":8000,"limit":20}"#)
+        let context = AgentToolExecutionContext(
+            runID: "run",
+            sessionID: "session",
+            groupID: "group",
+            userPrompt: "query",
+            toolCallID: "tool",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+
+        let recent = try await recentTool.execute(arguments: arguments, context: context)
+        let knowledge = try await knowledgeTool.execute(arguments: arguments, context: context)
+        #expect(recent.contentText.contains("## L2"))
+        #expect(!recent.contentText.contains("## L3"))
+        #expect(knowledge.contentText.contains("## L3"))
+        #expect(knowledge.contentText.contains("## L4"))
+        #expect(!knowledge.contentText.contains("## L2"))
+        #expect(await api.contextRequests.map(\.knowledgeBaseIDs) == [["kb-1"], ["kb-1"]])
+        #expect(await api.contextChannels == [.recentContext, .knowledgeContext])
+
+        let emptyTool = CloudKnowledgeRecentContextTool(
+            client: CloudKnowledgeConsumptionClient(api: api, cache: cache),
+            knowledgeBaseIDs: []
+        )
+        let empty = try await emptyTool.execute(arguments: arguments, context: context)
+        #expect(empty.contentText.contains("No remote knowledge bases are selected"))
+        #expect(empty.contentText.contains("Do not use remote knowledge context from earlier user runs"))
+        #expect(await api.contextRequests.count == 2)
+    }
+
+    @Test func runtimeAlwaysRegistersRemoteKnowledgeToolsAndReflectsCurrentSessionScope() throws {
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-consumption-runtime-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let store = try SQLiteGraphKernelStore(path: databaseURL.path)
+        try store.migrate()
+        let api = MarketplaceFakeAPI()
+        let cache = CloudKnowledgeAuthorizationCache()
+        let factory = AppGraphAgentRuntimeFactory(
+            store: store,
+            settingsRepository: AppLLMSettingsRepository(),
+            cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient(api: api, cache: cache)
+        )
+
+        let enabled = factory.makeAgentLoopController(remoteKnowledgeBaseIDs: ["kb-1"])
+        let disabled = factory.makeAgentLoopController(remoteKnowledgeBaseIDs: [])
+        let enabledNames = enabled.toolRegistry.definitions.map(\.name)
+        let disabledNames = disabled.toolRegistry.definitions.map(\.name)
+        #expect(enabledNames.contains("cloud_kb_recent_context"))
+        #expect(enabledNames.contains("cloud_kb_knowledge_context"))
+        #expect(!enabledNames.contains("cloud_kb_answer"))
+        #expect(disabledNames.contains("cloud_kb_recent_context"))
+        #expect(disabledNames.contains("cloud_kb_knowledge_context"))
+        #expect(disabled.toolRegistry.definition(named: "cloud_kb_recent_context")?.description.contains("No remote knowledge bases are selected") == true)
+    }
 }
 
 private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
     var answerCount = 0; var unsubscribeCount = 0
+    var contextRequests: [CloudKnowledgeAnswerRequest] = []
+    var contextChannels: [CloudKnowledgeSearchChannel] = []
     func home() async throws -> CloudMarketplaceHome { .init(categories: [.init(id: "agent", name: "AI Agent", parentID: nil, icon: nil), .init(id: "economics", name: "经济学", parentID: nil, icon: nil)], banners: [.init(id: "b", title: "本周精选", subtitle: nil, imageURL: nil, actionURL: nil)], sections: [.init(id: "hero", title: "精选", layout: "hero", knowledgeBases: [base]), .init(id: "new", title: "最新", layout: "grid", knowledgeBases: [])]) }
     func categories() async throws -> [CloudMarketplaceCategory] { try await home().categories }
     func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] { [base] }
@@ -66,5 +138,10 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
     func subscribe(id: String) async throws {}
     func unsubscribe(id: String) async throws { unsubscribeCount += 1 }
     func answer(_ request: CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse { answerCount += 1; return .init(requestID: "request", partitions: [.init(layer: .l2, results: [.init(identityID: "l2", layer: .l2, kind: "operational_fact", text: "current")]), .init(layer: .l3, results: [.init(identityID: "l3", layer: .l3, kind: "reusable_knowledge", text: "knowledge")]), .init(layer: .l4, results: [.init(identityID: "l4", layer: .l4, kind: "entity", text: "entity")])], returnedBytes: 30, knowledgeSequence: 4) }
+    func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse {
+        contextRequests.append(request)
+        contextChannels.append(channel)
+        return try await answer(request)
+    }
     private var base: CloudMarketplaceKnowledgeBase { .init(id: "kb-1", name: "Connor", description: "Agent OS", categoryID: "agent", subscriberCount: 10, subscribed: true, publicationStatus: "published") }
 }

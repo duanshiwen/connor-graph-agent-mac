@@ -19,7 +19,7 @@ struct CraftPrimarySidebarView: View {
     @State private var labelEditorRequest: LabelDefinitionEditorRequest?
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: AppShellLayout.spaceM) {
             Button {
                 select(.agentChat)
                 sendCommand(.shortcut(.newSession))
@@ -27,8 +27,8 @@ struct CraftPrimarySidebarView: View {
                 SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.top, AppShellLayout.spaceM)
 
             Button {
                 select(.agentChat)
@@ -37,10 +37,10 @@ struct CraftPrimarySidebarView: View {
                 SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
-            .padding(.horizontal, 10)
+            .padding(.horizontal, AppShellLayout.spaceM)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
                         SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && graph.chat.sessions.filter == .all) {
                             selectSessionFilter(.all)
@@ -113,22 +113,24 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarRow(title: "技能", systemImage: "bolt", count: graph.skills.presentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
+                    SidebarRow(title: "知识市场", systemImage: "books.vertical.fill", count: marketplaceCount, isSelected: selection == .knowledgeMarketplace) { select(.knowledgeMarketplace) }
+
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: graph.tasks.presentation.summary.scheduledTaskCount, isSelected: selection == .scheduledTasks) { select(.scheduledTasks) }
                         SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: graph.tasks.presentation.summary.eventTriggeredTaskCount, isSelected: selection == .eventTriggeredTasks) { select(.eventTriggeredTasks) }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+                .padding(.horizontal, AppShellLayout.spaceM)
+                .padding(.bottom, AppShellLayout.spaceM)
             }
 
             Spacer(minLength: 0)
 
-            VStack(spacing: 6) {
+            VStack(spacing: AppShellLayout.spaceS) {
                 SidebarRow(title: "设置", systemImage: "gearshape", count: nil, isSelected: selection == .llmSettings) { select(.llmSettings) }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.bottom, AppShellLayout.spaceM)
         }
         .sheet(item: $statusEditorRequest) { request in
             StatusDefinitionEditorSheet(
@@ -168,6 +170,11 @@ struct CraftPrimarySidebarView: View {
 
     private var rssUnreadCount: Int? {
         let count = graph.rss.presentation.unreadCount(sourceID: nil)
+        return count > 0 ? count : nil
+    }
+
+    private var marketplaceCount: Int? {
+        let count = graph.knowledgeMarketplace.library.subscribed.count
         return count > 0 ? count : nil
     }
 

@@ -107,6 +107,10 @@ final class AppRuntimeLifecycle {
     let mailFeatureModel: MailFeatureModel
     let browserFeatureModel: BrowserFeatureModel
     let globalSearchFeatureModel: GlobalSearchFeatureModel
+    let knowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
+    let knowledgeCreatorStore: CloudKnowledgeCreatorStore
+    let cloudKnowledgeAPI: CloudKnowledgeAPIClient
+    let cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient
     let rssFeatureModel: RSSFeatureModel
     let skillRuntimeModel: SkillRuntimeFeatureModel
     let chatWorkspaceCoordinator = ChatWorkspaceCoordinator()
@@ -150,6 +154,7 @@ final class AppRuntimeLifecycle {
     private var globalSearchRuntimeCoordinator: GlobalSearchRuntimeCoordinator?
     private var newSessionPreparationTasks: [String: Task<Void, Never>] = [:]
     private var workspaceStatePersistenceTask: Task<Void, Never>?
+    private var pendingRemoteKnowledgeRuntimeRebuild = false
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -184,7 +189,12 @@ final class AppRuntimeLifecycle {
         chatFeatureModel.run.submittingSessionIDs.contains(sessionID)
     }
 
-    private func restoreChatInputDraft(for sessionID: String?) { chatComposerCoordinator.restore(sessionID: sessionID) }
+    private func restoreChatInputDraft(for sessionID: String?) {
+        chatComposerCoordinator.restore(sessionID: sessionID)
+        chatFeatureModel.composer.remoteKnowledgeBaseIDs = sessionID.flatMap {
+            chatWorkspaceCoordinator.stateSnapshotsBySessionID[$0]?.remoteKnowledgeBaseIDs
+        }
+    }
 
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? {
         guard let selectedChatSessionID = chatFeatureModel.sessions.selectedSessionID, let storagePaths else { return nil }
@@ -570,6 +580,17 @@ final class AppRuntimeLifecycle {
             bookmarkStore: storagePaths.map { BrowserBookmarkStore(bookmarksURL: $0.browserBookmarksURL) },
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
+        let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
+        let cloudKnowledgeAPI = CloudKnowledgeAPIClient(baseURL: backendBaseURL)
+        self.cloudKnowledgeAPI = cloudKnowledgeAPI
+        let cloudKnowledgeMarketplaceAPI = CloudKnowledgeMarketplaceAPIClient(baseURL: backendBaseURL)
+        let cloudKnowledgeAuthorizationCache = CloudKnowledgeAuthorizationCache()
+        self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
+        self.cloudKnowledgeConsumptionClient = CloudKnowledgeConsumptionClient(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
+        self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
+            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: backendBaseURL),
+            publicationAPI: cloudKnowledgeAPI
+        )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
         let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
         self.globalSearchFeatureModel = GlobalSearchFeatureModel(
@@ -693,6 +714,7 @@ final class AppRuntimeLifecycle {
                 personProfileStore: contactsFeatureModel.agentProfileStore,
                 mailRuntime: mailFeatureModel.agentRuntime,
                 rssRuntime: rssFeatureModel.agentRuntime,
+                cloudKnowledgeConsumptionClient: cloudKnowledgeConsumptionClient,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
@@ -715,6 +737,10 @@ final class AppRuntimeLifecycle {
                     return await self.browserFeatureModel.performAssistedWebFetch(request)
                 }
             ))
+            self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
+                guard let self else { throw CancellationError() }
+                return try await self.generateCloudKnowledge(conversationID: conversationID)
+            }
         }
         graphDiagnosticsModel.onPromotedSnapshot = { [weak self] snapshot in
             self?.applyPromotedGraphSnapshot(snapshot)
@@ -753,6 +779,14 @@ final class AppRuntimeLifecycle {
             self?.stopSpeechTranscriptionForDisabledSetting()
         }
         inputSettingsModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        knowledgeMarketplaceStore.onLibraryChanged = { [weak self] in
+            guard let self else { return }
+            if self.chatFeatureModel.run.isSubmitting {
+                self.pendingRemoteKnowledgeRuntimeRebuild = true
+                return
+            }
+            self.rebuildNativeSessionManagerForActiveSession()
+        }
         userPreferencesModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
         workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
@@ -804,12 +838,14 @@ final class AppRuntimeLifecycle {
                 selectModel: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectModel($0, providerMode: $1, connectionID: $2) },
                 thinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectThinkingLevel($0) },
                 defaultThinking: { [weak self] in self?.aiConnectionsRuntimeCoordinator.selectDefaultThinkingLevel($0) },
-                reloadModels: { [weak self] in await self?.aiConnectionsModel.reloadModelConnections() }
+                reloadModels: { [weak self] in await self?.aiConnectionsModel.reloadModelConnections() },
+                remoteKnowledge: { [weak self] in self?.setSessionRemoteKnowledgeBaseIDs($0) }
             ),
             browser: browserFeatureModel,
             calendar: calendarFeatureModel,
             rss: rssFeatureModel,
             mail: mailFeatureModel,
+            knowledgeMarketplace: knowledgeMarketplaceStore,
             appSettings: appSettingsModel
         )
         self.globalSearchRuntimeCoordinator = globalSearchRuntimeCoordinator
@@ -1047,6 +1083,10 @@ final class AppRuntimeLifecycle {
                 enabled: self.appSettingsModel.keepScreenAwake,
                 hasActiveRun: self.chatRunCoordinator.isActive
             )
+            if !self.chatRunCoordinator.isActive, self.pendingRemoteKnowledgeRuntimeRebuild {
+                self.pendingRemoteKnowledgeRuntimeRebuild = false
+                self.rebuildNativeSessionManagerForActiveSession()
+            }
         }
         maintenanceCoordinator.runScheduledTasks = { [weak self] in await self?.performScheduledTaskRun() }
         maintenanceCoordinator.runBackgroundJobs = { [weak self] in
@@ -1213,6 +1253,10 @@ final class AppRuntimeLifecycle {
         async let contacts: Void = contactsFeatureModel.reload()
         async let mail: Void = mailFeatureModel.reload()
         _ = await (rss, calendar, contacts, mail)
+    }
+
+    func reloadKnowledgeMarketplace() async {
+        await knowledgeMarketplaceStore.load()
     }
 
     func reconcileStartupRefreshTasks() async {
@@ -1613,7 +1657,8 @@ final class AppRuntimeLifecycle {
             permissionMode: configuration.permissionMode,
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
-            sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride
+            sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
+            remoteKnowledgeBaseIDs: effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         )
     }
 
@@ -1640,6 +1685,24 @@ final class AppRuntimeLifecycle {
         return provider
     }
 
+    private func generateCloudKnowledge(conversationID: String) async throws -> CloudKnowledgeLocalGenerationResult {
+        guard let knowledgeBaseID = knowledgeCreatorStore.snapshot.knowledgeBaseID,
+              let publicationRunID = knowledgeCreatorStore.snapshot.runID
+        else { throw CloudKnowledgeError.invalidResponse }
+        guard let session = try chatSessionRepository?.loadSession(id: conversationID) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(conversationID)
+        }
+        let provider = try sessionAgentModelProvider(sessionID: conversationID)
+        return try await CloudKnowledgeLLMGenerationRunner().generate(
+            session: session,
+            knowledgeBaseID: knowledgeBaseID,
+            publicationRunID: publicationRunID,
+            clientRunID: knowledgeCreatorStore.snapshot.clientRunID,
+            api: cloudKnowledgeAPI,
+            provider: provider
+        )
+    }
+
     private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
         let provider = try sessionAgentModelProvider(sessionID: sessionID)
         return AnyLLMProvider { prompt, context in
@@ -1653,6 +1716,25 @@ final class AppRuntimeLifecycle {
 
     private func syncWorkspaceDraftsFromSession(_ state: AppSessionStateSnapshot?) {
         workspaceSettingsModel.applySessionState(state)
+    }
+
+    private func effectiveRemoteKnowledgeBaseIDs(sessionID: String) -> [String] {
+        let available = Set(knowledgeMarketplaceStore.library.subscribed.map(\.id))
+        let explicit = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.remoteKnowledgeBaseIDs
+        return (explicit.map { Set($0).intersection(available) } ?? available).sorted()
+    }
+
+    private func setSessionRemoteKnowledgeBaseIDs(_ ids: [String]?) {
+        guard let sessionID = chatFeatureModel.sessions.selectedSessionID else { return }
+        var state = chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]
+            ?? (try? chatSessionRepository?.loadSessionState(sessionID: sessionID))
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.remoteKnowledgeBaseIDs = ids.map { Array(Set($0)).sorted() }
+        state.updatedAt = Date()
+        chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID] = state
+        chatFeatureModel.composer.remoteKnowledgeBaseIDs = state.remoteKnowledgeBaseIDs
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        rebuildNativeSessionManagerForActiveSession()
     }
 
     private func currentSessionIDForWorkspaceDrafts() -> String? {
@@ -3050,7 +3132,8 @@ extension AppRuntimeLifecycle {
             selectModel: { [weak aiRuntime] in aiRuntime?.selectModel($0, providerMode: $1, connectionID: $2) },
             thinking: { [weak aiRuntime] in aiRuntime?.selectThinkingLevel($0) },
             defaultThinking: { [weak aiRuntime] in aiRuntime?.selectDefaultThinkingLevel($0) },
-            reloadModels: { [weak aiConnections] in await aiConnections?.reloadModelConnections() }
+            reloadModels: { [weak aiConnections] in await aiConnections?.reloadModelConnections() },
+            remoteKnowledge: { [weak model] in model?.setSessionRemoteKnowledgeBaseIDs($0) }
         )
         let chatActions = ChatFeatureActions(
             session: session,
@@ -3074,6 +3157,7 @@ extension AppRuntimeLifecycle {
                 contacts: model.contactsFeatureModel,
                 governance: model.governanceModel,
                 aiConnections: aiConnections,
+                knowledgeMarketplace: model.knowledgeMarketplaceStore,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },
                 sessionHasLLMOverride: { [weak aiRuntime] in aiRuntime?.sessionHasOverride ?? false }
             )
@@ -3103,6 +3187,8 @@ extension AppRuntimeLifecycle {
             mail: model.mailFeatureModel,
             browser: model.browserFeatureModel,
             globalSearch: model.globalSearchFeatureModel,
+            knowledgeMarketplace: model.knowledgeMarketplaceStore,
+            knowledgeCreator: model.knowledgeCreatorStore,
             rss: model.rssFeatureModel,
             skills: model.skillRuntimeModel,
             appSettings: model.appSettingsModel,

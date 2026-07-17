@@ -49,32 +49,23 @@ enum SettingsListLayout {
 struct ConnorSettingsDetailView: View {
     let graph: AppFeatureGraph
     @ObservedObject var identityStore: AppUserIdentityStore
-    @StateObject private var cloudKnowledgeCreatorStore: CloudKnowledgeCreatorStore
-    @StateObject private var cloudKnowledgeMarketplaceStore: CloudKnowledgeMarketplaceStore
 
     init(graph: AppFeatureGraph, identityStore: AppUserIdentityStore) {
         self.graph = graph
         self.identityStore = identityStore
-        let baseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
-        _cloudKnowledgeCreatorStore = StateObject(wrappedValue: CloudKnowledgeCreatorStore(
-            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: baseURL),
-            publicationAPI: CloudKnowledgeAPIClient(baseURL: baseURL)
-        ))
-        let marketplaceAPI = CloudKnowledgeMarketplaceAPIClient(baseURL: baseURL)
-        _cloudKnowledgeMarketplaceStore = StateObject(wrappedValue: CloudKnowledgeMarketplaceStore(api: marketplaceAPI))
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: AppShellLayout.sectionSpacing) {
                 Text(graph.shell.selectedSettingsSection.title)
-                    .font(SettingsListTypography.header)
+                    .font(AppTypography.pageTitle)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
                     switch graph.shell.selectedSettingsSection {
                     case .identity:
-                        UserIdentitySettingsView(identityStore: identityStore, creatorStore: cloudKnowledgeCreatorStore, marketplaceStore: cloudKnowledgeMarketplaceStore, sessions: graph.chat.sessions.allSessions)
+                        UserIdentitySettingsView(identityStore: identityStore)
                     case .app:
                         SettingsAppSection(model: graph.appSettings, inputModel: graph.inputSettings, openProjectHelp: graph.settingsActions.openProjectHelp)
                     case .ai:
@@ -106,14 +97,14 @@ struct ConnorSettingsDetailView: View {
                         SettingsPreferencesSection(model: graph.userPreferences)
                     }
                 }
-                .frame(maxWidth: 760)
+                .frame(maxWidth: SettingsListLayout.contentMaxWidth)
                 .frame(maxWidth: .infinity, alignment: .center)
 
                 if let message = graph.shell.settingsMessage(for: graph.shell.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: SettingsListLayout.contentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 if let error = graph.shell.selectedSettingsSection == .ai
@@ -123,12 +114,12 @@ struct ConnorSettingsDetailView: View {
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
-                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: SettingsListLayout.contentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            .padding(.horizontal, 44)
-            .padding(.vertical, 18)
+            .padding(.horizontal, AppShellLayout.pageHorizontalPadding)
+            .padding(.vertical, AppShellLayout.pageVerticalPadding)
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .task {
@@ -637,7 +628,7 @@ struct SettingsAISection: View {
                         .padding(.vertical, SettingsListLayout.spaceXS)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.large)
+                .controlSize(AppButtonLayout.controlSize)
 
                 Label("连接能力会在添加时一次性验证并保存。为保护 API Key 安全，我们暂时不支持编辑连接；如需更改，请删除后重建。", systemImage: "lock.shield")
                     .font(SettingsListTypography.rowCaption)
@@ -1090,14 +1081,14 @@ struct AIConnectionSetupView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
 
             Button(action: primaryAction) {
                 Label(primaryButtonTitle, systemImage: primaryButtonIcon)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .controlSize(AppButtonLayout.controlSize)
             .keyboardShortcut(.defaultAction)
             .disabled(isPrimaryButtonDisabled || isAuthenticating)
         }
@@ -2258,9 +2249,9 @@ struct AIConnectionCapabilityDetailView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("支持能力")
-                        .font(.title2.weight(.semibold))
+                        .font(AppTypography.pageTitle)
                     Text(detail.connectionName)
-                        .font(.subheadline)
+                        .font(AppTypography.meta)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -2437,7 +2428,7 @@ struct AIConnectionEntryRow: View {
                     Image(systemName: "ellipsis")
                         .font(SettingsListTypography.icon)
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)

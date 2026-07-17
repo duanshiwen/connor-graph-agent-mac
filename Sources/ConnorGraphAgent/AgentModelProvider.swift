@@ -292,8 +292,30 @@ public enum AgentModelFinishReason: String, Codable, Sendable, Equatable {
     case stop
     case toolCalls = "tool_calls"
     case length
+    case pause
     case contentFilter = "content_filter"
     case unknown
+
+    public static func openAICompatible(finishReason: String?) -> AgentModelFinishReason {
+        switch finishReason {
+        case "stop": .stop
+        case "tool_calls", "function_call": .toolCalls
+        case "length": .length
+        case "content_filter": .contentFilter
+        default: .unknown
+        }
+    }
+
+    public static func anthropic(stopReason: String?) -> AgentModelFinishReason {
+        switch stopReason {
+        case "end_turn", "stop_sequence": .stop
+        case "tool_use": .toolCalls
+        case "max_tokens", "model_context_window_exceeded": .length
+        case "pause_turn": .pause
+        case "refusal": .contentFilter
+        default: .unknown
+        }
+    }
 }
 
 public struct AgentModelResponse: Sendable, Equatable {

@@ -7,6 +7,7 @@ struct AgentComposerOptionBar: View {
     var selectedSession: AgentSession?
     var composerState: AgentComposerState
     var governanceConfig: AppSessionGovernanceConfig
+    @ObservedObject var knowledgeMarketplace: CloudKnowledgeMarketplaceStore
     var hasRunningBackgroundTask: Bool
     var currentTextSelectionRange: () -> NSRange?
     @Binding var isSessionInfoPresented: Bool
@@ -19,6 +20,13 @@ struct AgentComposerOptionBar: View {
             if let selectedSession {
                 sessionStatusMenu(selectedSession)
             }
+
+            RemoteKnowledgeBaseSelectionMenu(
+                store: knowledgeMarketplace,
+                explicitIDs: composerState.remoteKnowledgeBaseIDs,
+                isDisabled: selectedSession == nil || composerState.isSubmitting,
+                onSelectionChanged: { onAction(.setRemoteKnowledgeBaseIDs($0)) }
+            )
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
