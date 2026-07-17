@@ -42,17 +42,42 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
     }
 
     public func createImportedNoteSession(
+        id: String = UUID().uuidString,
         title: String,
         content: String,
+        messageID: String = UUID().uuidString,
         attachments: [AgentMessageAttachmentRef] = [],
         createdAt: Date = Date()
     ) throws -> AgentSession {
         try repository.createImportedNoteSession(
+            id: id,
             title: title,
+            content: content,
+            messageID: messageID,
+            attachments: attachments,
+            createdAt: createdAt
+        )
+    }
+
+    public func upsertImportedNoteMessage(
+        sessionID: String,
+        messageID: String,
+        content: String,
+        attachments: [AgentMessageAttachmentRef],
+        createdAt: Date
+    ) throws -> AgentSession {
+        try repository.upsertImportedNoteMessage(
+            sessionID: sessionID,
+            messageID: messageID,
             content: content,
             attachments: attachments,
             createdAt: createdAt
         )
+    }
+
+    @discardableResult
+    public func trimMessagesAfterImportedNote(sessionID: String, messageID: String) throws -> AgentSession {
+        try repository.trimMessagesAfterImportedNote(sessionID: sessionID, messageID: messageID)
     }
 
     @discardableResult

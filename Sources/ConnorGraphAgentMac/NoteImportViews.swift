@@ -149,16 +149,21 @@ final class NoteImportViewModel: ObservableObject {
         activity = .starting
         error = nil
         do {
-            var source = NoteImportSourceRecord(kind: sourceKind, displayName: sourceURL.deletingPathExtension().lastPathComponent)
+            let standardizedPath = sourceURL.standardizedFileURL.path
+            var source = try ledger.sources().first {
+                $0.kind == sourceKind && $0.metadata["authorized_path"] == standardizedPath
+            } ?? NoteImportSourceRecord(kind: sourceKind, displayName: sourceURL.deletingPathExtension().lastPathComponent)
             source = try sourceAccessService.authorize(url: sourceURL, source: source)
             try ledger.saveSource(source)
-            let job = NoteImportJobRecord(sourceID: source.id, options: options)
+            var flattenedOptions = options
+            flattenedOptions.preserveHierarchy = false
+            let job = NoteImportJobRecord(sourceID: source.id, options: flattenedOptions)
             try ledger.saveJob(job)
             reloadJobs(selecting: job.id)
             startJobMonitoring()
             activity = .importing(job.id)
             let adapter = adapterForCurrentSource()
-            let request = NoteImportScanRequest(sourceID: source.id, sourceURL: sourceURL, kind: sourceKind, options: options)
+            let request = NoteImportScanRequest(sourceID: source.id, sourceURL: sourceURL, kind: sourceKind, options: flattenedOptions)
             _ = try await coordinator.scan(jobID: job.id, adapter: adapter, request: request)
             reloadJobs(selecting: job.id)
             await executionSupervisor?.ensureRunning(jobID: job.id)
@@ -306,4 +311,3 @@ final class NoteImportViewModel: ObservableObject {
         return String(describing: error)
     }
 }
-

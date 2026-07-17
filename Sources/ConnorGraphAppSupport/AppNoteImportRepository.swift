@@ -215,6 +215,7 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         job.status = status; job.updatedAt = now
         if status == .scanning && job.startedAt == nil { job.startedAt = now }
         if status.isTerminal { job.completedAt = now }
+        else { job.completedAt = nil }
         try saveJob(job)
         return job
     }
@@ -388,6 +389,7 @@ public final class AppNoteImportRepository: @unchecked Sendable {
             .parseFailed, .sessionFailed, .attachmentFailed, .llmFailed
         ]
         job.importedCount = persistedItems.filter { importedStatuses.contains($0.status) }.count
+        job.duplicateCount = persistedItems.filter { $0.status == .duplicateUnchanged }.count
         job.failedCount = persistedItems.filter { failureStatuses.contains($0.status) }.count
         job.updatedAt = now
         try saveJob(job)
