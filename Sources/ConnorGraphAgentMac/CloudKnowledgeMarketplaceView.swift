@@ -170,6 +170,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
 
 struct CloudKnowledgeMarketplaceDetailPane: View {
     @ObservedObject var store: CloudKnowledgeMarketplaceStore
+    @State private var selectedCategoryID: String?
 
     var body: some View {
         Group {
@@ -202,14 +203,11 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
                 }
 
                 if !store.searchResults.isEmpty {
-                    marketplaceSection(title: "搜索结果", bases: store.searchResults)
-                }
-                ForEach(store.home.sections) { section in
-                    marketplaceSection(title: section.title, bases: section.knowledgeBases)
+                    marketplaceSection(title: marketplaceBrowseTitle, bases: store.searchResults)
                 }
 
-                if store.home.sections.isEmpty && !store.isLoading {
-                    ContentUnavailableView("暂无推荐内容", systemImage: "books.vertical", description: Text("可以通过分类或统一搜索查找知识库。"))
+                if store.searchResults.isEmpty && !store.isLoading {
+                    ContentUnavailableView("暂无可用知识库", systemImage: "books.vertical", description: Text("当前分类下还没有已发布的知识库。"))
                         .frame(maxWidth: .infinity, minHeight: 260)
                 }
                 if store.isLoading { ProgressView("正在加载知识市场…").frame(maxWidth: .infinity) }
@@ -249,10 +247,20 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
     }
 
     private func categoryButton(_ title: String, id: String?, systemImage: String) -> some View {
-        Button { Task { await store.search(query: "", categoryID: id) } } label: {
+        Button {
+            selectedCategoryID = id
+            Task { await store.search(query: "", categoryID: id) }
+        } label: {
             Label(title, systemImage: systemImage).padding(.horizontal, 10).padding(.vertical, 6)
         }
         .buttonStyle(.bordered)
+    }
+
+    private var marketplaceBrowseTitle: String {
+        guard let selectedCategoryID,
+              let category = store.home.categories.first(where: { $0.id == selectedCategoryID })
+        else { return "全部知识库" }
+        return category.name
     }
 
     private func marketplaceDetail(_ base: CloudMarketplaceKnowledgeBase) -> some View {

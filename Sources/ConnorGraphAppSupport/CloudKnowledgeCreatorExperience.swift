@@ -19,7 +19,53 @@ public struct CloudKnowledgeBaseDetail: Codable, Sendable, Equatable, Identifiab
     public init(from decoder: Decoder) throws { let box = try decoder.container(keyedBy: CodingKeys.self); id = try box.decodeIfPresent(String.self, forKey: .id) ?? box.decode(String.self, forKey: .kbID); name = try box.decode(String.self, forKey: .name); slug = try box.decode(String.self, forKey: .slug); description = try box.decodeIfPresent(String.self, forKey: .description); visibility = try box.decode(String.self, forKey: .visibility); currentSequence = try box.decodeIfPresent(Int.self, forKey: .currentSequence) ?? 0; lifecycleStatus = try box.decodeIfPresent(String.self, forKey: .lifecycleStatus) ?? "active"; publicationStatus = try box.decodeIfPresent(String.self, forKey: .publicationStatus) ?? "unpublished"; enforcementStatus = try box.decodeIfPresent(String.self, forKey: .enforcementStatus) ?? "clear"; governanceVersion = try box.decodeIfPresent(Int.self, forKey: .governanceVersion) ?? box.decodeIfPresent(Int.self, forKey: .governance_version) ?? 1; latestTakedownActionID = try box.decodeIfPresent(String.self, forKey: .latestTakedownActionId); appealCount = try box.decodeIfPresent(Int.self, forKey: .appealCount) ?? box.decodeIfPresent(Int.self, forKey: .appeal_count) ?? 0 }
     public func encode(to encoder: Encoder) throws { var box = encoder.container(keyedBy: CodingKeys.self); try box.encode(id, forKey: .id); try box.encode(name, forKey: .name); try box.encode(slug, forKey: .slug); try box.encodeIfPresent(description, forKey: .description); try box.encode(visibility, forKey: .visibility); try box.encode(currentSequence, forKey: .currentSequence); try box.encode(lifecycleStatus, forKey: .lifecycleStatus); try box.encode(publicationStatus, forKey: .publicationStatus); try box.encode(enforcementStatus, forKey: .enforcementStatus); try box.encode(governanceVersion, forKey: .governanceVersion); try box.encode(governanceVersion, forKey: .governance_version); try box.encodeIfPresent(latestTakedownActionID, forKey: .latestTakedownActionId); try box.encode(appealCount, forKey: .appealCount); try box.encode(appealCount, forKey: .appeal_count) }
 }
-public struct CloudKnowledgeRevisionSummary: Codable, Sendable, Equatable, Identifiable { public var identityID: String; public var revisionID: String; public var layer: CloudKnowledgeLayer; public var title: String?; public var text: String; public var revisionNumber: Int; public var recordedAt: Date?; public var id: String { revisionID }; public init(identityID: String, revisionID: String, layer: CloudKnowledgeLayer, title: String? = nil, text: String, revisionNumber: Int, recordedAt: Date? = nil) { self.identityID = identityID; self.revisionID = revisionID; self.layer = layer; self.title = title; self.text = text; self.revisionNumber = revisionNumber; self.recordedAt = recordedAt } }
+public struct CloudKnowledgeRevisionSummary: Codable, Sendable, Equatable, Identifiable {
+    public var identityID: String
+    public var revisionID: String
+    public var layer: CloudKnowledgeLayer
+    public var title: String?
+    public var text: String
+    public var revisionNumber: Int
+    public var recordedAt: Date?
+    public var id: String { revisionID }
+
+    public init(identityID: String, revisionID: String, layer: CloudKnowledgeLayer, title: String? = nil, text: String, revisionNumber: Int, recordedAt: Date? = nil) {
+        self.identityID = identityID
+        self.revisionID = revisionID
+        self.layer = layer
+        self.title = title
+        self.text = text
+        self.revisionNumber = revisionNumber
+        self.recordedAt = recordedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case identityID, revisionID, layer, title, text, revisionNumber, recordedAt, stableKey
+    }
+
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        identityID = try box.decode(String.self, forKey: .identityID)
+        revisionID = try box.decode(String.self, forKey: .revisionID)
+        layer = try box.decode(CloudKnowledgeLayer.self, forKey: .layer)
+        title = try box.decodeIfPresent(String.self, forKey: .title)
+            ?? box.decodeIfPresent(String.self, forKey: .stableKey)
+        text = try box.decodeIfPresent(String.self, forKey: .text) ?? ""
+        revisionNumber = try box.decode(Int.self, forKey: .revisionNumber)
+        recordedAt = try box.decodeIfPresent(Date.self, forKey: .recordedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var box = encoder.container(keyedBy: CodingKeys.self)
+        try box.encode(identityID, forKey: .identityID)
+        try box.encode(revisionID, forKey: .revisionID)
+        try box.encode(layer, forKey: .layer)
+        try box.encodeIfPresent(title, forKey: .title)
+        try box.encode(text, forKey: .text)
+        try box.encode(revisionNumber, forKey: .revisionNumber)
+        try box.encodeIfPresent(recordedAt, forKey: .recordedAt)
+    }
+}
 public struct CloudKnowledgePreview: Codable, Sendable, Equatable {
     public var publicationRunID: String; public var stagedSequence: Int; public var operations: [CloudKnowledgeOperation]; public var summaries: [String]
     public var runID: String { publicationRunID }

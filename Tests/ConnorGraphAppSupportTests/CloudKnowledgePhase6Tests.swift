@@ -8,15 +8,19 @@ import ConnorGraphStore
 struct CloudKnowledgePhase6Tests {
     @Test func canonicalBackendFixturesDecodeAndRequestUsesByteBudget() throws {
         let homeJSON = #"{"categories":[{"id":"c","slug":"agents","localized_names":{"zh-CN":"智能体"}}],"banners":[],"sections":[{"id":"s","slug":"featured","title":{"zh-CN":"精选"},"section_type":"hero","knowledge_bases":[{"id":"kb-1","name":"Connor","category_id":"agents","subscriber_count":10,"subscribed":false,"publication_status":"published"}]}]}"#
-        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase; decoder.dateDecodingStrategy = .iso8601
         let home = try decoder.decode(CloudMarketplaceHome.self, from: Data(homeJSON.utf8))
         #expect(home.categories.first?.name == "智能体" && home.sections.first?.layout == "hero" && home.sections.first?.knowledgeBases.first?.id == "kb-1")
-        let answerJSON = #"{"request_id":"request","l2":[{"document_id":"00000000-0000-0000-0000-000000000001","knowledge_base_id":"kb-1","identity_id":"i2","revision_id":"r2","layer":"L2","kind":"operational_fact","stable_key":"state","text":"current","rank":1,"score":1,"retriever":"exact"}],"l3":[],"l4":[],"returned_bytes":7,"knowledge_base_ids":["kb-1"]}"#
+        let answerJSON = #"{"request_id":"request","l2":[{"document_id":"00000000-0000-0000-0000-000000000001","knowledge_base_id":"kb-1","identity_id":"i2","revision_id":"r2","layer":"L2","kind":"operational_fact","stable_key":"state","text":"current","rank":1,"score":1,"retriever":"exact","updated_at":"2026-07-17T06:32:10Z"}],"l3":[],"l4":[],"returned_bytes":7,"knowledge_base_ids":["kb-1"]}"#
         let answer = try decoder.decode(CloudKnowledgeAnswerResponse.self, from: Data(answerJSON.utf8))
         #expect(answer.requestID == "request" && answer.partitions.first?.results.first?.text == "current")
+        #expect(answer.partitions.first?.results.first?.updatedAt != nil)
         let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase
         let body = try #require(try JSONSerialization.jsonObject(with: encoder.encode(CloudKnowledgeAnswerRequest(requestID: "request", query: "Connor", knowledgeBaseIDs: ["kb-1"], contextBudget: 9000))) as? [String: Any])
-        #expect(body["context_budget_bytes"] as? Int == 9000 && body["request_id"] as? String == "request")
+        #expect(body["context_budget_bytes"] as? Int == 9000)
+        #expect(body["request_id"] as? String == "request")
+        #expect(body["knowledge_base_ids"] as? [String] == ["kb-1"])
+        #expect(body["knowledge_base_i_ds"] == nil)
     }
     @Test @MainActor func marketplaceHomeRendersDynamicBackendSectionsWithoutHardcodedCategories() async {
         let api = MarketplaceFakeAPI(); let cache = CloudKnowledgeAuthorizationCache(); let store = CloudKnowledgeMarketplaceStore(api: api, cache: cache)
@@ -24,6 +28,8 @@ struct CloudKnowledgePhase6Tests {
         #expect(store.home.categories.map(\.name) == ["AI Agent", "经济学"])
         #expect(store.home.banners.map(\.title) == ["本周精选"])
         #expect(store.home.sections.map(\.layout) == ["hero", "grid"])
+        #expect(store.searchResults.map(\.id) == ["kb-1"])
+        #expect(await api.searchRequests == [.init(query: "", limit: 100)])
         #expect(await cache.isAuthorized("kb-1"))
     }
 
@@ -129,11 +135,12 @@ struct CloudKnowledgePhase6Tests {
 
 private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
     var answerCount = 0; var unsubscribeCount = 0
+    var searchRequests: [CloudMarketplaceSearchRequest] = []
     var contextRequests: [CloudKnowledgeAnswerRequest] = []
     var contextChannels: [CloudKnowledgeSearchChannel] = []
     func home() async throws -> CloudMarketplaceHome { .init(categories: [.init(id: "agent", name: "AI Agent", parentID: nil, icon: nil), .init(id: "economics", name: "经济学", parentID: nil, icon: nil)], banners: [.init(id: "b", title: "本周精选", subtitle: nil, imageURL: nil, actionURL: nil)], sections: [.init(id: "hero", title: "精选", layout: "hero", knowledgeBases: [base]), .init(id: "new", title: "最新", layout: "grid", knowledgeBases: [])]) }
     func categories() async throws -> [CloudMarketplaceCategory] { try await home().categories }
-    func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] { [base] }
+    func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] { searchRequests.append(request); return [base] }
     func detail(id: String) async throws -> CloudMarketplaceKnowledgeBase { base }
     func subscribe(id: String) async throws {}
     func unsubscribe(id: String) async throws { unsubscribeCount += 1 }
