@@ -33,6 +33,7 @@ Environment:
   CONNOR_RELEASE_ARCH       Build architecture (default: current Mac).
   CONNOR_RELEASE_BUILD_DIR  Temporary build directory.
   CONNOR_DIST_DIR           Output directory, overridden by --output-dir.
+  CONNOR_RELEASE_REUSE_BUILD  Set to 1 to keep DerivedData for an incremental rebuild.
 USAGE
 }
 
@@ -111,7 +112,10 @@ BUILD_ROOT="$BUILD_ROOT/$ARCH"
 DERIVED_DATA="$BUILD_ROOT/DerivedData"
 PRODUCT_DIR="$BUILD_ROOT/product"
 mkdir -p "$BUILD_ROOT"
-rm -rf "$DERIVED_DATA" "$PRODUCT_DIR"
+if [[ "${CONNOR_RELEASE_REUSE_BUILD:-0}" != "1" ]]; then
+  rm -rf "$DERIVED_DATA"
+fi
+rm -rf "$PRODUCT_DIR"
 mkdir -p "$PRODUCT_DIR"
 
 RUST_TARGET_LIBDIR="$("$RUSTUP_BIN" run stable rustc --print target-libdir --target "$RUST_TARGET" 2>/dev/null || true)"
@@ -150,6 +154,9 @@ ditto "$BUILT_APP" "$APP_PATH"
 
 echo "Applying ad-hoc signatures to embedded code..."
 while IFS= read -r -d '' candidate; do
+  if [[ "$candidate" == "$APP_PATH/Contents/MacOS/"* ]]; then
+    continue
+  fi
   if /usr/bin/file -b "$candidate" | /usr/bin/grep -q 'Mach-O'; then
     codesign --force --sign - --timestamp=none --options runtime "$candidate"
   fi
@@ -165,6 +172,13 @@ done < <(
     -name '*.xpc' -o -name '*.bundle' \
   \) -print | awk '{ print length($0), $0 }' | sort -rn | cut -d' ' -f2-
 )
+
+# Sign top-level executables only after all nested code has a valid signature.
+while IFS= read -r -d '' executable; do
+  if /usr/bin/file -b "$executable" | /usr/bin/grep -q 'Mach-O'; then
+    codesign --force --sign - --timestamp=none --options runtime "$executable"
+  fi
+done < <(find "$APP_PATH/Contents/MacOS" -type f -print0)
 
 codesign \
   --force \
