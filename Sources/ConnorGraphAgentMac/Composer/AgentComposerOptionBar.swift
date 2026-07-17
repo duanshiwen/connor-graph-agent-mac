@@ -117,6 +117,8 @@ struct AgentComposerOptionBar: View {
             )
         }
         .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
         .help("调整本轮会话权限")
     }
 
@@ -142,6 +144,8 @@ struct AgentComposerOptionBar: View {
             )
         }
         .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
         .help("更改会话状态")
     }
 
@@ -377,22 +381,20 @@ struct SpeechInputHoldToTalkButton: View {
     @State private var isPressed = false
 
     var body: some View {
-        HStack(spacing: AgentChatLayout.spaceXS) {
+        ZStack {
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                .fill(background)
             Image(systemName: iconName)
                 .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
-            Text(title)
-                .font(AgentChatTypography.micro.weight(.medium))
-                .lineLimit(1)
         }
         .foregroundStyle(foreground)
-        .padding(.horizontal, AgentChatLayout.spaceS)
-        .frame(minWidth: 176, maxWidth: isEnabled ? 176 : 232, minHeight: AgentChatLayout.iconButtonSize)
-        .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
                 .stroke(border, lineWidth: 1)
         )
+        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -400,7 +402,6 @@ struct SpeechInputHoldToTalkButton: View {
                 .onEnded { _ in endIfNeeded() }
         )
         .opacity(isEnabled ? 1 : 0.45)
-        .allowsHitTesting(isEnabled)
         .help(helpText)
         .accessibilityLabel(title)
     }
