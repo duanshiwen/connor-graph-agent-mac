@@ -2,9 +2,10 @@ import Foundation
 
 public struct CloudKnowledgeMarketplaceAPIClient: CloudKnowledgeMarketplaceAPI, Sendable {
     private let baseURL: URL; private let transport: any ConnorBackendHTTPTransport; private let credentials: any CloudKnowledgeCredentialProvider
+    private let refreshRejectedToken: (@Sendable (String) async throws -> String)?
     private let encoder: JSONEncoder; private let decoder: JSONDecoder
-    public init(baseURL: URL, transport: any ConnorBackendHTTPTransport = URLSession.shared, credentials: any CloudKnowledgeCredentialProvider = StoredCloudKnowledgeCredentialProvider()) {
-        self.baseURL = baseURL; self.transport = transport; self.credentials = credentials
+    public init(baseURL: URL, transport: any ConnorBackendHTTPTransport = URLSession.shared, credentials: any CloudKnowledgeCredentialProvider = StoredCloudKnowledgeCredentialProvider(), refreshRejectedToken: (@Sendable (String) async throws -> String)? = nil) {
+        self.baseURL = baseURL; self.transport = transport; self.credentials = credentials; self.refreshRejectedToken = refreshRejectedToken
         let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase; self.encoder = encoder
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase; decoder.dateDecodingStrategy = .iso8601; self.decoder = decoder
     }
@@ -26,8 +27,20 @@ public struct CloudKnowledgeMarketplaceAPIClient: CloudKnowledgeMarketplaceAPI, 
     private func send<T: Decodable, B: Encodable>(_ path: String, method: String, body: B) async throws -> T { try await send(path, method: method, bodyData: try encoder.encode(body)) }
     private func send<T: Decodable>(_ path: String, method: String, bodyData: Data?) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL.appendingPathComponent("api/v2/", isDirectory: true))?.absoluteURL else { throw CloudKnowledgeError.invalidResponse }
-        var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = bodyData; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.setValue("Bearer \(try await credentials.accessToken())", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await transport.data(for: request); guard let http = response as? HTTPURLResponse else { throw CloudKnowledgeError.invalidResponse }; if http.statusCode == 401 { throw CloudKnowledgeError.unauthorized }; guard (200..<300).contains(http.statusCode) else { throw CloudKnowledgeError.server(status: http.statusCode, code: nil, message: "请求失败（\(http.statusCode)）") }
+        var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = bodyData; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let initialToken = try await credentials.accessToken()
+        request.setValue("Bearer \(initialToken)", forHTTPHeaderField: "Authorization")
+        var (data, response) = try await transport.data(for: request)
+        guard var http = response as? HTTPURLResponse else { throw CloudKnowledgeError.invalidResponse }
+        if http.statusCode == 401, let refreshRejectedToken {
+            let refreshedToken = try await refreshRejectedToken(initialToken)
+            request.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
+            (data, response) = try await transport.data(for: request)
+            guard let retriedHTTP = response as? HTTPURLResponse else { throw CloudKnowledgeError.invalidResponse }
+            http = retriedHTTP
+        }
+        if http.statusCode == 401 { throw CloudKnowledgeError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else { throw CloudKnowledgeError.server(status: http.statusCode, code: nil, message: "请求失败（\(http.statusCode)）") }
         if T.self == Empty.self, data.isEmpty { return Empty() as! T }
         if let envelope = try? decoder.decode(Envelope<T>.self, from: data) { return envelope.data }
         if let result = try? decoder.decode(T.self, from: data) { return result }

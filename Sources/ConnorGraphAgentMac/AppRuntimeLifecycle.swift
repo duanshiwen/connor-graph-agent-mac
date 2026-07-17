@@ -581,14 +581,35 @@ final class AppRuntimeLifecycle {
             nativeSourceSearchBackend: nativeSourceSearchBackend
         )
         let backendBaseURL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!
-        let cloudKnowledgeAPI = CloudKnowledgeAPIClient(baseURL: backendBaseURL)
+        let accountCredentials = AppConnorAccountCredentialStore()
+        let authenticatedSession = ConnorBackendAuthenticatedSession(
+            api: ConnorBackendAPIClient(baseURL: backendBaseURL),
+            credentials: accountCredentials
+        )
+        let cloudCredentials = RefreshingCloudKnowledgeCredentialProvider(session: authenticatedSession)
+        let refreshRejectedToken: @Sendable (String) async throws -> String = { rejectedToken in
+            try await cloudCredentials.refreshedAccessToken(afterRejectedToken: rejectedToken)
+        }
+        let cloudKnowledgeAPI = CloudKnowledgeAPIClient(
+            baseURL: backendBaseURL,
+            credentials: cloudCredentials,
+            refreshRejectedToken: refreshRejectedToken
+        )
         self.cloudKnowledgeAPI = cloudKnowledgeAPI
-        let cloudKnowledgeMarketplaceAPI = CloudKnowledgeMarketplaceAPIClient(baseURL: backendBaseURL)
+        let cloudKnowledgeMarketplaceAPI = CloudKnowledgeMarketplaceAPIClient(
+            baseURL: backendBaseURL,
+            credentials: cloudCredentials,
+            refreshRejectedToken: refreshRejectedToken
+        )
         let cloudKnowledgeAuthorizationCache = CloudKnowledgeAuthorizationCache()
         self.knowledgeMarketplaceStore = CloudKnowledgeMarketplaceStore(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
         self.cloudKnowledgeConsumptionClient = CloudKnowledgeConsumptionClient(api: cloudKnowledgeMarketplaceAPI, cache: cloudKnowledgeAuthorizationCache)
         self.knowledgeCreatorStore = CloudKnowledgeCreatorStore(
-            creatorAPI: CloudKnowledgeCreatorAPIClient(baseURL: backendBaseURL),
+            creatorAPI: CloudKnowledgeCreatorAPIClient(
+                baseURL: backendBaseURL,
+                credentials: cloudCredentials,
+                refreshRejectedToken: refreshRejectedToken
+            ),
             publicationAPI: cloudKnowledgeAPI
         )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
@@ -829,7 +850,7 @@ final class AppRuntimeLifecycle {
                 submit: { [weak self] in await self?.submitChat(prompt: $0, clearComposer: $1, displayPrompt: $2, attachments: $3, personReferences: $4) },
                 cancel: { [weak self] in self?.cancelActiveChatRun() },
                 permission: { [weak self] in self?.setAgentPermissionMode($0) },
-                timeline: { [weak self] in self?.restoredAgentEventTimeline(for: $0) ?? [] },
+                timeline: { [weak self] in await self?.restoredAgentEventTimeline(for: $0) ?? [] },
                 markdown: { [weak self] in self?.markdownPersistentCacheContext(messageID: $0) },
                 copy: { [weak self] in self?.copyAssistantMessageToPasteboard($0) },
                 export: { [weak self] in self?.exportAssistantMessageToFile($0, now: $1) },
@@ -2358,7 +2379,7 @@ final class AppRuntimeLifecycle {
         }
     }
 
-    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) async -> [AgentEventPresentation] {
         guard process.state == .completed,
               let chatSessionRepository,
               let sessionID = chatFeatureModel.sessions.selectedSessionID
@@ -2369,19 +2390,31 @@ final class AppRuntimeLifecycle {
             chatRunCoordinator.cacheProcessTimeline([], key: cacheKey)
             return []
         }
-        do {
-            let runs = try chatSessionRepository.loadRuns(sessionID: sessionID, statuses: nil, limit: 200)
-            guard let run = runs.first(where: { $0.metadata["user_message_id"] == sourceUserMessageID }) else {
-                chatRunCoordinator.cacheProcessTimeline([], key: cacheKey)
+        let restored = await Task.detached(priority: .userInitiated) { () -> [AgentEventPresentation] in
+            do {
+                let runs = try chatSessionRepository.loadRuns(sessionID: sessionID, statuses: nil, limit: 200)
+                guard let run = runs.first(where: { $0.metadata["user_message_id"] == sourceUserMessageID }) else { return [] }
+                let restorer = AgentEventPresentationRestorer()
+                let runEvents = try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil)
+                let runPresentations = restorer.presentations(from: runEvents)
+                if !runPresentations.isEmpty { return runPresentations }
+                let journalEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: nil)
+                    .filter { $0.runID == run.id }
+                    .sorted { lhs, rhs in
+                        switch (lhs.sequence, rhs.sequence) {
+                        case let (left?, right?): return left < right
+                        case (.some, .none): return true
+                        case (.none, .some): return false
+                        case (.none, .none): return lhs.createdAt < rhs.createdAt
+                        }
+                    }
+                return restorer.presentations(from: journalEvents)
+            } catch {
                 return []
             }
-            let restored = try restoreAgentEventTimeline(runID: run.id, sessionID: sessionID)
-            chatRunCoordinator.cacheProcessTimeline(restored, key: cacheKey)
-            return restored
-        } catch {
-            chatRunCoordinator.cacheProcessTimeline([], key: cacheKey)
-            return []
-        }
+        }.value
+        chatRunCoordinator.cacheProcessTimeline(restored, key: cacheKey)
+        return restored
     }
 
     private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {
@@ -2889,6 +2922,7 @@ final class AppRuntimeLifecycle {
                 )
                 chatSessionCoordinator.adoptDirectSelection(response.session.id)
             }
+            chatSessionCoordinator.synchronize(response.session)
             chatApprovalCoordinator.reload()
             globalSearchFeatureModel.upsertSessionIndex(response.session)
             scheduleChatSessionListRefresh(reason: "chatSubmitCompleted")
@@ -2918,6 +2952,7 @@ final class AppRuntimeLifecycle {
                     transcript: recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
                 )
             }
+            chatSessionCoordinator.synchronize(recoveredSession)
             chatApprovalCoordinator.reload()
             chatRunCoordinator.clearPendingCancellation(sessionID: submittingSessionID)
             if case NativeSessionManagerError.runCancelled = error {
@@ -3125,7 +3160,7 @@ extension AppRuntimeLifecycle {
             },
             cancel: { [weak model] in model?.cancelActiveChatRun() },
             permission: { [weak model] in model?.setAgentPermissionMode($0) },
-            timeline: { [weak model] in model?.restoredAgentEventTimeline(for: $0) ?? [] },
+            timeline: { [weak model] in await model?.restoredAgentEventTimeline(for: $0) ?? [] },
             markdown: { [weak model] in model?.markdownPersistentCacheContext(messageID: $0) },
             copy: { [weak model] in model?.copyAssistantMessageToPasteboard($0) },
             export: { [weak model] in model?.exportAssistantMessageToFile($0, now: $1) },
