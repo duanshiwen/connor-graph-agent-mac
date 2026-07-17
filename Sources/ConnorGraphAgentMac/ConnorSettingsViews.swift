@@ -269,21 +269,8 @@ struct SettingsAppSection: View {
     private var appVersionDisplay: String {
         let info = Bundle.main.infoDictionary ?? [:]
         let shortVersion = (info["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let build = (info["CFBundleVersion"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch (shortVersion?.isEmpty == false ? shortVersion : nil, build?.isEmpty == false ? build : nil) {
-        case let (version?, build?):
-            return "\(version) (\(build))"
-        case let (version?, nil):
-            return version
-        case let (nil, build?):
-            return "Build \(build)"
-        default:
-            return "开发版本"
-        }
-    }
-
-    private var bundleIdentifierDisplay: String {
-        Bundle.main.bundleIdentifier ?? "未知"
+        guard let shortVersion, !shortVersion.isEmpty else { return "开发版本" }
+        return shortVersion.hasPrefix("v") ? shortVersion : "v\(shortVersion)"
     }
 
     var body: some View {
@@ -361,8 +348,6 @@ struct SettingsAppSection: View {
             }
             SettingsGroup(title: "关于") {
                 SettingsValueRow(title: "当前版本", value: appVersionDisplay)
-                Divider()
-                SettingsValueRow(title: "应用标识", value: bundleIdentifierDisplay)
                 Divider()
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
