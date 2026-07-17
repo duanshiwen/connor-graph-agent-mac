@@ -22,6 +22,12 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(strategy == .deferredPreview)
     }
 
+    @Test func messageBodyPointSizeIsDisplayedAndClamped() {
+        #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
+        #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)
+        #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(30) == 22)
+    }
+
     @Test func compiledMarkdownUsesIntrinsicVerticalHeight() throws {
         let testFile = URL(fileURLWithPath: #filePath)
         let root = testFile
@@ -39,6 +45,8 @@ struct AgentMarkdownPreviewStrategyTests {
 
         #expect(preview.components(separatedBy: ".fixedSize(horizontal: false, vertical: true)").count >= 9)
         #expect(messageRows.contains(".fixedSize(horizontal: false, vertical: true)"))
-        #expect(messageRows.contains("font: AgentChatTypography.messageBody"))
+        #expect(messageRows.contains("@AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)"))
+        #expect(messageRows.components(separatedBy: "bodyPointSize: messageBodyPointSize").count >= 4)
+        #expect(preview.contains("bodyPointSize + semanticSize - systemBodySize"))
     }
 }

@@ -263,6 +263,9 @@ struct SettingsAppSection: View {
     @Bindable var inputModel: InputSettingsFeatureModel
     var openProjectHelp: () -> Void
 
+    @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
+    private var messageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
+
     private var appVersionDisplay: String {
         let info = Bundle.main.infoDictionary ?? [:]
         let shortVersion = (info["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -346,6 +349,9 @@ struct SettingsAppSection: View {
             SettingsGroup(title: "页面显示主题") {
                 SettingsAppearanceModeRow(selection: $model.appearanceMode)
             }
+            SettingsGroup(title: "会话显示") {
+                SettingsChatFontSizeRow(pointSize: $messageBodyPointSize)
+            }
             SettingsGroup(title: "网络") {
                 SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $model.httpProxyEnabled)
                 if model.httpProxyEnabled {
@@ -370,6 +376,61 @@ struct SettingsAppSection: View {
                 }
             }
         }
+    }
+}
+
+private struct SettingsChatFontSizeRow: View {
+    @Binding var pointSize: Double
+
+    private var renderedPointSize: CGFloat {
+        AgentChatFontPreferences.validatedMessageBodyPointSize(pointSize)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceM) {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                    Text("气泡内字号")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("选择气泡正文的实际字号，Markdown 标题与代码会同步保持层级。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(AgentChatFontPreferences.pointSizeLabel(pointSize))
+                    .font(SettingsListTypography.rowCaptionEmphasized.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 64, alignment: .trailing)
+            }
+
+            HStack(spacing: SettingsListLayout.spaceM) {
+                Image(systemName: "textformat.size.smaller")
+                    .foregroundStyle(.secondary)
+                Slider(
+                    value: $pointSize,
+                    in: AgentChatFontPreferences.messageBodyPointSizeRange,
+                    step: 1
+                )
+                Image(systemName: "textformat.size.larger")
+                    .foregroundStyle(.secondary)
+                Button("恢复默认") {
+                    pointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
+                }
+                .buttonStyle(.bordered)
+                .disabled(pointSize == AgentChatFontPreferences.defaultMessageBodyPointSize)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Markdown 标题示例")
+                    .font(.system(size: renderedPointSize + 2, weight: .semibold))
+                Text("气泡正文会以 \(AgentChatFontPreferences.pointSizeLabel(pointSize)) 显示。")
+                    .font(AgentChatTypography.messageBody(pointSize: renderedPointSize))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(SettingsListLayout.spaceM)
+            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusS, style: .continuous))
+        }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
