@@ -18,6 +18,7 @@ public actor NoteImportCoordinator {
     private let sourceAccessService: NoteImportSourceAccessService
     private let rateLimiter: NoteImportProviderRateLimiter
     private let retryPolicy: NoteImportRetryPolicy
+    private let onSessionImported: @Sendable (AgentSession) -> Void
     private let schedulerVersion = "2"
     private var activeSchedulers: [String: NoteImportExecutionScheduler] = [:]
     private static let payloadMetadataKey = "imported_note_payload"
@@ -30,7 +31,8 @@ public actor NoteImportCoordinator {
         payloadStore: NoteImportPayloadStore? = nil,
         sourceAccessService: NoteImportSourceAccessService = .init(),
         rateLimiter: NoteImportProviderRateLimiter = .init(),
-        retryPolicy: NoteImportRetryPolicy = .init(maxAttempts: 20)
+        retryPolicy: NoteImportRetryPolicy = .init(maxAttempts: 20),
+        onSessionImported: @escaping @Sendable (AgentSession) -> Void = { _ in }
     ) {
         self.ledger = ledger
         self.sessionService = sessionService
@@ -39,6 +41,7 @@ public actor NoteImportCoordinator {
         self.sourceAccessService = sourceAccessService
         self.rateLimiter = rateLimiter
         self.retryPolicy = retryPolicy
+        self.onSessionImported = onSessionImported
     }
 
     public func prepareImport(
@@ -153,7 +156,7 @@ public actor NoteImportCoordinator {
         let rateLimiter = self.rateLimiter
         let providerKey = NoteImportProviderKey(connection: "note-import", provider: "active-runtime", model: "active")
         await rateLimiter.configure(.init(maxConcurrent: options.llmConcurrency, requestsPerMinute: 60), for: providerKey)
-        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options, sourceLease, enexLease, retryPolicy, rateLimiter] item in
+        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options, sourceLease, enexLease, retryPolicy, rateLimiter, onSessionImported] item in
             let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
             defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
             let owner = "\(jobID):\(UUID().uuidString)"
@@ -173,13 +176,14 @@ public actor NoteImportCoordinator {
 
                     if [.ready, .duplicateChanged].contains(current.status) {
                         current = try ledger.transitionItem(id: current.id, to: .creatingSession)
-                        _ = try await sessionService.createImportedNoteSession(
+                        let importedSession = try await sessionService.createImportedNoteSession(
                             id: sessionID,
                             title: current.title,
                             content: note.markdownContent,
                             messageID: messageID,
                             createdAt: note.createdAt ?? current.createdAt
                         )
+                        onSessionImported(importedSession)
                         current.sessionID = sessionID
                         current.status = .imported
                         current.errorCode = nil
@@ -201,13 +205,14 @@ public actor NoteImportCoordinator {
                                 authorizedRoot: authorizedRoot
                             ).map(\.messageRef)
                         }
-                        _ = try await sessionService.upsertImportedNoteMessage(
+                        let importedSession = try await sessionService.upsertImportedNoteMessage(
                             sessionID: boundSessionID,
                             messageID: messageID,
                             content: note.markdownContent,
                             attachments: attachmentRefs,
                             createdAt: note.createdAt ?? current.createdAt
                         )
+                        onSessionImported(importedSession)
                         current = options.llmMode == .automatic
                             ? try ledger.transitionItem(id: current.id, to: .queuedForLLM)
                             : try ledger.transitionItem(id: current.id, to: .completed)
@@ -228,6 +233,9 @@ public actor NoteImportCoordinator {
                             prompt: "请理解并整理上一条已导入的笔记，提炼主题、关键观点和概念关系。",
                             allowNetworkReadTools: options.allowNetworkReadTools
                         ))
+                        if let importedSession = try await sessionService.loadSession(id: boundSessionID) {
+                            onSessionImported(importedSession)
+                        }
                         await rateLimiter.release(providerKey)
                         limiterAcquired = false
                         _ = try ledger.transitionItem(id: current.id, to: .completed)

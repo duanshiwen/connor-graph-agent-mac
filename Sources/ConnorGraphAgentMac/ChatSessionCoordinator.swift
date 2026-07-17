@@ -17,6 +17,8 @@ final class ChatSessionCoordinator {
     @ObservationIgnored private var pendingNewSessionIDs: Set<String> = []
     @ObservationIgnored private var isShutdown = false
     @ObservationIgnored private var filterChangeGeneration = 0
+    @ObservationIgnored private var pendingImportedSessions: [String: AgentSession] = [:]
+    @ObservationIgnored private var importedSessionFlushTask: Task<Void, Never>?
 
     @ObservationIgnored var activeSessionIDProvider: () -> String = { "" }
     @ObservationIgnored var onSelectionWillChange: (String?, String) -> Void = { _, _ in }
@@ -265,6 +267,33 @@ final class ChatSessionCoordinator {
         replaceInLists(session)
     }
 
+    /// Coalesces imported sessions before updating the observable list. Import
+    /// progress can advance several items at once, so publishing one batch keeps
+    /// sidebar navigation independent from import throughput.
+    func enqueueImportedSession(_ session: AgentSession) {
+        guard !isShutdown else { return }
+        pendingImportedSessions[session.id] = session
+        guard importedSessionFlushTask == nil else { return }
+        importedSessionFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            self?.flushPendingImportedSessions()
+        }
+    }
+
+    func installImportedSessions(_ importedSessions: [AgentSession]) {
+        guard !isShutdown, !importedSessions.isEmpty else { return }
+        hasLoadedInitialSessions = true
+        let importedIDs = Set(importedSessions.map(\.id))
+        model.allSessions.removeAll { importedIDs.contains($0.id) }
+        model.allSessions.append(contentsOf: importedSessions)
+        model.allSessions.sort { $0.updatedAt > $1.updatedAt }
+        model.sessions = Self.filter(model.allSessions, by: model.filter)
+        for session in importedSessions { onSessionAdded(session) }
+        onSessionsChanged(model.allSessions)
+        errorMessage = nil
+    }
+
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
@@ -272,6 +301,9 @@ final class ChatSessionCoordinator {
         selectionTask = nil
         selectionGeneration += 1
         pendingNewSessionIDs.removeAll()
+        importedSessionFlushTask?.cancel()
+        importedSessionFlushTask = nil
+        pendingImportedSessions.removeAll()
         model.loadingSessionDetailID = nil
     }
 
@@ -317,6 +349,13 @@ final class ChatSessionCoordinator {
         if let index = model.sessions.firstIndex(where: { $0.id == session.id }) { model.sessions[index] = session }
         if let index = model.allSessions.firstIndex(where: { $0.id == session.id }) { model.allSessions[index] = session }
         onSessionsChanged(model.allSessions)
+    }
+
+    private func flushPendingImportedSessions() {
+        importedSessionFlushTask = nil
+        let sessions = Array(pendingImportedSessions.values)
+        pendingImportedSessions.removeAll()
+        installImportedSessions(sessions)
     }
 
     private func report(_ error: Error) { report(String(describing: error)) }

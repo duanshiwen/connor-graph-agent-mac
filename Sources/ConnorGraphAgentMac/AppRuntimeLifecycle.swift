@@ -1709,7 +1709,10 @@ final class AppRuntimeLifecycle {
             databasePath: databasePath,
             sessionRepository: chatSessionRepository,
             runCoordinator: chatRunCoordinator,
-            storagePaths: storagePaths
+            storagePaths: storagePaths,
+            onSessionImported: { [weak self] session in
+                self?.chatSessionCoordinator.enqueueImportedSession(session)
+            }
         )
     }
 

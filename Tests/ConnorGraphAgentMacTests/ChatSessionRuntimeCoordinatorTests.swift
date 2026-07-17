@@ -176,6 +176,33 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(model.allSessions.first?.messages.count == 4)
         #expect(AgentChatSessionPresentation(session: try #require(model.sessions.first)).messageCount == 4)
     }
+
+    @Test func importedSessionBatchUpdatesListsWithoutChangingSelectionOrLoadingDetail() throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let selected = try fixture.repository.createSession(title: "Selected", now: Date(timeIntervalSince1970: 1_000))
+        let model = ChatSessionListModel()
+        model.selectedSessionID = selected.id
+        let coordinator = ChatSessionCoordinator(model: model, repository: fixture.repository)
+        coordinator.installStartupSessions([selected], allSessions: [selected])
+        var selectionChangeCount = 0
+        var detailReloadCount = 0
+        coordinator.onSelectionWillChange = { _, _ in selectionChangeCount += 1 }
+        coordinator.onReloadSelectedSession = { _, _ in detailReloadCount += 1 }
+        var noteGovernance = AgentSessionGovernanceMetadata.default
+        noteGovernance.kind = .note
+        let olderNote = AgentSession(id: "note-older", title: "Older", createdAt: Date(timeIntervalSince1970: 2_000), updatedAt: Date(timeIntervalSince1970: 2_000), governance: noteGovernance)
+        let newerNote = AgentSession(id: "note-newer", title: "Newer", createdAt: Date(timeIntervalSince1970: 3_000), updatedAt: Date(timeIntervalSince1970: 3_000), governance: noteGovernance)
+
+        coordinator.installImportedSessions([olderNote, newerNote])
+
+        #expect(model.allSessions.map(\.id) == [newerNote.id, olderNote.id, selected.id])
+        #expect(model.sessions.map(\.id) == [newerNote.id, olderNote.id, selected.id])
+        #expect(model.selectedSessionID == selected.id)
+        #expect(model.loadingSessionDetailID == nil)
+        #expect(selectionChangeCount == 0)
+        #expect(detailReloadCount == 0)
+    }
 }
 
 private struct CoordinatorTestBackend: AgentBackend {

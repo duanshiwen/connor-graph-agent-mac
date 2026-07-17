@@ -1,11 +1,13 @@
 import Foundation
 import ConnorGraphAppSupport
+import ConnorGraphCore
 
 struct NoteImportRuntimeFactory {
     let databasePath: String?
     let sessionRepository: AppChatSessionRepository?
     let runCoordinator: ChatRunCoordinator
     let storagePaths: AppStoragePaths?
+    let onSessionImported: @MainActor (AgentSession) -> Void
 
     @MainActor
     func makeModel() -> NoteImportViewModel {
@@ -24,7 +26,12 @@ struct NoteImportRuntimeFactory {
                 ledger: ledger,
                 sessionService: sessionService,
                 attachmentImporter: NoteImportAttachmentImporter(store: attachmentStore),
-                payloadStore: NoteImportPayloadStore(rootDirectory: storagePaths.artifactsDirectory.appendingPathComponent("note-import-staging", isDirectory: true))
+                payloadStore: NoteImportPayloadStore(rootDirectory: storagePaths.artifactsDirectory.appendingPathComponent("note-import-staging", isDirectory: true)),
+                onSessionImported: { session in
+                    Task { @MainActor in
+                        onSessionImported(session)
+                    }
+                }
             )
             return NoteImportViewModel(
                 ledger: ledger,
