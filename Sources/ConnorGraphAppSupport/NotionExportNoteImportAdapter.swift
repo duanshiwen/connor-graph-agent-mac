@@ -8,13 +8,13 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
     public let sourceKind: NoteImportSourceKind = .notionExport
     public var databaseStrategy: NotionDatabaseImportStrategy
     public init(databaseStrategy: NotionDatabaseImportStrategy = .childPagesOnly) { self.databaseStrategy = databaseStrategy }
-    public func scan(_ request: NoteImportScanRequest) -> AsyncThrowingStream<ImportedNote, Error> { AsyncThrowingStream { continuation in Task.detached(priority: .utility) { do { for note in try Self.notes(root: request.sourceURL, strategy: databaseStrategy) { continuation.yield(note) }; continuation.finish() } catch { continuation.finish(throwing: error) } } } }
+    public func scan(_ request: NoteImportScanRequest) -> AsyncThrowingStream<ImportedNote, Error> { AsyncThrowingStream { continuation in Task.detached(priority: .utility) { do { for note in try Self.notes(root: request.sourceURL, strategy: databaseStrategy, preserveHierarchy: request.options.preserveHierarchy) { continuation.yield(note) }; continuation.finish() } catch { continuation.finish(throwing: error) } } } }
 
-    private static func notes(root: URL, strategy: NotionDatabaseImportStrategy) throws -> [ImportedNote] {
+    private static func notes(root: URL, strategy: NotionDatabaseImportStrategy, preserveHierarchy: Bool) throws -> [ImportedNote] {
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
         var result: [ImportedNote] = []
         for case let url as URL in enumerator { let ext = url.pathExtension.lowercased(); guard ["md", "markdown", "html", "htm", "csv"].contains(ext) else { continue }; if ext == "csv" && strategy == .childPagesOnly { continue }
-            let data = try Data(contentsOf: url); let text = String(decoding: data, as: UTF8.self); let relative = url.path.replacingOccurrences(of: root.path + "/", with: ""); let parsed = parseName(url.deletingPathExtension().lastPathComponent); let hierarchy = relative.split(separator: "/").dropLast().map(String.init)
+            let data = try Data(contentsOf: url); let text = String(decoding: data, as: UTF8.self); let relative = url.path.replacingOccurrences(of: root.path + "/", with: ""); let parsed = parseName(url.deletingPathExtension().lastPathComponent); let hierarchy = preserveHierarchy ? relative.split(separator: "/").dropLast().map(String.init) : []
             if ext == "csv" && strategy == .rowAsNote { let rows = parseCSV(text); guard let headers = rows.first else { continue }; for (index, row) in rows.dropFirst().enumerated() { let pairs = zip(headers, row).map { "- **\($0.0):** \($0.1)" }.joined(separator: "\n"); result.append(make(kind: ext, title: row.first?.nilIfEmpty ?? "\(parsed.title) \(index + 1)", content: pairs, relative: relative + "#row-\(index + 1)", externalID: nil, hierarchy: hierarchy, data: Data(pairs.utf8), root: root, sourceURL: url)) }; continue }
             let content = ext.hasPrefix("htm") ? sanitizeHTML(text) : (ext == "csv" ? csvSummary(text, title: parsed.title) : text)
             result.append(make(kind: ext, title: parsed.title, content: content, relative: relative, externalID: parsed.id, hierarchy: hierarchy, data: data, root: root, sourceURL: url))

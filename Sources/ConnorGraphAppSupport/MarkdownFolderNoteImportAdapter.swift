@@ -49,7 +49,9 @@ public struct MarkdownFolderNoteImportAdapter: NoteImportSourceAdapter, Sendable
         let title = metadata["title"]?.trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
             ?? firstHeading(decoded.text)
             ?? url.deletingPathExtension().lastPathComponent
-        let hierarchy = relative.split(separator: "/").dropLast().map(String.init)
+        let hierarchy = request.options.preserveHierarchy
+            ? relative.split(separator: "/").dropLast().map(String.init)
+            : []
         var sourceMetadata = metadata
         sourceMetadata["encoding"] = decoded.encodingName
         sourceMetadata["encoding_confidence"] = decoded.confidence.rawValue
