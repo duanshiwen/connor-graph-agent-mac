@@ -26,6 +26,12 @@ public enum AppNoteImportRepositoryError: Error, Equatable, CustomStringConverti
 
 public final class AppNoteImportRepository: @unchecked Sendable {
     public static let schemaVersion = 2
+    private static let importedItemStatuses: Set<NoteImportItemStatus> = [
+        .completed
+    ]
+    private static let failedItemStatuses: Set<NoteImportItemStatus> = [
+        .parseFailed, .sessionFailed, .attachmentFailed, .llmFailed
+    ]
 
     private var db: OpaquePointer?
     private let lock = NSRecursiveLock()
@@ -204,6 +210,33 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         try rows(Self.jobSelect + " ORDER BY updated_at DESC LIMIT ?", bindings: [.int(max(1, limit))]).map(decodeJob)
     }
 
+    public func jobsWithLiveCounts(limit: Int = 200) throws -> [NoteImportJobRecord] {
+        var values = try jobs(limit: limit)
+        for index in values.indices where !values[index].status.isTerminal {
+            values[index] = try projectedCounts(for: values[index])
+        }
+        return values
+    }
+
+    private func projectedCounts(for job: NoteImportJobRecord) throws -> NoteImportJobRecord {
+        let failures = Self.failedItemStatuses.map { "'\($0.rawValue)'" }.joined(separator: ",")
+        guard let counts = try rows(
+            """
+            SELECT
+              COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN status = 'duplicate_unchanged' THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN status IN (\(failures)) THEN 1 ELSE 0 END), 0)
+            FROM note_import_items WHERE job_id = ?
+            """,
+            bindings: [.text(job.id)]
+        ).first else { return job }
+        var projected = job
+        projected.importedCount = counts[0].integer
+        projected.duplicateCount = counts[1].integer
+        projected.failedCount = counts[2].integer
+        return projected
+    }
+
     public func recoverableJobs() throws -> [NoteImportJobRecord] {
         let terminal = NoteImportJobStatus.allCases.filter(\.isTerminal).map { "'\($0.rawValue)'" }.joined(separator: ",")
         return try rows(Self.jobSelect + " WHERE status NOT IN (\(terminal)) ORDER BY updated_at ASC").map(decodeJob)
@@ -222,7 +255,40 @@ public final class AppNoteImportRepository: @unchecked Sendable {
 
     public func saveItem(_ item: NoteImportItemRecord) throws {
         guard try job(id: item.jobID) != nil else { throw AppNoteImportRepositoryError.jobNotFound(item.jobID) }
+        let previousStatus = try self.item(id: item.id)?.status
         try saveItemUnchecked(item)
+        try updateJobCounts(
+            jobID: item.jobID,
+            from: previousStatus,
+            to: item.status,
+            now: item.updatedAt
+        )
+    }
+
+    private func updateJobCounts(
+        jobID: String,
+        from previous: NoteImportItemStatus?,
+        to current: NoteImportItemStatus,
+        now: Date
+    ) throws {
+        func delta(_ statuses: Set<NoteImportItemStatus>) -> Int {
+            (statuses.contains(current) ? 1 : 0) - (previous.map(statuses.contains) == true ? 1 : 0)
+        }
+        let importedDelta = delta(Self.importedItemStatuses)
+        let duplicateDelta = delta([.duplicateUnchanged])
+        let failedDelta = delta(Self.failedItemStatuses)
+        guard importedDelta != 0 || duplicateDelta != 0 || failedDelta != 0 else { return }
+        try run(
+            """
+            UPDATE note_import_jobs
+            SET imported_count = MAX(imported_count + ?, 0),
+                duplicate_count = MAX(duplicate_count + ?, 0),
+                failed_count = MAX(failed_count + ?, 0),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            bindings: [.int(importedDelta), .int(duplicateDelta), .int(failedDelta), .text(iso(now)), .text(jobID)]
+        )
     }
 
     /// Persists a bounded scan batch in one short transaction and updates the
@@ -382,15 +448,9 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     public func recalculateJobCounts(jobID: String, now: Date = Date()) throws -> NoteImportJobRecord {
         guard var job = try job(id: jobID) else { throw AppNoteImportRepositoryError.jobNotFound(jobID) }
         let persistedItems = try items(jobID: jobID)
-        let importedStatuses: Set<NoteImportItemStatus> = [
-            .imported, .queuedForLLM, .runningLLM, .completed, .attachmentFailed, .llmFailed
-        ]
-        let failureStatuses: Set<NoteImportItemStatus> = [
-            .parseFailed, .sessionFailed, .attachmentFailed, .llmFailed
-        ]
-        job.importedCount = persistedItems.filter { importedStatuses.contains($0.status) }.count
+        job.importedCount = persistedItems.filter { Self.importedItemStatuses.contains($0.status) }.count
         job.duplicateCount = persistedItems.filter { $0.status == .duplicateUnchanged }.count
-        job.failedCount = persistedItems.filter { failureStatuses.contains($0.status) }.count
+        job.failedCount = persistedItems.filter { Self.failedItemStatuses.contains($0.status) }.count
         job.updatedAt = now
         try saveJob(job)
         return job

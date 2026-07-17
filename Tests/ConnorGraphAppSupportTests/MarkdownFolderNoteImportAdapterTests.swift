@@ -5,17 +5,27 @@ import ConnorGraphCore
 
 @Suite("Markdown folder import adapter")
 struct MarkdownFolderNoteImportAdapterTests {
-    @Test("Recursively scans markdown and preserves hierarchy")
+    @Test("Recursively scans markdown and preserves hierarchy only when requested")
     func recursiveScan() async throws {
         let fixture = try Fixture()
         try fixture.write("---\ntitle: Commercial Note\ntags: import\n---\n# Ignored heading\nBody", at: "Projects/Connor/note.md")
         try fixture.write("not markdown", at: "Projects/skip.txt")
-        let notes = try await fixture.scan()
+        let notes = try await fixture.scan(options: .init(preserveHierarchy: true))
         #expect(notes.count == 1)
         #expect(notes[0].title == "Commercial Note")
         #expect(notes[0].relativePath == "Projects/Connor/note.md")
         #expect(notes[0].hierarchy == ["Projects", "Connor"])
         #expect(notes[0].sourceMetadata["encoding"] == "utf-8")
+    }
+
+    @Test("Flattens nested Markdown folders by default")
+    func flattenedHierarchy() async throws {
+        let fixture = try Fixture()
+        try fixture.write("# Nested", at: "Projects/Connor/note.md")
+        let notes = try await fixture.scan()
+        let note = try #require(notes.first)
+        #expect(note.relativePath == "Projects/Connor/note.md")
+        #expect(note.hierarchy.isEmpty)
     }
 
     @Test("Supports mixed UTF-8 and GB18030 files")

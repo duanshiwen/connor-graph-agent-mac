@@ -51,6 +51,38 @@ struct AppNoteImportRepositoryTests {
         #expect(persisted.discoveredCount == 2)
         #expect(persisted.duplicateCount == 1)
     }
+
+    @Test("Updates completion counters immediately and repairs stale active-job projections")
+    func liveProgressCounters() throws {
+        let fixture = try Fixture()
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try fixture.repository.saveSource(source)
+        try fixture.repository.saveJob(.init(id: "job", sourceID: source.id, status: .processing, discoveredCount: 2))
+        try fixture.repository.saveItem(.init(id: "done", jobID: "job", sourceID: source.id, sourceIdentity: "done.md", title: "Done", status: .ready, rawByteHash: "raw", normalizedTextHash: "text"))
+
+        _ = try fixture.repository.transitionItem(id: "done", to: .creatingSession)
+        let loadedImported = try fixture.repository.item(id: "done")
+        var imported = try #require(loadedImported)
+        imported.status = .imported
+        try fixture.repository.saveItem(imported)
+        #expect(try fixture.repository.job(id: "job")?.importedCount == 0)
+        _ = try fixture.repository.transitionItem(id: "done", to: .completed)
+        #expect(try fixture.repository.job(id: "job")?.importedCount == 1)
+
+        try fixture.repository.saveItem(.init(id: "failed", jobID: "job", sourceID: source.id, sourceIdentity: "failed.md", title: "Failed", status: .sessionFailed, rawByteHash: "raw-2", normalizedTextHash: "text-2"))
+        #expect(try fixture.repository.job(id: "job")?.failedCount == 1)
+
+        let loadedStale = try fixture.repository.job(id: "job")
+        var stale = try #require(loadedStale)
+        stale.importedCount = 0
+        stale.failedCount = 0
+        try fixture.repository.saveJob(stale)
+        let projectedJobs = try fixture.repository.jobsWithLiveCounts()
+        let projected = try #require(projectedJobs.first)
+        #expect(projected.importedCount == 1)
+        #expect(projected.failedCount == 1)
+        #expect(try fixture.repository.job(id: "job")?.importedCount == 0)
+    }
     @Test("Persists a recoverable job across repository reopen")
     func persistsRecoverableJob() throws {
         let fixture = try Fixture()

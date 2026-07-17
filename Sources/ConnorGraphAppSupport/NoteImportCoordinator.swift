@@ -41,6 +41,27 @@ public actor NoteImportCoordinator {
         self.retryPolicy = retryPolicy
     }
 
+    public func prepareImport(
+        sourceURL: URL,
+        kind: NoteImportSourceKind,
+        options: NoteImportOptions
+    ) throws -> NoteImportJobRecord {
+        let standardizedPath = sourceURL.standardizedFileURL.path
+        var source = try ledger.sources().first {
+            $0.kind == kind && $0.metadata["authorized_path"] == standardizedPath
+        } ?? NoteImportSourceRecord(
+            kind: kind,
+            displayName: sourceURL.deletingPathExtension().lastPathComponent
+        )
+        source = try sourceAccessService.authorize(url: sourceURL, source: source)
+        try ledger.saveSource(source)
+        var flattenedOptions = options
+        flattenedOptions.preserveHierarchy = false
+        let job = NoteImportJobRecord(sourceID: source.id, options: flattenedOptions)
+        try ledger.saveJob(job)
+        return job
+    }
+
     public func scan(jobID: String, adapter: any NoteImportSourceAdapter, request: NoteImportScanRequest) async throws -> NoteImportJobRecord {
         let interval = NoteImportPerformanceLog.begin("Import Scan", jobID: jobID)
         defer { NoteImportPerformanceLog.end(interval, jobID: jobID) }
@@ -98,6 +119,7 @@ public actor NoteImportCoordinator {
             job = try reopenFailedItems(jobID: jobID, options: job.options)
         }
         _ = try ledger.reconcileInterruptedItems(jobID: jobID)
+        job = try ledger.recalculateJobCounts(jobID: jobID)
         _ = try ledger.heartbeat(jobID: jobID, schedulerVersion: schedulerVersion)
         if job.cancelRequestedAt != nil { return try finalizeCancellationAndCleanup(jobID: jobID) }
         if job.pauseRequestedAt != nil || job.status == .paused { return job }

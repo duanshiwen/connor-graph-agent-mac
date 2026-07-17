@@ -24,10 +24,10 @@ struct NoteImportCenterView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) { Button { openWindow(id: AppMenuPresentation.noteImportWizardWindowID) } label: { Label("新建导入", systemImage: "plus") } }
-            ToolbarItem { Button { model.reloadJobs() } label: { Label("刷新", systemImage: "arrow.clockwise") } }
+            ToolbarItem { Button { Task { await model.reloadJobs() } } label: { Label("刷新", systemImage: "arrow.clockwise") } }
         }
-        .onAppear {
-            model.reloadJobs()
+        .task {
+            await model.reloadJobs()
             selectedJobID = model.selectedJobID
         }
         .task(id: selectedJobID) {
@@ -60,7 +60,7 @@ struct NoteImportCenterView: View {
             runtimeState: model.runtimeSnapshot.state(for: job.id)
         )
         return VStack(alignment: .leading, spacing: 7) {
-            HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(sourceName(job)).fontWeight(.medium).lineLimit(1); Spacer() }
+            HStack { Image(systemName: presentation.systemImage).foregroundStyle(job.status.tint); Text(model.sourceNamesByID[job.sourceID] ?? "笔记导入").fontWeight(.medium).lineLimit(1); Spacer() }
             jobProgress(job)
             HStack {
                 Text(presentation.displayName)
@@ -79,7 +79,7 @@ struct NoteImportCenterView: View {
         )
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) { Text(sourceName(job)).font(AppTypography.pageTitle); Label(presentation.displayName, systemImage: presentation.systemImage).foregroundStyle(job.status.tint) }
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) { Text(model.sourceNamesByID[job.sourceID] ?? "笔记导入").font(AppTypography.pageTitle); Label(presentation.displayName, systemImage: presentation.systemImage).foregroundStyle(job.status.tint) }
                 Spacer()
                 controls(job)
             }.padding(24)
@@ -137,9 +137,4 @@ struct NoteImportCenterView: View {
     }
 
     private func metric(_ title: String, _ value: Int) -> some View { VStack(alignment: .leading, spacing: 2) { Text("\(value)").font(.title3.bold()); Text(title).font(.caption).foregroundStyle(.secondary) }.frame(minWidth: 72, alignment: .leading) }
-    private func sourceName(_ job: NoteImportJobRecord) -> String {
-        guard let ledger = model.ledger else { return "笔记导入" }
-        do { return try ledger.source(id: job.sourceID)?.displayName ?? "笔记导入" }
-        catch { return "笔记导入" }
-    }
 }
