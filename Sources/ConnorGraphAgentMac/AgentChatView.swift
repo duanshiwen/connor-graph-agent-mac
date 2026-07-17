@@ -609,11 +609,18 @@ private struct AgentChatConversationView: View {
         visibleMessageLimit = nextLimit
     }
 
-    private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
+    private func initialActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation]? {
         if process.id == latestProcessID, !model.run.eventTimeline.isEmpty {
             return model.run.eventTimeline
         }
-        let restoredEvents = chatActions.run.restoredAgentEventTimeline(for: process)
+        return nil
+    }
+
+    private func loadActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) async -> [AgentEventPresentation] {
+        if let initial = initialActivityEvents(for: process, latestProcessID: latestProcessID) {
+            return initial
+        }
+        let restoredEvents = await chatActions.run.restoredAgentEventTimeline(for: process)
         if !restoredEvents.isEmpty {
             return restoredEvents
         }
@@ -644,7 +651,10 @@ private struct AgentChatConversationView: View {
                 AgentAssistantHeaderView()
                 AgentChatTurnProcessRow(
                     process: process,
-                    events: activityEvents(for: process, latestProcessID: latestProcessID),
+                    initialEvents: initialActivityEvents(for: process, latestProcessID: latestProcessID),
+                    loadEvents: {
+                        await loadActivityEvents(for: process, latestProcessID: latestProcessID)
+                    },
                     onOpenToolInvocation: { invocation in
                         selectedToolInvocation = invocation
                     }

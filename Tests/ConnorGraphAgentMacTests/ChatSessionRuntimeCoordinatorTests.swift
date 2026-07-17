@@ -158,6 +158,24 @@ struct ChatSessionRuntimeCoordinatorTests {
         coordinator.select(session.id)
         #expect(model.loadingSessionDetailID == nil)
     }
+
+    @Test func sessionCoordinatorSynchronizesUpdatedMessageCountIntoCardSnapshot() throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        var session = try fixture.repository.createSession(title: "Count")
+        session.messages = (1...3).map { AgentMessage(role: .user, content: "message-\($0)") }
+        session = try fixture.repository.saveSession(session)
+        let model = ChatSessionListModel()
+        let coordinator = ChatSessionCoordinator(model: model, repository: fixture.repository)
+        coordinator.installStartupSessions([session], allSessions: [session])
+        session.messages.append(AgentMessage(role: .assistant, content: "message-4"))
+
+        coordinator.synchronize(session)
+
+        #expect(model.sessions.first?.messages.count == 4)
+        #expect(model.allSessions.first?.messages.count == 4)
+        #expect(AgentChatSessionPresentation(session: try #require(model.sessions.first)).messageCount == 4)
+    }
 }
 
 private struct CoordinatorTestBackend: AgentBackend {

@@ -196,8 +196,12 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var errorMessage: String?
     public var onLibraryChanged: (() -> Void)?
     private let api: any CloudKnowledgeMarketplaceAPI; private let cache: CloudKnowledgeAuthorizationCache
+    private var isLoadingMarketplace = false
     public init(api: any CloudKnowledgeMarketplaceAPI, cache: CloudKnowledgeAuthorizationCache = .init()) { self.api = api; self.cache = cache }
     public func load() async {
+        guard !isLoadingMarketplace else { return }
+        isLoadingMarketplace = true
+        defer { isLoadingMarketplace = false }
         await perform {
             async let home = self.api.home()
             async let library = self.api.library()
@@ -214,11 +218,21 @@ public actor CloudKnowledgeAuthorizationCache {
     public func search(query: String, categoryID: String? = nil) async { await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
     public func showHome() { selected = nil; showsPublisher = false }
     public func showPublisher() { selected = nil; showsPublisher = true }
-    public func loadDetail(id: String) async { showsPublisher = false; await perform { self.selected = try await self.api.detail(id: id) } }
+    public func loadDetail(id: String) async {
+        showsPublisher = false
+        if selected?.id != id, let cached = cachedKnowledgeBase(id: id) { selected = cached }
+        await perform { self.selected = try await self.api.detail(id: id) }
+    }
     public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
     public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
     public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { (try? await api.search(.init(query: query, limit: 6))) ?? [] }
     public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
+    private func cachedKnowledgeBase(id: String) -> CloudMarketplaceKnowledgeBase? {
+        searchResults.first(where: { $0.id == id })
+            ?? library.subscribed.first(where: { $0.id == id })
+            ?? library.owned.first(where: { $0.id == id })
+            ?? home.sections.lazy.flatMap(\.knowledgeBases).first(where: { $0.id == id })
+    }
     private func perform(_ action: @escaping () async throws -> Void) async { isLoading = true; errorMessage = nil; defer { isLoading = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }
 
@@ -229,12 +243,74 @@ public actor CloudKnowledgeConsumptionClient {
         for id in request.knowledgeBaseIDs where await !cache.isAuthorized(id) { throw CloudKnowledgeError.server(status: 403, code: "subscription_required", message: "知识库订阅已失效。") }
         let key = request.knowledgeBaseIDs.sorted().joined(separator: ",") + "|" + request.query + "|\(request.contextBudget)|\(request.limit)"
         if let cached = await cache.value(key: key) { return cached }
-        let response = try await api.answer(request); await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs); return response
+        let response = try await searchEachKnowledgeBase(request) { api, request in
+            try await api.answer(request)
+        }
+        await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs)
+        return response
     }
     public func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse {
         for id in request.knowledgeBaseIDs where await !cache.isAuthorized(id) { throw CloudKnowledgeError.server(status: 403, code: "subscription_required", message: "知识库订阅已失效。") }
         let key = channel.rawValue + "|" + request.knowledgeBaseIDs.sorted().joined(separator: ",") + "|" + request.query + "|\(request.contextBudget)|\(request.limit)"
         if let cached = await cache.value(key: key) { return cached }
-        let response = try await api.context(request, channel: channel); await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs); return response
+        let response = try await searchEachKnowledgeBase(request, channel: channel) { api, request in
+            try await api.context(request, channel: channel)
+        }
+        await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs)
+        return response
+    }
+
+    private func searchEachKnowledgeBase(
+        _ request: CloudKnowledgeAnswerRequest,
+        channel: CloudKnowledgeSearchChannel? = nil,
+        search: @escaping @Sendable (any CloudKnowledgeMarketplaceAPI, CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse
+    ) async throws -> CloudKnowledgeAnswerResponse {
+        let ids = Array(Set(request.knowledgeBaseIDs)).sorted()
+        guard ids.count > 1 else { return try await search(api, request) }
+
+        let api = self.api
+        let responses = try await withThrowingTaskGroup(of: CloudKnowledgeAnswerResponse.self) { group in
+            for id in ids {
+                var scopedRequest = request
+                scopedRequest.requestID = UUID().uuidString
+                scopedRequest.knowledgeBaseIDs = [id]
+                let singleBaseRequest = scopedRequest
+                group.addTask { try await search(api, singleBaseRequest) }
+            }
+            var values: [CloudKnowledgeAnswerResponse] = []
+            for try await response in group { values.append(response) }
+            return values
+        }
+        return Self.merge(responses, request: request, channel: channel)
+    }
+
+    private static func merge(
+        _ responses: [CloudKnowledgeAnswerResponse],
+        request: CloudKnowledgeAnswerRequest,
+        channel: CloudKnowledgeSearchChannel?
+    ) -> CloudKnowledgeAnswerResponse {
+        var seen = Set<String>()
+        let ranked = responses
+            .flatMap(\.partitions)
+            .flatMap(\.results)
+            .sorted {
+                if ($0.score ?? 0) != ($1.score ?? 0) { return ($0.score ?? 0) > ($1.score ?? 0) }
+                if ($0.updatedAt ?? .distantPast) != ($1.updatedAt ?? .distantPast) { return ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+                return $0.id < $1.id
+            }
+            .filter { seen.insert($0.id).inserted }
+            .prefix(request.limit)
+        let partitions = CloudKnowledgeLayer.allCases.compactMap { layer -> CloudKnowledgeAnswerPartition? in
+            let results = ranked.filter { $0.layer == layer }
+            return results.isEmpty ? nil : .init(layer: layer, results: Array(results))
+        }
+        let returnedByteValues = responses.compactMap(\.returnedBytes)
+        return CloudKnowledgeAnswerResponse(
+            requestID: request.requestID,
+            channel: channel ?? responses.compactMap(\.channel).first,
+            partitions: partitions,
+            returnedBytes: returnedByteValues.isEmpty ? nil : returnedByteValues.reduce(0, +),
+            knowledgeSequence: responses.compactMap(\.knowledgeSequence).max()
+        )
     }
 }

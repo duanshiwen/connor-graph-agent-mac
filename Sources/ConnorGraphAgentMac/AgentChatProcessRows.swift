@@ -4,36 +4,60 @@ import ConnorGraphAppSupport
 
 struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
-    var events: [AgentEventPresentation]
+    var initialEvents: [AgentEventPresentation]?
+    var loadEvents: () async -> [AgentEventPresentation]
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
     @State private var isExpanded: Bool = false
+    @State private var loadedEvents: [AgentEventPresentation]?
+    @State private var isDetailReady = false
     @State private var startedAt: Date = Date()
 
     var body: some View {
-        let visibleEvents = events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
+        let resolvedEvents = loadedEvents ?? initialEvents
+        let visibleEvents = resolvedEvents ?? AgentActivityFallbackEvents.events(for: process)
         let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: visibleEvents)
         return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                Button(action: { withAnimation(.easeOut(duration: 0.16)) { isExpanded.toggle() } }) {
+                Button(action: { isExpanded.toggle() }) {
                     activityHeader(summary)
                 }
                 .buttonStyle(.plain)
 
                 if isExpanded {
-                    AgentTurnActivitySummaryDetailView(
-                        summary: summary,
-                        events: visibleEvents,
-                        isRunning: process.state == .running,
-                        startedAt: startedAt,
-                        onOpenToolInvocation: onOpenToolInvocation
-                    )
+                    Group {
+                        if isDetailReady {
+                            AgentTurnActivitySummaryDetailView(
+                                summary: summary,
+                                events: visibleEvents,
+                                isRunning: process.state == .running,
+                                startedAt: startedAt,
+                                onOpenToolInvocation: onOpenToolInvocation
+                            )
+                        } else {
+                            AgentTurnActivityDetailLoadingView()
+                        }
+                    }
                     .padding(.leading, AgentChatLayout.iconButtonSize + AgentChatLayout.spaceM)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: isExpanded) {
+            guard isExpanded, !isDetailReady else { return }
+            try? await Task.sleep(for: .milliseconds(16))
+            guard !Task.isCancelled else { return }
+            let events: [AgentEventPresentation]
+            if let initialEvents {
+                events = initialEvents
+            } else {
+                events = await loadEvents()
+            }
+            guard !Task.isCancelled else { return }
+            loadedEvents = events
+            isDetailReady = true
+        }
     }
 
     private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
@@ -85,6 +109,22 @@ struct AgentChatTurnProcessRow: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
         }
+    }
+}
+
+private struct AgentTurnActivityDetailLoadingView: View {
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            ProgressView()
+                .controlSize(.small)
+                .fixedSize()
+            Text("正在加载本轮详情…")
+                .font(AgentChatTypography.micro)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, minHeight: AgentChatLayout.activityRowMinHeight, alignment: .leading)
     }
 }
 

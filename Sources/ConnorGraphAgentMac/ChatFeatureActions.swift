@@ -54,7 +54,7 @@ extension ChatComposerCommanding {
     func submitChat(prompt: String, clearComposer: Bool, displayPrompt: String?, attachments: [AgentMessageAttachmentRef]?, personReferences: [PersonReference]) async -> String?
     func cancelActiveChatRun()
     func setAgentPermissionMode(_ mode: AgentPermissionMode)
-    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation]
+    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) async -> [AgentEventPresentation]
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext?
     func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation)
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date)
@@ -172,7 +172,7 @@ final class ClosureChatRunPort: ChatRunCommanding {
     let submitAction: (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?
     let cancelAction: () -> Void
     let permissionAction: (AgentPermissionMode) -> Void
-    let timelineAction: (AgentChatTurnProcessPresentation) -> [AgentEventPresentation]
+    let timelineAction: (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation]
     let markdownAction: (String) -> AgentMarkdownPersistentCacheContext?
     let copyAction: (AgentChatMessagePresentation) -> Void
     let exportAction: (AgentChatMessagePresentation, Date) -> Void
@@ -190,7 +190,7 @@ final class ClosureChatRunPort: ChatRunCommanding {
     func submitChat(prompt: String, clearComposer: Bool, displayPrompt: String?, attachments: [AgentMessageAttachmentRef]?, personReferences: [PersonReference]) async -> String? { await submitAction(prompt, clearComposer, displayPrompt, attachments, personReferences) }
     func cancelActiveChatRun() { cancelAction() }
     func setAgentPermissionMode(_ mode: AgentPermissionMode) { permissionAction(mode) }
-    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] { timelineAction(process) }
+    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) async -> [AgentEventPresentation] { await timelineAction(process) }
     func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? { markdownAction(messageID) }
     func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation) { copyAction(message) }
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date) { exportAction(message, now) }
@@ -201,7 +201,7 @@ final class ClosureChatRunPort: ChatRunCommanding {
     func selectDefaultLLMThinkingLevel(_ level: AppLLMThinkingLevel) { defaultThinkingAction(level) }
     func reloadLLMModelConnections() async { await reloadModelsAction() }
     func setSessionRemoteKnowledgeBaseIDs(_ ids: [String]?) { remoteKnowledgeAction(ids) }
-    init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void) {
+    init(backgroundTasks: @escaping () -> [AppSessionBackgroundTask], hasBackgroundTask: @escaping () -> Bool, summaryFreshness: @escaping () -> AgentSessionSummaryFreshness?, summaryContext: @escaping () -> String, submit: @escaping (String, Bool, String?, [AgentMessageAttachmentRef]?, [PersonReference]) async -> String?, cancel: @escaping () -> Void, permission: @escaping (AgentPermissionMode) -> Void, timeline: @escaping (AgentChatTurnProcessPresentation) async -> [AgentEventPresentation], markdown: @escaping (String) -> AgentMarkdownPersistentCacheContext?, copy: @escaping (AgentChatMessagePresentation) -> Void, export: @escaping (AgentChatMessagePresentation, Date) -> Void, download: @escaping (AttachmentPreviewModel) -> Void, clearOverride: @escaping () -> Void, selectModel: @escaping (String, AppLLMProviderMode, String?) -> Void, thinking: @escaping (AppLLMThinkingLevel) -> Void, defaultThinking: @escaping (AppLLMThinkingLevel) -> Void, reloadModels: @escaping () async -> Void, remoteKnowledge: @escaping ([String]?) -> Void) {
         self.backgroundTasks = backgroundTasks; self.hasBackgroundTask = hasBackgroundTask; self.summaryFreshness = summaryFreshness; self.summaryContext = summaryContext; submitAction = submit; cancelAction = cancel; permissionAction = permission; timelineAction = timeline; markdownAction = markdown; copyAction = copy; exportAction = export; downloadAction = download; clearOverrideAction = clearOverride; selectModelAction = selectModel; thinkingAction = thinking; defaultThinkingAction = defaultThinking; reloadModelsAction = reloadModels; remoteKnowledgeAction = remoteKnowledge
     }
 }
