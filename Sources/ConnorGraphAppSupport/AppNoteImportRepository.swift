@@ -218,6 +218,28 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         return values
     }
 
+    public func deleteJob(id: String) throws {
+        try lock.withLock {
+            guard let job = try job(id: id) else { throw AppNoteImportRepositoryError.jobNotFound(id) }
+            guard job.status.isTerminal else {
+                throw AppNoteImportRepositoryError.jobControlUnavailable("Active import tasks cannot be deleted")
+            }
+            try execute("BEGIN IMMEDIATE TRANSACTION;")
+            do {
+                let itemIDs = "SELECT id FROM note_import_items WHERE job_id = ?"
+                try run("DELETE FROM note_import_item_attempts WHERE item_id IN (\(itemIDs))", bindings: [.text(id)])
+                try run("DELETE FROM note_import_links WHERE item_id IN (\(itemIDs))", bindings: [.text(id)])
+                try run("DELETE FROM note_import_attachments WHERE item_id IN (\(itemIDs))", bindings: [.text(id)])
+                try run("DELETE FROM note_import_items WHERE job_id = ?", bindings: [.text(id)])
+                try run("DELETE FROM note_import_jobs WHERE id = ?", bindings: [.text(id)])
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
     private func projectedCounts(for job: NoteImportJobRecord) throws -> NoteImportJobRecord {
         let failures = Self.failedItemStatuses.map { "'\($0.rawValue)'" }.joined(separator: ",")
         guard let counts = try rows(

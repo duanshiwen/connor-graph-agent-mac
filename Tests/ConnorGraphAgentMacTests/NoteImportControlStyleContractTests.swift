@@ -42,7 +42,10 @@ struct NoteImportControlStyleContractTests {
     func localListSelection() throws {
         let center = try source("NoteImportCenterView.swift")
         #expect(center.contains("@State private var selectedJobID"))
-        #expect(center.contains("List(selection: $selectedJobID)"))
+        #expect(center.contains("List {"))
+        #expect(!center.contains("List(selection: $selectedJobID)"))
+        #expect(center.contains("selectedJobID = job.id"))
+        #expect(center.contains(".listRowBackground(selectedJobID == job.id"))
         #expect(center.contains(".task(id: selectedJobID)"))
         #expect(!center.contains("set: { newValue in model.selectJob(newValue) }"))
         #expect(!center.contains(".onChange(of: model.selectedJobID) { _, _ in model.reloadSelectedJobItems() }"))
@@ -52,6 +55,8 @@ struct NoteImportControlStyleContractTests {
         #expect(center.contains("guard hasInitializedSelection else { return }"))
         #expect(center.contains("transaction.disablesAnimations = true"))
         #expect(center.contains(".contentMargins(.top, 6, for: .scrollContent)"))
+        #expect(center.contains("Button(\"删除导入记录\""))
+        #expect(center.contains("已经导入的笔记会保留"))
     }
 
     @Test("Import center renders one state-driven pause or resume control")

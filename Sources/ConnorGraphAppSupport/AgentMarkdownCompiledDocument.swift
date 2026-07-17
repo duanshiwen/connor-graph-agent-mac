@@ -69,7 +69,7 @@ public struct AgentMarkdownCompiledDocument: Identifiable, Sendable, Equatable {
 }
 
 public struct AgentMarkdownDocumentCompiler: Sendable {
-    public static let parserVersion = 1
+    public static let parserVersion = 2
     public static let rendererVersion = 1
 
     private let parser: AgentMarkdownBlockParser

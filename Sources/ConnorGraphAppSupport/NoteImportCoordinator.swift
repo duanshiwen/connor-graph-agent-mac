@@ -320,6 +320,13 @@ public actor NoteImportCoordinator {
         }
     }
     public func recoverableJobs() throws -> [NoteImportJobRecord] { try ledger.recoverableJobs() }
+    public func delete(jobID: String) throws {
+        guard try requireJob(jobID).status.isTerminal else {
+            throw AppNoteImportRepositoryError.jobControlUnavailable("Active import tasks cannot be deleted")
+        }
+        cleanupStaging(jobID: jobID)
+        try ledger.deleteJob(id: jobID)
+    }
     public func progress(jobID: String) throws -> NoteImportProgress { let job = try requireJob(jobID); let items = try ledger.items(jobID: jobID); return .init(jobID: jobID, status: job.status, discovered: job.discoveredCount, imported: job.importedCount, completed: items.filter { $0.status == .completed }.count, failed: job.failedCount) }
 
     private func reopenFailedItems(jobID: String, options: NoteImportOptions) throws -> NoteImportJobRecord {
