@@ -176,7 +176,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Processing triggers when: pending count ≥ 100, OR oldest pending event age ≥ 24 hours.
         - Events are batched by time proximity and token limits (≤30 events, ≤12k tokens per batch).
         - After successful processing, the processed L1 events are physically deleted. L0 remains as permanent evidence.
-        - If processing fails, L1 events are preserved for retry (up to 3 attempts) or dead-letter review.
+        - If processing fails, L1 events are preserved and retried with backoff until processing succeeds.
 
         Goal:
         - From the cached L1 events, extract information and directly write to L2, L3, and L4 using the provided write tools.

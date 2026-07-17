@@ -27,6 +27,7 @@ struct AgentComposerStore {
             selectedModel: actions.dependencies.aiConnections.selectedModel,
             sessionHasLLMOverride: actions.dependencies.sessionHasLLMOverride(),
             remoteKnowledgeBaseIDs: model.composer.remoteKnowledgeBaseIDs,
+            allowedMCPToolNames: model.composer.allowedMCPToolNames,
             permissionMode: actions.dependencies.permissionMode(),
             selectedSessionStatus: selectedSession?.governance.status,
             isSpeechTranscriptionEnabled: actions.dependencies.inputSettings.sessionSpeechTranscriptionEnabled,
@@ -62,6 +63,8 @@ struct AgentComposerStore {
             DispatchQueue.main.async { actions.session.setSelectedSessionStatus(status) }
         case .setRemoteKnowledgeBaseIDs(let ids):
             actions.run.setSessionRemoteKnowledgeBaseIDs(ids)
+        case .setAllowedMCPToolNames(let names):
+            actions.run.setSessionAllowedMCPToolNames(names)
         case .toggleBrowserWorkspaceVisibility:
             actions.dependencies.browser.toggleWorkspaceVisibility()
         case .toggleSpeechTranscription:

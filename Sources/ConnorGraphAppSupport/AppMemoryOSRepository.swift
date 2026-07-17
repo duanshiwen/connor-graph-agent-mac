@@ -30,13 +30,19 @@ public struct AppMemoryOSBackgroundRunSummary: Sendable, Equatable, Codable {
     public var projectionRunCount: Int
     public var aiJobRunCount: Int
     public var healthStatus: MemoryOSHealthStatus
+    public var retryScheduledCount: Int
+    public var deadLetterCount: Int
+    public var attentionMessage: String?
     public var checkedAt: Date
 
-    public init(expiredLeaseCount: Int, projectionRunCount: Int = 0, aiJobRunCount: Int = 0, healthStatus: MemoryOSHealthStatus, checkedAt: Date = Date()) {
+    public init(expiredLeaseCount: Int, projectionRunCount: Int = 0, aiJobRunCount: Int = 0, healthStatus: MemoryOSHealthStatus, retryScheduledCount: Int = 0, deadLetterCount: Int = 0, attentionMessage: String? = nil, checkedAt: Date = Date()) {
         self.expiredLeaseCount = expiredLeaseCount
         self.projectionRunCount = projectionRunCount
         self.aiJobRunCount = aiJobRunCount
         self.healthStatus = healthStatus
+        self.retryScheduledCount = retryScheduledCount
+        self.deadLetterCount = deadLetterCount
+        self.attentionMessage = attentionMessage
         self.checkedAt = checkedAt
     }
 }
@@ -66,6 +72,7 @@ public struct AppMemoryOSBackgroundJobRunner: Sendable {
     }
 
     public func runOnce(facade: AppMemoryOSFacade, now: Date = Date()) throws -> AppMemoryOSBackgroundRunSummary {
+        let recoveredLeaseCount = try facade.recoverExpiredBackgroundQueueLeases(now: now)
         let projectionRuns = try facade.runProjectionQueueOnce(now: now)
 
         var aiRunCount = 0
@@ -74,11 +81,24 @@ public struct AppMemoryOSBackgroundJobRunner: Sendable {
         }
 
         let summary = try facade.operationalSummary(now: now)
+        let attentionMessage: String?
+        if summary.l1DeadLetterCount > 0 {
+            attentionMessage = "Memory OS 有 \(summary.l1DeadLetterCount) 个后台任务需要处理，请检查 LLM 连接、余额或模型配置。"
+        } else if summary.l1RetryScheduledCount > 0 {
+            attentionMessage = "Memory OS 有 \(summary.l1RetryScheduledCount) 个后台任务正在等待自动重试。"
+        } else if aiExecutorProvider == nil && summary.l1PendingQueueCount > 0 {
+            attentionMessage = "Memory OS 有 \(summary.l1PendingQueueCount) 个后台任务等待执行，但当前没有可用的 LLM 连接。"
+        } else {
+            attentionMessage = nil
+        }
         return AppMemoryOSBackgroundRunSummary(
-            expiredLeaseCount: summary.expiredLeaseCount,
+            expiredLeaseCount: recoveredLeaseCount,
             projectionRunCount: projectionRuns.count,
             aiJobRunCount: aiRunCount,
             healthStatus: summary.healthReport.status,
+            retryScheduledCount: summary.l1RetryScheduledCount,
+            deadLetterCount: summary.l1DeadLetterCount,
+            attentionMessage: attentionMessage,
             checkedAt: now
         )
     }

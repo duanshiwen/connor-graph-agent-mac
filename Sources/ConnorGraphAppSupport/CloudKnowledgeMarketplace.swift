@@ -48,7 +48,82 @@ public struct CloudMarketplaceKnowledgeBase: Codable, Sendable, Equatable, Ident
 public struct CloudMarketplaceLibrary: Codable, Sendable, Equatable {
     public var subscribed: [CloudMarketplaceKnowledgeBase]
     public var owned: [CloudMarketplaceKnowledgeBase]
-    public init(subscribed: [CloudMarketplaceKnowledgeBase] = [], owned: [CloudMarketplaceKnowledgeBase] = []) { self.subscribed = subscribed; self.owned = owned }
+
+    public var availableForConsumption: [CloudMarketplaceKnowledgeBase] {
+        var valuesByID: [String: CloudMarketplaceKnowledgeBase] = [:]
+        var orderedIDs: [String] = []
+
+        for base in subscribed + owned.filter({ $0.publicationStatus == "published" }) {
+            if valuesByID[base.id] == nil { orderedIDs.append(base.id) }
+            valuesByID[base.id] = Self.merge(valuesByID[base.id], with: base)
+        }
+
+        return orderedIDs.compactMap { valuesByID[$0] }
+    }
+
+    private enum CodingKeys: String, CodingKey { case subscribed, owned }
+
+    public init(subscribed: [CloudMarketplaceKnowledgeBase] = [], owned: [CloudMarketplaceKnowledgeBase] = []) {
+        let normalized = Self.normalize(subscribed: subscribed, owned: owned)
+        self.subscribed = normalized.subscribed
+        self.owned = normalized.owned
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            subscribed: try container.decodeIfPresent([CloudMarketplaceKnowledgeBase].self, forKey: .subscribed) ?? [],
+            owned: try container.decodeIfPresent([CloudMarketplaceKnowledgeBase].self, forKey: .owned) ?? []
+        )
+    }
+
+    private static func normalize(
+        subscribed rawSubscribed: [CloudMarketplaceKnowledgeBase],
+        owned rawOwned: [CloudMarketplaceKnowledgeBase]
+    ) -> (subscribed: [CloudMarketplaceKnowledgeBase], owned: [CloudMarketplaceKnowledgeBase]) {
+        var valuesByID: [String: CloudMarketplaceKnowledgeBase] = [:]
+        var subscribedIDs: [String] = []
+        var ownedIDs: [String] = []
+
+        for var base in rawSubscribed {
+            base.subscribed = true
+            valuesByID[base.id] = merge(valuesByID[base.id], with: base)
+            appendUnique(base.id, to: &subscribedIDs)
+            if base.owned { appendUnique(base.id, to: &ownedIDs) }
+        }
+
+        for var base in rawOwned {
+            base.owned = true
+            valuesByID[base.id] = merge(valuesByID[base.id], with: base)
+            appendUnique(base.id, to: &ownedIDs)
+            if base.subscribed { appendUnique(base.id, to: &subscribedIDs) }
+        }
+
+        return (
+            subscribedIDs.compactMap { valuesByID[$0] },
+            ownedIDs.compactMap { valuesByID[$0] }
+        )
+    }
+
+    private static func appendUnique(_ id: String, to ids: inout [String]) {
+        if !ids.contains(id) { ids.append(id) }
+    }
+
+    private static func merge(
+        _ current: CloudMarketplaceKnowledgeBase?,
+        with incoming: CloudMarketplaceKnowledgeBase
+    ) -> CloudMarketplaceKnowledgeBase {
+        guard var current else { return incoming }
+        current.subscribed = current.subscribed || incoming.subscribed
+        current.owned = current.owned || incoming.owned
+        current.subscriberCount = max(current.subscriberCount, incoming.subscriberCount)
+        if current.description == nil { current.description = incoming.description }
+        if current.categoryID == nil { current.categoryID = incoming.categoryID }
+        if current.ownerID == nil { current.ownerID = incoming.ownerID }
+        if current.ownerName == nil { current.ownerName = incoming.ownerName }
+        if current.publicationStatus == nil { current.publicationStatus = incoming.publicationStatus }
+        return current
+    }
 }
 public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifiable {
     public var id: String; public var title: String; public var layout: String; public var knowledgeBases: [CloudMarketplaceKnowledgeBase]
@@ -58,7 +133,29 @@ public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifia
 }
 public struct CloudMarketplaceHome: Decodable, Sendable, Equatable { public var categories: [CloudMarketplaceCategory]; public var banners: [CloudMarketplaceBanner]; public var sections: [CloudMarketplaceSection]; public init(categories: [CloudMarketplaceCategory], banners: [CloudMarketplaceBanner] = [], sections: [CloudMarketplaceSection]) { self.categories = categories; self.banners = banners; self.sections = sections } }
 public struct CloudMarketplaceSearchRequest: Codable, Sendable, Equatable { public var query: String; public var categoryID: String?; public var limit: Int; public init(query: String, categoryID: String? = nil, limit: Int = 30) { self.query = query; self.categoryID = categoryID; self.limit = limit } }
-public struct CloudKnowledgeAnswerRequest: Codable, Sendable, Equatable { public var requestID: String; public var query: String; public var knowledgeBaseIDs: [String]; public var contextBudget: Int; public var limit: Int; public init(requestID: String = UUID().uuidString, query: String, knowledgeBaseIDs: [String], contextBudget: Int = 8_000, limit: Int = 20) { self.requestID = requestID; self.query = query; self.knowledgeBaseIDs = knowledgeBaseIDs; self.contextBudget = contextBudget; self.limit = limit }; private enum CodingKeys: String, CodingKey { case requestID = "requestId", query, knowledgeBaseIDs, contextBudget = "contextBudgetBytes", limit } }
+public struct CloudKnowledgeAnswerRequest: Codable, Sendable, Equatable {
+    public var requestID: String
+    public var query: String
+    public var knowledgeBaseIDs: [String]
+    public var contextBudget: Int
+    public var limit: Int
+
+    public init(requestID: String = UUID().uuidString, query: String, knowledgeBaseIDs: [String], contextBudget: Int = 8_000, limit: Int = 20) {
+        self.requestID = requestID
+        self.query = query
+        self.knowledgeBaseIDs = knowledgeBaseIDs
+        self.contextBudget = contextBudget
+        self.limit = limit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID = "request_id"
+        case query
+        case knowledgeBaseIDs = "knowledge_base_ids"
+        case contextBudget = "context_budget_bytes"
+        case limit
+    }
+}
 public struct CloudKnowledgeAnswerPartition: Codable, Sendable, Equatable { public var layer: CloudKnowledgeLayer; public var results: [CloudKnowledgeSearchHit]; public init(layer: CloudKnowledgeLayer, results: [CloudKnowledgeSearchHit]) { self.layer = layer; self.results = results } }
 public struct CloudKnowledgeAnswerResponse: Codable, Sendable, Equatable {
     public var requestID: String; public var channel: CloudKnowledgeSearchChannel?; public var partitions: [CloudKnowledgeAnswerPartition]; public var returnedBytes: Int?; public var knowledgeSequence: Int?
@@ -111,27 +208,62 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var errorMessage: String?
     public var onLibraryChanged: (() -> Void)?
     private let api: any CloudKnowledgeMarketplaceAPI; private let cache: CloudKnowledgeAuthorizationCache
-    public init(api: any CloudKnowledgeMarketplaceAPI, cache: CloudKnowledgeAuthorizationCache = .init()) { self.api = api; self.cache = cache }
+    private let networkIsAvailable: @MainActor () -> Bool
+    private let serverIsReachable: @MainActor () -> Bool
+    private var isLoadingMarketplace = false
+    public init(
+        api: any CloudKnowledgeMarketplaceAPI,
+        cache: CloudKnowledgeAuthorizationCache = .init(),
+        networkIsAvailable: @escaping @MainActor () -> Bool = { true },
+        serverIsReachable: @escaping @MainActor () -> Bool = { true }
+    ) {
+        self.api = api
+        self.cache = cache
+        self.networkIsAvailable = networkIsAvailable
+        self.serverIsReachable = serverIsReachable
+    }
     public func load() async {
+        guard requireNetwork() else { return }
+        guard !isLoadingMarketplace else { return }
+        isLoadingMarketplace = true
+        defer { isLoadingMarketplace = false }
         await perform {
             async let home = self.api.home()
             async let library = self.api.library()
+            async let allKnowledgeBases = self.api.search(.init(query: "", limit: 100))
             self.home = try await home
             self.library = try await library
+            self.searchResults = try await allKnowledgeBases
             let subscribed = self.home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + self.library.subscribed
             for base in subscribed { await self.cache.authorize(base.id) }
             self.onLibraryChanged?()
         }
     }
     public func loadHome() async { await load() }
-    public func search(query: String, categoryID: String? = nil) async { await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
+    public func search(query: String, categoryID: String? = nil) async { guard requireNetwork() else { return }; await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
     public func showHome() { selected = nil; showsPublisher = false }
     public func showPublisher() { selected = nil; showsPublisher = true }
-    public func loadDetail(id: String) async { showsPublisher = false; await perform { self.selected = try await self.api.detail(id: id) } }
-    public func subscribe(id: String) async { await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
-    public func unsubscribe(id: String) async { await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
-    public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { (try? await api.search(.init(query: query, limit: 6))) ?? [] }
+    public func loadDetail(id: String) async {
+        guard requireNetwork() else { return }
+        showsPublisher = false
+        if selected?.id != id, let cached = cachedKnowledgeBase(id: id) { selected = cached }
+        await perform { self.selected = try await self.api.detail(id: id) }
+    }
+    public func subscribe(id: String) async { guard requireNetwork() else { return }; await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
+    public func unsubscribe(id: String) async { guard requireNetwork() else { return }; await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
+    public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { guard networkIsAvailable(), serverIsReachable() else { return [] }; return (try? await api.search(.init(query: query, limit: 6))) ?? [] }
     public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
+    private func cachedKnowledgeBase(id: String) -> CloudMarketplaceKnowledgeBase? {
+        searchResults.first(where: { $0.id == id })
+            ?? library.subscribed.first(where: { $0.id == id })
+            ?? library.owned.first(where: { $0.id == id })
+            ?? home.sections.lazy.flatMap(\.knowledgeBases).first(where: { $0.id == id })
+    }
+    @discardableResult private func requireNetwork() -> Bool {
+        guard networkIsAvailable() else { errorMessage = "当前没有网络连接。"; return false }
+        guard serverIsReachable() else { errorMessage = "当前无法连接到康纳服务器。"; return false }
+        return true
+    }
     private func perform(_ action: @escaping () async throws -> Void) async { isLoading = true; errorMessage = nil; defer { isLoading = false }; do { try await action() } catch { errorMessage = error.localizedDescription } }
 }
 
@@ -142,12 +274,74 @@ public actor CloudKnowledgeConsumptionClient {
         for id in request.knowledgeBaseIDs where await !cache.isAuthorized(id) { throw CloudKnowledgeError.server(status: 403, code: "subscription_required", message: "知识库订阅已失效。") }
         let key = request.knowledgeBaseIDs.sorted().joined(separator: ",") + "|" + request.query + "|\(request.contextBudget)|\(request.limit)"
         if let cached = await cache.value(key: key) { return cached }
-        let response = try await api.answer(request); await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs); return response
+        let response = try await searchEachKnowledgeBase(request) { api, request in
+            try await api.answer(request)
+        }
+        await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs)
+        return response
     }
     public func context(_ request: CloudKnowledgeAnswerRequest, channel: CloudKnowledgeSearchChannel) async throws -> CloudKnowledgeAnswerResponse {
         for id in request.knowledgeBaseIDs where await !cache.isAuthorized(id) { throw CloudKnowledgeError.server(status: 403, code: "subscription_required", message: "知识库订阅已失效。") }
         let key = channel.rawValue + "|" + request.knowledgeBaseIDs.sorted().joined(separator: ",") + "|" + request.query + "|\(request.contextBudget)|\(request.limit)"
         if let cached = await cache.value(key: key) { return cached }
-        let response = try await api.context(request, channel: channel); await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs); return response
+        let response = try await searchEachKnowledgeBase(request, channel: channel) { api, request in
+            try await api.context(request, channel: channel)
+        }
+        await cache.set(response, key: key, knowledgeBaseIDs: request.knowledgeBaseIDs)
+        return response
+    }
+
+    private func searchEachKnowledgeBase(
+        _ request: CloudKnowledgeAnswerRequest,
+        channel: CloudKnowledgeSearchChannel? = nil,
+        search: @escaping @Sendable (any CloudKnowledgeMarketplaceAPI, CloudKnowledgeAnswerRequest) async throws -> CloudKnowledgeAnswerResponse
+    ) async throws -> CloudKnowledgeAnswerResponse {
+        let ids = Array(Set(request.knowledgeBaseIDs)).sorted()
+        guard ids.count > 1 else { return try await search(api, request) }
+
+        let api = self.api
+        let responses = try await withThrowingTaskGroup(of: CloudKnowledgeAnswerResponse.self) { group in
+            for id in ids {
+                var scopedRequest = request
+                scopedRequest.requestID = UUID().uuidString
+                scopedRequest.knowledgeBaseIDs = [id]
+                let singleBaseRequest = scopedRequest
+                group.addTask { try await search(api, singleBaseRequest) }
+            }
+            var values: [CloudKnowledgeAnswerResponse] = []
+            for try await response in group { values.append(response) }
+            return values
+        }
+        return Self.merge(responses, request: request, channel: channel)
+    }
+
+    private static func merge(
+        _ responses: [CloudKnowledgeAnswerResponse],
+        request: CloudKnowledgeAnswerRequest,
+        channel: CloudKnowledgeSearchChannel?
+    ) -> CloudKnowledgeAnswerResponse {
+        var seen = Set<String>()
+        let ranked = responses
+            .flatMap(\.partitions)
+            .flatMap(\.results)
+            .sorted {
+                if ($0.score ?? 0) != ($1.score ?? 0) { return ($0.score ?? 0) > ($1.score ?? 0) }
+                if ($0.updatedAt ?? .distantPast) != ($1.updatedAt ?? .distantPast) { return ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+                return $0.id < $1.id
+            }
+            .filter { seen.insert($0.id).inserted }
+            .prefix(request.limit)
+        let partitions = CloudKnowledgeLayer.allCases.compactMap { layer -> CloudKnowledgeAnswerPartition? in
+            let results = ranked.filter { $0.layer == layer }
+            return results.isEmpty ? nil : .init(layer: layer, results: Array(results))
+        }
+        let returnedByteValues = responses.compactMap(\.returnedBytes)
+        return CloudKnowledgeAnswerResponse(
+            requestID: request.requestID,
+            channel: channel ?? responses.compactMap(\.channel).first,
+            partitions: partitions,
+            returnedBytes: returnedByteValues.isEmpty ? nil : returnedByteValues.reduce(0, +),
+            knowledgeSequence: responses.compactMap(\.knowledgeSequence).max()
+        )
     }
 }

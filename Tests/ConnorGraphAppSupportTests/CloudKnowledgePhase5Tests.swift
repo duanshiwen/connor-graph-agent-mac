@@ -20,6 +20,25 @@ struct CloudKnowledgePhase5Tests {
         #expect(preview.operations.first?.searchContextID == "search-1")
     }
 
+    @Test func creatorAPIDecodesBackendRevisionSummaryWithoutMaterializedText() async throws {
+        let api = CloudKnowledgeCreatorAPIClient(
+            baseURL: URL(string: "http://localhost:8080")!,
+            transport: RevisionSummaryContractTransport(),
+            credentials: StaticCloudKnowledgeCredentialProvider(token: "token")
+        )
+
+        let revisions = try await api.revisions(knowledgeBaseID: "kb-1", limit: 100)
+
+        let revision = try #require(revisions.first)
+        #expect(revision.identityID == "identity-1")
+        #expect(revision.revisionID == "revision-1")
+        #expect(revision.layer == .l3)
+        #expect(revision.title == "orchid-7319-fault-rollback-window")
+        #expect(revision.text.isEmpty)
+        #expect(revision.revisionNumber == 1)
+        #expect(revision.recordedAt != nil)
+    }
+
     @Test @MainActor func creatorWorkflowPersistsAndRestoresSelectedConversationsAndProgress() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-creator-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -307,6 +326,14 @@ private final class CloudKnowledgeCreatorAPITransportRecorder: @unchecked Sendab
 private struct PreviewContractTransport: ConnorBackendHTTPTransport {
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let json = #"{"data":{"publication_run_id":"run-1","staged_sequence":12,"operations":[{"operation_id":"operation-1","operation_type":"create","layer":"L3","decision":"create_new","search_context_id":"search-1","semantic_terms":["Connor"],"payload":{}}],"summaries":{"create":12},"generated_at":"2026-07-16T10:00:00Z"}}"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        return (Data(json.utf8), response)
+    }
+}
+
+private struct RevisionSummaryContractTransport: ConnorBackendHTTPTransport {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let json = #"{"code":0,"data":[{"identity_id":"identity-1","revision_id":"revision-1","revision_number":1,"layer":"L3","kind":"reusable_knowledge","stable_key":"orchid-7319-fault-rollback-window","recorded_at":"2026-07-17T06:06:14Z","superseded_at":null,"committed_sequence":1}]}"#
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         return (Data(json.utf8), response)
     }

@@ -94,10 +94,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
         sessionLLMOverride: SessionLLMOverride? = nil,
-        remoteKnowledgeBaseIDs: [String]? = nil
+        remoteKnowledgeBaseIDs: [String]? = nil,
+        allowedMCPToolNames: [String]? = nil
     ) -> AgentLoopChatController<AnyAgentModelProvider> {
         AgentLoopChatController(
-            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs),
+            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs, allowedMCPToolNames: allowedMCPToolNames),
             session: session,
             groupID: groupID,
             memoryOSFacade: makeMemoryOSFacade()
@@ -110,10 +111,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
         sessionLLMOverride: SessionLLMOverride? = nil,
-        remoteKnowledgeBaseIDs: [String]? = nil
+        remoteKnowledgeBaseIDs: [String]? = nil,
+        allowedMCPToolNames: [String]? = nil
     ) -> NativeSessionManager {
         NativeSessionManager(
-            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs)),
+            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs, allowedMCPToolNames: allowedMCPToolNames)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
@@ -138,10 +140,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
     }
 
-    private func registerPersistedMCPSourceTools(into registry: inout AgentToolRegistry, workingDirectory: URL) {
+    private func registerPersistedMCPSourceTools(
+        into registry: inout AgentToolRegistry,
+        workingDirectory: URL,
+        allowedToolNames: [String]?
+    ) {
         guard let storagePaths else { return }
         let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
-        guard let catalog = try? MCPClientPool.loadEnabledPersistedCatalog(repository: repository), !catalog.isEmpty else { return }
+        guard let catalog = try? MCPClientPool.loadEnabledPersistedCatalog(
+            repository: repository,
+            allowedToolNames: allowedToolNames
+        ), !catalog.isEmpty else { return }
         let pool = MCPClientPool(repository: repository, currentDirectoryURL: workingDirectory)
         MCPToolRegistryBridge().registerTools(catalog: catalog, into: &registry, router: pool)
     }
@@ -164,7 +173,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         sessionWorkspace: AppSessionWorkspaceReference? = nil,
         sessionLLMOverride: SessionLLMOverride? = nil,
-        remoteKnowledgeBaseIDs: [String]? = nil
+        remoteKnowledgeBaseIDs: [String]? = nil,
+        allowedMCPToolNames: [String]? = nil
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
@@ -259,7 +269,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
-        registerPersistedMCPSourceTools(into: &registry, workingDirectory: resolvedWorkspace.primary.url)
+        registerPersistedMCPSourceTools(
+            into: &registry,
+            workingDirectory: resolvedWorkspace.primary.url,
+            allowedToolNames: allowedMCPToolNames
+        )
         if let storagePaths {
             let scanner = SkillPackageScanner()
             let snapshot = scanner.scan(storagePaths: storagePaths)

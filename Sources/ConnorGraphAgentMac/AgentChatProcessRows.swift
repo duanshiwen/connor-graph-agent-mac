@@ -4,38 +4,60 @@ import ConnorGraphAppSupport
 
 struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
-    var events: [AgentEventPresentation]
-    var onOpenDetail: (AgentEventPresentation) -> Void
+    var initialEvents: [AgentEventPresentation]?
+    var loadEvents: () async -> [AgentEventPresentation]
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
     @State private var isExpanded: Bool = false
+    @State private var loadedEvents: [AgentEventPresentation]?
+    @State private var isDetailReady = false
     @State private var startedAt: Date = Date()
 
     var body: some View {
-        let visibleEvents = events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
+        let resolvedEvents = loadedEvents ?? initialEvents
+        let visibleEvents = resolvedEvents ?? AgentActivityFallbackEvents.events(for: process)
         let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: visibleEvents)
         return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                Button(action: { withAnimation(.easeOut(duration: 0.16)) { isExpanded.toggle() } }) {
+            VStack(alignment: .leading, spacing: 2) {
+                Button(action: { isExpanded.toggle() }) {
                     activityHeader(summary)
                 }
                 .buttonStyle(.plain)
 
                 if isExpanded {
-                    AgentTurnActivitySummaryDetailView(
-                        summary: summary,
-                        events: visibleEvents,
-                        isRunning: process.state == .running,
-                        startedAt: startedAt,
-                        onOpenDetail: onOpenDetail,
-                        onOpenToolInvocation: onOpenToolInvocation
-                    )
-                    .padding(.leading, AgentChatLayout.iconButtonSize + AgentChatLayout.spaceM)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    Group {
+                        if isDetailReady {
+                            AgentTurnActivitySummaryDetailView(
+                                summary: summary,
+                                events: visibleEvents,
+                                isRunning: process.state == .running,
+                                startedAt: startedAt,
+                                onOpenToolInvocation: onOpenToolInvocation
+                            )
+                        } else {
+                            AgentTurnActivityDetailLoadingView()
+                        }
+                    }
+                    .padding(.leading, AgentChatLayout.spaceM)
+                    .transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: isExpanded) {
+            guard isExpanded, !isDetailReady else { return }
+            try? await Task.sleep(for: .milliseconds(16))
+            guard !Task.isCancelled else { return }
+            let events: [AgentEventPresentation]
+            if let initialEvents {
+                events = initialEvents
+            } else {
+                events = await loadEvents()
+            }
+            guard !Task.isCancelled else { return }
+            loadedEvents = events
+            isDetailReady = true
+        }
     }
 
     private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
@@ -90,20 +112,33 @@ struct AgentChatTurnProcessRow: View {
     }
 }
 
+private struct AgentTurnActivityDetailLoadingView: View {
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            ProgressView()
+                .controlSize(.small)
+                .fixedSize()
+            Text("正在加载本轮详情…")
+                .font(AgentChatTypography.micro)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: AgentChatLayout.activityRowMinHeight, alignment: .leading)
+    }
+}
+
 struct AgentTurnActivitySummaryDetailView: View {
     var summary: AgentTurnActivitySummaryPresentation
     var events: [AgentEventPresentation]
     var isRunning: Bool
     var startedAt: Date
-    var onOpenDetail: (AgentEventPresentation) -> Void
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void
-    @State private var showsRawEvents = false
 
     var body: some View {
         let toolInvocations = AgentToolInvocationAssembler().invocations(from: events)
-        return VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+        return VStack(alignment: .leading, spacing: 2) {
             if !summary.toolSummaries.isEmpty {
-                detailLine(icon: "wrench.and.screwdriver", text: "工具：\(toolSummaryText)")
+                detailLine(icon: "wrench.and.screwdriver", text: "本轮调用：\(toolSummaryText)")
             }
 
             detailLine(icon: "checklist", text: resultText)
@@ -117,7 +152,7 @@ struct AgentTurnActivitySummaryDetailView: View {
             }
 
             if !toolInvocations.isEmpty {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(toolInvocations) { invocation in
                         AgentToolActivityRow(activity: activityPresentation(for: invocation)) {
                             AppInteractionPerformance.beginAgentDetail(callID: invocation.callID)
@@ -125,30 +160,13 @@ struct AgentTurnActivitySummaryDetailView: View {
                         }
                     }
                 }
-                .padding(.top, AgentChatLayout.spaceXS)
+                .padding(.top, 2)
             }
 
             if isRunning {
                 AgentActivityLoadingRow(startedAt: startedAt)
                     .padding(.leading, -AgentChatLayout.spaceM)
             }
-
-            DisclosureGroup(isExpanded: $showsRawEvents) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    ForEach(events) { event in
-                        Button(action: { onOpenDetail(event) }) {
-                            AgentActivityEventRow(event: event)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, AgentChatLayout.spaceXS)
-            } label: {
-                Label("查看底层事件（\(events.count)）", systemImage: "ladybug")
-                    .font(AgentChatTypography.micro.weight(.medium))
-                    .foregroundStyle(.tertiary)
-            }
-            .tint(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -188,8 +206,7 @@ struct AgentTurnActivitySummaryDetailView: View {
         if parts.isEmpty {
             parts.append(summary.statusText)
         }
-        parts.append("底层事件 \(summary.eventCount) 个")
-        return "结果：\(parts.joined(separator: "，"))"
+        return "执行结果：\(parts.joined(separator: "，"))"
     }
 
     private func detailLine(icon: String, text: String, color: Color = .secondary) -> some View {
@@ -203,8 +220,7 @@ struct AgentTurnActivitySummaryDetailView: View {
                 .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
                 .foregroundStyle(color)
         }
-        .padding(.horizontal, AgentChatLayout.spaceM)
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .frame(maxWidth: .infinity, minHeight: AgentChatLayout.activityRowMinHeight, alignment: .leading)
     }
 }
@@ -226,8 +242,8 @@ struct AgentToolActivityRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                if let target = activity.target, !target.isEmpty {
-                    Text(target)
+                if let visibleTarget {
+                    Text(visibleTarget)
                         .font(AgentChatTypography.monoMicro)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -236,8 +252,8 @@ struct AgentToolActivityRow: View {
                         .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                 }
 
-                if let subtitle = activity.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
+                if let visibleSubtitle {
+                    Text(visibleSubtitle)
                         .font(AgentChatTypography.micro)
                         .foregroundStyle(activity.severity == .error ? AnyShapeStyle(Color.red) : AnyShapeStyle(.tertiary))
                         .lineLimit(1)
@@ -254,8 +270,7 @@ struct AgentToolActivityRow: View {
                     .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, AgentChatLayout.spaceM)
-            .padding(.vertical, 2)
+            .padding(.vertical, 1)
             .frame(minHeight: AgentChatLayout.activityRowMinHeight)
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
         }
@@ -273,12 +288,25 @@ struct AgentToolActivityRow: View {
 
     private var phaseText: String {
         switch activity.phase {
-        case .requested: return "queued"
-        case .approved: return "approved"
-        case .running: return "running"
-        case .finished: return "done"
-        case .failed: return "error"
+        case .requested: return "等待执行"
+        case .approved: return "已授权"
+        case .running: return "执行中"
+        case .finished: return "已完成"
+        case .failed: return "失败"
         }
+    }
+
+    private var visibleSubtitle: String? {
+        guard let subtitle = activity.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty else { return nil }
+        let genericStates = ["done", "finished", "running", "queued", "approved", "success", "failed", "error"]
+        return genericStates.contains(subtitle.lowercased()) ? nil : subtitle
+    }
+
+    private var visibleTarget: String? {
+        guard let target = activity.target?.trimmingCharacters(in: .whitespacesAndNewlines), !target.isEmpty else { return nil }
+        if target.caseInsensitiveCompare(activity.rawToolName) == .orderedSame { return nil }
+        if target.hasPrefix("mcp__") { return nil }
+        return target
     }
 
     private var color: Color {
@@ -400,4 +428,3 @@ enum AgentActivityFallbackEvents {
         return items
     }
 }
-

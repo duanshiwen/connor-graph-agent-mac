@@ -25,7 +25,7 @@ import ConnorGraphAppSupport
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.background_job.model_failed';").first?.first == "1")
 }
 
-@Test func backgroundJobDeadLettersAfterMaxAttemptsAndKeepsL1Buffer() throws {
+@Test func l1BackgroundJobKeepsRetryingAfterLegacyMaxAttemptsAndKeepsL1Buffer() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundFailureDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -38,10 +38,11 @@ import ConnorGraphAppSupport
 
     _ = try facade.runBackgroundAIQueueOnce(executor: ThrowingMemoryOSBackgroundExecutor(), now: now)
 
-    #expect(try store.queueItem(id: item.id)?.status == .deadLetter)
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_dead_letter_queue;").first?.first == "1")
+    #expect(try store.queueItem(id: item.id)?.status == .retryScheduled)
+    #expect(try store.queueItem(id: item.id)?.maxAttempts == .max)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_dead_letter_queue;").first?.first == "0")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "1")
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.background_job.dead_lettered';").first?.first == "1")
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.background_job.dead_lettered';").first?.first == "0")
 }
 
 private struct ThrowingMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExecutor {

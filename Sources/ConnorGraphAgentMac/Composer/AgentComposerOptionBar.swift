@@ -8,6 +8,7 @@ struct AgentComposerOptionBar: View {
     var composerState: AgentComposerState
     var governanceConfig: AppSessionGovernanceConfig
     @ObservedObject var knowledgeMarketplace: CloudKnowledgeMarketplaceStore
+    @Bindable var sourceRuntime: SourceRuntimeFeatureModel
     var hasRunningBackgroundTask: Bool
     var currentTextSelectionRange: () -> NSRange?
     @Binding var isSessionInfoPresented: Bool
@@ -26,6 +27,13 @@ struct AgentComposerOptionBar: View {
                 explicitIDs: composerState.remoteKnowledgeBaseIDs,
                 isDisabled: selectedSession == nil || composerState.isSubmitting,
                 onSelectionChanged: { onAction(.setRemoteKnowledgeBaseIDs($0)) }
+            )
+
+            MCPToolSelectionMenu(
+                sourceRuntime: sourceRuntime,
+                explicitToolNames: composerState.allowedMCPToolNames,
+                isDisabled: selectedSession == nil || composerState.isSubmitting,
+                onSelectionChanged: { onAction(.setAllowedMCPToolNames($0)) }
             )
 
             Spacer(minLength: AgentChatLayout.spaceS)
@@ -109,6 +117,8 @@ struct AgentComposerOptionBar: View {
             )
         }
         .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
         .help("调整本轮会话权限")
     }
 
@@ -134,6 +144,8 @@ struct AgentComposerOptionBar: View {
             )
         }
         .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
         .help("更改会话状态")
     }
 
@@ -196,6 +208,162 @@ struct AgentComposerOptionBar: View {
     }
 }
 
+private struct MCPToolSelectionMenu: View {
+    @Bindable var sourceRuntime: SourceRuntimeFeatureModel
+    var explicitToolNames: [String]?
+    var isDisabled: Bool
+    var onSelectionChanged: ([String]?) -> Void
+    @State private var isPresented = false
+    @State private var searchText = ""
+
+    private struct SourceGroup: Identifiable {
+        var id: String
+        var displayName: String
+        var tools: [MCPSourceToolDescriptor]
+    }
+
+    private var groups: [SourceGroup] {
+        sourceRuntime.configurations
+            .filter { $0.status == .enabled }
+            .map { configuration in
+                let tools = (sourceRuntime.toolCatalogs[configuration.sourceID] ?? [])
+                    .filter(matchesSearch)
+                    .sorted { $0.rawName.localizedCaseInsensitiveCompare($1.rawName) == .orderedAscending }
+                return SourceGroup(id: configuration.sourceID, displayName: configuration.displayName, tools: tools)
+            }
+            .filter { !$0.tools.isEmpty }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private var allToolNames: [String] {
+        sourceRuntime.configurations
+            .filter { $0.status == .enabled }
+            .flatMap { sourceRuntime.toolCatalogs[$0.sourceID] ?? [] }
+            .map(\.name)
+            .sorted()
+    }
+
+    private var selection: MCPToolSelection {
+        MCPToolSelection(availableToolNames: allToolNames, explicitToolNames: explicitToolNames)
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            AgentComposerOptionBadge(
+                title: selection.label,
+                systemImage: "server.rack",
+                tint: .secondary,
+                isActive: false,
+                style: .prominent,
+                showsBorder: false
+            )
+            .frame(minWidth: 132, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help("选择本会话允许使用的 MCP 工具")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 8) {
+                    Text("MCP 工具").font(.headline)
+                    Spacer()
+                    Button("自动") { onSelectionChanged(nil) }
+                        .disabled(selection.isAutomatic)
+                    Button("清除") { onSelectionChanged([]) }
+                        .disabled(selection.selectedToolNames.isEmpty && !selection.isAutomatic)
+                }
+                .padding(12)
+
+                Divider()
+
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("搜索工具", text: $searchText)
+                        .textFieldStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+
+                Divider()
+
+                if allToolNames.isEmpty {
+                    ContentUnavailableView(
+                        "暂无可用 MCP 工具",
+                        systemImage: "server.rack",
+                        description: Text("请先启用并测试 MCP Source。")
+                    )
+                    .frame(minHeight: 160)
+                } else if groups.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                        .frame(minHeight: 160)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(groups) { group in
+                                sourceSection(group)
+                                if group.id != groups.last?.id { Divider().padding(.leading, 12) }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 380)
+                }
+            }
+            .frame(width: 360)
+        }
+    }
+
+    private func sourceSection(_ group: SourceGroup) -> some View {
+        let names = group.tools.map(\.name)
+        let selectedCount = names.filter(selection.selectedToolNames.contains).count
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                onSelectionChanged(selection.togglingSource(toolNames: names))
+            } label: {
+                HStack {
+                    Image(systemName: selectedCount == names.count ? "checkmark.square.fill" : selectedCount == 0 ? "square" : "minus.square.fill")
+                        .foregroundStyle(selectedCount == 0 ? Color.secondary : Color.accentColor)
+                    Text(group.displayName).font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(selectedCount)/\(names.count)").font(.caption).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            ForEach(group.tools) { tool in
+                Toggle(isOn: Binding(
+                    get: { selection.selectedToolNames.contains(tool.name) },
+                    set: { _ in onSelectionChanged(selection.toggling(tool.name)) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tool.rawName).lineLimit(1)
+                        if !tool.description.isEmpty {
+                            Text(tool.description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private func matchesSearch(_ tool: MCPSourceToolDescriptor) -> Bool {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return tool.rawName.localizedCaseInsensitiveContains(query)
+            || tool.description.localizedCaseInsensitiveContains(query)
+            || tool.sourceID.localizedCaseInsensitiveContains(query)
+    }
+}
+
 // MARK: - Speech Input Controls
 
 struct SpeechInputHoldToTalkButton: View {
@@ -213,22 +381,20 @@ struct SpeechInputHoldToTalkButton: View {
     @State private var isPressed = false
 
     var body: some View {
-        HStack(spacing: AgentChatLayout.spaceXS) {
+        ZStack {
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                .fill(background)
             Image(systemName: iconName)
                 .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
-            Text(title)
-                .font(AgentChatTypography.micro.weight(.medium))
-                .lineLimit(1)
         }
         .foregroundStyle(foreground)
-        .padding(.horizontal, AgentChatLayout.spaceS)
-        .frame(minWidth: 176, maxWidth: isEnabled ? 176 : 232, minHeight: AgentChatLayout.iconButtonSize)
-        .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
                 .stroke(border, lineWidth: 1)
         )
+        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -236,7 +402,6 @@ struct SpeechInputHoldToTalkButton: View {
                 .onEnded { _ in endIfNeeded() }
         )
         .opacity(isEnabled ? 1 : 0.45)
-        .allowsHitTesting(isEnabled)
         .help(helpText)
         .accessibilityLabel(title)
     }

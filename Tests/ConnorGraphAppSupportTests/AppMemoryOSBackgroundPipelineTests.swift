@@ -19,6 +19,7 @@ import ConnorGraphAppSupport
     #expect(enqueued.count == 2)
     let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now)
     #expect(runnable.count == 2)
+    #expect(runnable.allSatisfy { $0.maxAttempts == .max })
     let payload = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, runnable[0].payloadJSON)
     #expect(payload.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(payload.prompt.contains("L2 entity-centered working memory"))
