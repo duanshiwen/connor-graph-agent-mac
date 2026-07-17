@@ -8,6 +8,7 @@ struct NoteImportCenterView: View {
     @State private var confirmsCancellation = false
     @State private var pendingControlJobID: String?
     @State private var selectedJobID: String?
+    @State private var hasInitializedSelection = false
 
     var body: some View {
         NavigationSplitView {
@@ -17,6 +18,7 @@ struct NoteImportCenterView: View {
                 if !completedJobs.isEmpty { Section("已完成") { ForEach(completedJobs) { jobRow($0) } } }
             }
             .navigationTitle("导入中心")
+            .contentMargins(.top, 6, for: .scrollContent)
             .frame(minWidth: 260)
         } detail: {
             if let job = model.selectedJob { jobDetail(job) }
@@ -28,12 +30,19 @@ struct NoteImportCenterView: View {
         }
         .task {
             await model.reloadJobs()
-            selectedJobID = model.selectedJobID
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                selectedJobID = model.selectedJobID
+                hasInitializedSelection = true
+            }
         }
         .task(id: selectedJobID) {
+            guard hasInitializedSelection else { return }
             await model.selectJob(selectedJobID)
         }
         .onChange(of: model.selectedJobID) { _, newValue in
+            guard hasInitializedSelection else { return }
             if selectedJobID != newValue { selectedJobID = newValue }
         }
         .confirmationDialog("取消剩余导入？", isPresented: $confirmsCancellation) {

@@ -158,6 +158,7 @@ struct AppRouteViewDependencyTests {
         #expect(!settingsSource.contains("StateObject(wrappedValue: CloudKnowledgeMarketplaceStore"))
 
         let accountSource = try String(contentsOf: projectSourceURL(named: "UserIdentitySettingsView.swift"), encoding: .utf8)
+        #expect(!accountSource.contains("SettingsValueRow(title: \"角色\""))
         #expect(!accountSource.contains("我创建的知识库"))
         #expect(!accountSource.contains("我订阅的知识库"))
         #expect(!accountSource.contains("CloudKnowledgeCreatorView("))
