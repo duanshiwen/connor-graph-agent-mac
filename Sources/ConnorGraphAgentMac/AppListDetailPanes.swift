@@ -497,10 +497,7 @@ private struct CalendarEventButton: View {
                         .lineLimit(1)
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -555,8 +552,6 @@ private struct ContactRowButton: View {
     var isSelected: Bool
     var onSelect: () -> Void
 
-    @State private var isHovering = false
-
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 8) {
@@ -571,25 +566,11 @@ private struct ContactRowButton: View {
                 }
                 Spacer(minLength: 8)
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(rowBackground, in: rowShape)
-            .contentShape(rowShape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("打开人物详情")
-    }
-
-    private var rowShape: RoundedRectangle {
-        AppListCardLayout.shape
-    }
-
-    private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
-        if isHovering { return Color.secondary.opacity(0.08) }
-        return Color(nsColor: .windowBackgroundColor)
     }
 }
 
@@ -689,9 +670,9 @@ extension View {
     func nativeListRowStyle() -> some View {
         self
             .listRowInsets(EdgeInsets(
-                top: AppListCardLayout.spacing / 2,
+                top: 0,
                 leading: AppListCardLayout.horizontalInset,
-                bottom: AppListCardLayout.spacing / 2,
+                bottom: 0,
                 trailing: AppListCardLayout.horizontalInset
             ))
             .listRowSeparator(.hidden)
@@ -1201,10 +1182,7 @@ private struct TaskAutomationListRow: View {
                     }
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -1846,10 +1824,7 @@ private struct MailMessageListRow: View, Equatable {
                         .lineLimit(1)
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -1954,10 +1929,7 @@ private struct RSSItemListRow: View {
                         .lineLimit(1)
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -3186,16 +3158,13 @@ struct CraftSessionRow: View {
             leadingSessionIcon
             sessionTextContent
         }
-        .padding(AppListCardLayout.contentPadding)
-        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-        .background(rowBackgroundColor, in: AppListCardLayout.shape)
+        .appListRowSurface(isSelected: isSelected, backgroundColor: rowBackgroundColor)
         .overlay(
             AppListCardLayout.shape
                 .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
         )
         .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 2)
         .scaleEffect(attentionLevel == .interruptive && isAttentionPulseOn ? 1.012 : 1)
-        .contentShape(AppListCardLayout.shape)
         .onTapGesture {
             if !isEditingTitle { onSelect() }
         }
@@ -3252,24 +3221,12 @@ struct CraftSessionRow: View {
                 Text("\(row.messageCount) 条消息")
                     .font(AppListTypography.rowCaption)
                     .foregroundStyle(secondaryTextColor)
-            }
 
-
-            if row.kind == .note {
-                HStack(spacing: 4) {
-                    Text("📝 笔记")
+                if row.kind == .note {
+                    Label("笔记", systemImage: "note.text")
                         .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color.accentColor.opacity(0.10))
-                        )
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
-                        )
+                        .foregroundStyle(activeMetaTextColor)
+                        .labelStyle(.titleAndIcon)
                 }
             }
 
@@ -3362,7 +3319,8 @@ struct CraftSessionRow: View {
         SessionCardAttentionStyle(level: attentionLevel, isSelected: isSelected)
     }
 
-    private var rowBackgroundColor: Color {
+    private var rowBackgroundColor: Color? {
+        guard attentionLevel > .unread else { return nil }
         guard shouldPulseAttention else { return cardStyle.backgroundColor }
         if attentionLevel == .interruptive {
             return ConnorCraftPalette.accent.opacity(isAttentionPulseOn ? 0.24 : 0.10)
@@ -3508,10 +3466,7 @@ struct SettingsCategoryRow: View {
                 }
                 Spacer()
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -3532,14 +3487,13 @@ struct CraftSimpleListPane: View {
             .padding(.vertical, 14)
             Divider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                     ForEach(rows.isEmpty ? ["在右侧查看详情"] : rows, id: \.self) { row in
                         Text(row)
                             .font(AppListTypography.rowTitle)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .appListRowSurface(isSelected: false)
                     }
                 }
                 .padding(10)

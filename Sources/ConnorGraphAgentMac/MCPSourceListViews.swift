@@ -372,17 +372,7 @@ private struct MCPSourceRow: View {
                     }
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(
-                AppListCardLayout.shape
-                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
-            )
-            .overlay(
-                AppListCardLayout.shape
-                    .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.clear, lineWidth: 1)
-            )
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }

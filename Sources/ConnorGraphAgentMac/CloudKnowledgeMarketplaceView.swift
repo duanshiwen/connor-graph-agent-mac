@@ -153,13 +153,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 }
                 Spacer(minLength: 8)
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(
-                isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor),
-                in: AppListCardLayout.shape
-            )
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
