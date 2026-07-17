@@ -22,6 +22,20 @@ struct CloudKnowledgePhase6Tests {
         #expect(body["knowledge_base_ids"] as? [String] == ["kb-1"])
         #expect(body["knowledge_base_i_ds"] == nil)
     }
+
+    @Test func marketplaceLibraryKeepsSubscribedOwnedKnowledgeBaseInBothSections() throws {
+        let json = #"{"subscribed":[{"id":"kb-owned","name":"Owned","subscribed":true,"owned":true,"publication_status":"published"}],"owned":[]}"#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        let library = try decoder.decode(CloudMarketplaceLibrary.self, from: Data(json.utf8))
+
+        #expect(library.subscribed.map(\.id) == ["kb-owned"])
+        #expect(library.owned.map(\.id) == ["kb-owned"])
+        #expect(library.owned.first?.subscribed == true)
+        #expect(library.owned.first?.owned == true)
+    }
+
     @Test @MainActor func marketplaceHomeRendersDynamicBackendSectionsWithoutHardcodedCategories() async {
         let api = MarketplaceFakeAPI(); let cache = CloudKnowledgeAuthorizationCache(); let store = CloudKnowledgeMarketplaceStore(api: api, cache: cache)
         await store.loadHome()
