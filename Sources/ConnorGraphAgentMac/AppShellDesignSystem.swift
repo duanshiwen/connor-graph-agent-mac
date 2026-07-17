@@ -33,11 +33,11 @@ enum AppListTypography {
     static let actionTitle = AppTypography.body
     static let actionIcon = AppTypography.bodyEmphasis
     static let header = AppTypography.paneTitle
-    static let rowTitle = AppTypography.body
-    static let rowTitleSelected = AppTypography.bodyEmphasis
-    static let rowSubtitle = AppTypography.meta
-    static let rowCaption = AppTypography.caption
-    static let rowCaptionEmphasized = AppTypography.captionEmphasis
+    static let rowTitle: Font = .system(size: 14)
+    static let rowTitleSelected: Font = .system(size: 14, weight: .semibold)
+    static let rowSubtitle: Font = .system(size: 12.5)
+    static let rowCaption: Font = .system(size: 12)
+    static let rowCaptionEmphasized: Font = .system(size: 12, weight: .semibold)
 }
 
 struct AppListPaneHeader<Actions: View>: View {
@@ -239,6 +239,7 @@ enum AppListCardLayout {
     static let contentSpacing: CGFloat = 4
     static let cornerRadius: CGFloat = 6
     static let minimumHeight: CGFloat = 64
+    static let titleLineLimit = 2
     static let separatorLeadingInset: CGFloat = 10
 
     static var shape: RoundedRectangle {

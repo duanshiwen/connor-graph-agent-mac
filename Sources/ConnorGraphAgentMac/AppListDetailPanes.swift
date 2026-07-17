@@ -474,7 +474,7 @@ private struct CalendarEventButton: View {
                 Text(row.title)
                     .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(AppListCardLayout.titleLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let calendarName = row.calendarName?.trimmingCharacters(in: .whitespacesAndNewlines), !calendarName.isEmpty {
@@ -559,6 +559,7 @@ private struct ContactRowButton: View {
                     Text(row.displayName)
                         .font(AppListTypography.rowTitle)
                         .foregroundStyle(.primary)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                     Text(row.subtitle)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
@@ -1160,7 +1161,7 @@ private struct TaskAutomationListRow: View {
                     HStack(spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         Spacer(minLength: 4)
                         Text(card.originBadge)
                             .font(AppListTypography.rowCaption)
@@ -1799,7 +1800,7 @@ private struct MailMessageListRow: View, Equatable {
                         }
                         Text(presentation.subjectText)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         if message.hasAttachments {
                             Image(systemName: "paperclip")
                                 .font(.system(size: 11, weight: .semibold))
@@ -1909,7 +1910,7 @@ private struct RSSItemListRow: View {
                     HStack(spacing: 6) {
                         Text(item.title)
                             .font(item.state.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         if item.state.isStarred {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 11, weight: .semibold))
@@ -3190,7 +3191,7 @@ struct CraftSessionRow: View {
 
     private var sessionTextContent: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 if isEditingTitle {
                     TextField("会话标题", text: $titleDraft)
                         .textFieldStyle(.plain)
@@ -3204,7 +3205,7 @@ struct CraftSessionRow: View {
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .fontWeight(cardStyle.titleWeight)
                         .foregroundStyle(primaryTextColor)
-                        .lineLimit(1)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                         .onTapGesture(count: 2) { beginTitleEdit() }
                 }
                 Spacer(minLength: 4)
@@ -3233,7 +3234,7 @@ struct CraftSessionRow: View {
             if !row.labels.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
-                        Text(label.id)
+                        Text(displayName(for: label))
                             .font(AppListTypography.rowCaption)
                             .foregroundStyle(labelForegroundColor)
                             .padding(.horizontal, 6)
@@ -3243,6 +3244,10 @@ struct CraftSessionRow: View {
                 }
             }
         }
+    }
+
+    private func displayName(for label: AgentSessionLabel) -> String {
+        labelDefinitions.first(where: { $0.id == label.id })?.name ?? label.id
     }
 
     @ViewBuilder
@@ -3461,7 +3466,9 @@ struct SettingsCategoryRow: View {
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(AppListTypography.rowTitleSelected)
+                    Text(title)
+                        .font(AppListTypography.rowTitleSelected)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                     Text(subtitle).font(AppListTypography.rowSubtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -3491,7 +3498,7 @@ struct CraftSimpleListPane: View {
                     ForEach(rows.isEmpty ? ["在右侧查看详情"] : rows, id: \.self) { row in
                         Text(row)
                             .font(AppListTypography.rowTitle)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .appListRowSurface(isSelected: false)
                     }
