@@ -470,7 +470,7 @@ struct CraftSkillRow: View {
         HStack(alignment: .top, spacing: AppListCardLayout.contentPadding) {
             SkillRowIcon(iconName: iconName, accent: skillAccent, isSelected: isSelected)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                 SkillRowTitleLine(card: card, isSelected: isSelected)
                 Text(card.subtitle)
                     .font(AppListTypography.rowSubtitle)
@@ -479,10 +479,7 @@ struct CraftSkillRow: View {
                 SkillRowBadgeLine(card: card, riskColor: riskColor, trustColor: trustColor)
             }
         }
-        .padding(AppListCardLayout.contentPadding)
-        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-        .background(rowBackgroundColor, in: AppListCardLayout.shape)
-        .contentShape(AppListCardLayout.shape)
+        .appListRowSurface(isSelected: isSelected)
         .onTapGesture(perform: onSelect)
     }
 
@@ -498,10 +495,6 @@ struct CraftSkillRow: View {
             Label("删除", systemImage: "trash")
         }
         .disabled(card.sourceTier != SkillSourceTier.user.rawValue)
-    }
-
-    private var rowBackgroundColor: Color {
-        isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
     }
 
     private var iconName: String {
@@ -556,7 +549,7 @@ private struct SkillRowTitleLine: View {
         HStack(spacing: 6) {
             Text(card.title)
                 .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                .lineLimit(1)
+                .lineLimit(AppListCardLayout.titleLineLimit)
             Spacer(minLength: 4)
             Text(card.sourceTier)
                 .font(AppListTypography.rowCaption)

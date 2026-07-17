@@ -142,10 +142,10 @@ struct CloudKnowledgeMarketplaceListPane: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(title)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                        .lineLimit(1)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                     Text(caption)
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
@@ -153,13 +153,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 }
                 Spacer(minLength: 8)
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(
-                isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor),
-                in: AppListCardLayout.shape
-            )
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }

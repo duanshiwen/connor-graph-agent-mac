@@ -474,7 +474,7 @@ private struct CalendarEventButton: View {
                 Text(row.title)
                     .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .lineLimit(AppListCardLayout.titleLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let calendarName = row.calendarName?.trimmingCharacters(in: .whitespacesAndNewlines), !calendarName.isEmpty {
@@ -497,10 +497,7 @@ private struct CalendarEventButton: View {
                         .lineLimit(1)
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -555,15 +552,14 @@ private struct ContactRowButton: View {
     var isSelected: Bool
     var onSelect: () -> Void
 
-    @State private var isHovering = false
-
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(row.displayName)
                         .font(AppListTypography.rowTitle)
                         .foregroundStyle(.primary)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                     Text(row.subtitle)
                         .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
@@ -571,25 +567,11 @@ private struct ContactRowButton: View {
                 }
                 Spacer(minLength: 8)
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(rowBackground, in: rowShape)
-            .contentShape(rowShape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("打开人物详情")
-    }
-
-    private var rowShape: RoundedRectangle {
-        AppListCardLayout.shape
-    }
-
-    private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
-        if isHovering { return Color.secondary.opacity(0.08) }
-        return Color(nsColor: .windowBackgroundColor)
     }
 }
 
@@ -689,9 +671,9 @@ extension View {
     func nativeListRowStyle() -> some View {
         self
             .listRowInsets(EdgeInsets(
-                top: AppListCardLayout.spacing / 2,
+                top: 0,
                 leading: AppListCardLayout.horizontalInset,
-                bottom: AppListCardLayout.spacing / 2,
+                bottom: 0,
                 trailing: AppListCardLayout.horizontalInset
             ))
             .listRowSeparator(.hidden)
@@ -1179,7 +1161,7 @@ private struct TaskAutomationListRow: View {
                     HStack(spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         Spacer(minLength: 4)
                         Text(card.originBadge)
                             .font(AppListTypography.rowCaption)
@@ -1201,10 +1183,7 @@ private struct TaskAutomationListRow: View {
                     }
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -1809,19 +1788,9 @@ private struct MailMessageListRow: View, Equatable {
                     .padding(.top, 7)
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     HStack(spacing: 6) {
-                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
-                            Label(label, systemImage: image)
-                                .font(AppTypography.microEmphasis)
-                                .labelStyle(.titleAndIcon)
-                                .foregroundStyle(mailDirectionBadgeForeground)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
-                                .lineLimit(1)
-                        }
                         Text(presentation.subjectText)
                             .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         if message.hasAttachments {
                             Image(systemName: "paperclip")
                                 .font(.system(size: 11, weight: .semibold))
@@ -1833,9 +1802,23 @@ private struct MailMessageListRow: View, Equatable {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    Text(presentation.senderText)
-                        .font(AppListTypography.rowCaptionEmphasized)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        if let label = presentation.directionLabelText, let image = presentation.directionLabelSystemImage {
+                            Label(label, systemImage: image)
+                                .font(AppTypography.microEmphasis)
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(mailDirectionBadgeForeground)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(mailDirectionBadgeBackground, in: Capsule(style: .continuous))
+                                .lineLimit(1)
+                        }
+                        Text(presentation.senderText)
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                    }
                     Text(presentation.contextText)
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
@@ -1846,10 +1829,7 @@ private struct MailMessageListRow: View, Equatable {
                         .lineLimit(1)
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -1934,7 +1914,7 @@ private struct RSSItemListRow: View {
                     HStack(spacing: 6) {
                         Text(item.title)
                             .font(item.state.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                         if item.state.isStarred {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 11, weight: .semibold))
@@ -1954,10 +1934,7 @@ private struct RSSItemListRow: View {
                         .lineLimit(1)
                 }
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -3186,16 +3163,13 @@ struct CraftSessionRow: View {
             leadingSessionIcon
             sessionTextContent
         }
-        .padding(AppListCardLayout.contentPadding)
-        .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-        .background(rowBackgroundColor, in: AppListCardLayout.shape)
+        .appListRowSurface(isSelected: isSelected, backgroundColor: rowBackgroundColor)
         .overlay(
             AppListCardLayout.shape
                 .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
         )
         .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 2)
         .scaleEffect(attentionLevel == .interruptive && isAttentionPulseOn ? 1.012 : 1)
-        .contentShape(AppListCardLayout.shape)
         .onTapGesture {
             if !isEditingTitle { onSelect() }
         }
@@ -3220,8 +3194,8 @@ struct CraftSessionRow: View {
     }
 
     private var sessionTextContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
+            HStack(alignment: .firstTextBaseline) {
                 if isEditingTitle {
                     TextField("会话标题", text: $titleDraft)
                         .textFieldStyle(.plain)
@@ -3235,7 +3209,7 @@ struct CraftSessionRow: View {
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .fontWeight(cardStyle.titleWeight)
                         .foregroundStyle(primaryTextColor)
-                        .lineLimit(1)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                         .onTapGesture(count: 2) { beginTitleEdit() }
                 }
                 Spacer(minLength: 4)
@@ -3252,31 +3226,19 @@ struct CraftSessionRow: View {
                 Text("\(row.messageCount) 条消息")
                     .font(AppListTypography.rowCaption)
                     .foregroundStyle(secondaryTextColor)
-            }
 
-
-            if row.kind == .note {
-                HStack(spacing: 4) {
-                    Text("📝 笔记")
+                if row.kind == .note {
+                    Label("笔记", systemImage: "note.text")
                         .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color.accentColor.opacity(0.10))
-                        )
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
-                        )
+                        .foregroundStyle(activeMetaTextColor)
+                        .labelStyle(.titleAndIcon)
                 }
             }
 
             if !row.labels.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
-                        Text(label.id)
+                        Text(displayName(for: label))
                             .font(AppListTypography.rowCaption)
                             .foregroundStyle(labelForegroundColor)
                             .padding(.horizontal, 6)
@@ -3286,6 +3248,10 @@ struct CraftSessionRow: View {
                 }
             }
         }
+    }
+
+    private func displayName(for label: AgentSessionLabel) -> String {
+        labelDefinitions.first(where: { $0.id == label.id })?.name ?? label.id
     }
 
     @ViewBuilder
@@ -3362,7 +3328,8 @@ struct CraftSessionRow: View {
         SessionCardAttentionStyle(level: attentionLevel, isSelected: isSelected)
     }
 
-    private var rowBackgroundColor: Color {
+    private var rowBackgroundColor: Color? {
+        guard attentionLevel > .unread else { return nil }
         guard shouldPulseAttention else { return cardStyle.backgroundColor }
         if attentionLevel == .interruptive {
             return ConnorCraftPalette.accent.opacity(isAttentionPulseOn ? 0.24 : 0.10)
@@ -3502,16 +3469,15 @@ struct SettingsCategoryRow: View {
                 Image(systemName: systemImage)
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(AppListTypography.rowTitleSelected)
+                VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
+                    Text(title)
+                        .font(AppListTypography.rowTitleSelected)
+                        .lineLimit(AppListCardLayout.titleLineLimit)
                     Text(subtitle).font(AppListTypography.rowSubtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            .padding(AppListCardLayout.contentPadding)
-            .frame(maxWidth: .infinity, minHeight: AppListCardLayout.minimumHeight, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: AppListCardLayout.shape)
-            .contentShape(AppListCardLayout.shape)
+            .appListRowSurface(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -3532,14 +3498,13 @@ struct CraftSimpleListPane: View {
             .padding(.vertical, 14)
             Divider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                     ForEach(rows.isEmpty ? ["在右侧查看详情"] : rows, id: \.self) { row in
                         Text(row)
                             .font(AppListTypography.rowTitle)
-                            .lineLimit(1)
+                            .lineLimit(AppListCardLayout.titleLineLimit)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .appListRowSurface(isSelected: false)
                     }
                 }
                 .padding(10)
