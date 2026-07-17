@@ -54,9 +54,7 @@ enum AgentChatTypography {
     static let sessionTitleEmphasis = AppTypography.bodyEmphasis
     static let body = AppTypography.body
     static let bodyEmphasis = AppTypography.bodyEmphasis
-    static var messageBody: Font {
-        .system(size: NSFont.preferredFont(forTextStyle: .body).pointSize + 1)
-    }
+    static func messageBody(pointSize: CGFloat) -> Font { .system(size: pointSize) }
     static let callout = AppTypography.callout
     static let calloutEmphasis = AppTypography.calloutEmphasis
     static let meta = AppTypography.meta
@@ -68,6 +66,33 @@ enum AgentChatTypography {
     static let monoMicro = AppTypography.monoMicro
 
     static var composerNSFont: NSFont { .preferredFont(forTextStyle: .body) }
+}
+
+enum AgentChatFontPreferences {
+    static let messageBodyPointSizeKey = "agentChat.messageBodyPointSize"
+    static let messageBodyPointSizeRange = 11.0...22.0
+
+    static var systemBodyPointSize: CGFloat {
+        NSFont.preferredFont(forTextStyle: .body).pointSize
+    }
+
+    static var defaultMessageBodyPointSize: Double {
+        Double(systemBodyPointSize)
+    }
+
+    static func validatedMessageBodyPointSize(_ pointSize: Double) -> CGFloat {
+        CGFloat(pointSize.clamped(to: messageBodyPointSizeRange))
+    }
+
+    static func pointSizeLabel(_ pointSize: Double) -> String {
+        "\(Int(pointSize.rounded())) pt"
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
 }
 
 enum AgentChatLayout {

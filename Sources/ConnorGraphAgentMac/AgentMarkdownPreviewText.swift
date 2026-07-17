@@ -21,6 +21,7 @@ enum AgentMarkdownPreviewRenderStrategy: Equatable {
 struct AgentMarkdownPreviewText: View {
     var markdown: String
     var font: Font = AgentChatTypography.body
+    var bodyPointSize: CGFloat? = nil
     var monospacedFallback: Bool = false
     var lineLimit: Int? = nil
     var maxRenderedBlocks: Int? = nil
@@ -78,13 +79,13 @@ struct AgentMarkdownPreviewText: View {
         switch renderStrategy {
         case .inlineOnly:
             Text(lightweightInlineRendered)
-                .font(monospacedFallback ? AgentChatTypography.monoMeta : font)
+                .font(monospacedFallback ? monospacedBodyFont : font)
                 .lineLimit(lineLimit)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .plainText:
             Text(markdown)
-                .font(AgentChatTypography.monoMeta)
+                .font(monospacedBodyFont)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,7 +96,7 @@ struct AgentMarkdownPreviewText: View {
                     .lineLimit(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("内容较长，已先显示轻量预览以保持界面响应。")
-                    .font(AgentChatTypography.meta)
+                    .font(secondaryFont)
                     .foregroundStyle(.secondary)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -183,11 +184,11 @@ struct AgentMarkdownPreviewText: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let language, !language.isEmpty {
                     Text(language)
-                        .font(AgentChatTypography.monoMicro.weight(.semibold))
+                        .font(monospacedLabelFont)
                         .foregroundStyle(.secondary)
                 }
                 Text(text)
-                    .font(AgentChatTypography.monoMeta)
+                    .font(monospacedBodyFont)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -207,7 +208,7 @@ struct AgentMarkdownPreviewText: View {
 
     private func omittedBlocksIndicator(count: Int) -> some View {
         Text("已暂缓渲染后续 \(count) 个 Markdown 块，展开后完整显示")
-            .font(AgentChatTypography.meta)
+            .font(secondaryFont)
             .foregroundStyle(.secondary)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -268,11 +269,37 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private func headingFont(_ level: Int) -> Font {
-        switch level {
-        case 1: return AgentChatTypography.title
-        case 2: return AgentChatTypography.sectionTitle
-        default: return AgentChatTypography.calloutEmphasis
+        guard let bodyPointSize else {
+            switch level {
+            case 1: return AgentChatTypography.title
+            case 2: return AgentChatTypography.sectionTitle
+            default: return AgentChatTypography.calloutEmphasis
+            }
         }
+
+        let systemBodySize = NSFont.preferredFont(forTextStyle: .body).pointSize
+        let semanticSize: CGFloat
+        switch level {
+        case 1: semanticSize = NSFont.preferredFont(forTextStyle: .title3).pointSize
+        case 2: semanticSize = NSFont.preferredFont(forTextStyle: .headline).pointSize
+        default: semanticSize = NSFont.preferredFont(forTextStyle: .callout).pointSize
+        }
+        return .system(size: max(10, bodyPointSize + semanticSize - systemBodySize), weight: .semibold)
+    }
+
+    private var secondaryFont: Font {
+        guard let bodyPointSize else { return AgentChatTypography.meta }
+        return .system(size: max(10, bodyPointSize - 1))
+    }
+
+    private var monospacedBodyFont: Font {
+        guard let bodyPointSize else { return AgentChatTypography.monoMeta }
+        return .system(size: max(10, bodyPointSize - 1), design: .monospaced)
+    }
+
+    private var monospacedLabelFont: Font {
+        guard let bodyPointSize else { return AgentChatTypography.monoMicro.weight(.semibold) }
+        return .system(size: max(9, bodyPointSize - 2), weight: .semibold, design: .monospaced)
     }
 
     private func renderTableCellInline(_ text: String) -> AttributedString {

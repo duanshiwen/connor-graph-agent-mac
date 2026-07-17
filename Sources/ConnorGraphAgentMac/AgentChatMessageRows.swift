@@ -124,6 +124,9 @@ struct AgentChatMessageRow: View {
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
 
+    @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
+    private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
+
     @MainActor
     private final class BrowserPromptFoldingCache {
         static let shared = BrowserPromptFoldingCache()
@@ -167,6 +170,12 @@ struct AgentChatMessageRow: View {
     }
 
     private var isUser: Bool { row.message.role == .user }
+    private var messageBodyPointSize: CGFloat {
+        AgentChatFontPreferences.validatedMessageBodyPointSize(preferredMessageBodyPointSize)
+    }
+    private var messageBodyFont: Font {
+        AgentChatTypography.messageBody(pointSize: messageBodyPointSize)
+    }
     private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
         AgentAssistantMessageActionsPresentation(message: row.message)
     }
@@ -257,9 +266,9 @@ struct AgentChatMessageRow: View {
     private var messageContent: some View {
         if isUser {
             if let browserPromptFoldingParts {
-                BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts)
+                BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts, bodyPointSize: messageBodyPointSize)
             } else {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.messageBody)
+                AgentMarkdownPreviewText(markdown: row.message.content, font: messageBodyFont, bodyPointSize: messageBodyPointSize)
             }
         } else {
             assistantMarkdownBody
@@ -269,7 +278,8 @@ struct AgentChatMessageRow: View {
     private var assistantMarkdownBody: some View {
         AgentMarkdownPreviewText(
             markdown: row.message.content,
-            font: AgentChatTypography.messageBody,
+            font: messageBodyFont,
+            bodyPointSize: messageBodyPointSize,
             persistentCacheContext: persistentCacheContext
         )
         .fixedSize(horizontal: false, vertical: true)
@@ -406,12 +416,17 @@ struct AgentAssistantHeaderView: View {
 
 struct BrowserPromptFoldedMessageView: View {
     var parts: BrowserPromptFoldingParts
+    var bodyPointSize: CGFloat
     @State private var isWebPageBodyExpanded: Bool = false
+
+    private var bodyFont: Font {
+        AgentChatTypography.messageBody(pointSize: bodyPointSize)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             if !parts.leadingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: AgentChatTypography.messageBody)
+                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: bodyFont, bodyPointSize: bodyPointSize)
             }
 
             DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
@@ -431,7 +446,7 @@ struct BrowserPromptFoldedMessageView: View {
             .tint(.primary)
 
             if !parts.trailingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: AgentChatTypography.messageBody)
+                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: bodyFont, bodyPointSize: bodyPointSize)
             }
         }
     }
