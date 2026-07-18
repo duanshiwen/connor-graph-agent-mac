@@ -265,11 +265,14 @@ private struct MCPToolSelectionMenu: View {
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text("MCP 工具").font(.headline)
+                    Text("MCP 工具")
+                        .font(AgentChatTypography.sectionTitle)
                     Spacer()
                     Button("自动") { onSelectionChanged(nil) }
+                        .font(AgentChatTypography.callout)
                         .disabled(selection.isAutomatic)
                     Button("清除") { onSelectionChanged([]) }
+                        .font(AgentChatTypography.callout)
                         .disabled(selection.selectedToolNames.isEmpty && !selection.isAutomatic)
                 }
                 .padding(12)
@@ -279,6 +282,7 @@ private struct MCPToolSelectionMenu: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("搜索工具", text: $searchText)
+                        .font(AgentChatTypography.body)
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 12)
@@ -287,10 +291,10 @@ private struct MCPToolSelectionMenu: View {
                 Divider()
 
                 if allToolNames.isEmpty {
-                    ContentUnavailableView(
-                        "暂无可用 MCP 工具",
+                    AgentComposerPopoverEmptyState(
+                        title: "暂无可用 MCP 工具",
                         systemImage: "server.rack",
-                        description: Text("请先启用并测试 MCP Source。")
+                        message: "请先启用并测试 MCP Source。"
                     )
                     .frame(minHeight: 160)
                 } else if groups.isEmpty {
