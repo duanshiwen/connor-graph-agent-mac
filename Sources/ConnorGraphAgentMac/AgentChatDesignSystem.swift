@@ -89,6 +89,33 @@ enum AgentChatFontPreferences {
     }
 }
 
+struct AgentComposerPopoverEmptyState: View {
+    var title: String
+    var systemImage: String
+    var message: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 30, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tertiary)
+
+            Text(title)
+                .font(AgentChatTypography.sectionTitle)
+                .foregroundStyle(.secondary)
+
+            Text(message)
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)

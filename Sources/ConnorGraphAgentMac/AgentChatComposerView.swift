@@ -577,7 +577,7 @@ struct AgentChatComposerView: View {
         VStack(alignment: .leading, spacing: 8) {
             if chatActions.dependencies.workspaceSettings.roots.isEmpty {
                 Text("尚未设置工作目录")
-                    .font(AgentChatTypography.micro)
+                    .font(AgentChatTypography.body)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 8)
@@ -594,14 +594,14 @@ struct AgentChatComposerView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Label("历史打开列表", systemImage: "clock.arrow.circlepath")
-                    .font(AgentChatTypography.micro.weight(.medium))
+                    .font(AgentChatTypography.calloutEmphasis)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.top, 2)
 
                 if chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
                     Text("暂无历史记录")
-                        .font(AgentChatTypography.micro)
+                        .font(AgentChatTypography.callout)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
@@ -615,6 +615,7 @@ struct AgentChatComposerView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
+                        .font(AgentChatTypography.callout)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .contentShape(Rectangle())
@@ -651,7 +652,7 @@ struct AgentChatComposerView: View {
                 .buttonStyle(.borderless)
                 .disabled(chatActions.dependencies.workspaceSettings.recentPaths.isEmpty)
             }
-            .font(AgentChatTypography.micro)
+            .font(AgentChatTypography.callout)
             .padding(.horizontal, 4)
         }
     }
@@ -666,6 +667,7 @@ struct AgentChatComposerView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .font(AgentChatTypography.body)
             .help(root.path)
 
             Button {
@@ -1093,11 +1095,13 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("远端知识库").font(.headline)
+                    Text("远端知识库")
+                        .font(AgentChatTypography.sectionTitle)
                     Spacer()
                     Button(selection.isAllSelected ? "清除全选" : "全选") {
                         onSelectionChanged(selection.toggleAllValue)
                     }
+                    .font(AgentChatTypography.callout)
                     .disabled(available.isEmpty)
                 }
                 .padding(12)
@@ -1105,12 +1109,12 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
                 Divider()
 
                 if available.isEmpty {
-                    ContentUnavailableView(
-                        "暂无可用知识库",
+                    AgentComposerPopoverEmptyState(
+                        title: "暂无可用知识库",
                         systemImage: "books.vertical",
-                        description: Text("订阅知识库，或发布自己的知识库后会显示在这里。")
+                        message: "订阅知识库，或发布自己的知识库后会显示在这里。"
                     )
-                        .frame(minHeight: 150)
+                    .frame(minHeight: 150)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {

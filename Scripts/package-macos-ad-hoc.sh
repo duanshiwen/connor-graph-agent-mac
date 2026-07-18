@@ -20,8 +20,8 @@ Usage: Scripts/package-macos-ad-hoc.sh [--arch ARCH] [--version VERSION] [--outp
 Builds an architecture-specific Release app, applies an ad-hoc signature to
 the app and all embedded Mach-O code, verifies the signature, and creates a DMG.
 
-The resulting app is not notarized. On first launch, users must Control-click
-the app, choose Open, and confirm Open once.
+The resulting app is not notarized. On first launch, users must try to open the
+app, then allow it in System Settings > Privacy & Security > Open Anyway.
 
 Options:
   --arch ARCH        arm64, x86_64, or all (default: current Mac).
@@ -232,8 +232,10 @@ ln -s /Applications "$DMG_ROOT/Applications"
 printf '%s\n' \
   '首次安装：' \
   '1. 将“康纳同学”拖入 Applications 文件夹。' \
-  '2. 在“应用程序”中按住 Control 点击“康纳同学”，选择“打开”。' \
-  '3. 在系统提示中再次点击“打开”。以后可直接双击运行。' \
+  '2. 尝试打开“康纳同学”；看到 Apple 无法验证的提示时，点击“完成”。' \
+  '3. 打开“系统设置 → 隐私与安全性”，向下滚动到“安全性”。' \
+  '4. 在“已阻止使用‘康纳同学’”旁点击“仍要打开”，并完成身份验证。' \
+  '5. 警告再次出现时点击“打开”。以后可直接双击运行。' \
   '' \
   '本版本使用 Ad-hoc 签名，未经过 Apple 公证。无需运行终端命令。' \
   > "$DMG_ROOT/首次打开说明.txt"
@@ -251,4 +253,4 @@ echo
 echo "Package created: $DMG_PATH"
 echo "Architecture: $ARCH"
 echo "Signing: ad-hoc (not notarized)"
-echo "Expected first launch: Control-click > Open > Open"
+echo "Expected first launch: Privacy & Security > Open Anyway > Open"

@@ -477,7 +477,7 @@ cargo build
 
 ### 9.1 打包未公证的 macOS 安装包
 
-在没有 Apple Developer Program 和 Developer ID 证书时，发布脚本会对应用及其嵌入代码进行 Ad-hoc 签名，并生成 DMG。该产物无法通过 Apple 公证；用户首次启动仍需通过 Control 点击选择“打开”并确认一次，但不需要运行终端命令。
+在没有 Apple Developer Program 和 Developer ID 证书时，发布脚本会对应用及其嵌入代码进行 Ad-hoc 签名，并生成 DMG。该产物无法通过 Apple 公证。macOS 15 及更高版本不再允许通过 Control 点击绕过 Gatekeeper；用户首次尝试启动后，必须前往“系统设置 → 隐私与安全性”点击“仍要打开”并确认一次，但不需要运行终端命令。
 
 构建要求：
 
@@ -528,6 +528,8 @@ Scripts/package-macos-ad-hoc.sh --help
 ```
 
 `spctl --assess` 拒绝该产物属于预期结果，因为 Ad-hoc 签名不能建立 Developer ID 信任链。不要通过 `xattr -cr`、关闭 Gatekeeper 或要求用户运行终端命令来掩盖这一限制。
+
+Apple 对互联网分发的正式路径是 Developer ID 签名与公证。免费 Apple Account/Personal Team 只适用于个人设备测试，不能签发 Developer ID 或使用 Mac App 公证分发能力。只要项目坚持不加入 Apple Developer Program，Gatekeeper 的一次性“仍要打开”确认就是可达到的最佳用户体验。
 
 诊断命令：
 
