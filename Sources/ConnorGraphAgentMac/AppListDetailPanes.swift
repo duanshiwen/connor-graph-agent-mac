@@ -593,14 +593,14 @@ struct CraftSessionListPane: View {
                 model.sessions.searchQuery = ""
             }
 
-            if visibleSessions.isEmpty {
+            if visibleSessionRows.isEmpty {
                 ContentUnavailableView(sessionEmptyTitle, systemImage: "bubble.left", description: Text(sessionEmptyDescription))
                     .padding(.top, 80)
             } else {
                 ScrollView {
                     LazyVStack(spacing: AppListCardLayout.spacing) {
-                        ForEach(visibleSessions) { session in
-                            sessionRow(session)
+                        ForEach(visibleSessionRows) { row in
+                            sessionRow(row)
                         }
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
@@ -613,21 +613,21 @@ struct CraftSessionListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func sessionRow(_ session: AgentSession) -> some View {
+    private func sessionRow(_ row: AgentChatSessionPresentation) -> some View {
         CraftSessionRow(
-            row: AgentChatSessionPresentation(session: session),
-            readState: model.sessions.readStates[session.id],
-            isSelected: session.id == model.sessions.selectedSessionID,
-            isRunning: rowActions.isSubmitting(session.id),
-            isRegeneratingTitle: model.sessions.regeneratingTitleSessionIDs.contains(session.id),
-            hasRunningBackgroundTask: !rowActions.canDelete(session.id),
+            row: row,
+            readState: model.sessions.readStates[row.id],
+            isSelected: row.id == model.sessions.selectedSessionID,
+            isRunning: rowActions.isSubmitting(row.id),
+            isRegeneratingTitle: model.sessions.regeneratingTitleSessionIDs.contains(row.id),
+            hasRunningBackgroundTask: !rowActions.canDelete(row.id),
             labelDefinitions: governanceModel.config.labels,
-            onSelect: { selectSession(id: session.id) },
-            onRename: { title in rowActions.rename(session.id, title) },
-            onSetStatus: { status in rowActions.setStatus(session.id, status) },
-            onToggleLabel: { labelID in rowActions.toggleLabel(session.id, labelID) },
-            onRegenerateTitle: { rowActions.regenerateTitle(session.id) },
-            onDelete: { rowActions.delete(session.id) }
+            onSelect: { selectSession(id: row.id) },
+            onRename: { title in rowActions.rename(row.id, title) },
+            onSetStatus: { status in rowActions.setStatus(row.id, status) },
+            onToggleLabel: { labelID in rowActions.toggleLabel(row.id, labelID) },
+            onRegenerateTitle: { rowActions.regenerateTitle(row.id) },
+            onDelete: { rowActions.delete(row.id) }
         )
     }
 
@@ -639,15 +639,18 @@ struct CraftSessionListPane: View {
         }
     }
 
-    private var visibleSessions: [AgentSession] {
+    private var visibleSessionRows: [AgentChatSessionPresentation] {
         let query = model.sessions.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.sessions.sessions }
-        let terms = listSearchTerms(for: query)
-        guard !terms.isEmpty else { return model.sessions.sessions }
-        return model.sessions.sessions.filter { session in
-            listSearchTextMatches(session.title, terms: terms)
-                || session.messages.contains { listSearchTextMatches($0.content, terms: terms) }
+        guard !query.isEmpty else {
+            return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
         }
+        let terms = listSearchTerms(for: query)
+        let matchingSessions = terms.isEmpty ? model.sessions.sessions : model.sessions.sessions.filter { session in
+            listSearchTextMatches(session.title, terms: terms) || session.messages.contains {
+                listSearchTextMatches($0.content, terms: terms)
+            }
+        }
+        return matchingSessions.map { model.sessions.rowPresentation(for: $0) }
     }
 
     private var sessionEmptyTitle: String {
@@ -1511,7 +1514,7 @@ struct CraftMailListPane: View {
             }
 
             if presentation.accounts.isEmpty {
-                ContentUnavailableView("还没有添加邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。康纳同学会把邮件同步到本地，并保持发送审批边界。"))
+                ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。"))
                     .padding(.top, 80)
             } else if presentation.mailboxes.isEmpty {
                 ContentUnavailableView("还没有邮箱文件夹", systemImage: "tray", description: Text("账户添加后，康纳同学会在同步完成时显示收件箱和其他文件夹。"))

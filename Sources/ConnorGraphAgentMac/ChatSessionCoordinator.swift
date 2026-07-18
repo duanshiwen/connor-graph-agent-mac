@@ -273,23 +273,34 @@ final class ChatSessionCoordinator {
     func enqueueImportedSession(_ session: AgentSession) {
         guard !isShutdown else { return }
         pendingImportedSessions[session.id] = session
-        guard importedSessionFlushTask == nil else { return }
-        importedSessionFlushTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(200))
+        scheduleImportedSessionFlush()
+    }
+
+    private func scheduleImportedSessionFlush() {
+        importedSessionFlushTask?.cancel()
+        importedSessionFlushTask = Task(priority: .utility) { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
             guard !Task.isCancelled else { return }
-            self?.flushPendingImportedSessions()
+            guard let self else { return }
+            guard self.model.loadingSessionDetailID == nil else {
+                self.scheduleImportedSessionFlush()
+                return
+            }
+            self.flushPendingImportedSessions()
         }
     }
 
     func installImportedSessions(_ importedSessions: [AgentSession]) {
         guard !isShutdown, !importedSessions.isEmpty else { return }
+        let importedByID = Dictionary(uniqueKeysWithValues: importedSessions.map { ($0.id, $0) })
+        let existingIDs = Set(model.allSessions.map(\.id))
+        let newSessions = importedSessions.filter { !existingIDs.contains($0.id) }
         hasLoadedInitialSessions = true
-        let importedIDs = Set(importedSessions.map(\.id))
-        model.allSessions.removeAll { importedIDs.contains($0.id) }
-        model.allSessions.append(contentsOf: importedSessions)
+        model.allSessions = model.allSessions.map { importedByID[$0.id] ?? $0 }
+        model.allSessions.append(contentsOf: newSessions)
         model.allSessions.sort { $0.updatedAt > $1.updatedAt }
         model.sessions = Self.filter(model.allSessions, by: model.filter)
-        for session in importedSessions { onSessionAdded(session) }
+        for session in newSessions { onSessionAdded(session) }
         onSessionsChanged(model.allSessions)
         errorMessage = nil
     }

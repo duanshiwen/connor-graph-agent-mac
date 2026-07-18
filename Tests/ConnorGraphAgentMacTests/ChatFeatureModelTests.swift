@@ -103,6 +103,23 @@ struct ChatFeatureModelTests {
         #expect(model.summaryMessage == "updated")
     }
 
+    @Test func sessionSelectionDoesNotRebuildCachedRowPresentations() {
+        let session = AgentSession(
+            id: "session-1",
+            title: "Cached title",
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let model = ChatSessionListModel()
+        model.sessions = [session]
+        let cachedRows = model.rowPresentationsByID
+
+        model.selectedSessionID = session.id
+        model.loadingSessionDetailID = session.id
+
+        #expect(model.rowPresentationsByID == cachedRows)
+        #expect(model.rowPresentation(for: session).title == "Cached title")
+    }
+
     @Test func approvalModelOwnsPendingApprovalsAndResultFeedback() {
         let model = ChatApprovalModel()
         let approval = AgentPendingApproval(

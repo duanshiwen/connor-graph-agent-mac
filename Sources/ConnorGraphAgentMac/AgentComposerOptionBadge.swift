@@ -37,6 +37,8 @@ struct AgentComposerOptionBadge: View {
     var isActive: Bool = false
     var style: Style = .compact
     var showsBorder: Bool = true
+    var fill: Color = .clear
+    var borderTint: Color = .secondary
 
     var body: some View {
         HStack(spacing: 6) {
@@ -58,12 +60,12 @@ struct AgentComposerOptionBadge: View {
         .foregroundStyle(tint)
         .background(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                .fill(Color.clear)
+                .fill(fill)
         )
         .overlay {
             if showsBorder {
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                    .stroke(Color.secondary.opacity(isActive ? 0.28 : 0.18), lineWidth: 1)
+                    .stroke(borderTint.opacity(isActive ? 0.30 : 0.20), lineWidth: 1)
             }
         }
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
@@ -71,4 +73,3 @@ struct AgentComposerOptionBadge: View {
         .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
     }
 }
-

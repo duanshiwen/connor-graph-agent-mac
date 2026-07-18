@@ -289,6 +289,7 @@ extension View {
 }
 
 enum AppShellColors {
+    static let listBackground = Color(nsColor: .windowBackgroundColor)
     static let detailBackground = Color(nsColor: .textBackgroundColor).opacity(0.18)
     static let cardBackground = Color(nsColor: .windowBackgroundColor)
     static let subtleCardBackground = Color(nsColor: .textBackgroundColor).opacity(0.42)
