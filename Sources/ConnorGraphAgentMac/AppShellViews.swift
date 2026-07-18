@@ -141,7 +141,7 @@ struct AppShellView: View {
             )
                 .frame(width: AppShellLayout.listColumnWidth)
                 .frame(maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
+                .background(AppShellColors.listBackground)
                 .controlSize(AppButtonLayout.controlSize)
 
             CraftDetailPaneView(

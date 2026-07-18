@@ -27,6 +27,9 @@ struct ChatSessionSidebarSummary: Sendable, Equatable {
 final class ChatSessionListModel {
     var sessions: [AgentSession] = [] {
         didSet {
+            rowPresentationsByID = Dictionary(
+                uniqueKeysWithValues: sessions.map { ($0.id, AgentChatSessionPresentation(session: $0)) }
+            )
             guard allSessions.isEmpty else { return }
             sidebarSummary = .build(from: sessions)
         }
@@ -37,6 +40,7 @@ final class ChatSessionListModel {
         }
     }
     private(set) var sidebarSummary = ChatSessionSidebarSummary()
+    private(set) var rowPresentationsByID: [String: AgentChatSessionPresentation] = [:]
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var readStates: [String: SessionReadState] = [:]
@@ -47,6 +51,9 @@ final class ChatSessionListModel {
     var searchQuery = ""
     var selectedArtifactDirectories: AgentSessionArtifactDirectories?
 
+    func rowPresentation(for session: AgentSession) -> AgentChatSessionPresentation {
+        rowPresentationsByID[session.id] ?? AgentChatSessionPresentation(session: session)
+    }
 }
 
 @MainActor

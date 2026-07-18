@@ -7,6 +7,25 @@ import ConnorGraphAppSupport
 
 @MainActor
 struct SkillRuntimeFeatureModelTests {
+    @Test func instructionPresentationLimitsCollapsedLayoutWork() {
+        let source = "  " + String(repeating: "内容", count: 1_000) + "  "
+
+        let presentation = SkillInstructionsPresentation(instructions: source)
+
+        #expect(presentation.isCollapsible)
+        #expect(presentation.fullText == String(repeating: "内容", count: 1_000))
+        #expect(presentation.collapsedText.hasSuffix("\n\n…"))
+        #expect(presentation.collapsedText.count == SkillInstructionsPresentation.previewCharacterLimit + 3)
+    }
+
+    @Test func emptyInstructionPresentationUsesStableFallback() {
+        let presentation = SkillInstructionsPresentation(instructions: " \n ")
+
+        #expect(presentation.fullText == "No instructions found.")
+        #expect(presentation.collapsedText == presentation.fullText)
+        #expect(!presentation.isCollapsible)
+    }
+
     @Test func reloadBuildsDefinitionsAndCommercialPresentation() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

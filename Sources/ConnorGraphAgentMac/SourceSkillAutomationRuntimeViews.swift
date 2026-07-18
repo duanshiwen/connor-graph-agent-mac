@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
@@ -557,7 +558,7 @@ private struct SkillManagerDetailView: View {
                 }
 
                 SkillInfoSection(title: "Instructions", systemImage: "doc.text") {
-                    SkillInstructionsPreview(instructions: card.instructions)
+                    SkillInstructionsPreview(skillID: card.id, instructions: card.instructions)
                 }
             }
             .padding(AgentChatLayout.spaceXL)
@@ -700,39 +701,36 @@ private struct SkillInfoSection<Content: View>: View {
 }
 
 private struct SkillInstructionsPreview: View {
+    var skillID: String
     var instructions: String
     @State private var isExpanded = false
-
-    private var normalizedInstructions: String {
-        instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var displayText: String {
-        guard !normalizedInstructions.isEmpty else { return "No instructions found." }
-        guard !isExpanded, normalizedInstructions.count > 1_800 else { return normalizedInstructions }
-        let prefix = normalizedInstructions.prefix(1_800)
-        return "\(prefix)\n\n…"
-    }
-
-    private var shouldShowToggle: Bool {
-        normalizedInstructions.count > 1_800
-    }
+    @State private var presentation: SkillInstructionsPresentation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-            Text(displayText)
-                .font(AgentChatTypography.monoMeta)
-                .textSelection(.enabled)
-                .lineLimit(isExpanded ? nil : 18)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let presentation {
+                Group {
+                    if isExpanded {
+                        SkillInstructionsTextView(text: presentation.fullText)
+                            .frame(height: 360)
+                    } else {
+                        Text(presentation.collapsedText)
+                            .font(AgentChatTypography.monoMeta)
+                            .lineLimit(18)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 .padding(AgentChatLayout.spaceM)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.50), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+            } else {
+                ProgressView("正在加载指令…")
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            }
 
-            if shouldShowToggle {
+            if presentation?.isCollapsible == true {
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        isExpanded.toggle()
-                    }
+                    isExpanded.toggle()
                 } label: {
                     Label(isExpanded ? "收起完整指令" : "展开完整指令", systemImage: isExpanded ? "chevron.up" : "chevron.down")
                         .font(AgentChatTypography.metaEmphasis)
@@ -741,6 +739,73 @@ private struct SkillInstructionsPreview: View {
                 .foregroundStyle(ConnorCraftPalette.accent)
             }
         }
+        .task(id: instructions) {
+            isExpanded = false
+            presentation = nil
+            let source = instructions
+            let prepared = await Task.detached(priority: .userInitiated) {
+                SkillInstructionsPresentation(instructions: source)
+            }.value
+            guard !Task.isCancelled else { return }
+            presentation = prepared
+        }
+        .accessibilityIdentifier("skill-instructions-\(skillID)")
+    }
+}
+
+struct SkillInstructionsPresentation: Sendable, Equatable {
+    static let previewCharacterLimit = 1_800
+
+    var fullText: String
+    var collapsedText: String
+    var isCollapsible: Bool
+
+    init(instructions: String, previewCharacterLimit: Int = Self.previewCharacterLimit) {
+        let normalized = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        fullText = normalized.isEmpty ? "No instructions found." : normalized
+        let limit = max(0, previewCharacterLimit)
+        isCollapsible = fullText.count > limit
+        collapsedText = isCollapsible ? "\(fullText.prefix(limit))\n\n…" : fullText
+    }
+}
+
+private struct SkillInstructionsTextView: NSViewRepresentable {
+    var text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.drawsBackground = false
+        textView.textColor = .labelColor
+        textView.font = .monospacedSystemFont(
+            ofSize: NSFont.preferredFont(forTextStyle: .subheadline).pointSize,
+            weight: .regular
+        )
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.string = text
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView,
+              textView.string != text else { return }
+        textView.string = text
+        textView.scrollToBeginningOfDocument(nil)
     }
 }
 

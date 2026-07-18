@@ -144,7 +144,9 @@ struct AgentChatComposerView: View {
                             tint: chatActions.dependencies.browser.isVisible ? composerControlActiveForeground : composerControlForeground,
                             showsChevron: false,
                             isActive: chatActions.dependencies.browser.isVisible,
-                            style: .compact
+                            style: .prominent,
+                            fill: Color.accentColor.opacity(chatActions.dependencies.browser.isVisible ? 0.12 : 0.06),
+                            borderTint: .accentColor
                         )
                     }
                     .buttonStyle(.plain)
