@@ -121,6 +121,7 @@ struct AgentChatMessageRow: View {
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
+    var onSaveImageAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
 
@@ -212,7 +213,8 @@ struct AgentChatMessageRow: View {
                         AgentMessageAttachmentRefsView(
                             attachments: row.attachments,
                             localFileURL: localAttachmentFileURL,
-                            onPreview: onPreviewAttachment
+                            onPreview: onPreviewAttachment,
+                            onSaveImage: onSaveImageAttachment
                         )
                     }
                 }
@@ -350,6 +352,7 @@ struct AgentMessageAttachmentRefsView: View {
     var attachments: [AgentMessageAttachmentRef]
     var localFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreview: (AgentMessageAttachmentRef) -> Void
+    var onSaveImage: (AgentMessageAttachmentRef) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
@@ -357,7 +360,8 @@ struct AgentMessageAttachmentRefsView: View {
                 AgentInlineAttachmentView(
                     attachment: attachment,
                     localFileURL: localFileURL(attachment),
-                    onPreview: { onPreview(attachment) }
+                    onPreview: { onPreview(attachment) },
+                    onSaveImage: { onSaveImage(attachment) }
                 )
             }
         }
