@@ -2,6 +2,20 @@ import SwiftUI
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
+enum AgentTurnActivityEventResolver {
+    static func events(
+        initialEvents: [AgentEventPresentation]?,
+        loadedEvents: [AgentEventPresentation]?
+    ) -> [AgentEventPresentation]? {
+        initialEvents ?? loadedEvents
+    }
+}
+
+private struct AgentTurnActivityEventLoadKey: Hashable {
+    var isExpanded: Bool
+    var hasInitialEvents: Bool
+}
+
 struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
     var initialEvents: [AgentEventPresentation]?
@@ -13,7 +27,10 @@ struct AgentChatTurnProcessRow: View {
     @State private var startedAt: Date = Date()
 
     var body: some View {
-        let resolvedEvents = loadedEvents ?? initialEvents
+        let resolvedEvents = AgentTurnActivityEventResolver.events(
+            initialEvents: initialEvents,
+            loadedEvents: loadedEvents
+        )
         let visibleEvents = resolvedEvents ?? AgentActivityFallbackEvents.events(for: process)
         let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: visibleEvents)
         return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
@@ -44,16 +61,20 @@ struct AgentChatTurnProcessRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: isExpanded) {
-            guard isExpanded, !isDetailReady else { return }
+        .task(id: AgentTurnActivityEventLoadKey(
+            isExpanded: isExpanded,
+            hasInitialEvents: initialEvents != nil
+        )) {
+            guard isExpanded else { return }
+            isDetailReady = false
             try? await Task.sleep(for: .milliseconds(16))
             guard !Task.isCancelled else { return }
-            let events: [AgentEventPresentation]
-            if let initialEvents {
-                events = initialEvents
-            } else {
-                events = await loadEvents()
+            if initialEvents != nil {
+                isDetailReady = true
+                return
             }
+            let events: [AgentEventPresentation]
+            events = await loadEvents()
             guard !Task.isCancelled else { return }
             loadedEvents = events
             isDetailReady = true
