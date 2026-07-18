@@ -532,68 +532,36 @@ public struct NativeWebFetchTool: AgentTool {
         let extractMode = (arguments.string("extract_mode") ?? "markdown").lowercased()
         let waitUntil = (arguments.string("wait_until") ?? "networkidle").lowercased()
         let timeoutMilliseconds = arguments.int("timeout_ms") ?? 720_000
-        if renderMode == "js", let browserAssistedWebFetchHandler {
-            let request = BrowserAssistedWebFetchRequest(
+        if renderMode == "js", let result = try await executeBrowserAssistedFetch(
+            url: url,
+            extractMode: extractMode,
+            waitUntil: waitUntil,
+            timeoutMilliseconds: timeoutMilliseconds,
+            renderMode: renderMode,
+            context: context
+        ) {
+            return result
+        }
+        let nativeResult: NativeWebFetchResult
+        do {
+            nativeResult = try await nativeFetchClient.fetch(
                 urlString: url,
+                extractMode: extractMode,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
+        } catch {
+            if renderMode == "auto", let result = try await executeBrowserAssistedFetch(
+                url: url,
                 extractMode: extractMode,
                 waitUntil: waitUntil,
                 timeoutMilliseconds: timeoutMilliseconds,
-                revealImmediately: false
-            )
-            if let browserResult = await browserAssistedWebFetchHandler(request) {
-                let json: [String: Any] = [
-                    "url": browserResult.urlString,
-                    "finalURL": browserResult.finalURLString,
-                    "title": browserResult.title,
-                    "renderMode": renderMode,
-                    "engine": "wkwebview",
-                    "browserAssisted": true,
-                    "taskID": browserResult.taskID,
-                    "sessionID": browserResult.sessionID,
-                    "tabID": browserResult.tabID,
-                    "status": browserResult.status.rawValue,
-                    "errorMessage": browserResult.errorMessage as Any,
-                    "interventionReason": browserResult.interventionReason as Any,
-                    "truncated": browserResult.truncated,
-                    "originalCharacterCount": browserResult.originalCharacterCount
-                ]
-                switch browserResult.status {
-                case .fetched:
-                    return AgentToolResult(
-                        toolCallID: context.toolCallID,
-                        toolName: name,
-                        contentText: browserResult.contentText,
-                        contentJSON: BrowserFetchTool.encodeJSONObject(json),
-                        citations: [browserResult.finalURLString.isEmpty ? browserResult.urlString : browserResult.finalURLString]
-                    )
-                case .needsUserIntervention:
-                    let reason = browserResult.interventionReason ?? "Browser page requires user intervention."
-                    let text = """
-                    Connor opened this page in the built-in browser, but it requires user intervention.
-                    URL: \(browserResult.urlString)
-                    Final URL: \(browserResult.finalURLString)
-                    Reason: \(reason)
-                    Task ID: \(browserResult.taskID)
-                    Browser session ID: \(browserResult.sessionID)
-                    Browser tab ID: \(browserResult.tabID)
-                    """
-                    return AgentToolResult(
-                        toolCallID: context.toolCallID,
-                        toolName: name,
-                        contentText: text,
-                        contentJSON: BrowserFetchTool.encodeJSONObject(json),
-                        citations: [browserResult.urlString]
-                    )
-                case .failed, .timedOut:
-                    throw AgentToolError.invalidArguments(browserResult.errorMessage ?? "Connor WKWebView web_fetch(js) failed with status \(browserResult.status.rawValue)")
-                }
+                renderMode: renderMode,
+                context: context
+            ) {
+                return result
             }
+            throw error
         }
-        let nativeResult = try await nativeFetchClient.fetch(
-            urlString: url,
-            extractMode: extractMode,
-            timeoutMilliseconds: timeoutMilliseconds
-        )
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
@@ -613,5 +581,70 @@ public struct NativeWebFetchTool: AgentTool {
             ]),
             citations: [nativeResult.finalURLString.isEmpty ? nativeResult.urlString : nativeResult.finalURLString]
         )
+    }
+
+    private func executeBrowserAssistedFetch(
+        url: String,
+        extractMode: String,
+        waitUntil: String,
+        timeoutMilliseconds: Int,
+        renderMode: String,
+        context: AgentToolExecutionContext
+    ) async throws -> AgentToolResult? {
+        guard let browserAssistedWebFetchHandler else { return nil }
+        let request = BrowserAssistedWebFetchRequest(
+            urlString: url,
+            extractMode: extractMode,
+            waitUntil: waitUntil,
+            timeoutMilliseconds: timeoutMilliseconds,
+            revealImmediately: false
+        )
+        guard let browserResult = await browserAssistedWebFetchHandler(request) else { return nil }
+        let json: [String: Any] = [
+            "url": browserResult.urlString,
+            "finalURL": browserResult.finalURLString,
+            "title": browserResult.title,
+            "renderMode": renderMode,
+            "engine": "wkwebview",
+            "browserAssisted": true,
+            "taskID": browserResult.taskID,
+            "sessionID": browserResult.sessionID,
+            "tabID": browserResult.tabID,
+            "status": browserResult.status.rawValue,
+            "errorMessage": browserResult.errorMessage as Any,
+            "interventionReason": browserResult.interventionReason as Any,
+            "truncated": browserResult.truncated,
+            "originalCharacterCount": browserResult.originalCharacterCount
+        ]
+        switch browserResult.status {
+        case .fetched:
+            return AgentToolResult(
+                toolCallID: context.toolCallID,
+                toolName: name,
+                contentText: browserResult.contentText,
+                contentJSON: BrowserFetchTool.encodeJSONObject(json),
+                citations: [browserResult.finalURLString.isEmpty ? browserResult.urlString : browserResult.finalURLString]
+            )
+        case .needsUserIntervention:
+            let reason = browserResult.interventionReason ?? "Browser page requires user intervention."
+            let text = """
+            Connor opened this page in the built-in browser, but it requires user intervention.
+            URL: \(browserResult.urlString)
+            Final URL: \(browserResult.finalURLString)
+            Reason: \(reason)
+            Task ID: \(browserResult.taskID)
+            Browser session ID: \(browserResult.sessionID)
+            Browser tab ID: \(browserResult.tabID)
+            """
+            return AgentToolResult(
+                toolCallID: context.toolCallID,
+                toolName: name,
+                contentText: text,
+                contentJSON: BrowserFetchTool.encodeJSONObject(json),
+                citations: [browserResult.urlString]
+            )
+        case .failed, .timedOut:
+            throw AgentToolError.invalidArguments(browserResult.errorMessage ?? "Connor WKWebView web_fetch(js) failed with status \(browserResult.status.rawValue)")
+        }
     }
 }
