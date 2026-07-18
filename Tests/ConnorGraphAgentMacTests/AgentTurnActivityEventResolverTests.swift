@@ -31,6 +31,8 @@ private func event(id: String) -> AgentEventPresentation {
         kind: "toolRequested",
         title: "Tool requested",
         detail: id,
-        severity: .info
+        severity: .info,
+        runID: nil,
+        sessionID: nil
     )
 }

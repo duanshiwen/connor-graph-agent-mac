@@ -132,10 +132,9 @@ final class GlobalSearchRuntimeCoordinator {
     private func handle(_ destination: GlobalSearchFeatureModel.Destination) {
         switch destination {
         case .newChat(let prompt):
-            chatSessions.newChatSession()
             shell.selection = .agentChat
             Task { @MainActor [weak chatRun] in
-                await chatRun?.submitChat(prompt: prompt, clearComposer: false, displayPrompt: prompt, attachments: [], personReferences: [])
+                await chatRun?.submitNewChat(prompt: prompt, displayPrompt: prompt)
             }
         case .webSearch(let url):
             browser.openURL(url)
