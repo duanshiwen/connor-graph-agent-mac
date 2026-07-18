@@ -859,6 +859,7 @@ final class AppRuntimeLifecycle {
                 hasBackgroundTask: { [weak self] in self?.hasRunningActiveSessionBackgroundTask ?? false },
                 summaryFreshness: { [weak self] in self?.latestChatSummaryFreshness },
                 summaryContext: { [weak self] in self?.latestChatSummaryContextMessage ?? "" },
+                submitNewChat: { [weak self] in await self?.submitNewChat(prompt: $0, displayPrompt: $1) },
                 submit: { [weak self] in await self?.submitChat(prompt: $0, clearComposer: $1, displayPrompt: $2, attachments: $3, personReferences: $4) },
                 cancel: { [weak self] in self?.cancelActiveChatRun() },
                 permission: { [weak self] in self?.setAgentPermissionMode($0) },
@@ -2042,8 +2043,9 @@ final class AppRuntimeLifecycle {
         createSessionOptimistically(title: "未命名的笔记", kind: .note)
     }
 
-    private func createSessionOptimistically(title: String, kind: AgentSessionKind) {
-        guard let chatSessionRepository else { return }
+    @discardableResult
+    private func createSessionOptimistically(title: String, kind: AgentSessionKind) -> String? {
+        guard let chatSessionRepository else { return nil }
         let interaction = AppInteractionPerformance.begin("NewSession.UserActionToFirstFrame")
         defer { DispatchQueue.main.async { AppInteractionPerformance.end(interaction) } }
 
@@ -2150,6 +2152,7 @@ final class AppRuntimeLifecycle {
                 self.errorMessage = message
             }
         }
+        return session.id
     }
 
     func waitForNewSessionPreparation(sessionID: String) async {
@@ -2856,6 +2859,31 @@ final class AppRuntimeLifecycle {
     }
 
     @discardableResult
+    func submitNewChat(
+        prompt rawPrompt: String,
+        displayPrompt rawDisplayPrompt: String? = nil
+    ) async -> String? {
+        let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty,
+              let sessionID = createSessionOptimistically(title: "新对话", kind: .chat) else { return nil }
+
+        let composerPrompt = displayPrompt.flatMap { $0.isEmpty ? nil : $0 } ?? prompt
+        chatComposerCoordinator.updateSelectedChatInputDraft(composerPrompt)
+        await waitForNewSessionPreparation(sessionID: sessionID)
+        guard chatFeatureModel.sessions.selectedSessionID == sessionID,
+              !isLoadingSelectedChatSessionDetail else { return nil }
+
+        return await submitChat(
+            prompt: prompt,
+            clearComposer: true,
+            displayPrompt: displayPrompt,
+            attachments: [],
+            personReferences: []
+        )
+    }
+
+    @discardableResult
     func submitChat(
         prompt rawPrompt: String,
         clearComposer: Bool = false,
@@ -3193,6 +3221,9 @@ extension AppRuntimeLifecycle {
             },
             summaryFreshness: { [weak model] in model?.latestChatSummaryFreshness },
             summaryContext: { [weak model] in model?.latestChatSummaryContextMessage ?? "" },
+            submitNewChat: { [weak model] prompt, display in
+                await model?.submitNewChat(prompt: prompt, displayPrompt: display)
+            },
             submit: { [weak model] prompt, clear, display, attachments, people in
                 await model?.submitChat(prompt: prompt, clearComposer: clear, displayPrompt: display, attachments: attachments, personReferences: people)
             },

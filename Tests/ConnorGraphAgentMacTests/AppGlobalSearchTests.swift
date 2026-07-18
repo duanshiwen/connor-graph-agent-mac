@@ -50,7 +50,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.runtime.globalSearchFeatureModel.query == "invoice")
     }
 
-    @Test func focusEmptyGlobalSearchShowsRecentSearches() throws {
+    @Test func focusEmptyGlobalSearchKeepsRecordedHistoryWithoutShowingOverlay() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -60,7 +60,7 @@ struct AppGlobalSearchTests {
         fixture.runtime.globalSearchFeatureModel.activateField()
 
         #expect(fixture.runtime.globalSearchFeatureModel.isFieldFocused)
-        #expect(fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
+        #expect(!fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
         #expect(fixture.runtime.globalSearchFeatureModel.selectableItems == [.recentSearch("swiftui 搜索")])
     }
 
@@ -114,13 +114,33 @@ struct AppGlobalSearchTests {
 
         fixture.runtime.globalSearchFeatureModel.recordHistoryForTesting(query: "SwiftUI 搜索")
         fixture.runtime.globalSearchFeatureModel.activateField()
-        #expect(fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
+        #expect(!fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
 
         fixture.runtime.globalSearchFeatureModel.clearHistory()
 
         #expect(fixture.runtime.globalSearchFeatureModel.historyEntries.isEmpty)
         #expect(!fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
         #expect(fixture.runtime.globalSearchFeatureModel.isFieldFocused)
+    }
+
+    @Test func sendingGlobalSearchQueryCreatesReadySessionAndSubmitsPrompt() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.runtime.globalSearchFeatureModel.updateQuery("解释 actor isolation")
+        fixture.runtime.globalSearchFeatureModel.performNewChat()
+
+        for _ in 0..<100 {
+            if fixture.runtime.chatFeatureModel.run.transcript.contains(where: { $0.content == "解释 actor isolation" }) {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(fixture.runtime.selection == .agentChat)
+        #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID != nil)
+        #expect(fixture.runtime.chatFeatureModel.run.transcript.contains { $0.content == "解释 actor isolation" })
+        #expect(fixture.runtime.chatFeatureModel.composer.input.isEmpty)
     }
 
     @Test func defaultSearchURLUsesSelectedSearchEngine() throws {

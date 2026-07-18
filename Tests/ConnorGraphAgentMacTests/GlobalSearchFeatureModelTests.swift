@@ -37,6 +37,18 @@ struct GlobalSearchFeatureModelTests {
         model.shutdown()
     }
 
+    @Test func emptyFocusedQueryDoesNotShowRecordedHistoryOverlay() {
+        let model = makeModel()
+        model.recordHistoryForTesting(query: "recorded query")
+
+        model.activateField()
+
+        #expect(model.historyEntries.first?.query == "recorded query")
+        #expect(model.isFieldFocused)
+        #expect(!model.isOverlayPresented)
+        model.shutdown()
+    }
+
     @Test func webSearchUsesProviderAndEmitsURL() throws {
         let model = makeModel()
         model.defaultSearchURLProvider = { URL(string: "https://example.com/search?q=\($0)") }

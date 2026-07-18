@@ -70,7 +70,7 @@ final class GlobalSearchFeatureModel {
         isFieldFocused = true
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            isOverlayPresented = !historyEntries.isEmpty
+            isOverlayPresented = false
             selectedItem = selectableItems.first
             return
         }
@@ -86,7 +86,7 @@ final class GlobalSearchFeatureModel {
         previewTask?.cancel()
         guard !trimmed.isEmpty else {
             previewState = .empty
-            isOverlayPresented = isFieldFocused && !historyEntries.isEmpty
+            isOverlayPresented = false
             selectedItem = selectableItems.first
             return
         }
