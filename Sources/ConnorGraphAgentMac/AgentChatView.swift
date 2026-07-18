@@ -639,6 +639,26 @@ private struct AgentChatConversationView: View {
                 onPreviewAttachment: { attachment in
                     chatActions.composer.previewAttachment(attachment)
                 },
+                onSaveImageAttachment: { attachment in
+                    guard let sourceURL = chatActions.composer.localAttachmentFileURL(attachment) else {
+                        chatActions.composer.showAttachmentToast(
+                            title: "图片另存为失败",
+                            message: "图片原件不存在或已不可用。",
+                            systemImage: "xmark.circle"
+                        )
+                        return
+                    }
+                    chatActions.run.downloadPreviewImage(
+                        AttachmentPreviewModel(
+                            attachment: attachment,
+                            title: attachment.displayName,
+                            subtitle: "",
+                            body: "",
+                            bodyMode: .image,
+                            sourceFileURL: sourceURL
+                        )
+                    )
+                },
                 onCopyAssistantMessage: { message in
                     chatActions.run.copyAssistantMessageToPasteboard(message)
                 },

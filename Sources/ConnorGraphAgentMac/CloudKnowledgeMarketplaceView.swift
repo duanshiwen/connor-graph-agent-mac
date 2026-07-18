@@ -216,13 +216,33 @@ struct CloudKnowledgeMarketplaceDetailPane: View {
     }
 
     private var unavailableMarketplaceHome: some View {
-        ContentUnavailableView {
-            Label(marketplaceUnavailableTitle, systemImage: marketplaceUnavailableSystemImage)
-        } description: {
-            Text(marketplaceUnavailableDescription)
+        ScrollView {
+            VStack(spacing: 16) {
+                Image("KnowledgeMarketplacePoster")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 1120)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    }
+                    .accessibilityLabel("知识市场即将开放")
+
+                Label(marketplaceUnavailableTitle, systemImage: marketplaceUnavailableSystemImage)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
+                Text(marketplaceUnavailableDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 640)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(28)
     }
 
     private var canUseMarketplace: Bool { connectivity.isConnected && backendConnectivity.state != .unreachable }

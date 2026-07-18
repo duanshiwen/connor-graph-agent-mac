@@ -52,6 +52,7 @@ struct AgentInlineAttachmentView: View {
     var localFileURL: URL?
     var layout = AgentInlineAttachmentLayout()
     var onPreview: () -> Void
+    var onSaveImage: () -> Void = {}
 
     var body: some View {
         switch attachment.kind {
@@ -60,7 +61,8 @@ struct AgentInlineAttachmentView: View {
                 attachment: attachment,
                 localFileURL: localFileURL,
                 layout: layout,
-                onPreview: onPreview
+                onPreview: onPreview,
+                onSaveImage: onSaveImage
             )
         case .audio:
             AgentInlineAudioAttachmentView(
@@ -79,6 +81,7 @@ private struct AgentInlineImageAttachmentView: View {
     var localFileURL: URL?
     var layout: AgentInlineAttachmentLayout
     var onPreview: () -> Void
+    var onSaveImage: () -> Void
     @State private var loader = AgentImageThumbnailLoader()
 
     var body: some View {
@@ -103,6 +106,12 @@ private struct AgentInlineImageAttachmentView: View {
             .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(action: onSaveImage) {
+                Label("图片另存为…", systemImage: "square.and.arrow.down")
+            }
+            .disabled(localFileURL == nil)
+        }
         .accessibilityLabel("预览图片附件 \(attachment.displayName)")
         .task(id: localFileURL) {
             guard let localFileURL else { return }
