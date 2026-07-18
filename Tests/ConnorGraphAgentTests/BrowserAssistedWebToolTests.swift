@@ -198,6 +198,82 @@ struct BrowserAssistedWebToolTests {
         #expect(result.contentJSON?.contains("fetched") == true)
     }
 
+    @Test func automaticWebFetchFallsBackToBrowserWhenNativeHTTPFails() async throws {
+        final class Recorder: @unchecked Sendable {
+            var requests: [BrowserAssistedWebFetchRequest] = []
+        }
+        let recorder = Recorder()
+        let nativeClient = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: NativeWebHTTPResponse(
+            data: Data(),
+            statusCode: 403,
+            mimeType: "text/html",
+            finalURL: URL(string: "https://example.com/protected"),
+            textEncodingName: "utf-8"
+        )))
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
+            recorder.requests.append(request)
+            return BrowserAssistedWebFetchResult(
+                status: .fetched,
+                urlString: request.urlString,
+                finalURLString: request.urlString,
+                title: "Browser Fetch",
+                contentText: "Content from the retained browser session",
+                taskID: "task-auto-fallback",
+                sessionID: "session-auto-fallback",
+                tabID: "tab-auto-fallback",
+                errorMessage: nil,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 41
+            )
+        }, nativeFetchClient: nativeClient)
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "url": .string("https://example.com/protected"),
+                "render_mode": .string("auto")
+            ]),
+            context: Self.context()
+        )
+
+        #expect(recorder.requests.count == 1)
+        #expect(result.contentText.contains("retained browser session"))
+        #expect(result.contentJSON?.contains("wkwebview") == true)
+        #expect(result.contentJSON?.contains("\"renderMode\":\"auto\"") == true)
+    }
+
+    @Test func explicitHTTPWebFetchDoesNotFallBackToBrowser() async {
+        final class Recorder: @unchecked Sendable {
+            var requestCount = 0
+        }
+        let recorder = Recorder()
+        let nativeClient = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: NativeWebHTTPResponse(
+            data: Data(),
+            statusCode: 403,
+            mimeType: "text/html",
+            finalURL: URL(string: "https://example.com/protected"),
+            textEncodingName: "utf-8"
+        )))
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
+            recorder.requestCount += 1
+            return nil
+        }, nativeFetchClient: nativeClient)
+
+        do {
+            _ = try await tool.execute(
+                arguments: AgentToolArguments(values: [
+                    "url": .string("https://example.com/protected"),
+                    "render_mode": .string("http")
+                ]),
+                context: Self.context()
+            )
+            Issue.record("Expected the HTTP 403 fetch to fail")
+        } catch {
+            #expect(String(describing: error).contains("HTTP status 403"))
+        }
+        #expect(recorder.requestCount == 0)
+    }
+
     @Test func javascriptWebFetchReportsUserInterventionWhenBrowserRequiresChallenge() async throws {
         let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             BrowserAssistedWebFetchResult(
