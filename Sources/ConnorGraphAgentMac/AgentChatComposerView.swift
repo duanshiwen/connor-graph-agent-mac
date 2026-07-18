@@ -1162,7 +1162,7 @@ private struct ComposerModelSelectionLabel: View {
                 .accessibilityHidden(true)
 
             Text(presentation.title)
-                .font(AgentChatTypography.micro.weight(.medium))
+                .font(AgentChatTypography.metaEmphasis)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .minimumScaleFactor(0.85)
