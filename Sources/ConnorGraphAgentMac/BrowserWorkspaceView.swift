@@ -77,12 +77,11 @@ struct BrowserWorkspaceView: View {
                 GeometryReader { geometry in
                 ZStack(alignment: .topLeading) {
                     if activeTabs.isEmpty {
-                        ContentUnavailableView(
-                            "没有打开的网页",
+                        BrowserEmptyStateView(
                             systemImage: "safari",
-                            description: Text("新建一个标签页开始浏览。")
+                            title: "没有打开的网页",
+                            message: "新建一个标签页开始浏览。"
                         )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ZStack {
                             ForEach(activeTabs) { tab in
@@ -425,13 +424,13 @@ struct BrowserWorkspaceView: View {
             HStack(spacing: 6) {
                 if isExpanded {
                     Text("标签页")
-                        .font(BrowserFloatingTypography.tabTitleSelected)
+                        .font(BrowserFloatingTypography.listTitleSelected)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Button(action: model.toggleVerticalTabSidebarPinned) {
                         Image(systemName: model.isVerticalTabSidebarPinned ? "pin.fill" : "pin")
                             .font(BrowserFloatingTypography.toolbarIcon)
-                            .frame(width: 26, height: 26)
+                            .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(model.isVerticalTabSidebarPinned ? Color.accentColor : Color.secondary)
@@ -442,7 +441,7 @@ struct BrowserWorkspaceView: View {
                 Button(action: { openNewTab(urlString: model.targetURLString, select: true) }) {
                     Image(systemName: "plus")
                         .font(BrowserFloatingTypography.toolbarIcon)
-                        .frame(width: 26, height: 26)
+                        .frame(width: AppButtonLayout.iconButtonSize, height: AppButtonLayout.iconButtonSize)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -450,7 +449,7 @@ struct BrowserWorkspaceView: View {
                 .accessibilityLabel("新建标签页")
             }
             .padding(.horizontal, isExpanded ? 8 : 9)
-            .frame(height: 36)
+            .frame(height: 40)
 
             if isExpanded {
                 HStack(spacing: 6) {
@@ -459,20 +458,19 @@ struct BrowserWorkspaceView: View {
                         .foregroundStyle(.secondary)
                     TextField("筛选标签页", text: $verticalTabFilter)
                         .textFieldStyle(.plain)
-                        .font(BrowserFloatingTypography.tabTitle)
+                        .font(AppTypography.meta)
                     if !verticalTabFilter.isEmpty {
                         Button(action: { verticalTabFilter = "" }) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(BrowserFloatingTypography.tabIcon)
                                 .foregroundStyle(.tertiary)
+                                .frame(width: 24, height: 24)
                         }
                         .buttonStyle(.plain)
                         .help("清除筛选")
                     }
                 }
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .browserPanelInputSurface()
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
             }
@@ -481,7 +479,7 @@ struct BrowserWorkspaceView: View {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if groups.isEmpty, isExpanded {
                         Text("没有匹配的标签页")
-                            .font(BrowserFloatingTypography.tabTitle)
+                            .font(BrowserFloatingTypography.listTitle)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 8)
@@ -582,7 +580,7 @@ struct BrowserWorkspaceView: View {
                 onEditingChanged: { isAddressEditing = $0 },
                 onSubmit: navigateFromAddressBar
             )
-            .frame(height: 28)
+            .frame(height: AppButtonLayout.height)
 
             Button(action: { model.toggleBookmarksPanel() }) {
                 BrowserToolbarIconButtonLabel(
@@ -730,23 +728,23 @@ struct BrowserWorkspaceView: View {
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 70, alignment: .trailing)
             Button(action: { findInPage(forward: false) }) {
-                Image(systemName: "chevron.up").frame(width: 18, height: 18)
+                Image(systemName: "chevron.up").frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .help("上一个匹配项")
             Button(action: { findInPage(forward: true) }) {
-                Image(systemName: "chevron.down").frame(width: 18, height: 18)
+                Image(systemName: "chevron.down").frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .help("下一个匹配项")
             Button(action: closeFindBar) {
-                Image(systemName: "xmark").frame(width: 18, height: 18)
+                Image(systemName: "xmark").frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .help("关闭查找")
         }
         .padding(.horizontal, 12)
-        .frame(height: 32)
+        .frame(height: 40)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) { Divider() }
     }

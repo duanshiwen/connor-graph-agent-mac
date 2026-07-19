@@ -51,10 +51,10 @@ struct BrowserBookmarksPanelView: View {
             Spacer()
             Button(action: addCurrentPageToBookmarks) {
                 Label(currentPageIsBookmarked ? "已收藏" : "收藏当前页", systemImage: currentPageIsBookmarked ? "checkmark" : "plus")
-                    .font(AppTypography.captionEmphasis)
+                    .font(AppTypography.metaEmphasis)
                     .labelStyle(.titleAndIcon)
                     .padding(.horizontal, 8)
-                    .frame(height: 22)
+                    .frame(height: 28)
                     .background(Color.accentColor.opacity(currentPageIsBookmarked ? 0.08 : 0.12), in: Capsule())
             }
             .buttonStyle(.plain)
@@ -115,12 +115,14 @@ struct BrowserBookmarksPanelView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(AppTypography.caption)
                         .foregroundStyle(.tertiary)
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
                 .help("清空收藏搜索")
                 .accessibilityLabel("清空收藏搜索")
             }
         }
+        .browserPanelInputSurface()
         .padding(.horizontal, AppShellLayout.spaceM)
         .padding(.vertical, AppShellLayout.spaceS)
     }
@@ -146,10 +148,10 @@ struct BrowserBookmarksPanelView: View {
             model.filterBookmarks(query: searchText, groupName: groupName)
         }) {
             Text(title)
-                .font(AppTypography.captionEmphasis)
+                .font(BrowserFloatingTypography.listMetaEmphasis)
                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .frame(minHeight: 28)
                 .background(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.07), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -173,11 +175,13 @@ struct BrowserBookmarksPanelView: View {
                 Button("清除") {
                     model.filterBookmarks(query: searchText, groupName: nil)
                 }
-                .font(AppTypography.captionEmphasis)
+                .font(AppTypography.metaEmphasis)
+                .frame(minHeight: 28)
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
             }
         }
+        .browserPanelInputSurface()
         .padding(.horizontal, AppShellLayout.spaceM)
         .padding(.vertical, AppShellLayout.spaceS)
     }
@@ -187,23 +191,11 @@ struct BrowserBookmarksPanelView: View {
     private var emptyState: some View {
         let isSearching = !searchText.isEmpty
 
-        return VStack(spacing: AppShellLayout.spaceS) {
-            Spacer()
-            Image(systemName: "star")
-                .font(.system(size: 32))
-                .foregroundStyle(.tertiary)
-            Text(isSearching ? "没有找到匹配的收藏" : "还没有收藏网页")
-                .font(BrowserFloatingTypography.hint.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(isSearching ? "可以换个关键词，或者查看全部收藏。" : "遇到想反复查看的资料，可以点星标收藏。康纳同学会把它留在这个工作区里，方便之后继续阅读和提问。")
-                .font(AppTypography.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .padding(.horizontal, AppShellLayout.spaceL)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
+        return BrowserEmptyStateView(
+            systemImage: "star",
+            title: isSearching ? "没有找到匹配的收藏" : "还没有收藏网页",
+            message: isSearching ? "可以换个关键词，或者查看全部收藏。" : "遇到想反复查看的资料，可以点星标收藏。康纳同学会把它留在这个工作区里，方便之后继续阅读和提问。"
+        )
     }
 
     // MARK: - List
@@ -234,7 +226,7 @@ struct BrowserBookmarksPanelView: View {
     @ViewBuilder
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(AppTypography.captionEmphasis)
+            .font(BrowserFloatingTypography.listMetaEmphasis)
             .foregroundStyle(.secondary)
             .padding(.horizontal, AppShellLayout.spaceM)
             .padding(.top, AppShellLayout.spaceM)
@@ -273,11 +265,11 @@ struct BrowserBookmarkRow: View {
                 favicon
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                     Text(displayTitle)
-                        .font(BrowserFloatingTypography.pageTitle)
+                        .font(BrowserFloatingTypography.listTitle)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text(displayURL)
-                        .font(BrowserFloatingTypography.pageURL)
+                        .font(BrowserFloatingTypography.listSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -285,14 +277,14 @@ struct BrowserBookmarkRow: View {
                 Spacer(minLength: AppShellLayout.spaceXS)
                 VStack(alignment: .trailing, spacing: AppShellLayout.spaceXS) {
                     Text(record.groupName)
-                        .font(AppTypography.microEmphasis)
+                        .font(BrowserFloatingTypography.listMetaEmphasis)
                         .foregroundStyle(Color.accentColor)
                         .lineLimit(1)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Color.accentColor.opacity(0.10), in: Capsule())
                     Text(timeString)
-                        .font(AppTypography.monoMicro.monospacedDigit())
+                        .font(BrowserFloatingTypography.listMonospacedMeta.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
             }

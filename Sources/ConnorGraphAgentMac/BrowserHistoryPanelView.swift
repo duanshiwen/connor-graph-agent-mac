@@ -74,12 +74,14 @@ struct BrowserHistoryPanelView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(AppTypography.caption)
                         .foregroundStyle(.tertiary)
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
                 .help("清空历史搜索")
                 .accessibilityLabel("清空历史搜索")
             }
         }
+        .browserPanelInputSurface()
         .padding(.horizontal, AppShellLayout.spaceM)
         .padding(.vertical, AppShellLayout.spaceS)
     }
@@ -89,23 +91,11 @@ struct BrowserHistoryPanelView: View {
     private var emptyState: some View {
         let isSearching = !model.historySearchQuery.isEmpty
 
-        return VStack(spacing: AppShellLayout.spaceS) {
-            Spacer()
-            Image(systemName: "clock")
-                .font(.system(size: 32))
-                .foregroundStyle(.tertiary)
-            Text(isSearching ? "没有找到匹配的浏览记录" : "还没有浏览记录")
-                .font(BrowserFloatingTypography.hint.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(isSearching ? "换个关键词试试，或者回到浏览器继续打开新的网页。" : "你在康纳同学里打开过的网页会出现在这里。之后可以从历史记录回到资料现场，继续和会话一起工作。")
-                .font(AppTypography.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .padding(.horizontal, AppShellLayout.spaceL)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
+        return BrowserEmptyStateView(
+            systemImage: "clock",
+            title: isSearching ? "没有找到匹配的浏览记录" : "还没有浏览记录",
+            message: isSearching ? "换个关键词试试，或者回到浏览器继续打开新的网页。" : "你在康纳同学里打开过的网页会出现在这里。之后可以从历史记录回到资料现场，继续和会话一起工作。"
+        )
     }
 
     // MARK: - List
@@ -135,7 +125,7 @@ struct BrowserHistoryPanelView: View {
     @ViewBuilder
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(AppTypography.captionEmphasis)
+            .font(BrowserFloatingTypography.listMetaEmphasis)
             .foregroundStyle(.secondary)
             .padding(.horizontal, AppShellLayout.spaceM)
             .padding(.top, AppShellLayout.spaceM)
@@ -152,10 +142,11 @@ struct BrowserHistoryPanelView: View {
             Spacer()
             Button(action: { clearConfirmation = true }) {
                 Text("清空")
-                    .font(AppTypography.captionEmphasis)
+                    .font(AppTypography.metaEmphasis)
                     .foregroundStyle(.red)
             }
             .buttonStyle(.plain)
+            .frame(minHeight: 28)
             .disabled(model.historyRecords.isEmpty)
         }
         .padding(.horizontal, AppShellLayout.spaceM)
@@ -187,12 +178,12 @@ private struct BrowserHistoryRow: View {
                 favicon
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                     Text(displayTitle)
-                        .font(BrowserFloatingTypography.pageTitle)
+                        .font(BrowserFloatingTypography.listTitle)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     HStack(spacing: AppShellLayout.spaceXS) {
                         Text(displayURL)
-                            .font(BrowserFloatingTypography.pageURL)
+                            .font(BrowserFloatingTypography.listSubtitle)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -201,14 +192,14 @@ private struct BrowserHistoryRow: View {
                 Spacer(minLength: AppShellLayout.spaceXS)
                 VStack(alignment: .trailing, spacing: AppShellLayout.spaceXS) {
                     Text(record.sessionTitle)
-                        .font(AppTypography.microEmphasis)
+                        .font(BrowserFloatingTypography.listMetaEmphasis)
                         .foregroundStyle(Color.accentColor)
                         .lineLimit(1)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Color.accentColor.opacity(0.10), in: Capsule())
                     Text(timeString)
-                        .font(AppTypography.monoMicro.monospacedDigit())
+                        .font(BrowserFloatingTypography.listMonospacedMeta.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
             }
