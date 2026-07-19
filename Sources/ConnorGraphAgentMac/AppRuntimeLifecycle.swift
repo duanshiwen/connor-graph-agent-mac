@@ -1057,7 +1057,7 @@ final class AppRuntimeLifecycle {
             self.chatFeatureModel.sessions.selectedArtifactDirectories = nil
         }
         chatSessionCoordinator.onSelectionLoaded = { [weak self] snapshot, generation, startedAt in
-            self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
+            await self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
         }
         chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode in
             guard let self, let repository = self.chatSessionRepository else { return }
@@ -2573,7 +2573,7 @@ final class AppRuntimeLifecycle {
         _ snapshot: ChatSessionDetailLoadSnapshot,
         generation: Int,
         startedAt: ContinuousClock.Instant
-    ) {
+    ) async {
         let session = snapshot.session
         markSessionRead(session.id)
         chatRunCoordinator.clearProcessTimelines()
@@ -2592,9 +2592,30 @@ final class AppRuntimeLifecycle {
             sessionID: session.id
         )
         _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
+        let runtimeFactory = chatRunCoordinator.runtimeFactory
+        let configuration = effectiveLoopConfiguration
+        let permissionMode = agentPermissionMode
+        let runtimeState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
+        let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
+        let managerTask = Task.detached(priority: .userInitiated) {
+            runtimeFactory?.makeNativeSessionManager(
+                session: session,
+                permissionMode: permissionMode,
+                configuration: configuration,
+                sessionWorkspace: runtimeState?.workspace,
+                sessionLLMOverride: runtimeState?.llmOverride,
+                remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
+                allowedMCPToolNames: runtimeState?.allowedMCPToolNames
+            )
+        }
+        let manager = await managerTask.value
+        guard !Task.isCancelled,
+              chatFeatureModel.sessions.selectedSessionID == session.id,
+              chatFeatureModel.sessions.loadingSessionDetailID == session.id
+        else { return }
         chatRunCoordinator.applySelectedSnapshot(
             session: session,
-            manager: makeNativeSessionManager(for: session),
+            manager: manager,
             timeline: snapshot.timeline,
             summary: snapshot.latestSummary
         )
