@@ -21,6 +21,61 @@ enum BrowserFloatingTypography {
     static let tabTitleSelected = AppTypography.captionEmphasis
     static let tabIcon = AppTypography.caption
     static let tabCloseIcon = AppTypography.microEmphasis
+    static let listTitle = AppListTypography.rowTitle
+    static let listTitleSelected = AppListTypography.rowTitleSelected
+    static let listSubtitle = AppListTypography.rowSubtitle
+    static let listMeta = AppListTypography.rowCaption
+    static let listMetaEmphasis = AppListTypography.rowCaptionEmphasized
+    static let listMonospacedMeta: Font = .system(size: 12, design: .monospaced)
+}
+
+struct BrowserEmptyStateView: View {
+    var systemImage: String
+    var title: String
+    var message: String
+
+    var body: some View {
+        VStack(spacing: AppShellLayout.spaceS) {
+            Spacer(minLength: AppShellLayout.spaceL)
+            Image(systemName: systemImage)
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(BrowserFloatingTypography.listTitleSelected)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Text(message)
+                .font(BrowserFloatingTypography.listSubtitle)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+            Spacer(minLength: AppShellLayout.spaceL)
+        }
+        .padding(.horizontal, AppShellLayout.spaceL)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct BrowserPanelInputSurfaceModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 10)
+            .frame(minHeight: AppButtonLayout.height)
+            .background(
+                Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+            }
+    }
+}
+
+extension View {
+    func browserPanelInputSurface() -> some View {
+        modifier(BrowserPanelInputSurfaceModifier())
+    }
 }
 
 struct BrowserSelectionPopover: View {
@@ -339,7 +394,7 @@ struct BrowserFormAssistantPopover: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
-        .controlSize(.small)
+        .controlSize(AppButtonLayout.controlSize)
         .help(title)
     }
 
@@ -381,7 +436,7 @@ struct BrowserFormAssistantPopover: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 6)
-        .frame(height: 24)
+        .frame(height: 28)
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.secondary.opacity(0.18), lineWidth: 1))
     }
 }
@@ -405,7 +460,7 @@ struct BrowserQuickActionBadge: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, 6)
-        .frame(height: 26)
+        .frame(height: 28)
         .foregroundStyle(Color.secondary)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -486,7 +541,7 @@ struct BrowserVerticalTabGroupHeader: View {
 
             if isExpanded {
                 Text(title)
-                    .font(isActive ? BrowserFloatingTypography.tabTitleSelected : BrowserFloatingTypography.tabTitle)
+                    .font(isActive ? BrowserFloatingTypography.listTitleSelected : BrowserFloatingTypography.listTitle)
                     .foregroundStyle(isActive ? .primary : .secondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -527,7 +582,7 @@ struct BrowserVerticalTabRow: View {
 
             if isExpanded {
                 Text(item.displayTitle)
-                    .font(isSelected ? BrowserFloatingTypography.tabTitleSelected : BrowserFloatingTypography.tabTitle)
+                    .font(isSelected ? BrowserFloatingTypography.listTitleSelected : BrowserFloatingTypography.listTitle)
                     .foregroundStyle(isSelected ? .primary : .secondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -535,7 +590,7 @@ struct BrowserVerticalTabRow: View {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(BrowserFloatingTypography.tabCloseIcon)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary.opacity(0.72))
@@ -543,7 +598,7 @@ struct BrowserVerticalTabRow: View {
             }
         }
         .padding(.horizontal, isExpanded ? 7 : 9)
-        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
         .background(tabBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(alignment: .leading) {
             if isSelected {
@@ -590,15 +645,11 @@ struct BrowserDownloadsPanelView: View {
             Divider()
 
             if items.isEmpty {
-                VStack(spacing: AppShellLayout.spaceS) {
-                    Spacer()
-                    Image(systemName: "arrow.down.doc").font(.system(size: 32)).foregroundStyle(.tertiary)
-                    Text("还没有下载项目").font(BrowserFloatingTypography.hint.weight(.semibold)).foregroundStyle(.secondary)
-                    Text("网页下载会显示在这里，并保存到“下载”文件夹。")
-                        .font(AppTypography.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
-                    Spacer()
-                }
-                .padding(AppShellLayout.spaceL)
+                BrowserEmptyStateView(
+                    systemImage: "arrow.down.doc",
+                    title: "还没有下载项目",
+                    message: "网页下载会显示在这里，并保存到“下载”文件夹。"
+                )
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -612,11 +663,12 @@ struct BrowserDownloadsPanelView: View {
 
             Divider()
             HStack {
-                Text("\(items.count) 个项目").font(AppTypography.caption).foregroundStyle(.tertiary)
+                Text("\(items.count) 个项目").font(BrowserFloatingTypography.listMeta).foregroundStyle(.tertiary)
                 Spacer()
                 Button("清除已完成", action: onClearCompleted)
                     .buttonStyle(.plain)
-                    .font(AppTypography.captionEmphasis)
+                    .font(AppTypography.metaEmphasis)
+                    .frame(minHeight: 28)
                     .disabled(!items.contains { $0.status == .finished || $0.status == .failed || $0.status == .cancelled })
             }
             .padding(.horizontal, AppShellLayout.spaceM)
@@ -633,18 +685,21 @@ struct BrowserDownloadsPanelView: View {
                 .foregroundStyle(statusColor(item.status))
                 .frame(width: 24, height: 24)
             VStack(alignment: .leading, spacing: 5) {
-                Text(item.filename).font(BrowserFloatingTypography.pageTitle).lineLimit(1)
+                Text(item.filename).font(BrowserFloatingTypography.listTitle).lineLimit(1)
                 if item.status == .preparing || item.status == .downloading {
                     ProgressView(value: item.progress).controlSize(.small)
                 }
                 Text(statusText(item))
-                    .font(BrowserFloatingTypography.pageURL)
+                    .font(BrowserFloatingTypography.listSubtitle)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             if item.status == .preparing || item.status == .downloading {
-                Button(action: { onCancel(item.id) }) { Image(systemName: "xmark.circle") }
+                Button(action: { onCancel(item.id) }) {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 28, height: 28)
+                }
                     .buttonStyle(.plain).help("取消下载")
             } else if item.status == .finished {
                 Menu {
