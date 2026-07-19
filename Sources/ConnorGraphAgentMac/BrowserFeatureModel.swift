@@ -37,6 +37,7 @@ final class BrowserFeatureModel {
     private(set) var filteredHistoryRecords: [BrowserHistoryRecord] = []
     private(set) var downloadItems: [BrowserDownloadItem] = []
     private(set) var sitePermissionRecords: [String: BrowserSitePermissionRecord] = [:]
+    private(set) var formAssistantDisabledHosts: Set<String> = []
     var historySearchQuery = ""
     var internalBrowserEnabled = true
     private(set) var errorMessage: String?
@@ -76,6 +77,7 @@ final class BrowserFeatureModel {
         self.nativeSourceSearchBackend = nativeSourceSearchBackend
         self.userDefaults = userDefaults
         loadSitePermissions()
+        loadFormAssistantPreferences()
         liveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             MainActor.assumeIsolated {
                 self?.recordWebViewEviction(key: key, webView: webView, metadata: metadata)
@@ -141,6 +143,7 @@ final class BrowserFeatureModel {
     }
 
     private static let sitePermissionsDefaultsKey = "browser.site-permissions.v1"
+    private static let formAssistantDisabledHostsDefaultsKey = "browser.form-assistant.disabled-hosts.v1"
 
     private func loadSitePermissions() {
         guard let data = userDefaults.data(forKey: Self.sitePermissionsDefaultsKey),
@@ -153,6 +156,26 @@ final class BrowserFeatureModel {
         let records = sitePermissionRecords.values.sorted { $0.origin < $1.origin }
         guard let data = try? JSONEncoder().encode(records) else { return }
         userDefaults.set(data, forKey: Self.sitePermissionsDefaultsKey)
+    }
+
+    func isFormAssistantEnabled(for host: String) -> Bool {
+        !formAssistantDisabledHosts.contains(host.lowercased())
+    }
+
+    func setFormAssistantEnabled(_ isEnabled: Bool, for host: String) {
+        let normalized = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if isEnabled {
+            formAssistantDisabledHosts.remove(normalized)
+        } else {
+            formAssistantDisabledHosts.insert(normalized)
+        }
+        userDefaults.set(Array(formAssistantDisabledHosts).sorted(), forKey: Self.formAssistantDisabledHostsDefaultsKey)
+    }
+
+    private func loadFormAssistantPreferences() {
+        let values = userDefaults.stringArray(forKey: Self.formAssistantDisabledHostsDefaultsKey) ?? []
+        formAssistantDisabledHosts = Set(values.map { $0.lowercased() })
     }
 
     var currentSessionID: String {

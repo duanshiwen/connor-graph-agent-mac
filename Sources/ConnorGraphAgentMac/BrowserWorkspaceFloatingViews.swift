@@ -174,6 +174,224 @@ struct BrowserSelectionThreadList: View {
     }
 }
 
+struct BrowserFormAssistantPopover: View {
+    var state: BrowserFormAssistantState
+    @Binding var question: String
+    var tone: Binding<BrowserFormAssistantTone>
+    var length: Binding<BrowserFormAssistantLength>
+    var language: Binding<BrowserFormAssistantLanguage>
+    var siteEnabled: Bool
+    var canUndo: Bool
+    var onTask: (BrowserFormQuickTask) -> Void
+    var onAsk: () -> Void
+    var onCancel: () -> Void
+    var onUpdateCandidate: (UUID, String) -> Void
+    var onInsert: (String, BrowserFormInsertionMode) -> Void
+    var onUndo: () -> Void
+    var onToggleSite: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label("输入助手", systemImage: "sparkles")
+                    .font(BrowserFloatingTypography.popoverTitle)
+                Text(state.semantic.displayName)
+                    .font(BrowserFloatingTypography.hint)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button(siteEnabled ? "在此网站关闭" : "在此网站启用", action: onToggleSite)
+                    if canUndo { Button("撤销上次插入", systemImage: "arrow.uturn.backward", action: onUndo) }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(BrowserFloatingTypography.toolbarIcon)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("输入助手设置")
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(BrowserFloatingTypography.toolbarIcon)
+                }
+                .buttonStyle(.borderless)
+                .help("关闭输入助手")
+            }
+
+            if state.field.sensitive {
+                Label(state.field.sensitiveReason.isEmpty ? "此字段可能包含敏感信息，请手动填写。" : state.field.sensitiveReason,
+                      systemImage: "hand.raised.fill")
+                    .font(BrowserFloatingTypography.messageBody)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            } else if !siteEnabled {
+                Text("此网站的输入助手已关闭。")
+                    .font(BrowserFloatingTypography.messageBody)
+                    .foregroundStyle(.secondary)
+            } else {
+                fieldSummary
+                controls
+
+                if state.candidates.isEmpty && !state.isGenerating {
+                    HStack(spacing: 6) {
+                        ForEach(state.quickTasks) { task in
+                            Button { onTask(task) } label: {
+                                BrowserQuickActionBadge(title: task.title, systemImage: task.systemImage)
+                            }
+                            .buttonStyle(.plain)
+                            .help(task.prompt)
+                        }
+                    }
+                }
+
+                if state.isGenerating {
+                    HStack(spacing: 7) {
+                        ProgressView().controlSize(.small)
+                        Text("正在生成候选…").font(BrowserFloatingTypography.messageBody).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("取消", action: onCancel).buttonStyle(.plain).font(BrowserFloatingTypography.hint)
+                    }
+                    .padding(.vertical, 6)
+                }
+
+                if !state.candidates.isEmpty {
+                    ScrollView {
+                        LazyVStack(spacing: 7) {
+                            ForEach(state.candidates) { candidate in
+                                candidateRow(candidate)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 260)
+
+                    HStack(spacing: 5) {
+                        refinementButton("更简短", prompt: "将当前候选改得更简短，继续返回三个候选。")
+                        refinementButton("更正式", prompt: "将当前候选改得更正式，继续返回三个候选。")
+                        refinementButton("更友好", prompt: "将当前候选改得更友好自然，继续返回三个候选。")
+                        refinementButton("重新生成", prompt: "根据当前要求重新生成三个不同候选。")
+                    }
+                }
+
+                if let latestRequest = state.messages.last(where: { $0.role == .user }) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("你").font(BrowserFloatingTypography.messageRole).foregroundStyle(ConnorCraftPalette.accent)
+                        Text(latestRequest.text).font(BrowserFloatingTypography.hint).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+
+                if let error = state.errorMessage, !error.isEmpty {
+                    Text(error).font(BrowserFloatingTypography.hint).foregroundStyle(.red)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("继续修改或说明你的要求…", text: $question, axis: .vertical)
+                        .font(BrowserFloatingTypography.input)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...3)
+                        .onSubmit(onAsk)
+                    AgentSendControlButton(
+                        isSubmitting: state.isGenerating,
+                        isDisabled: !state.isGenerating && question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        action: state.isGenerating ? onCancel : onAsk
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(Color.secondary.opacity(0.16), lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 8)
+    }
+
+    private var fieldSummary: some View {
+        let label = [state.field.label, state.field.ariaLabel, state.field.placeholder]
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "当前输入框"
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(BrowserFloatingTypography.pageTitle).lineLimit(1)
+            if !state.field.currentValue.isEmpty {
+                Text(state.field.currentValue)
+                    .font(BrowserFloatingTypography.selectedText)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var controls: some View {
+        HStack(spacing: 6) {
+            compactPicker("语气", selection: tone, values: BrowserFormAssistantTone.allCases)
+            compactPicker("长度", selection: length, values: BrowserFormAssistantLength.allCases)
+            compactPicker("语言", selection: language, values: BrowserFormAssistantLanguage.allCases)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func compactPicker<Value: Hashable & Identifiable & RawRepresentable>(
+        _ title: String,
+        selection: Binding<Value>,
+        values: [Value]
+    ) -> some View where Value.RawValue == String {
+        Picker(title, selection: selection) {
+            ForEach(values) { value in Text(value.rawValue).tag(value) }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .help(title)
+    }
+
+    private func candidateRow(_ candidate: BrowserFormCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(candidate.label).font(BrowserFloatingTypography.messageRole).foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button("插入到光标", systemImage: "text.cursor") { onInsert(candidate.text, .insert) }
+                    Button("替换选中内容", systemImage: "selection.pin.in.out") { onInsert(candidate.text, .replaceSelection) }
+                    Button("替换全部", systemImage: "arrow.triangle.2.circlepath") { onInsert(candidate.text, .replaceAll) }
+                } label: {
+                    Label("插入", systemImage: "arrow.down.to.line.compact")
+                        .font(BrowserFloatingTypography.quickAction)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+            TextEditor(text: Binding(
+                get: { candidate.text },
+                set: { onUpdateCandidate(candidate.id, $0) }
+            ))
+            .font(BrowserFloatingTypography.messageBody)
+            .scrollContentBackground(.hidden)
+            .frame(minHeight: 48, maxHeight: 82)
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.secondary.opacity(0.10), lineWidth: 1))
+    }
+
+    private func refinementButton(_ title: String, prompt: String) -> some View {
+        Button {
+            onTask(.init(id: title, title: title, systemImage: "wand.and.stars", prompt: prompt))
+        } label: {
+            Text(title).font(BrowserFloatingTypography.quickAction).lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .frame(height: 24)
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.secondary.opacity(0.18), lineWidth: 1))
+    }
+}
+
+enum BrowserFormInsertionMode: String, Sendable {
+    case insert
+    case replaceSelection
+    case replaceAll
+}
+
 struct BrowserQuickActionBadge: View {
     var title: String
     var systemImage: String

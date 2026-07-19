@@ -41,6 +41,11 @@ struct BrowserWorkspaceView: View {
     @State private var findQuery = ""
     @State private var findResultText = ""
     @State private var readerHTMLByTabID: [UUID: String] = [:]
+    @State private var formAssistant: BrowserFormAssistantState?
+    @State private var formAssistantQuestion = ""
+    @State private var formGenerationTask: Task<Void, Never>?
+    @State private var formCandidateCache: [String: BrowserFormCandidateCacheEntry] = [:]
+    @State private var formUndoReceipt: BrowserFormInsertionReceipt?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -120,6 +125,31 @@ struct BrowserWorkspaceView: View {
                         .position(layout.position)
                         .transition(.scale(scale: 0.96).combined(with: .opacity))
                     }
+
+                    if let assistant = formAssistant, assistant.tabID == activeSelectedTabID {
+                        let layout = selectionPopoverLayout(for: assistant.field.rect, in: geometry.size)
+                        BrowserFormAssistantPopover(
+                            state: assistant,
+                            question: $formAssistantQuestion,
+                            tone: formToneBinding,
+                            length: formLengthBinding,
+                            language: formLanguageBinding,
+                            siteEnabled: isFormAssistantSiteEnabled(assistant.field.pageURL),
+                            canUndo: formUndoReceipt?.token == assistant.field.token,
+                            onTask: generateFormCandidates,
+                            onAsk: askFormAssistant,
+                            onCancel: cancelFormGeneration,
+                            onUpdateCandidate: updateFormCandidate,
+                            onInsert: insertFormCandidate,
+                            onUndo: undoFormInsertion,
+                            onToggleSite: toggleFormAssistantForCurrentSite,
+                            onClose: closeFormAssistant
+                        )
+                        .frame(width: layout.width)
+                        .frame(maxHeight: layout.maxHeight)
+                        .position(layout.position)
+                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    }
                 }
 
                 // Floating panels overlay on the right side
@@ -169,6 +199,7 @@ struct BrowserWorkspaceView: View {
             installBrowserKeyMonitorIfNeeded()
         }
         .onDisappear {
+            cancelFormGeneration()
             captureRestorationSnapshotsForLiveTabs()
             pauseAllBrowserMedia()
             markAllBrowserTabsHidden()
@@ -189,6 +220,7 @@ struct BrowserWorkspaceView: View {
             questionText = ""
         }
         .onChange(of: activeSelectedTabID) { _, _ in
+            closeFormAssistant()
             isAddressEditing = false
             syncAddressTextWithActiveTab()
             markVisibleTabInLiveStore()
@@ -262,6 +294,7 @@ struct BrowserWorkspaceView: View {
             },
             onContentProcessTerminated: { webView in recoverWebContentProcess(webView, tabID: tab.id) },
             onSelectionChanged: { selection in showSelectionPopover(selection, tabID: tab.id) },
+            onEditableFieldChanged: { payload in handleEditableField(payload, tabID: tab.id) },
             onRestorationReady: { webView in restoreSnapshotIfNeeded(for: tab.id, in: webView) },
             isPrivate: privateTabIDs.contains(tab.id),
             isVisible: isSelected
@@ -732,6 +765,7 @@ struct BrowserWorkspaceView: View {
         if privateTabIDs.contains(parentTabID) { privateTabIDs.insert(tabID) }
         coordinator.onNavigationStateChanged = { state in updateNavigationState(state, for: tabID) }
         coordinator.onSelectionChanged = { selection in showSelectionPopover(selection, tabID: tabID) }
+        coordinator.onEditableFieldChanged = { payload in handleEditableField(payload, tabID: tabID) }
         coordinator.onRestorationReady = { view in restoreSnapshotIfNeeded(for: tabID, in: view) }
         coordinator.onContentProcessTerminated = { view in recoverWebContentProcess(view, tabID: tabID) }
         mutateActiveSession { session in
@@ -783,6 +817,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func selectTab(_ id: BrowserTabState.ID) {
+        closeFormAssistant()
         mutateActiveSession { session in
             session.selectedTabID = id
             session.selectionPopover = nil
@@ -792,6 +827,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func closeTab(_ id: BrowserTabState.ID) {
+        if formAssistant?.tabID == id { closeFormAssistant() }
         var shouldReturnToConversation = false
         let wasPrivate = privateTabIDs.contains(id)
         let closingWebView = webViewsByTabID[id]
@@ -842,6 +878,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func updateNavigationState(_ state: WebNavigationState, for tabID: BrowserTabState.ID) {
+        if state.isLoading, formAssistant?.tabID == tabID { closeFormAssistant() }
         if !state.isLoading, state.errorMessage == nil { processRecoveryAttempts.remove(tabID) }
         var displayURL = state.url
         mutateActiveSession { session in
@@ -961,7 +998,272 @@ struct BrowserWorkspaceView: View {
         }
     }
 
+    private var formToneBinding: Binding<BrowserFormAssistantTone> {
+        Binding(
+            get: { formAssistant?.tone ?? .natural },
+            set: { value in
+                guard var state = formAssistant else { return }
+                state.tone = value
+                formAssistant = state
+            }
+        )
+    }
+
+    private var formLengthBinding: Binding<BrowserFormAssistantLength> {
+        Binding(
+            get: { formAssistant?.length ?? .medium },
+            set: { value in
+                guard var state = formAssistant else { return }
+                state.length = value
+                formAssistant = state
+            }
+        )
+    }
+
+    private var formLanguageBinding: Binding<BrowserFormAssistantLanguage> {
+        Binding(
+            get: { formAssistant?.language ?? .automatic },
+            set: { value in
+                guard var state = formAssistant else { return }
+                state.language = value
+                formAssistant = state
+            }
+        )
+    }
+
+    private func handleEditableField(_ payload: BrowserEditableFieldPayload, tabID: BrowserTabState.ID) {
+        guard tabID == activeSelectedTabID else { return }
+        switch payload.event {
+        case .dismissed:
+            if formAssistant?.field.token == payload.token { closeFormAssistant() }
+        case .moved:
+            guard var state = formAssistant, state.field.token == payload.token else { return }
+            state.field.rect = payload.rect
+            formAssistant = state
+        case .focused:
+            cancelFormGeneration()
+            formUndoReceipt = formUndoReceipt?.token == payload.token ? formUndoReceipt : nil
+            let semantic = BrowserFormAssistantClassifier.semantic(for: payload)
+            let tasks = BrowserFormAssistantClassifier.quickTasks(for: semantic, hasText: !payload.currentValue.isEmpty)
+            formAssistant = BrowserFormAssistantState(
+                tabID: tabID,
+                field: payload,
+                semantic: semantic,
+                quickTasks: tasks
+            )
+            formAssistantQuestion = ""
+            closeSelectionPopover(policy: .explicitClose)
+        }
+    }
+
+    private func closeFormAssistant() {
+        cancelFormGeneration()
+        formAssistant = nil
+        formAssistantQuestion = ""
+    }
+
+    private func isFormAssistantSiteEnabled(_ urlString: String) -> Bool {
+        guard let host = URL(string: urlString)?.host else { return true }
+        return model.isFormAssistantEnabled(for: host)
+    }
+
+    private func toggleFormAssistantForCurrentSite() {
+        guard let state = formAssistant, let host = URL(string: state.field.pageURL)?.host else { return }
+        model.setFormAssistantEnabled(!model.isFormAssistantEnabled(for: host), for: host)
+        if !model.isFormAssistantEnabled(for: host) { cancelFormGeneration() }
+    }
+
+    private func generateFormCandidates(_ task: BrowserFormQuickTask) {
+        requestFormCandidates(task.prompt, displayRequest: task.title)
+    }
+
+    private func askFormAssistant() {
+        let request = formAssistantQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty else { return }
+        requestFormCandidates(request, displayRequest: request)
+    }
+
+    private func requestFormCandidates(_ request: String, displayRequest: String) {
+        guard var state = formAssistant,
+              !state.field.sensitive,
+              isFormAssistantSiteEnabled(state.field.pageURL),
+              !state.isGenerating
+        else { return }
+
+        let cacheKey = formCandidateCacheKey(state: state, request: request)
+        if let cached = formCandidateCache[cacheKey], Date().timeIntervalSince(cached.createdAt) < 300 {
+            state.candidates = cached.candidates
+            state.errorMessage = nil
+            state.messages.append(.init(role: .user, text: displayRequest))
+            state.messages.append(.init(role: .assistant, text: "已使用最近生成的候选。"))
+            formAssistant = state
+            formAssistantQuestion = ""
+            return
+        }
+
+        state.isGenerating = true
+        state.errorMessage = nil
+        state.messages.append(.init(role: .user, text: displayRequest))
+        formAssistant = state
+        formAssistantQuestion = ""
+        let token = state.field.token
+        let tabID = state.tabID
+
+        chat.appendSessionRecord(
+            "browser.form-assistant.generate",
+            state.field.pageTitle.isEmpty ? "网页输入助手" : state.field.pageTitle,
+            displayRequest,
+            [
+                "pageHost": URL(string: state.field.pageURL)?.host ?? "",
+                "fieldSemantic": state.semantic.rawValue,
+                "fieldLabel": String(state.field.label.prefix(200)),
+                "tabID": tabID.uuidString
+            ],
+            activeSessionID
+        )
+
+        formGenerationTask?.cancel()
+        formGenerationTask = Task {
+            let prompt = BrowserFormAssistantPromptBuilder.prompt(state: state, request: request)
+            guard !Task.isCancelled else { return }
+            let displayPrompt = "网页输入助手\n字段：\(state.semantic.displayName)\n要求：\(displayRequest)"
+            let answer = await chat.submit(prompt, displayPrompt)
+            guard !Task.isCancelled else { return }
+            let candidates = await Task.detached(priority: .userInitiated) {
+                BrowserFormCandidateParser.parse(answer ?? "")
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard var current = formAssistant,
+                      current.tabID == tabID,
+                      current.field.token == token
+                else { return }
+                current.isGenerating = false
+                if candidates.isEmpty {
+                    current.errorMessage = chat.currentErrorMessage() ?? "未能生成候选，请重试。"
+                } else {
+                    current.candidates = candidates
+                    current.messages.append(.init(role: .assistant, text: "已生成 \(candidates.count) 个候选。"))
+                    formCandidateCache[cacheKey] = BrowserFormCandidateCacheEntry(createdAt: Date(), candidates: candidates)
+                    formCandidateCache = formCandidateCache.filter { Date().timeIntervalSince($0.value.createdAt) < 300 }
+                }
+                formAssistant = current
+                formGenerationTask = nil
+            }
+        }
+    }
+
+    private func cancelFormGeneration() {
+        guard formGenerationTask != nil || formAssistant?.isGenerating == true else { return }
+        formGenerationTask?.cancel()
+        formGenerationTask = nil
+        chat.cancelActiveRun()
+        if var state = formAssistant {
+            state.isGenerating = false
+            formAssistant = state
+        }
+    }
+
+    private func updateFormCandidate(_ id: UUID, _ text: String) {
+        guard var state = formAssistant,
+              let index = state.candidates.firstIndex(where: { $0.id == id })
+        else { return }
+        state.candidates[index].text = text
+        formAssistant = state
+    }
+
+    private func insertFormCandidate(_ text: String, mode: BrowserFormInsertionMode) {
+        guard let state = formAssistant, let webView = activeWebView else { return }
+        mutateEditableField(
+            webView: webView,
+            token: state.field.token,
+            text: text,
+            mode: mode,
+            expectedCurrentValue: nil
+        ) { receipt in
+            guard var current = formAssistant, current.field.token == state.field.token else { return }
+            if receipt.ok {
+                current.field.currentValue = receipt.insertedValue ?? text
+                current.errorMessage = nil
+                formUndoReceipt = receipt
+            } else {
+                current.errorMessage = receipt.reason ?? "插入失败，请重新选择输入框。"
+            }
+            formAssistant = current
+        }
+    }
+
+    private func undoFormInsertion() {
+        guard let receipt = formUndoReceipt,
+              let token = receipt.token,
+              let previous = receipt.previousValue,
+              let inserted = receipt.insertedValue,
+              let webView = activeWebView
+        else { return }
+        mutateEditableField(
+            webView: webView,
+            token: token,
+            text: previous,
+            mode: .replaceAll,
+            expectedCurrentValue: inserted
+        ) { result in
+            guard var current = formAssistant, current.field.token == token else { return }
+            if result.ok {
+                current.field.currentValue = previous
+                current.errorMessage = nil
+                formUndoReceipt = nil
+            } else {
+                current.errorMessage = result.reason ?? "未能撤销。"
+            }
+            formAssistant = current
+        }
+    }
+
+    private func mutateEditableField(
+        webView: WKWebView,
+        token: String,
+        text: String,
+        mode: BrowserFormInsertionMode,
+        expectedCurrentValue: String?,
+        completion: @escaping (BrowserFormInsertionReceipt) -> Void
+    ) {
+        Task {
+            do {
+                let value = try await webView.callAsyncJavaScript(
+                    EmbeddedWebView.editableFieldMutationScript,
+                    arguments: [
+                        "token": token,
+                        "text": text,
+                        "mode": mode.rawValue,
+                        "expectedCurrentValue": expectedCurrentValue ?? NSNull()
+                    ],
+                    in: nil,
+                    contentWorld: .page
+                )
+                guard let dictionary = value as? [String: Any] else {
+                    completion(.init(ok: false, reason: "网页未返回插入结果。", previousValue: nil, insertedValue: nil, token: token))
+                    return
+                }
+                completion(.init(
+                    ok: dictionary["ok"] as? Bool ?? false,
+                    reason: dictionary["reason"] as? String,
+                    previousValue: dictionary["previousValue"] as? String,
+                    insertedValue: dictionary["insertedValue"] as? String,
+                    token: dictionary["token"] as? String ?? token
+                ))
+            } catch {
+                completion(.init(ok: false, reason: error.localizedDescription, previousValue: nil, insertedValue: nil, token: token))
+            }
+        }
+    }
+
+    private func formCandidateCacheKey(state: BrowserFormAssistantState, request: String) -> String {
+        [state.field.pageURL, state.field.token, state.field.currentValue, state.tone.rawValue, state.length.rawValue, state.language.rawValue, request]
+            .joined(separator: "|")
+    }
+
     private func showSelectionPopover(_ payload: BrowserSelectionPayload, tabID: BrowserTabState.ID) {
+        closeFormAssistant()
         let page = BrowserPageContext(url: payload.pageURL, title: payload.pageTitle, text: payload.pageText)
         let context = BrowserSelectionContext(page: page, selectedText: payload.selectedText)
         guard context.hasSelectionContext else { return }
@@ -1028,6 +1330,10 @@ struct BrowserWorkspaceView: View {
                 && !event.modifierFlags.contains(.option)
             if event.keyCode == 53, isFindBarVisible {
                 closeFindBar()
+                return nil
+            }
+            if event.keyCode == 53, formAssistant != nil {
+                closeFormAssistant()
                 return nil
             }
             if commandOnly, characters == "f" {
@@ -1381,4 +1687,9 @@ private final class SelectAllOnFocusTextField: NSTextField {
         }
         return didBecomeFirstResponder
     }
+}
+
+private struct BrowserFormCandidateCacheEntry {
+    var createdAt: Date
+    var candidates: [BrowserFormCandidate]
 }
