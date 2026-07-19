@@ -106,16 +106,22 @@ final class AIConnectionsFeatureModel {
 
     func selectDefaultConnection(_ connectionID: String) {
         guard let connection = connectionConfigs.first(where: { $0.id == connectionID }) else { return }
-        defaultConnectionID = connection.id
-        connectionName = connection.name
-        providerMode = connection.providerMode
-        baseURLString = connection.baseURLString
-        model = connection.model
-        selectedModel = connection.effectiveModel
-        shouldFetchModelsList = connection.shouldFetchModelsList
-        hasAPIKey = connection.hasAPIKey
-        apiKeyInput = ""
-        persistSettings(rebuildRuntime: true)
+        do {
+            let existing = (try? settingsRepository.loadSettings()) ?? .default
+            let settings = AppLLMSettings(
+                connections: connectionConfigs,
+                defaultConnectionID: connection.id,
+                defaultThinkingLevel: existing.defaultThinkingLevel
+            )
+            try settingsRepository.save(settings: settings, apiKey: nil)
+            apply(try settingsRepository.loadSettings())
+            onRuntimeSettingsChanged(true)
+            settingsMessage = "默认连接已更新。"
+            errorMessage = nil
+            Task { await reloadModelConnections() }
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func selectDefaultThinkingLevel(_ level: AppLLMThinkingLevel) {
@@ -222,7 +228,22 @@ final class AIConnectionsFeatureModel {
         if wasDefault {
             defaultConnectionID = connectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
         }
-        persistSettings(rebuildRuntime: true)
+        do {
+            let existing = (try? settingsRepository.loadSettings()) ?? .default
+            let settings = AppLLMSettings(
+                connections: connectionConfigs,
+                defaultConnectionID: defaultConnectionID,
+                defaultThinkingLevel: existing.defaultThinkingLevel
+            )
+            try settingsRepository.save(settings: settings, apiKey: nil)
+            apply(try settingsRepository.loadSettings())
+            onRuntimeSettingsChanged(true)
+            settingsMessage = "连接已删除。"
+            errorMessage = nil
+            Task { await reloadModelConnections() }
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func capabilityDetailPresentation(for connectionID: String) -> AppProviderCapabilityDetailPresentation? {
@@ -245,46 +266,6 @@ final class AIConnectionsFeatureModel {
             settingsMessage = "连接名称已更新。"
             healthCheckMessage = nil
             errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func persistSettings(rebuildRuntime: Bool) {
-        do {
-            let existing = (try? settingsRepository.loadSettings()) ?? .default
-            var connections = connectionConfigs.isEmpty ? existing.connections : connectionConfigs
-            let targetID = defaultConnectionID.isEmpty ? existing.defaultConnectionID : defaultConnectionID
-            let updated = AppLLMConnectionConfig(
-                id: targetID,
-                name: connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? (connections.first(where: { $0.id == targetID })?.name ?? (providerMode == .openAICompatible ? "OpenAI Compatible" : "Claude"))
-                    : connectionName.trimmingCharacters(in: .whitespacesAndNewlines),
-                providerMode: providerMode,
-                baseURLString: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
-                model: model.trimmingCharacters(in: .whitespacesAndNewlines),
-                selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                hasAPIKey: hasAPIKey,
-                shouldFetchModelsList: shouldFetchModelsList
-            )
-            if let index = connections.firstIndex(where: { $0.id == targetID }) { connections[index] = updated }
-            else { connections.append(updated) }
-            let settings = AppLLMSettings(
-                connections: connections,
-                defaultConnectionID: targetID,
-                defaultThinkingLevel: thinkingLevel
-            )
-            connectionConfigs = settings.connections
-            defaultConnectionID = settings.defaultConnectionID
-            let apiKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            try settingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
-            loadSettings()
-            updateWelcomeState()
-            onRuntimeSettingsChanged(rebuildRuntime)
-            settingsMessage = "模型设置已保存。"
-            healthCheckMessage = nil
-            errorMessage = nil
-            Task { await reloadModelConnections() }
         } catch {
             errorMessage = String(describing: error)
         }
