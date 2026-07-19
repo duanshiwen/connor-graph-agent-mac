@@ -699,7 +699,8 @@ private extension AgentPermissionCapability {
         case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
             return true
         case .mutateSessionStatus, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
-             .externalNetwork, .modelCall, .costlyModelCall,
+             .externalNetwork, .readBrowserPage, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile,
+             .modelCall, .costlyModelCall,
              .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile,
              .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand,
              .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .importMailAttachment,

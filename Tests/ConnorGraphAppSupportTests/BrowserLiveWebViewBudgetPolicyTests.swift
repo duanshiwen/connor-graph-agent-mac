@@ -4,6 +4,15 @@ import ConnorGraphAppSupport
 
 @Suite("Browser Live WebView Budget Policy Tests")
 struct BrowserLiveWebViewBudgetPolicyTests {
+    @Test func defaultBudgetKeepsMoreLiveTabsForBrowserAutomation() {
+        let config = BrowserLiveWebViewBudgetConfig()
+
+        #expect(config.maxHiddenLiveWebViews == 8)
+        #expect(config.minHiddenLiveWebViewsToKeep == 2)
+        #expect(config.softProcessMemoryLimitMegabytes == 1536)
+        #expect(config.hiddenEvictionGracePeriodSeconds == 60)
+    }
+
     @Test func evictsLeastRecentlyUsedHiddenEntryWhenHiddenCountExceedsLimit() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let entries = (0..<5).map { index in

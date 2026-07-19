@@ -96,6 +96,7 @@ struct AppGlobalSearchTests {
         defer { fixture.cleanup() }
 
         fixture.runtime.appSettingsModel.defaultSearchEngine = .google
+        fixture.runtime.globalSearchFeatureModel.onDestination = nil
         fixture.runtime.globalSearchFeatureModel.updateQuery("  SwiftUI   Search  ")
         fixture.runtime.globalSearchFeatureModel.performWebSearch()
 
@@ -156,20 +157,31 @@ struct AppGlobalSearchTests {
         #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "q" })?.value == "connor search")
     }
 
-    @Test func globalSearchWebSearchUsesSelectedDefaultSearchEngine() throws {
+    @Test func globalSearchWebSearchCreatesDedicatedSessionWithSelectedDefaultSearchEngine() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
+        let previousSessionID = fixture.runtime.chatFeatureModel.sessions.selectedSessionID
         fixture.runtime.appSettingsModel.defaultSearchEngine = .baidu
         fixture.runtime.globalSearchFeatureModel.updateQuery("康纳 搜索")
         fixture.runtime.globalSearchFeatureModel.performWebSearch()
 
-        let url = try #require(URL(string: fixture.runtime.browserFeatureModel.targetURLString))
+        let searchSessionID = try #require(fixture.runtime.chatFeatureModel.sessions.selectedSessionID)
+        #expect(searchSessionID != previousSessionID)
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.first(where: { $0.id == searchSessionID })?.title == "用户搜索：康纳 搜索")
+        await fixture.runtime.waitForNewSessionPreparation(sessionID: searchSessionID)
+        for _ in 0..<20 where fixture.runtime.browserFeatureModel.workspaceSessionID != searchSessionID {
+            await Task.yield()
+        }
+
+        let tab = try #require(fixture.runtime.browserFeatureModel.workspaceSnapshotsBySessionID[searchSessionID]?.tabs.first)
+        let url = try #require(URL(string: tab.currentURLString.isEmpty ? tab.initialURLString : tab.currentURLString))
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
         #expect(url.host == "www.baidu.com")
         #expect(url.path == "/s")
         #expect(components.queryItems?.first(where: { $0.name == "wd" })?.value == "康纳 搜索")
+        #expect(fixture.runtime.browserFeatureModel.workspaceSessionID == searchSessionID)
         #expect(!fixture.runtime.globalSearchFeatureModel.isOverlayPresented)
     }
 

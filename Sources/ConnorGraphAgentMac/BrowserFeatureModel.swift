@@ -7,6 +7,77 @@ import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
 
+struct BrowserGlobalTabReference: Codable, Hashable, Identifiable, Sendable {
+    var sessionID: String
+    var tabID: UUID
+
+    var id: String { "\(sessionID):\(tabID.uuidString)" }
+}
+
+struct BrowserGlobalTabItem: Identifiable, Equatable, Sendable {
+    var reference: BrowserGlobalTabReference
+    var sessionTitle: String
+    var tab: AppBrowserTabSnapshot
+
+    var id: String { reference.id }
+
+    var displayTitle: String {
+        let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        if let host = URL(string: displayURL)?.host, !host.isEmpty { return host }
+        return "新标签页"
+    }
+
+    var displayURL: String { tab.restoredURLString }
+}
+
+enum BrowserTabLayoutMode: String, Sendable, Equatable {
+    case horizontal
+    case vertical
+}
+
+struct BrowserGlobalTabGroup: Identifiable, Equatable, Sendable {
+    var sessionID: String
+    var sessionTitle: String
+    var tabs: [BrowserGlobalTabItem]
+
+    var id: String { sessionID }
+}
+
+struct BrowserGlobalTabGroupBuilder: Sendable {
+    func groups(from tabs: [BrowserGlobalTabItem], query: String = "") -> [BrowserGlobalTabGroup] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var sessionOrder: [String] = []
+        var groupsBySessionID: [String: BrowserGlobalTabGroup] = [:]
+
+        for tab in tabs {
+            let sessionID = tab.reference.sessionID
+            if groupsBySessionID[sessionID] == nil {
+                sessionOrder.append(sessionID)
+                groupsBySessionID[sessionID] = BrowserGlobalTabGroup(
+                    sessionID: sessionID,
+                    sessionTitle: tab.sessionTitle,
+                    tabs: []
+                )
+            }
+            groupsBySessionID[sessionID]?.tabs.append(tab)
+        }
+
+        return sessionOrder.compactMap { sessionID in
+            guard var group = groupsBySessionID[sessionID] else { return nil }
+            guard !normalizedQuery.isEmpty else { return group }
+            if group.sessionTitle.localizedCaseInsensitiveContains(normalizedQuery) {
+                return group
+            }
+            group.tabs = group.tabs.filter { tab in
+                tab.displayTitle.localizedCaseInsensitiveContains(normalizedQuery)
+                    || tab.displayURL.localizedCaseInsensitiveContains(normalizedQuery)
+            }
+            return group.tabs.isEmpty ? nil : group
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class BrowserFeatureModel {
@@ -25,6 +96,9 @@ final class BrowserFeatureModel {
     private(set) var workspaceSessionID: String?
     var targetURLString = BrowserBuiltInPage.blankURLString
     private(set) var workspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
+    private(set) var globalTabOrder: [BrowserGlobalTabReference] = []
+    private(set) var tabLayoutMode: BrowserTabLayoutMode = .horizontal
+    private(set) var isVerticalTabSidebarPinned = false
     let liveWebViewStore = BrowserLiveWebViewStore()
     private(set) var assistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     private(set) var isBookmarksPanelVisible = false
@@ -37,6 +111,7 @@ final class BrowserFeatureModel {
     private(set) var filteredHistoryRecords: [BrowserHistoryRecord] = []
     private(set) var downloadItems: [BrowserDownloadItem] = []
     private(set) var sitePermissionRecords: [String: BrowserSitePermissionRecord] = [:]
+    private(set) var formAssistantDisabledHosts: Set<String> = []
     var historySearchQuery = ""
     var internalBrowserEnabled = true
     private(set) var errorMessage: String?
@@ -54,6 +129,7 @@ final class BrowserFeatureModel {
     @ObservationIgnored private var historyIndexRequiresRebuild = false
     @ObservationIgnored private var workspaceSessionBinding = BrowserWorkspaceSessionBinding()
     @ObservationIgnored private var isShutdown = false
+    @ObservationIgnored private(set) var automationRuntime: BrowserAutomationRuntime!
 
     @ObservationIgnored var sessionContextProvider: () -> SessionContext = {
         SessionContext(selectedSessionID: nil, activeSessionID: "__fallback__", sessionTitlesByID: [:])
@@ -75,11 +151,20 @@ final class BrowserFeatureModel {
         self.nativeSourceSearchBackend = nativeSourceSearchBackend
         self.userDefaults = userDefaults
         loadSitePermissions()
+        loadFormAssistantPreferences()
+        loadGlobalTabOrder()
+        loadTabLayoutPreferences()
         liveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             MainActor.assumeIsolated {
                 self?.recordWebViewEviction(key: key, webView: webView, metadata: metadata)
             }
         }
+        automationRuntime = BrowserAutomationRuntime(
+            liveStore: liveWebViewStore,
+            snapshotProvider: { [weak self] sessionID in self?.workspaceSnapshotsBySessionID[sessionID] },
+            snapshotSaver: { [weak self] snapshot, sessionID in self?.saveWorkspaceSnapshot(snapshot, for: sessionID) },
+            showWorkspace: { [weak self] sessionID in self?.showWorkspace(for: sessionID) }
+        )
     }
 
     func toggleDownloadsPanel() {
@@ -134,6 +219,38 @@ final class BrowserFeatureModel {
     }
 
     private static let sitePermissionsDefaultsKey = "browser.site-permissions.v1"
+    private static let formAssistantDisabledHostsDefaultsKey = "browser.form-assistant.disabled-hosts.v1"
+    private static let globalTabOrderDefaultsKey = "browser.global-tab-order.v1"
+    private static let tabLayoutModeDefaultsKey = "browser.tab-layout-mode.v1"
+    private static let verticalTabSidebarPinnedDefaultsKey = "browser.vertical-tab-sidebar-pinned.v1"
+
+    func setTabLayoutMode(_ mode: BrowserTabLayoutMode) {
+        guard tabLayoutMode != mode else { return }
+        tabLayoutMode = mode
+        userDefaults.set(mode.rawValue, forKey: Self.tabLayoutModeDefaultsKey)
+    }
+
+    func toggleTabLayoutMode() {
+        setTabLayoutMode(tabLayoutMode == .horizontal ? .vertical : .horizontal)
+    }
+
+    func setVerticalTabSidebarPinned(_ isPinned: Bool) {
+        guard isVerticalTabSidebarPinned != isPinned else { return }
+        isVerticalTabSidebarPinned = isPinned
+        userDefaults.set(isPinned, forKey: Self.verticalTabSidebarPinnedDefaultsKey)
+    }
+
+    func toggleVerticalTabSidebarPinned() {
+        setVerticalTabSidebarPinned(!isVerticalTabSidebarPinned)
+    }
+
+    private func loadTabLayoutPreferences() {
+        if let rawValue = userDefaults.string(forKey: Self.tabLayoutModeDefaultsKey),
+           let mode = BrowserTabLayoutMode(rawValue: rawValue) {
+            tabLayoutMode = mode
+        }
+        isVerticalTabSidebarPinned = userDefaults.bool(forKey: Self.verticalTabSidebarPinnedDefaultsKey)
+    }
 
     private func loadSitePermissions() {
         guard let data = userDefaults.data(forKey: Self.sitePermissionsDefaultsKey),
@@ -146,6 +263,26 @@ final class BrowserFeatureModel {
         let records = sitePermissionRecords.values.sorted { $0.origin < $1.origin }
         guard let data = try? JSONEncoder().encode(records) else { return }
         userDefaults.set(data, forKey: Self.sitePermissionsDefaultsKey)
+    }
+
+    func isFormAssistantEnabled(for host: String) -> Bool {
+        !formAssistantDisabledHosts.contains(host.lowercased())
+    }
+
+    func setFormAssistantEnabled(_ isEnabled: Bool, for host: String) {
+        let normalized = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if isEnabled {
+            formAssistantDisabledHosts.remove(normalized)
+        } else {
+            formAssistantDisabledHosts.insert(normalized)
+        }
+        userDefaults.set(Array(formAssistantDisabledHosts).sorted(), forKey: Self.formAssistantDisabledHostsDefaultsKey)
+    }
+
+    private func loadFormAssistantPreferences() {
+        let values = userDefaults.stringArray(forKey: Self.formAssistantDisabledHostsDefaultsKey) ?? []
+        formAssistantDisabledHosts = Set(values.map { $0.lowercased() })
     }
 
     var currentSessionID: String {
@@ -167,13 +304,107 @@ final class BrowserFeatureModel {
 
     func installLoadedWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
         workspaceSnapshotsBySessionID[sessionID] = snapshot
+        reconcileGlobalTabOrder(for: sessionID)
     }
 
     func saveWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
         var normalized = snapshot
         normalized.updatedAt = Date()
         workspaceSnapshotsBySessionID[sessionID] = normalized
+        reconcileGlobalTabOrder(for: sessionID)
         persistWorkspaceSnapshot(normalized, sessionID)
+    }
+
+    var globalTabs: [BrowserGlobalTabItem] {
+        let titles = sessionContextProvider().sessionTitlesByID
+        var tabsByReference: [BrowserGlobalTabReference: AppBrowserTabSnapshot] = [:]
+        tabsByReference.reserveCapacity(globalTabOrder.count)
+        for (sessionID, snapshot) in workspaceSnapshotsBySessionID {
+            for tab in snapshot.tabs {
+                tabsByReference[BrowserGlobalTabReference(sessionID: sessionID, tabID: tab.id)] = tab
+            }
+        }
+        return globalTabOrder.compactMap { reference in
+            guard let tab = tabsByReference[reference] else { return nil }
+            return BrowserGlobalTabItem(
+                reference: reference,
+                sessionTitle: titles[reference.sessionID] ?? "未命名会话",
+                tab: tab
+            )
+        }
+    }
+
+    @discardableResult
+    func activateGlobalTab(_ reference: BrowserGlobalTabReference) -> Bool {
+        guard var snapshot = workspaceSnapshotsBySessionID[reference.sessionID],
+              snapshot.tabs.contains(where: { $0.id == reference.tabID }) else { return false }
+        snapshot.selectedTabID = reference.tabID
+        snapshot.selectionPopover = nil
+        saveWorkspaceSnapshot(snapshot, for: reference.sessionID)
+        showWorkspace(for: reference.sessionID)
+        return true
+    }
+
+    func removeGlobalTab(_ reference: BrowserGlobalTabReference) {
+        guard var snapshot = workspaceSnapshotsBySessionID[reference.sessionID],
+              let index = snapshot.tabs.firstIndex(where: { $0.id == reference.tabID }) else { return }
+        let wasSelected = snapshot.selectedTabID == reference.tabID
+        snapshot.tabs.remove(at: index)
+        snapshot.selectionPopover = snapshot.selectionPopover?.tabID == reference.tabID ? nil : snapshot.selectionPopover
+        if wasSelected {
+            snapshot.selectedTabID = snapshot.tabs.isEmpty ? nil : snapshot.tabs[min(index, snapshot.tabs.count - 1)].id
+        }
+        saveWorkspaceSnapshot(snapshot, for: reference.sessionID)
+    }
+
+    func replacementGlobalTab(afterClosing reference: BrowserGlobalTabReference) -> BrowserGlobalTabReference? {
+        let references = globalTabs.map(\.reference)
+        guard let index = references.firstIndex(of: reference), references.count > 1 else { return nil }
+        return references[index == references.count - 1 ? index - 1 : index + 1]
+    }
+
+    func removeWorkspaceSnapshot(for sessionID: String) {
+        workspaceSnapshotsBySessionID.removeValue(forKey: sessionID)
+        globalTabOrder.removeAll { $0.sessionID == sessionID }
+        persistGlobalTabOrder()
+        if workspaceSessionID == sessionID { resetWorkspaceBinding() }
+    }
+
+    func retainWorkspaceSessions(_ sessionIDs: Set<String>) {
+        workspaceSnapshotsBySessionID = workspaceSnapshotsBySessionID.filter { sessionIDs.contains($0.key) }
+        globalTabOrder.removeAll { reference in
+            guard sessionIDs.contains(reference.sessionID),
+                  let snapshot = workspaceSnapshotsBySessionID[reference.sessionID] else { return true }
+            return !snapshot.tabs.contains(where: { $0.id == reference.tabID })
+        }
+        persistGlobalTabOrder()
+    }
+
+    private func reconcileGlobalTabOrder(for sessionID: String) {
+        guard let snapshot = workspaceSnapshotsBySessionID[sessionID] else { return }
+        let validTabIDs = Set(snapshot.tabs.map(\.id))
+        var updated = globalTabOrder.filter { reference in
+            reference.sessionID != sessionID || validTabIDs.contains(reference.tabID)
+        }
+        let existing = Set(updated)
+        updated.append(contentsOf: snapshot.tabs.compactMap { tab in
+            let reference = BrowserGlobalTabReference(sessionID: sessionID, tabID: tab.id)
+            return existing.contains(reference) ? nil : reference
+        })
+        guard updated != globalTabOrder else { return }
+        globalTabOrder = updated
+        persistGlobalTabOrder()
+    }
+
+    private func loadGlobalTabOrder() {
+        guard let data = userDefaults.data(forKey: Self.globalTabOrderDefaultsKey),
+              let references = try? JSONDecoder().decode([BrowserGlobalTabReference].self, from: data) else { return }
+        globalTabOrder = references
+    }
+
+    private func persistGlobalTabOrder() {
+        guard let data = try? JSONEncoder().encode(globalTabOrder) else { return }
+        userDefaults.set(data, forKey: Self.globalTabOrderDefaultsKey)
     }
 
     @discardableResult
@@ -233,6 +464,88 @@ final class BrowserFeatureModel {
     }
 
     // MARK: Assisted browser work
+
+    func performBrowserControl(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
+        guard !isShutdown else { throw BrowserAutomationRuntimeError.invalidRequest("Browser feature is shut down") }
+        return try await automationRuntime.perform(request)
+    }
+
+    func shouldAttachAssistedTaskInBackground(_ task: BrowserAssistedTaskState) -> Bool {
+        guard isVisible, workspaceSessionID == task.sessionID else { return true }
+        return workspaceSnapshotsBySessionID[task.sessionID]?.selectedTabID != task.tabID
+    }
+
+    func assistedTaskWebView(for task: BrowserAssistedTaskState) -> WKWebView {
+        automationRuntime.ensureWebView(
+            sessionID: task.sessionID,
+            tabID: task.tabID,
+            initialURLString: task.urlString,
+            onDidFinish: { [weak self] webView in self?.handleAssistedNavigationFinished(taskID: task.id, webView: webView) },
+            onDidFail: { [weak self] webView, error in self?.handleAssistedNavigationFailure(taskID: task.id, webView: webView, error: error) }
+        ).webView
+    }
+
+    private func handleAssistedNavigationFinished(taskID: UUID, webView: WKWebView) {
+        guard let task = assistedTasksByID[taskID], task.status == .running else { return }
+        let urlString = webView.url?.absoluteString ?? task.urlString
+        let title = webView.title ?? task.title
+        if let reason = BrowserAssistedInterventionDetector().interventionReason(urlString: urlString, title: title) {
+            automationRuntime.clearAutomationCallbacks(sessionID: task.sessionID, tabID: task.tabID)
+            revealAssistedTask(task.id, reason: reason)
+            return
+        }
+        guard task.kind == .fetch else {
+            automationRuntime.clearAutomationCallbacks(sessionID: task.sessionID, tabID: task.tabID)
+            completeAssistedTask(task.id, message: "Completed in background")
+            return
+        }
+        let script = """
+        (() => JSON.stringify({
+          title: document.title || '',
+          url: location.href || '',
+          text: document.body ? document.body.innerText.slice(0, 100001) : '',
+          lang: document.documentElement ? (document.documentElement.lang || '') : ''
+        }))()
+        """
+        webView.evaluateJavaScript(script) { [weak self] result, error in
+            let json = result as? String ?? ""
+            Task { @MainActor [weak self] in
+                let payload = await Task.detached(priority: .utility) { () -> (String?, String?, String) in
+                    guard let data = json.data(using: .utf8),
+                          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    else { return (nil, nil, "") }
+                    return (object["title"] as? String, object["url"] as? String, object["text"] as? String ?? "")
+                }.value
+                guard let self, let current = self.assistedTasksByID[taskID], current.status == .running else { return }
+                self.automationRuntime.clearAutomationCallbacks(sessionID: current.sessionID, tabID: current.tabID)
+                if let error {
+                    self.failAssistedTask(taskID, message: error.localizedDescription)
+                    return
+                }
+                let extractedTitle = payload.0?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let extractedURL = payload.1?.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.completeAssistedWebFetch(
+                    taskID,
+                    title: extractedTitle?.isEmpty == false ? extractedTitle! : title,
+                    finalURLString: extractedURL?.isEmpty == false ? extractedURL! : urlString,
+                    text: payload.2
+                )
+            }
+        }
+    }
+
+    private func handleAssistedNavigationFailure(taskID: UUID, webView: WKWebView, error: Error) {
+        guard let task = assistedTasksByID[taskID], task.status == .running else { return }
+        let urlString = webView.url?.absoluteString ?? task.urlString
+        let title = webView.title ?? task.title
+        let message = error.localizedDescription
+        automationRuntime.clearAutomationCallbacks(sessionID: task.sessionID, tabID: task.tabID)
+        if let reason = BrowserAssistedInterventionDetector().interventionReason(urlString: urlString, title: title, errorMessage: message) {
+            revealAssistedTask(task.id, reason: reason)
+        } else if (error as NSError).code != NSURLErrorCancelled {
+            failAssistedTask(task.id, message: message)
+        }
+    }
 
     @discardableResult
     func startAssistedSearch(urlString: String, title: String, revealImmediately: Bool = false) -> BrowserAssistedTaskState {
@@ -580,6 +893,7 @@ final class BrowserFeatureModel {
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
+        automationRuntime.shutdown()
         for task in assistedFetchTimeoutTasksByID.values { task.cancel() }
         assistedFetchTimeoutTasksByID.removeAll()
         for task in historyContentFetchTasksByID.values { task.cancel() }

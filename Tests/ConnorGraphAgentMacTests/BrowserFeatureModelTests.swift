@@ -25,6 +25,133 @@ struct BrowserFeatureModelTests {
         #expect(fixture.model.workspaceSnapshotsBySessionID["session-1"]?.tabs.count == 1)
     }
 
+    @Test func globalTabsPreserveSessionOwnershipAndActivateAtomically() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        fixture.model.sessionContextProvider = {
+            BrowserFeatureModel.SessionContext(
+                selectedSessionID: "session-1",
+                activeSessionID: "session-1",
+                sessionTitlesByID: ["session-1": "Research", "session-2": "Launch"]
+            )
+        }
+        let first = AppBrowserTabSnapshot(initialURLString: "https://example.com/research", title: "Research", currentURLString: "https://example.com/research")
+        let second = AppBrowserTabSnapshot(initialURLString: "https://example.com/launch", title: "Launch", currentURLString: "https://example.com/launch")
+        fixture.model.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [first], selectedTabID: first.id), for: "session-1")
+        fixture.model.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [second], selectedTabID: second.id), for: "session-2")
+        var shownSessionID: String?
+        fixture.model.onShowWorkspace = { shownSessionID = $0 }
+
+        let reference = try #require(fixture.model.globalTabs.first(where: { $0.reference.sessionID == "session-2" })?.reference)
+        #expect(fixture.model.activateGlobalTab(reference))
+
+        #expect(fixture.model.globalTabs.map(\.sessionTitle) == ["Research", "Launch"])
+        #expect(fixture.model.workspaceSessionID == "session-2")
+        #expect(fixture.model.workspaceSnapshotsBySessionID["session-2"]?.selectedTabID == second.id)
+        #expect(shownSessionID == "session-2")
+    }
+
+    @Test func globalTabOrderPersistsAndRemovedSessionIsPurged() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let first = AppBrowserTabSnapshot(initialURLString: "https://example.com/one", currentURLString: "https://example.com/one")
+        let second = AppBrowserTabSnapshot(initialURLString: "https://example.com/two", currentURLString: "https://example.com/two")
+        fixture.model.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [first], selectedTabID: first.id), for: "session-1")
+        fixture.model.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [second], selectedTabID: second.id), for: "session-2")
+
+        let reloaded = BrowserFeatureModel(
+            historyStore: nil,
+            bookmarkStore: nil,
+            nativeSourceSearchBackend: nil,
+            userDefaults: fixture.userDefaults
+        )
+        reloaded.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [first], selectedTabID: first.id), for: "session-1")
+        reloaded.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [second], selectedTabID: second.id), for: "session-2")
+        #expect(reloaded.globalTabOrder.map(\.sessionID) == ["session-1", "session-2"])
+
+        reloaded.retainWorkspaceSessions(["session-2"])
+        #expect(reloaded.globalTabOrder.map(\.sessionID) == ["session-2"])
+        reloaded.shutdown()
+    }
+
+    @Test func verticalTabPreferencesPersistAcrossModelInstances() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        fixture.model.setTabLayoutMode(.vertical)
+        fixture.model.setVerticalTabSidebarPinned(true)
+
+        let reloaded = BrowserFeatureModel(
+            historyStore: nil,
+            bookmarkStore: nil,
+            nativeSourceSearchBackend: nil,
+            userDefaults: fixture.userDefaults
+        )
+        #expect(reloaded.tabLayoutMode == .vertical)
+        #expect(reloaded.isVerticalTabSidebarPinned)
+        reloaded.shutdown()
+    }
+
+    @Test func verticalTabsGroupBySessionTitleAndFilterWithoutExposingIDs() throws {
+        let researchOne = BrowserGlobalTabItem(
+            reference: BrowserGlobalTabReference(sessionID: "session-private-id-1", tabID: UUID()),
+            sessionTitle: "产品调研",
+            tab: AppBrowserTabSnapshot(
+                initialURLString: "https://example.com/surface",
+                title: "Surface Laptop",
+                currentURLString: "https://example.com/surface"
+            )
+        )
+        let launch = BrowserGlobalTabItem(
+            reference: BrowserGlobalTabReference(sessionID: "session-private-id-2", tabID: UUID()),
+            sessionTitle: "发布计划",
+            tab: AppBrowserTabSnapshot(
+                initialURLString: "https://example.com/launch",
+                title: "Launch checklist",
+                currentURLString: "https://example.com/launch"
+            )
+        )
+        let researchTwo = BrowserGlobalTabItem(
+            reference: BrowserGlobalTabReference(sessionID: "session-private-id-1", tabID: UUID()),
+            sessionTitle: "产品调研",
+            tab: AppBrowserTabSnapshot(
+                initialURLString: "https://example.com/notes",
+                title: "Interview notes",
+                currentURLString: "https://example.com/notes"
+            )
+        )
+        let builder = BrowserGlobalTabGroupBuilder()
+
+        let groups = builder.groups(from: [researchOne, launch, researchTwo])
+        #expect(groups.map(\.sessionTitle) == ["产品调研", "发布计划"])
+        #expect(groups.map(\.tabs.count) == [2, 1])
+
+        let sessionMatch = try #require(builder.groups(from: [researchOne, launch, researchTwo], query: "产品").first)
+        #expect(sessionMatch.sessionTitle == "产品调研")
+        #expect(sessionMatch.tabs.count == 2)
+
+        let tabMatch = try #require(builder.groups(from: [researchOne, launch, researchTwo], query: "checklist").first)
+        #expect(tabMatch.sessionTitle == "发布计划")
+        #expect(tabMatch.tabs.map(\.displayTitle) == ["Launch checklist"])
+    }
+
+    @Test func closingGlobalTabKeepsOtherSessionAvailableAsReplacement() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let first = AppBrowserTabSnapshot(initialURLString: "https://example.com/one", currentURLString: "https://example.com/one")
+        let second = AppBrowserTabSnapshot(initialURLString: "https://example.com/two", currentURLString: "https://example.com/two")
+        fixture.model.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [first], selectedTabID: first.id), for: "session-1")
+        fixture.model.installLoadedWorkspaceSnapshot(AppBrowserStateSnapshot(tabs: [second], selectedTabID: second.id), for: "session-2")
+        let firstReference = BrowserGlobalTabReference(sessionID: "session-1", tabID: first.id)
+
+        let replacement = fixture.model.replacementGlobalTab(afterClosing: firstReference)
+        fixture.model.removeGlobalTab(firstReference)
+
+        #expect(replacement == BrowserGlobalTabReference(sessionID: "session-2", tabID: second.id))
+        #expect(fixture.model.workspaceSnapshotsBySessionID["session-1"]?.tabs.isEmpty == true)
+        #expect(fixture.model.globalTabs.map(\.reference) == [try #require(replacement)])
+    }
+
     @Test func bookmarkStateAndFilteringHaveSingleOwner() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
@@ -206,6 +333,17 @@ struct BrowserFeatureModelTests {
         #expect(source.contains("webViewDidClose"))
         #expect(source.contains("webViewWebContentProcessDidTerminate"))
         #expect(!source.contains("customUserAgent"))
+
+        let backgroundSource = try String(contentsOf: browserProjectSourceURL(named: "BrowserBackgroundTaskRunnerView.swift"), encoding: .utf8)
+        #expect(!backgroundSource.contains("customUserAgent"))
+        #expect(backgroundSource.contains("assistedTaskWebView"))
+
+        let automationSource = try String(contentsOf: browserProjectSourceURL(named: "BrowserAutomationRuntime.swift"), encoding: .utf8)
+        #expect(automationSource.contains("WKContentWorld.world"))
+        #expect(automationSource.contains("serialized(key:"))
+        #expect(automationSource.contains("Task.detached(priority: .utility)"))
+        #expect(automationSource.contains("The referenced element is obscured"))
+        #expect(automationSource.contains("Sensitive fields require user handoff"))
     }
 
     @MainActor

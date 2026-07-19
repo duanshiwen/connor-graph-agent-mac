@@ -50,6 +50,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
+    public var browserControlHandler: BrowserControlHandler?
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
     private let sharedCache: AppGraphAgentRuntimeSharedCache
 
@@ -68,6 +69,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         cloudKnowledgeConsumptionClient: CloudKnowledgeConsumptionClient? = nil,
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
+        browserControlHandler: BrowserControlHandler? = nil,
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
     ) {
         self.store = store
@@ -84,6 +86,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.cloudKnowledgeConsumptionClient = cloudKnowledgeConsumptionClient
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
+        self.browserControlHandler = browserControlHandler
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
         self.sharedCache = AppGraphAgentRuntimeSharedCache()
     }
@@ -269,6 +272,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
+        if let browserControlHandler {
+            registry.register(BrowserTabsTool(handler: browserControlHandler))
+            registry.register(BrowserSnapshotTool(handler: browserControlHandler))
+            registry.register(BrowserNavigateTool(handler: browserControlHandler))
+            registry.register(BrowserWaitTool(handler: browserControlHandler))
+            registry.register(BrowserScreenshotTool(handler: browserControlHandler))
+            registry.register(BrowserInteractTool(handler: browserControlHandler))
+            registry.register(BrowserSubmitTool(handler: browserControlHandler))
+            registry.register(BrowserUploadTool(handler: browserControlHandler))
+            registry.register(BrowserDownloadTool(handler: browserControlHandler))
+            registry.register(BrowserHandoffTool(handler: browserControlHandler))
+        }
         registerPersistedMCPSourceTools(
             into: &registry,
             workingDirectory: resolvedWorkspace.primary.url,

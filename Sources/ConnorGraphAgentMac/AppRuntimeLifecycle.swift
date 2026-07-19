@@ -183,7 +183,7 @@ final class AppRuntimeLifecycle {
         guard mode != .allowAll else { return }
         agentPermissionMode = mode
         chatRunCoordinator.mutateManager { $0.permissionMode = mode }
-        persistLLMSettings(rebuildRuntime: chatFeatureModel.run.submittingSessionIDs.isEmpty)
+        persistLLMSettings(rebuildRuntime: false)
         chatApprovalCoordinator.permissionModeDidChange()
     }
 
@@ -365,6 +365,19 @@ final class AppRuntimeLifecycle {
 
     func openURLInCurrentChatBrowser(_ url: URL) {
         browserFeatureModel.openURL(url)
+    }
+
+    func openGlobalWebSearch(query: String, url: URL) {
+        let title = BrowserSearchSessionTitleFormatter.title(for: query)
+        guard let sessionID = createSessionOptimistically(title: title, kind: .chat) else { return }
+        selection = .agentChat
+        Task { [weak self] in
+            guard let self else { return }
+            await self.waitForNewSessionPreparation(sessionID: sessionID)
+            guard self.chatFeatureModel.sessions.selectedSessionID == sessionID,
+                  !self.isLoadingSelectedChatSessionDetail else { return }
+            self.browserFeatureModel.openURL(url, preferredSessionID: sessionID)
+        }
     }
 
     private func rebuildCalendarSearchIndexIfNeeded(events: [CalendarEvent]) async throws {
@@ -769,6 +782,12 @@ final class AppRuntimeLifecycle {
                 browserAssistedWebFetchHandler: { [weak self] request in
                     guard let self else { return nil }
                     return await self.browserFeatureModel.performAssistedWebFetch(request)
+                },
+                browserControlHandler: { [weak self] request in
+                    guard let self else {
+                        throw BrowserAutomationRuntimeError.invalidRequest("Browser runtime is unavailable")
+                    }
+                    return try await self.browserFeatureModel.performBrowserControl(request)
                 }
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
@@ -882,7 +901,10 @@ final class AppRuntimeLifecycle {
             rss: rssFeatureModel,
             mail: mailFeatureModel,
             knowledgeMarketplace: knowledgeMarketplaceStore,
-            appSettings: appSettingsModel
+            appSettings: appSettingsModel,
+            openWebSearch: { [weak self] query, url in
+                self?.openGlobalWebSearch(query: query, url: url)
+            }
         )
         self.globalSearchRuntimeCoordinator = globalSearchRuntimeCoordinator
         globalSearchRuntimeCoordinator.activate()
@@ -1035,7 +1057,7 @@ final class AppRuntimeLifecycle {
             self.chatFeatureModel.sessions.selectedArtifactDirectories = nil
         }
         chatSessionCoordinator.onSelectionLoaded = { [weak self] snapshot, generation, startedAt in
-            self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
+            await self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
         }
         chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode in
             guard let self, let repository = self.chatSessionRepository else { return }
@@ -1260,9 +1282,12 @@ final class AppRuntimeLifecycle {
             }
         }
         chatWorkspaceCoordinator.recordsBySessionID[sessionID] = snapshot.records
-        if let browserState = snapshot.browserState {
-            browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
+        for session in snapshot.allSessions {
+            if let browserState = snapshot.browserStatesBySessionID[session.id] {
+                browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: session.id)
+            }
         }
+        browserFeatureModel.retainWorkspaceSessions(Set(snapshot.allSessions.map(\.id)))
         chatBackgroundTaskCoordinator.install(snapshot.backgroundTasks, sessionID: sessionID)
         chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
         replaceSelectedChatTranscript(session.messages)
@@ -1697,7 +1722,7 @@ final class AppRuntimeLifecycle {
         let configuration = effectiveLoopConfiguration
         return chatRunCoordinator.makeManager(
             for: session,
-            permissionMode: configuration.permissionMode,
+            permissionMode: agentPermissionMode,
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
@@ -2080,6 +2105,7 @@ final class AppRuntimeLifecycle {
 
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
+        let permissionMode = agentPermissionMode
         let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
         let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
@@ -2108,7 +2134,7 @@ final class AppRuntimeLifecycle {
                     try Task.checkCancellation()
                     let manager = isVisible ? runtimeFactory?.makeNativeSessionManager(
                         session: session,
-                        permissionMode: configuration.permissionMode,
+                        permissionMode: permissionMode,
                         configuration: configuration,
                         sessionWorkspace: sessionState?.workspace,
                         sessionLLMOverride: sessionState?.llmOverride,
@@ -2281,6 +2307,7 @@ final class AppRuntimeLifecycle {
             chatComposerCoordinator.removeSession(sessionID)
             chatRunCoordinator.removeSession(sessionID)
             chatWorkspaceCoordinator.removeSession(sessionID)
+            browserFeatureModel.removeWorkspaceSnapshot(for: sessionID)
             if chatFeatureModel.sessions.selectedSessionID == sessionID {
                 chatSessionCoordinator.clearSelection()
             }
@@ -2546,7 +2573,7 @@ final class AppRuntimeLifecycle {
         _ snapshot: ChatSessionDetailLoadSnapshot,
         generation: Int,
         startedAt: ContinuousClock.Instant
-    ) {
+    ) async {
         let session = snapshot.session
         markSessionRead(session.id)
         chatRunCoordinator.clearProcessTimelines()
@@ -2565,9 +2592,30 @@ final class AppRuntimeLifecycle {
             sessionID: session.id
         )
         _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
+        let runtimeFactory = chatRunCoordinator.runtimeFactory
+        let configuration = effectiveLoopConfiguration
+        let permissionMode = agentPermissionMode
+        let runtimeState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
+        let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
+        let managerTask = Task.detached(priority: .userInitiated) {
+            runtimeFactory?.makeNativeSessionManager(
+                session: session,
+                permissionMode: permissionMode,
+                configuration: configuration,
+                sessionWorkspace: runtimeState?.workspace,
+                sessionLLMOverride: runtimeState?.llmOverride,
+                remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
+                allowedMCPToolNames: runtimeState?.allowedMCPToolNames
+            )
+        }
+        let manager = await managerTask.value
+        guard !Task.isCancelled,
+              chatFeatureModel.sessions.selectedSessionID == session.id,
+              chatFeatureModel.sessions.loadingSessionDetailID == session.id
+        else { return }
         chatRunCoordinator.applySelectedSnapshot(
             session: session,
-            manager: makeNativeSessionManager(for: session),
+            manager: manager,
             timeline: snapshot.timeline,
             summary: snapshot.latestSummary
         )

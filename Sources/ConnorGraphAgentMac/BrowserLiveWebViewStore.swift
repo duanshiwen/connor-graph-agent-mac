@@ -21,8 +21,10 @@ final class BrowserLiveWebViewStore {
 
     final class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         static let selectionMessageName = "connorSelection"
+        static let editableFieldMessageName = "connorEditableField"
 
         var onNavigationStateChanged: ((WebNavigationState) -> Void)?
+        var onAutomationNavigationStateChanged: ((WebNavigationState) -> Void)?
         var onOpenInNewTab: ((URL) -> Void)?
         var onPopupCreated: ((WKWebView, WebViewCoordinator, URL?) -> Void)?
         var onCloseRequested: ((WKWebView) -> Void)?
@@ -32,27 +34,47 @@ final class BrowserLiveWebViewStore {
         var onMediaPermissionRequest: ((String, BrowserSitePermissionKind, @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) -> Void)?
         var onContentProcessTerminated: ((WKWebView) -> Void)?
         var onSelectionChanged: ((BrowserSelectionPayload) -> Void)?
+        var onEditableFieldChanged: ((BrowserEditableFieldPayload) -> Void)?
         var onRestorationReady: ((WKWebView) -> Void)?
+        var onAutomationDidFinish: ((WKWebView) -> Void)?
+        var onAutomationDidFail: ((WKWebView, Error) -> Void)?
         private var downloadCoordinators: [UUID: BrowserDownloadCoordinator] = [:]
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == Self.selectionMessageName,
-                  let json = message.body as? String,
-                  let data = json.data(using: .utf8),
-                  let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data)
-            else { return }
-            DispatchQueue.main.async { self.onSelectionChanged?(payload) }
+            guard let json = message.body as? String, let data = json.data(using: .utf8) else { return }
+            switch message.name {
+            case Self.selectionMessageName:
+                guard let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data) else { return }
+                DispatchQueue.main.async { self.onSelectionChanged?(payload) }
+            case Self.editableFieldMessageName:
+                let decoding = Task.detached(priority: .userInitiated) {
+                    try? JSONDecoder().decode(BrowserEditableFieldPayload.self, from: data)
+                }
+                Task { @MainActor [weak self] in
+                    guard let payload = await decoding.value else { return }
+                    self?.onEditableFieldChanged?(payload)
+                }
+            default:
+                return
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             publishNavigationState(webView)
+            onAutomationDidFinish?(webView)
             DispatchQueue.main.async { self.onRestorationReady?(webView) }
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { publishNavigationState(webView) }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            onAutomationDidFail?(webView, error)
+            handleNavigationFailure(in: webView, error: error)
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            onAutomationDidFail?(webView, error)
+            handleNavigationFailure(in: webView, error: error)
+        }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             guard navigationAction.targetFrame == nil else { return nil }
@@ -121,7 +143,7 @@ final class BrowserLiveWebViewStore {
             }
             let alert = NSAlert()
             alert.messageText = "需要登录"
-            alert.informativeText = "(challenge.protectionSpace.host) 请求用户名和密码。"
+            alert.informativeText = "\(challenge.protectionSpace.host) 请求用户名和密码。"
             let stack = NSStackView()
             stack.orientation = .vertical
             stack.spacing = 8
@@ -175,6 +197,7 @@ final class BrowserLiveWebViewStore {
             onMediaPermissionRequest = other.onMediaPermissionRequest
             onContentProcessTerminated = other.onContentProcessTerminated
             onSelectionChanged = other.onSelectionChanged
+            onEditableFieldChanged = other.onEditableFieldChanged
             onRestorationReady = other.onRestorationReady
         }
 
@@ -218,7 +241,10 @@ final class BrowserLiveWebViewStore {
                 isLoading: isLoadingOverride ?? webView.isLoading,
                 errorMessage: errorMessage
             )
-            DispatchQueue.main.async { self.onNavigationStateChanged?(state) }
+            DispatchQueue.main.async {
+                self.onNavigationStateChanged?(state)
+                self.onAutomationNavigationStateChanged?(state)
+            }
         }
     }
 
@@ -300,6 +326,7 @@ final class BrowserLiveWebViewStore {
 
     private var entries: [BrowserLiveWebViewKey: Entry] = [:]
     private var activeDownloads: [UUID: WKDownload] = [:]
+    private var activeAutomationKeys: Set<BrowserLiveWebViewKey> = []
     private let privateDataStore = WKWebsiteDataStore.nonPersistent()
     private var budgetPolicy = BrowserLiveWebViewBudgetPolicy()
     var onWillEvict: ((BrowserLiveWebViewKey, WKWebView, SnapshotMetadata) -> Void)?
@@ -315,6 +342,7 @@ final class BrowserLiveWebViewStore {
         onMediaPermissionRequest: @escaping (String, BrowserSitePermissionKind, @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) -> Void,
         onContentProcessTerminated: @escaping (WKWebView) -> Void,
         onSelectionChanged: @escaping (BrowserSelectionPayload) -> Void,
+        onEditableFieldChanged: @escaping (BrowserEditableFieldPayload) -> Void,
         onRestorationReady: @escaping (WKWebView) -> Void,
         isPrivate: Bool,
         isVisible: Bool
@@ -328,6 +356,7 @@ final class BrowserLiveWebViewStore {
             entry.coordinator.onOpenInNewTab = onOpenInNewTab
             configure(entry.coordinator, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
             entry.coordinator.onSelectionChanged = onSelectionChanged
+            entry.coordinator.onEditableFieldChanged = onEditableFieldChanged
             entry.coordinator.onRestorationReady = onRestorationReady
             entries[key] = entry
             return WebViewLease(webView: entry.webView, isNewlyCreated: false)
@@ -338,6 +367,7 @@ final class BrowserLiveWebViewStore {
         coordinator.onOpenInNewTab = onOpenInNewTab
         configure(coordinator, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
         coordinator.onSelectionChanged = onSelectionChanged
+        coordinator.onEditableFieldChanged = onEditableFieldChanged
         coordinator.onRestorationReady = onRestorationReady
 
         let webView = Self.makeConfiguredWebView(coordinator: coordinator, isPrivate: isPrivate, privateDataStore: privateDataStore)
@@ -357,6 +387,51 @@ final class BrowserLiveWebViewStore {
     func adoptPopup(key: BrowserLiveWebViewKey, webView: WKWebView, coordinator: WebViewCoordinator, isVisible: Bool) {
         let now = Date()
         entries[key] = Entry(key: key, webView: webView, coordinator: coordinator, lastAccessedAt: now, lastVisibleAt: isVisible ? now : nil, isVisible: isVisible, restorationStatus: .live)
+    }
+
+    func leaseAutomationWebView(
+        key: BrowserLiveWebViewKey,
+        onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
+        onDidFinish: ((WKWebView) -> Void)? = nil,
+        onDidFail: ((WKWebView, Error) -> Void)? = nil
+    ) -> WebViewLease {
+        let now = Date()
+        if var entry = entries[key] {
+            entry.lastAccessedAt = now
+            entry.coordinator.onAutomationNavigationStateChanged = onNavigationStateChanged
+            if let onDidFinish { entry.coordinator.onAutomationDidFinish = onDidFinish }
+            if let onDidFail { entry.coordinator.onAutomationDidFail = onDidFail }
+            if onDidFinish != nil || onDidFail != nil { activeAutomationKeys.insert(key) }
+            entries[key] = entry
+            return WebViewLease(webView: entry.webView, isNewlyCreated: false)
+        }
+
+        let coordinator = WebViewCoordinator()
+        coordinator.onAutomationNavigationStateChanged = onNavigationStateChanged
+        coordinator.onAutomationDidFinish = onDidFinish
+        coordinator.onAutomationDidFail = onDidFail
+        let webView = Self.makeConfiguredWebView(coordinator: coordinator, isPrivate: false, privateDataStore: privateDataStore)
+        entries[key] = Entry(
+            key: key,
+            webView: webView,
+            coordinator: coordinator,
+            lastAccessedAt: now,
+            lastVisibleAt: nil,
+            isVisible: false,
+            restorationStatus: .live
+        )
+        if onDidFinish != nil || onDidFail != nil { activeAutomationKeys.insert(key) }
+        return WebViewLease(webView: webView, isNewlyCreated: true)
+    }
+
+    func webView(for key: BrowserLiveWebViewKey) -> WKWebView? {
+        entries[key]?.webView
+    }
+
+    func clearAutomationCallbacks(for key: BrowserLiveWebViewKey) {
+        entries[key]?.coordinator.onAutomationDidFinish = nil
+        entries[key]?.coordinator.onAutomationDidFail = nil
+        activeAutomationKeys.remove(key)
     }
 
     func cancelDownload(_ id: UUID) {
@@ -407,11 +482,12 @@ final class BrowserLiveWebViewStore {
 
     func remove(_ key: BrowserLiveWebViewKey) {
         guard let entry = entries.removeValue(forKey: key) else { return }
+        activeAutomationKeys.remove(key)
         cleanup(entry.webView)
     }
 
     func enforceBudget(processMemoryMegabytes: Int? = nil) {
-        let budgetEntries = entries.values.map { entry in
+        let budgetEntries = entries.values.filter { !activeAutomationKeys.contains($0.key) }.map { entry in
             BrowserLiveWebViewBudgetEntry(
                 key: entry.key,
                 isVisible: entry.isVisible,
@@ -428,6 +504,7 @@ final class BrowserLiveWebViewStore {
 
     private func evict(_ key: BrowserLiveWebViewKey) {
         guard var entry = entries.removeValue(forKey: key) else { return }
+        activeAutomationKeys.remove(key)
         let metadata = snapshotMetadata(from: entry.webView)
         onWillEvict?(key, entry.webView, metadata)
         entry.restorationStatus = .evicted
@@ -440,6 +517,7 @@ final class BrowserLiveWebViewStore {
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: WebViewCoordinator.selectionMessageName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: WebViewCoordinator.editableFieldMessageName)
         webView.removeFromSuperview()
     }
 
@@ -461,7 +539,9 @@ final class BrowserLiveWebViewStore {
         configuration.userContentController = userContentController
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.addUserScript(WKUserScript(source: EmbeddedWebView.selectionObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        configuration.userContentController.addUserScript(WKUserScript(source: EmbeddedWebView.editableFieldObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         configuration.userContentController.add(coordinator, name: WebViewCoordinator.selectionMessageName)
+        configuration.userContentController.add(coordinator, name: WebViewCoordinator.editableFieldMessageName)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = coordinator

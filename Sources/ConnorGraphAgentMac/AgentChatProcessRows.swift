@@ -13,7 +13,65 @@ enum AgentTurnActivityEventResolver {
 
 private struct AgentTurnActivityEventLoadKey: Hashable {
     var isExpanded: Bool
-    var hasInitialEvents: Bool
+    var processID: String
+    var processState: AgentChatTurnProcessState
+    var eventCount: Int
+    var lastEventID: String?
+}
+
+private struct AgentTurnActivitySummaryLoadKey: Hashable {
+    var processID: String
+    var processState: AgentChatTurnProcessState
+    var eventCount: Int
+    var lastEventID: String?
+}
+
+fileprivate struct AgentTurnActivityPreparedTool: Sendable, Identifiable {
+    var id: String { invocation.id }
+    var invocation: AgentToolInvocationPresentation
+    var activity: AgentToolActivityPresentation
+}
+
+private struct AgentTurnActivityDetailPresentation: Sendable {
+    var summary: AgentTurnActivitySummaryPresentation
+    var tools: [AgentTurnActivityPreparedTool]
+}
+
+private enum AgentTurnActivityDetailBuilder {
+    nonisolated static func build(
+        process: AgentChatTurnProcessPresentation,
+        events: [AgentEventPresentation]
+    ) -> AgentTurnActivityDetailPresentation? {
+        guard !Task.isCancelled else { return nil }
+        let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
+        guard !Task.isCancelled else { return nil }
+        let invocations = AgentToolInvocationAssembler().invocations(from: events)
+        guard !Task.isCancelled else { return nil }
+        var tools: [AgentTurnActivityPreparedTool] = []
+        tools.reserveCapacity(invocations.count)
+        for invocation in invocations {
+            guard !Task.isCancelled else { return nil }
+            tools.append(AgentTurnActivityPreparedTool(
+                invocation: invocation,
+                activity: AgentToolActivityPresentation(
+                    id: invocation.id,
+                    callID: invocation.callID,
+                    phase: invocation.phase,
+                    rawToolName: invocation.toolName,
+                    semanticKind: invocation.semanticKind,
+                    title: invocation.title,
+                    subtitle: invocation.subtitle,
+                    target: invocation.target,
+                    detail: invocation.errorText ?? invocation.outputText,
+                    icon: invocation.icon,
+                    severity: invocation.severity,
+                    argumentsJSON: invocation.argumentsJSON,
+                    resultJSON: invocation.resultJSON
+                )
+            ))
+        }
+        return AgentTurnActivityDetailPresentation(summary: summary, tools: tools)
+    }
 }
 
 struct AgentChatTurnProcessRow: View {
@@ -22,17 +80,17 @@ struct AgentChatTurnProcessRow: View {
     var loadEvents: () async -> [AgentEventPresentation]
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
     @State private var isExpanded: Bool = false
-    @State private var loadedEvents: [AgentEventPresentation]?
-    @State private var isDetailReady = false
+    @State private var preparedDetail: AgentTurnActivityDetailPresentation?
+    @State private var preparedDetailProcessID: String?
+    @State private var preparedSummary: AgentTurnActivitySummaryPresentation?
+    @State private var preparedSummaryProcessID: String?
     @State private var startedAt: Date = Date()
 
     var body: some View {
-        let resolvedEvents = AgentTurnActivityEventResolver.events(
-            initialEvents: initialEvents,
-            loadedEvents: loadedEvents
-        )
-        let visibleEvents = resolvedEvents ?? AgentActivityFallbackEvents.events(for: process)
-        let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: visibleEvents)
+        let currentDetail = preparedDetailProcessID == process.id ? preparedDetail : nil
+        let summary = currentDetail?.summary
+            ?? (preparedSummaryProcessID == process.id ? preparedSummary : nil)
+            ?? fallbackSummary
         return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             VStack(alignment: .leading, spacing: 2) {
                 Button(action: { isExpanded.toggle() }) {
@@ -42,10 +100,10 @@ struct AgentChatTurnProcessRow: View {
 
                 if isExpanded {
                     Group {
-                        if isDetailReady {
+                        if let preparedDetail = currentDetail {
                             AgentTurnActivitySummaryDetailView(
-                                summary: summary,
-                                events: visibleEvents,
+                                summary: preparedDetail.summary,
+                                tools: preparedDetail.tools,
                                 isRunning: process.state == .running,
                                 startedAt: startedAt,
                                 onOpenToolInvocation: onOpenToolInvocation
@@ -63,22 +121,75 @@ struct AgentChatTurnProcessRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: AgentTurnActivityEventLoadKey(
             isExpanded: isExpanded,
-            hasInitialEvents: initialEvents != nil
+            processID: process.id,
+            processState: process.state,
+            eventCount: initialEvents?.count ?? 0,
+            lastEventID: initialEvents?.last?.id
         )) {
             guard isExpanded else { return }
-            isDetailReady = false
-            try? await Task.sleep(for: .milliseconds(16))
+            let events: [AgentEventPresentation]
+            if let initialEvents {
+                events = initialEvents
+            } else {
+                events = await loadEvents()
+            }
             guard !Task.isCancelled else { return }
-            if initialEvents != nil {
-                isDetailReady = true
+            do {
+                try await Task.sleep(for: .milliseconds(40))
+            } catch {
                 return
             }
-            let events: [AgentEventPresentation]
-            events = await loadEvents()
-            guard !Task.isCancelled else { return }
-            loadedEvents = events
-            isDetailReady = true
+            let preparationTask = Task.detached(priority: .userInitiated) {
+                AgentTurnActivityDetailBuilder.build(process: process, events: events)
+            }
+            let detail = await withTaskCancellationHandler {
+                await preparationTask.value
+            } onCancel: {
+                preparationTask.cancel()
+            }
+            guard !Task.isCancelled, let detail else { return }
+            preparedDetail = detail
+            preparedDetailProcessID = process.id
+            preparedSummary = detail.summary
+            preparedSummaryProcessID = process.id
         }
+        .task(id: AgentTurnActivitySummaryLoadKey(
+            processID: process.id,
+            processState: process.state,
+            eventCount: initialEvents?.count ?? 0,
+            lastEventID: initialEvents?.last?.id
+        )) {
+            guard let initialEvents else {
+                if preparedSummaryProcessID != process.id {
+                    preparedSummary = nil
+                    preparedSummaryProcessID = nil
+                }
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(40))
+            } catch {
+                return
+            }
+            let summaryTask = Task.detached(priority: .utility) {
+                AgentTurnActivitySummaryBuilder().summary(process: process, events: initialEvents)
+            }
+            let summary = await withTaskCancellationHandler {
+                await summaryTask.value
+            } onCancel: {
+                summaryTask.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            preparedSummary = summary
+            preparedSummaryProcessID = process.id
+        }
+    }
+
+    private var fallbackSummary: AgentTurnActivitySummaryPresentation {
+        AgentTurnActivitySummaryBuilder().summary(
+            process: process,
+            events: AgentActivityFallbackEvents.events(for: process)
+        )
     }
 
     private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
@@ -150,14 +261,13 @@ private struct AgentTurnActivityDetailLoadingView: View {
 
 struct AgentTurnActivitySummaryDetailView: View {
     var summary: AgentTurnActivitySummaryPresentation
-    var events: [AgentEventPresentation]
+    fileprivate var tools: [AgentTurnActivityPreparedTool]
     var isRunning: Bool
     var startedAt: Date
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void
 
     var body: some View {
-        let toolInvocations = AgentToolInvocationAssembler().invocations(from: events)
-        return VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             if !summary.toolSummaries.isEmpty {
                 detailLine(icon: "wrench.and.screwdriver", text: "本轮调用：\(toolSummaryText)")
             }
@@ -172,12 +282,12 @@ struct AgentTurnActivitySummaryDetailView: View {
                 detailLine(icon: "exclamationmark.triangle", text: "错误：\(primaryErrorMessage)", color: .red)
             }
 
-            if !toolInvocations.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(toolInvocations) { invocation in
-                        AgentToolActivityRow(activity: activityPresentation(for: invocation)) {
-                            AppInteractionPerformance.beginAgentDetail(callID: invocation.callID)
-                            onOpenToolInvocation(invocation)
+            if !tools.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(tools) { tool in
+                        AgentToolActivityRow(activity: tool.activity) {
+                            AppInteractionPerformance.beginAgentDetail(callID: tool.invocation.callID)
+                            onOpenToolInvocation(tool.invocation)
                         }
                     }
                 }
@@ -190,24 +300,6 @@ struct AgentTurnActivitySummaryDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func activityPresentation(for invocation: AgentToolInvocationPresentation) -> AgentToolActivityPresentation {
-        AgentToolActivityPresentation(
-            id: invocation.id,
-            callID: invocation.callID,
-            phase: invocation.phase,
-            rawToolName: invocation.toolName,
-            semanticKind: invocation.semanticKind,
-            title: invocation.title,
-            subtitle: invocation.subtitle,
-            target: invocation.target,
-            detail: invocation.errorText ?? invocation.outputText,
-            icon: invocation.icon,
-            severity: invocation.severity,
-            argumentsJSON: invocation.argumentsJSON,
-            resultJSON: invocation.resultJSON
-        )
     }
 
     private var toolSummaryText: String {
@@ -431,7 +523,7 @@ struct AgentActivityEventRow: View {
 enum AgentActivityFallbackEvents {
     static func events(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
         var items: [AgentEventPresentation] = []
-        if let request = process.currentRequest, !request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let request = process.currentRequest, hasVisibleText(request) {
             items.append(AgentEventPresentation(kind: "user_input", title: "User prompt", detail: request, severity: .info, runID: nil, sessionID: nil))
         }
         if !process.expandedContextItems.isEmpty {
@@ -440,12 +532,16 @@ enum AgentActivityFallbackEvents {
         if !process.citationIDs.isEmpty {
             items.append(AgentEventPresentation(kind: "citations", title: "Citations attached", detail: process.citationIDs.joined(separator: ", "), severity: .success, runID: nil, sessionID: nil))
         }
-        if let response = process.assistantResponse, !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let response = process.assistantResponse, hasVisibleText(response) {
             items.append(AgentEventPresentation(kind: "assistant_response", title: "Answer completed", detail: response, severity: .success, runID: nil, sessionID: nil))
         }
         if items.isEmpty {
             items.append(AgentEventPresentation(kind: "activity", title: process.state == .running ? "Processing" : "Activity", detail: process.summary, severity: process.state == .running ? .info : .success, runID: nil, sessionID: nil))
         }
         return items
+    }
+
+    private static func hasVisibleText(_ text: String) -> Bool {
+        text.contains { !$0.isWhitespace }
     }
 }
