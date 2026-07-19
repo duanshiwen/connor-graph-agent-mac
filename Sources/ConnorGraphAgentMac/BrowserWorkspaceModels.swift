@@ -459,6 +459,13 @@ enum BrowserFormAssistantClassifier {
                 hasText ? polish : .init(id: "question", title: "提出问题", systemImage: "questionmark.bubble", prompt: "生成一个清晰、礼貌的追问。")
             ]
         case .title:
+            if !hasText {
+                return [
+                    .init(id: "titles", title: "生成标题", systemImage: "textformat", prompt: "根据字段附近的内容生成三个明确、有信息量的标题候选。"),
+                    .init(id: "highlight", title: "突出重点", systemImage: "scope", prompt: "根据页面上下文生成三个突出核心价值的标题，不要虚构信息。"),
+                    .init(id: "styles", title: "多种风格", systemImage: "textformat.alt", prompt: "根据页面上下文分别生成直接、场景化和价值导向的标题。")
+                ]
+            }
             return [
                 .init(id: "titles", title: "生成标题", systemImage: "textformat", prompt: "生成三个明确、有信息量的标题候选。"),
                 .init(id: "shorten", title: "缩短标题", systemImage: "arrow.left.and.right.text.vertical", prompt: "缩短当前标题，同时保留关键信息。"),
