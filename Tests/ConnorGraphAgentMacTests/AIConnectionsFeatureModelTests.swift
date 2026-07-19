@@ -60,6 +60,77 @@ private final class AIModelFakeSettingsStore: LLMSettingsStore, @unchecked Senda
 }
 
 @MainActor
+@Test func aiConnectionsModelDefaultSelectionPreservesCompleteConnectionConfigs() throws {
+    let settingsStore = AIModelFakeSettingsStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: AIModelFakeCredentialStore())
+    let first = AppLLMConnectionConfig(
+        id: "anthropic",
+        name: "MiMo Token Plan",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://token-plan.example/anthropic",
+        model: "mimo-pro,mimo",
+        selectedModel: "mimo-pro",
+        extraHTTPHeaders: ["x-provider": "mimo"],
+        explicitVisionSupport: true
+    )
+    let second = AppLLMConnectionConfig(
+        id: "openai",
+        name: "OpenAI Proxy",
+        providerMode: .openAICompatible,
+        baseURLString: "https://openai.example/v1",
+        model: "gpt-test",
+        selectedModel: "gpt-test"
+    )
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: nil)
+    let model = AIConnectionsFeatureModel(settingsRepository: repository)
+    model.loadSettings()
+
+    // Simulate session-scoped display values from another connection.
+    model.providerMode = .openAICompatible
+    model.selectedModel = "gpt-test"
+    model.selectDefaultConnection(second.id)
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.defaultConnectionID == second.id)
+    #expect(loaded.connection(id: first.id) == first)
+    #expect(loaded.connection(id: second.id) == second)
+}
+
+@MainActor
+@Test func deletingDefaultConnectionPreservesReplacementConnectionConfig() throws {
+    let settingsStore = AIModelFakeSettingsStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: AIModelFakeCredentialStore())
+    let first = AppLLMConnectionConfig(
+        id: "anthropic",
+        name: "MiMo Token Plan",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://token-plan.example/anthropic",
+        model: "mimo-pro",
+        selectedModel: "mimo-pro"
+    )
+    let second = AppLLMConnectionConfig(
+        id: "openai",
+        name: "OpenAI Proxy",
+        providerMode: .openAICompatible,
+        baseURLString: "https://openai.example/v1",
+        model: "gpt-test",
+        selectedModel: "gpt-test",
+        extraHTTPHeaders: ["x-provider": "proxy"]
+    )
+    try repository.save(settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id), apiKey: nil)
+    let model = AIConnectionsFeatureModel(settingsRepository: repository)
+    model.loadSettings()
+
+    model.deleteConnection(first.id)
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.defaultConnectionID == second.id)
+    #expect(loaded.connections == [second])
+}
+
+@MainActor
 @Test func aiConnectionsModelRenamePreservesEvidenceAndDeleteClearsIt() throws {
     let settingsStore = AIModelFakeSettingsStore()
     let credentialStore = AIModelFakeCredentialStore()

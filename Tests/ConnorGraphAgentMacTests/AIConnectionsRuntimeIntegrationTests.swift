@@ -159,6 +159,35 @@ private func makeRuntime(
 }
 
 @MainActor
+@Test func changingAgentPermissionDoesNotPersistSessionDisplayIntoLLMSettings() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let connection = AppLLMConnectionConfig(
+        id: "anthropic",
+        name: "MiMo Token Plan",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://token-plan.example/anthropic",
+        model: "mimo-pro,mimo",
+        selectedModel: "mimo-pro",
+        extraHTTPHeaders: ["x-provider": "mimo"]
+    )
+    try repository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: nil)
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+
+    // Session display state may legitimately differ from the global connection.
+    runtime.aiConnectionsModel.providerMode = .openAICompatible
+    runtime.aiConnectionsModel.selectedModel = "gpt-test"
+    runtime.setAgentPermissionMode(.trustedWrite)
+
+    let loaded = try repository.loadSettings()
+    #expect(loaded.connections == [connection])
+    #expect(loaded.defaultConnectionID == connection.id)
+}
+
+@MainActor
 @Test func runtimeHidesWelcomeImmediatelyAfterFirstConnectionBecomesSelected() throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
