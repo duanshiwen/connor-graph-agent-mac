@@ -23,7 +23,7 @@ final class ChatSessionCoordinator {
     @ObservationIgnored var activeSessionIDProvider: () -> String = { "" }
     @ObservationIgnored var onSelectionWillChange: (String?, String) -> Void = { _, _ in }
     @ObservationIgnored var onSelectionStarted: (String) -> Void = { _ in }
-    @ObservationIgnored var onSelectionLoaded: (ChatSessionDetailLoadSnapshot, Int, ContinuousClock.Instant) -> Void = { _, _, _ in }
+    @ObservationIgnored var onSelectionLoaded: (ChatSessionDetailLoadSnapshot, Int, ContinuousClock.Instant) async -> Void = { _, _, _ in }
     @ObservationIgnored var onReloadSelectedSession: (AgentSession, Bool) throws -> Void = { _, _ in }
     @ObservationIgnored var onSelectionCleared: () -> Void = {}
     @ObservationIgnored var onSessionsChanged: ([AgentSession]) -> Void = { _ in }
@@ -135,7 +135,7 @@ final class ChatSessionCoordinator {
                 }
                 try Task.checkCancellation()
                 guard let self, self.isCurrent(sessionID: sessionID, generation: generation) else { return }
-                self.onSelectionLoaded(snapshot, generation, startedAt)
+                await self.onSelectionLoaded(snapshot, generation, startedAt)
                 if self.isCurrent(sessionID: sessionID, generation: generation) {
                     self.model.loadingSessionDetailID = nil
                 }

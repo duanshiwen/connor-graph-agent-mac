@@ -8,7 +8,7 @@ import ConnorGraphCore
 final class GlobalSearchFeatureModel {
     enum Destination {
         case newChat(prompt: String)
-        case webSearch(URL)
+        case webSearch(query: String, url: URL)
         case chatSession(String)
         case nativeResult(NativeSearchResult)
         case browserHistoryRecord(BrowserHistoryRecord)
@@ -156,7 +156,7 @@ final class GlobalSearchFeatureModel {
         guard !value.isEmpty, let url = defaultSearchURLProvider(value) else { return }
         recordHistoryIfNeeded(value)
         dismissOverlay()
-        onDestination?(.webSearch(url))
+        onDestination?(.webSearch(query: value, url: url))
     }
 
     func openBrowserHistoryRecord(_ record: BrowserHistoryRecord) {

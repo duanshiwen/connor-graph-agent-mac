@@ -97,9 +97,17 @@ if [[ -n "$RUST_TARGET" ]]; then
   TARGET_OUTPUT_DIR="$TARGET_OUTPUT_DIR/$RUST_TARGET"
 fi
 if [[ "$RUN_TESTS" == "1" ]]; then
-  "${CARGO_COMMAND[@]}" test "${TARGET_ARGS[@]}"
+  if [[ -n "$RUST_TARGET" ]]; then
+    "${CARGO_COMMAND[@]}" test "${TARGET_ARGS[@]}"
+  else
+    "${CARGO_COMMAND[@]}" test
+  fi
 fi
-"${CARGO_COMMAND[@]}" build --release "${TARGET_ARGS[@]}"
+if [[ -n "$RUST_TARGET" ]]; then
+  "${CARGO_COMMAND[@]}" build --release "${TARGET_ARGS[@]}"
+else
+  "${CARGO_COMMAND[@]}" build --release
+fi
 popd >/dev/null
 
 CRATE_DYLIB="$TARGET_OUTPUT_DIR/release/libconnor_memory_search_kernel.dylib"

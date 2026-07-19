@@ -53,16 +53,26 @@ struct GlobalSearchFeatureModelTests {
         let model = makeModel()
         model.defaultSearchURLProvider = { URL(string: "https://example.com/search?q=\($0)") }
         var openedURL: URL?
+        var openedQuery: String?
         model.onDestination = {
-            if case let .webSearch(url) = $0 { openedURL = url }
+            if case let .webSearch(query, url) = $0 {
+                openedQuery = query
+                openedURL = url
+            }
         }
         model.updateQuery("connor")
 
         model.performWebSearch()
 
         #expect(openedURL?.host == "example.com")
+        #expect(openedQuery == "connor")
         #expect(model.historyEntries.first?.normalizedQuery == "connor")
         model.shutdown()
+    }
+
+    @Test func browserSearchSessionTitlePreservesNormalizedQuery() {
+        #expect(BrowserSearchSessionTitleFormatter.title(for: "  Surface   Laptop  ") == "用户搜索：Surface Laptop")
+        #expect(BrowserSearchSessionTitleFormatter.title(for: "   ") == "用户搜索")
     }
 
     @Test func fallbackPreviewAggregatesSessionsAndNativeSources() async {

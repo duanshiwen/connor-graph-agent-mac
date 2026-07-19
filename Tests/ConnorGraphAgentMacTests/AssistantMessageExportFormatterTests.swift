@@ -71,6 +71,13 @@ struct AssistantMessageExportFormatterTests {
         #expect(presentation.exportHelp == "选择保存位置和文件名，导出为 Markdown 文件")
     }
 
+    @Test("only the first message in a note session uses note body presentation")
+    func noteBodyPresentationIsLimitedToFirstNoteMessage() {
+        #expect(AgentChatMessagePresentationPolicy.isNoteBody(sessionKind: .note, firstMessageID: "first", messageID: "first"))
+        #expect(!AgentChatMessagePresentationPolicy.isNoteBody(sessionKind: .note, firstMessageID: "first", messageID: "second"))
+        #expect(!AgentChatMessagePresentationPolicy.isNoteBody(sessionKind: .chat, firstMessageID: "first", messageID: "first"))
+    }
+
     private func presentation(
         id: String,
         role: AgentRole,

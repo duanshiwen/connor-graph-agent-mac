@@ -26,6 +26,67 @@ struct BrowserAssistedWebToolTests {
         #expect(!fetchTool.description.contains(legacySourceName))
     }
 
+    @Test func browserControlToolsExposeStructuredSchemasAndForwardBoundedRequests() async throws {
+        final class Recorder: @unchecked Sendable {
+            var request: BrowserControlRequest?
+        }
+        let recorder = Recorder()
+        let handler: BrowserControlHandler = { request in
+            recorder.request = request
+            return BrowserControlResponse(contentText: "snapshot", contentJSON: #"{"nodes":[]}"#)
+        }
+        let tool = BrowserSnapshotTool(handler: handler)
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "tab_id": .string("tab-1"),
+                "max_nodes": .int(9_999)
+            ]),
+            context: Self.context()
+        )
+
+        #expect(recorder.request?.operation == .snapshot)
+        #expect(recorder.request?.sessionID == "session-1")
+        #expect(recorder.request?.tabID == "tab-1")
+        #expect(recorder.request?.maxNodes == 500)
+        #expect(result.contentText == "snapshot")
+
+        var registry = AgentToolRegistry()
+        registry.register(BrowserTabsTool(handler: handler))
+        registry.register(BrowserSnapshotTool(handler: handler))
+        registry.register(BrowserNavigateTool(handler: handler))
+        registry.register(BrowserWaitTool(handler: handler))
+        registry.register(BrowserScreenshotTool(handler: handler))
+        registry.register(BrowserInteractTool(handler: handler))
+        registry.register(BrowserSubmitTool(handler: handler))
+        registry.register(BrowserUploadTool(handler: handler))
+        registry.register(BrowserDownloadTool(handler: handler))
+        registry.register(BrowserHandoffTool(handler: handler))
+        #expect(registry.schemaValidationIssues.isEmpty)
+    }
+
+    @Test func browserInteractionApprovalRedactsTypedValuesAndCommitUsesRuntimeTargetDescription() async throws {
+        let interact = BrowserInteractTool()
+        let secret = "private form value"
+        let interactPayload = await interact.approvalPayloadJSON(
+            for: AgentToolCall(name: "browser_interact", argumentsJSON: #"{"action":"fill","node_ref":"node-1","value":"private form value"}"#),
+            context: Self.context()
+        )
+        #expect(!interactPayload.contains(secret))
+        #expect(interactPayload.contains(#""valueCharacterCount":18"#))
+
+        let submit = BrowserSubmitTool(handler: { request in
+            #expect(request.operation == .describe)
+            #expect(request.nodeReference == "node-2")
+            return BrowserControlResponse(contentText: "target", contentJSON: #"{"host":"example.com","name":"Send"}"#)
+        })
+        let submitPayload = await submit.approvalPayloadJSON(
+            for: AgentToolCall(name: "browser_submit", argumentsJSON: #"{"node_ref":"node-2"}"#),
+            context: Self.context()
+        )
+        #expect(submitPayload.contains("example.com"))
+        #expect(submitPayload.contains("Send"))
+    }
+
     @Test func duckDuckGoWebSearchUsesNativeClientWithoutPythonRuntime() async throws {
         let html = """
         <html><body>

@@ -49,6 +49,14 @@ public enum AgentChatTurnProcessState: String, Sendable, Equatable {
     case cancelled
 }
 
+fileprivate final class AgentChatConversationHistoryStorage: @unchecked Sendable {
+    let rows: [AgentChatMessagePresentation]
+
+    init(rows: [AgentChatMessagePresentation]) {
+        self.rows = rows
+    }
+}
+
 public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiable {
     public var id: String
     public var turnNumber: Int
@@ -61,25 +69,47 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     public var citationIDs: [String]
     public var expandedContextItems: [AgentContextItem]
     public var fullConversationMessageCount: Int
-    public var conversationHistory: [AgentChatMessagePresentation]
+    private var conversationHistoryStorage: AgentChatConversationHistoryStorage
+    private var conversationHistoryCount: Int
+    public var conversationHistory: [AgentChatMessagePresentation] {
+        get { Array(conversationHistoryStorage.rows.prefix(conversationHistoryCount)) }
+        set {
+            conversationHistoryStorage = AgentChatConversationHistoryStorage(rows: newValue)
+            conversationHistoryCount = newValue.count
+        }
+    }
     public var sourceUserMessageID: String?
     public var assistantMessageID: String?
     public var activeSkillLabel: String?
 
     public init(completedAssistant row: AgentChatMessagePresentation, conversationHistory: [AgentChatMessagePresentation]) {
+        self.init(
+            completedAssistant: row,
+            conversationHistoryStorage: AgentChatConversationHistoryStorage(rows: conversationHistory),
+            conversationHistoryCount: conversationHistory.count
+        )
+    }
+
+    fileprivate init(
+        completedAssistant row: AgentChatMessagePresentation,
+        conversationHistoryStorage: AgentChatConversationHistoryStorage,
+        conversationHistoryCount: Int
+    ) {
         self.id = "process-\(row.id)"
         self.turnNumber = row.turnNumber
         self.state = .completed
-        self.fullConversationMessageCount = conversationHistory.count
-        self.conversationHistory = conversationHistory
+        self.fullConversationMessageCount = conversationHistoryCount
+        self.conversationHistoryStorage = conversationHistoryStorage
+        self.conversationHistoryCount = conversationHistoryCount
+        let conversationHistory = conversationHistoryStorage.rows.prefix(conversationHistoryCount)
         let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
         self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = row.id
         self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         if let inspection = row.message.promptInspection {
-            self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistory.count)
+            self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistoryCount)
         } else {
-            self.summary = "第 \(row.turnNumber) 轮 · 已完成 · 完整历史 \(conversationHistory.count) 条"
+            self.summary = "第 \(row.turnNumber) 轮 · 已完成 · 完整历史 \(conversationHistoryCount) 条"
         }
         self.title = "第 \(row.turnNumber) 轮处理详情"
         self.currentRequest = row.currentRequest
@@ -90,24 +120,40 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     }
 
     public init(pending: AgentChatPendingAssistantPresentation, conversationHistory: [AgentChatMessagePresentation], state: AgentChatTurnProcessState = .running) {
+        self.init(
+            pending: pending,
+            conversationHistoryStorage: AgentChatConversationHistoryStorage(rows: conversationHistory),
+            conversationHistoryCount: conversationHistory.count,
+            state: state
+        )
+    }
+
+    fileprivate init(
+        pending: AgentChatPendingAssistantPresentation,
+        conversationHistoryStorage: AgentChatConversationHistoryStorage,
+        conversationHistoryCount: Int,
+        state: AgentChatTurnProcessState
+    ) {
         self.id = "process-\(pending.id)"
         self.turnNumber = pending.turnNumber
         self.state = state
-        self.fullConversationMessageCount = conversationHistory.count
-        self.conversationHistory = conversationHistory
+        self.fullConversationMessageCount = conversationHistoryCount
+        self.conversationHistoryStorage = conversationHistoryStorage
+        self.conversationHistoryCount = conversationHistoryCount
+        let conversationHistory = conversationHistoryStorage.rows.prefix(conversationHistoryCount)
         let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
         self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = nil
         self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         switch state {
         case .running:
-            self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
+            self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistoryCount) 条"
             self.title = "第 \(pending.turnNumber) 轮处理中…"
         case .cancelled:
             self.summary = "第 \(pending.turnNumber) 轮 · 已取消 · 已保留收到的运行记录"
             self.title = "第 \(pending.turnNumber) 轮已取消"
         case .completed:
-            self.summary = "第 \(pending.turnNumber) 轮 · 已记录 · 完整历史 \(conversationHistory.count) 条"
+            self.summary = "第 \(pending.turnNumber) 轮 · 已记录 · 完整历史 \(conversationHistoryCount) 条"
             self.title = "第 \(pending.turnNumber) 轮处理详情"
         }
         self.currentRequest = conversationHistory.last(where: { $0.message.role == .user })?.message.content
@@ -115,6 +161,31 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.promptSnapshotText = nil
         self.citationIDs = []
         self.expandedContextItems = []
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.turnNumber == rhs.turnNumber
+            && lhs.state == rhs.state
+            && lhs.summary == rhs.summary
+            && lhs.title == rhs.title
+            && lhs.currentRequest == rhs.currentRequest
+            && lhs.assistantResponse == rhs.assistantResponse
+            && lhs.promptSnapshotText == rhs.promptSnapshotText
+            && lhs.citationIDs == rhs.citationIDs
+            && lhs.expandedContextItems == rhs.expandedContextItems
+            && lhs.fullConversationMessageCount == rhs.fullConversationMessageCount
+            && lhs.conversationHistoryCount == rhs.conversationHistoryCount
+            && historiesAreEqual(lhs, rhs)
+            && lhs.sourceUserMessageID == rhs.sourceUserMessageID
+            && lhs.assistantMessageID == rhs.assistantMessageID
+            && lhs.activeSkillLabel == rhs.activeSkillLabel
+    }
+
+    private static func historiesAreEqual(_ lhs: Self, _ rhs: Self) -> Bool {
+        if lhs.conversationHistoryStorage === rhs.conversationHistoryStorage { return true }
+        return lhs.conversationHistoryStorage.rows.prefix(lhs.conversationHistoryCount)
+            == rhs.conversationHistoryStorage.rows.prefix(rhs.conversationHistoryCount)
     }
 
     private static func completedSummary(turnNumber: Int, inspection: AgentPromptInspectionSnapshot, fullConversationMessageCount: Int) -> String {
@@ -214,10 +285,10 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
 
     public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, preservesOpenProcess: Bool = false, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
         let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
+        let conversationHistoryStorage = AgentChatConversationHistoryStorage(rows: rows)
         var items: [AgentChatTurnTimelineItem] = []
-        var conversationHistory: [AgentChatMessagePresentation] = []
         var lastTimestampDate: Date?
-        for row in rows {
+        for (index, row) in rows.enumerated() {
             if row.message.role == .user,
                shouldInsertTimestamp(
                    for: row.message.createdAt,
@@ -229,14 +300,22 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                 lastTimestampDate = row.message.createdAt
             }
             if row.message.role == .assistant {
-                items.append(.process(AgentChatTurnProcessPresentation(completedAssistant: row, conversationHistory: conversationHistory)))
+                items.append(.process(AgentChatTurnProcessPresentation(
+                    completedAssistant: row,
+                    conversationHistoryStorage: conversationHistoryStorage,
+                    conversationHistoryCount: index
+                )))
             }
             items.append(.message(row))
-            conversationHistory.append(row)
         }
         if isSubmitting || preservesOpenProcess {
             let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
-            items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages), conversationHistory: conversationHistory, state: state)))
+            items.append(.process(AgentChatTurnProcessPresentation(
+                pending: AgentChatPendingAssistantPresentation(messages: messages),
+                conversationHistoryStorage: conversationHistoryStorage,
+                conversationHistoryCount: rows.count,
+                state: state
+            )))
         }
         return items
     }

@@ -23,6 +23,21 @@ private struct EchoTool: AgentTool {
     }
 }
 
+@Test func browserPermissionsSeparateReadingNavigationInteractionAndCommit() async {
+    let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
+    #expect(await readOnly.evaluate(capability: .readBrowserPage, runID: "run", sessionID: "session").outcome == .approved)
+    #expect(await readOnly.evaluate(capability: .navigateBrowser, runID: "run", sessionID: "session").outcome == .denied)
+
+    let ask = AgentPolicyEngine(permissionMode: .askToWrite)
+    #expect(await ask.evaluate(capability: .navigateBrowser, runID: "run", sessionID: "session").outcome == .approved)
+    #expect(await ask.evaluate(capability: .interactBrowser, runID: "run", sessionID: "session").outcome == .needsApproval)
+
+    let trusted = AgentPolicyEngine(permissionMode: .trustedWrite)
+    #expect(await trusted.evaluate(capability: .interactBrowser, runID: "run", sessionID: "session").outcome == .approved)
+    #expect(await trusted.evaluate(capability: .commitBrowserAction, runID: "run", sessionID: "session").outcome == .needsApproval)
+    #expect(await trusted.evaluate(capability: .transferBrowserFile, runID: "run", sessionID: "session").outcome == .needsApproval)
+}
+
 @Test func toolRegistryExecutesRegisteredToolAndWritesAuditDecision() async throws {
     var registry = AgentToolRegistry()
     registry.register(EchoTool())
