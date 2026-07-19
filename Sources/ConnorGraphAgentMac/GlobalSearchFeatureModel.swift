@@ -36,6 +36,7 @@ final class GlobalSearchFeatureModel {
 
     @ObservationIgnored var sessionsProvider: () -> [AgentSession] = { [] }
     @ObservationIgnored var fallbackNativeSearchProvider: (NativeSearchSourceKind, String, Int) -> [NativeSearchResult] = { _, _, _ in [] }
+    @ObservationIgnored var recentNativeSearchProvider: (NativeSearchSourceKind, String, Int) -> [NativeSearchResult] = { _, _, _ in [] }
     @ObservationIgnored var defaultSearchURLProvider: (String) -> URL? = { _ in nil }
     @ObservationIgnored var knowledgeMarketplaceSearchProvider: (String) async -> [CloudMarketplaceKnowledgeBase] = { _ in [] }
     @ObservationIgnored var onDestination: ((Destination) -> Void)?
@@ -355,7 +356,15 @@ final class GlobalSearchFeatureModel {
             for await sectionResult in coordinator.previewResults(query: query, limitsBySource: limits) {
                 guard canApply(query: query, generation: generation) else { return }
                 timings.append(sectionResult.timing)
-                applySection(GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: sectionResult.kind), results: sectionResult.results, errorMessage: sectionResult.errorMessage, timing: sectionResult.timing), query: query, tokens: tokens, generation: generation)
+                let limit = limits[sectionResult.kind] ?? 3
+                let results: [NativeSearchResult]
+                if sectionResult.kind == .browserHistory {
+                    let recent = recentNativeSearchProvider(.browserHistory, query, limit)
+                    results = Self.mergeRecentResults(recent, with: sectionResult.results, limit: limit)
+                } else {
+                    results = sectionResult.results
+                }
+                applySection(GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: sectionResult.kind), results: results, errorMessage: sectionResult.errorMessage, timing: sectionResult.timing), query: query, tokens: tokens, generation: generation)
             }
             return
         }
@@ -366,6 +375,11 @@ final class GlobalSearchFeatureModel {
             recordTiming(query: query, section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue, startedAt: startedAt, returnedCount: results.count, backend: "fallback")
             applySection(GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil), query: query, tokens: tokens, generation: generation)
         }
+    }
+
+    nonisolated static func mergeRecentResults(_ recent: [NativeSearchResult], with indexed: [NativeSearchResult], limit: Int) -> [NativeSearchResult] {
+        var seen: Set<String> = []
+        return Array((recent + indexed).filter { seen.insert($0.id).inserted }.prefix(max(0, limit)))
     }
 
     private func applyHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String], generation: UInt64) {

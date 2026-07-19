@@ -955,6 +955,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "康纳同学";
 				INFOPLIST_KEY_CFBundleName = "康纳同学";
+				INFOPLIST_KEY_NSCameraUsageDescription = "康纳同学仅在你允许网站使用摄像头时访问摄像头，用于网页视频通话、拍摄或扫码等功能。";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "康纳同学需要访问你的联系人，用于在联系人数据源中显示通讯录并辅助你管理关系上下文。";
@@ -992,6 +993,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "康纳同学";
 				INFOPLIST_KEY_CFBundleName = "康纳同学";
+				INFOPLIST_KEY_NSCameraUsageDescription = "康纳同学仅在你允许网站使用摄像头时访问摄像头，用于网页视频通话、拍摄或扫码等功能。";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "康纳同学需要访问你的联系人，用于在联系人数据源中显示通讯录并辅助你管理关系上下文。";
