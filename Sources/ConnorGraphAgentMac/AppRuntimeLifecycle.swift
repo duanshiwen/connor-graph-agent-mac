@@ -183,7 +183,6 @@ final class AppRuntimeLifecycle {
         guard mode != .allowAll else { return }
         agentPermissionMode = mode
         chatRunCoordinator.mutateManager { $0.permissionMode = mode }
-        persistLLMSettings(rebuildRuntime: false)
         chatApprovalCoordinator.permissionModeDidChange()
     }
 
@@ -1118,7 +1117,7 @@ final class AppRuntimeLifecycle {
         chatApprovalCoordinator.onAlwaysAllow = { [weak self] in
             guard let self else { return }
             self.agentPermissionMode = .trustedWrite
-            self.persistLLMSettings(rebuildRuntime: true)
+            self.chatRunCoordinator.mutateManager { $0.permissionMode = .trustedWrite }
         }
         chatApprovalCoordinator.onError = { [weak self] message in self?.errorMessage = message }
         chatComposerCoordinator.selectedSessionID = { [weak self] in self?.chatFeatureModel.sessions.selectedSessionID }
@@ -1689,11 +1688,6 @@ final class AppRuntimeLifecycle {
         )
         let event: AgentEvent = kind == "source" ? .sourceRegistryChanged(payload) : .skillRegistryChanged(payload)
         chatFeatureModel.run.eventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
-    }
-
-    private func persistLLMSettings(rebuildRuntime: Bool) {
-        aiConnectionsModel.persistSettings(rebuildRuntime: rebuildRuntime)
-        errorMessage = aiConnectionsModel.errorMessage
     }
 
     func selectSettingsSection(_ section: ConnorSettingsSection) {
