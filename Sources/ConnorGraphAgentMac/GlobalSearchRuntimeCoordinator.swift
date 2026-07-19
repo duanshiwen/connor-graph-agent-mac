@@ -3,6 +3,13 @@ import ConnorGraphCore
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+enum BrowserSearchSessionTitleFormatter {
+    static func title(for query: String) -> String {
+        let normalized = query.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
+        return normalized.isEmpty ? "用户搜索" : "用户搜索：\(normalized)"
+    }
+}
+
 @MainActor
 final class GlobalSearchRuntimeCoordinator {
     private let search: GlobalSearchFeatureModel
@@ -16,6 +23,7 @@ final class GlobalSearchRuntimeCoordinator {
     private let mail: MailFeatureModel
     private let appSettings: AppSettingsFeatureModel
     private let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
+    private let openWebSearch: (String, URL) -> Void
 
     init(
         search: GlobalSearchFeatureModel,
@@ -28,7 +36,8 @@ final class GlobalSearchRuntimeCoordinator {
         rss: RSSFeatureModel,
         mail: MailFeatureModel,
         knowledgeMarketplace: CloudKnowledgeMarketplaceStore,
-        appSettings: AppSettingsFeatureModel
+        appSettings: AppSettingsFeatureModel,
+        openWebSearch: @escaping (String, URL) -> Void
     ) {
         self.search = search
         self.shell = shell
@@ -41,6 +50,7 @@ final class GlobalSearchRuntimeCoordinator {
         self.mail = mail
         self.knowledgeMarketplace = knowledgeMarketplace
         self.appSettings = appSettings
+        self.openWebSearch = openWebSearch
     }
 
     func activate() {
@@ -140,8 +150,8 @@ final class GlobalSearchRuntimeCoordinator {
             Task { @MainActor [weak chatRun] in
                 await chatRun?.submitNewChat(prompt: prompt, displayPrompt: prompt)
             }
-        case .webSearch(let url):
-            browser.openURL(url)
+        case .webSearch(let query, let url):
+            openWebSearch(query, url)
         case .chatSession(let sessionID):
             shell.selection = .agentChat
             chatSessions.selectChatSession(sessionID)

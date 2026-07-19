@@ -367,6 +367,19 @@ final class AppRuntimeLifecycle {
         browserFeatureModel.openURL(url)
     }
 
+    func openGlobalWebSearch(query: String, url: URL) {
+        let title = BrowserSearchSessionTitleFormatter.title(for: query)
+        guard let sessionID = createSessionOptimistically(title: title, kind: .chat) else { return }
+        selection = .agentChat
+        Task { [weak self] in
+            guard let self else { return }
+            await self.waitForNewSessionPreparation(sessionID: sessionID)
+            guard self.chatFeatureModel.sessions.selectedSessionID == sessionID,
+                  !self.isLoadingSelectedChatSessionDetail else { return }
+            self.browserFeatureModel.openURL(url, preferredSessionID: sessionID)
+        }
+    }
+
     private func rebuildCalendarSearchIndexIfNeeded(events: [CalendarEvent]) async throws {
         guard let nativeSourceSearchBackend else { return }
         try await nativeSourceSearchBackend.rebuildSource(
@@ -888,7 +901,10 @@ final class AppRuntimeLifecycle {
             rss: rssFeatureModel,
             mail: mailFeatureModel,
             knowledgeMarketplace: knowledgeMarketplaceStore,
-            appSettings: appSettingsModel
+            appSettings: appSettingsModel,
+            openWebSearch: { [weak self] query, url in
+                self?.openGlobalWebSearch(query: query, url: url)
+            }
         )
         self.globalSearchRuntimeCoordinator = globalSearchRuntimeCoordinator
         globalSearchRuntimeCoordinator.activate()
@@ -1266,9 +1282,12 @@ final class AppRuntimeLifecycle {
             }
         }
         chatWorkspaceCoordinator.recordsBySessionID[sessionID] = snapshot.records
-        if let browserState = snapshot.browserState {
-            browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: sessionID)
+        for session in snapshot.allSessions {
+            if let browserState = snapshot.browserStatesBySessionID[session.id] {
+                browserFeatureModel.installLoadedWorkspaceSnapshot(browserState, for: session.id)
+            }
         }
+        browserFeatureModel.retainWorkspaceSessions(Set(snapshot.allSessions.map(\.id)))
         chatBackgroundTaskCoordinator.install(snapshot.backgroundTasks, sessionID: sessionID)
         chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
         replaceSelectedChatTranscript(session.messages)
@@ -2288,6 +2307,7 @@ final class AppRuntimeLifecycle {
             chatComposerCoordinator.removeSession(sessionID)
             chatRunCoordinator.removeSession(sessionID)
             chatWorkspaceCoordinator.removeSession(sessionID)
+            browserFeatureModel.removeWorkspaceSnapshot(for: sessionID)
             if chatFeatureModel.sessions.selectedSessionID == sessionID {
                 chatSessionCoordinator.clearSelection()
             }

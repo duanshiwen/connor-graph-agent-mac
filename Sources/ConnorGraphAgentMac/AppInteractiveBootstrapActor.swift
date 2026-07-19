@@ -8,7 +8,7 @@ struct InitialSessionContentSnapshot: Sendable {
     let selectedSession: AgentSession?
     let state: AppSessionStateSnapshot?
     let records: [AppSessionRecord]
-    let browserState: AppBrowserStateSnapshot?
+    let browserStatesBySessionID: [String: AppBrowserStateSnapshot]
     let backgroundTasks: [AppSessionBackgroundTask]
     let timeline: [AgentEventPresentation]
     let latestSummary: AgentSessionSummary?
@@ -62,7 +62,7 @@ actor AppInteractiveBootstrapActor {
                     selectedSession: nil,
                     state: nil,
                     records: [],
-                    browserState: nil,
+                    browserStatesBySessionID: [:],
                     backgroundTasks: [],
                     timeline: [],
                     latestSummary: nil,
@@ -79,7 +79,11 @@ actor AppInteractiveBootstrapActor {
                 try sessionsRepository.saveSessionState(state, sessionID: sessionID)
             }
             let records = try sessionsRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
-            let browserState = try sessionsRepository.loadBrowserState(sessionID: sessionID)
+            let browserStatesBySessionID = try allSessions.reduce(into: [String: AppBrowserStateSnapshot]()) { states, session in
+                if let state = try sessionsRepository.loadBrowserState(sessionID: session.id), !state.tabs.isEmpty {
+                    states[session.id] = state
+                }
+            }
             _ = try sessionsRepository.refreshSessionManifest(sessionID: sessionID)
             let backgroundTasks = try interruptPersistedActiveTasks(repository: sessionsRepository, sessionID: sessionID)
             let timeline = try loadLatestTimeline(repository: sessionsRepository, sessionID: sessionID)
@@ -89,7 +93,7 @@ actor AppInteractiveBootstrapActor {
                 selectedSession: selectedSession,
                 state: state,
                 records: records,
-                browserState: browserState,
+                browserStatesBySessionID: browserStatesBySessionID,
                 backgroundTasks: backgroundTasks,
                 timeline: timeline,
                 latestSummary: try sessionsRepository.loadLatestSummary(sessionID: sessionID),

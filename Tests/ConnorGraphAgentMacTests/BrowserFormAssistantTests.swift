@@ -43,7 +43,7 @@ struct BrowserFormAssistantTests {
         #expect(candidates.first?.text == "可以直接使用的回复")
     }
 
-    @Test func injectedObserverRoutesPasswordFieldsThroughSensitiveHandling() {
+    @MainActor @Test func injectedObserverRoutesPasswordFieldsThroughSensitiveHandling() {
         let script = EmbeddedWebView.editableFieldObserverScript
 
         #expect(script.contains("'password'"))

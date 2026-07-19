@@ -7,6 +7,30 @@ import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
 
+struct BrowserGlobalTabReference: Codable, Hashable, Identifiable, Sendable {
+    var sessionID: String
+    var tabID: UUID
+
+    var id: String { "\(sessionID):\(tabID.uuidString)" }
+}
+
+struct BrowserGlobalTabItem: Identifiable, Equatable, Sendable {
+    var reference: BrowserGlobalTabReference
+    var sessionTitle: String
+    var tab: AppBrowserTabSnapshot
+
+    var id: String { reference.id }
+
+    var displayTitle: String {
+        let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        if let host = URL(string: displayURL)?.host, !host.isEmpty { return host }
+        return "新标签页"
+    }
+
+    var displayURL: String { tab.restoredURLString }
+}
+
 @MainActor
 @Observable
 final class BrowserFeatureModel {
@@ -25,6 +49,7 @@ final class BrowserFeatureModel {
     private(set) var workspaceSessionID: String?
     var targetURLString = BrowserBuiltInPage.blankURLString
     private(set) var workspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
+    private(set) var globalTabOrder: [BrowserGlobalTabReference] = []
     let liveWebViewStore = BrowserLiveWebViewStore()
     private(set) var assistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     private(set) var isBookmarksPanelVisible = false
@@ -78,6 +103,7 @@ final class BrowserFeatureModel {
         self.userDefaults = userDefaults
         loadSitePermissions()
         loadFormAssistantPreferences()
+        loadGlobalTabOrder()
         liveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             MainActor.assumeIsolated {
                 self?.recordWebViewEviction(key: key, webView: webView, metadata: metadata)
@@ -144,6 +170,7 @@ final class BrowserFeatureModel {
 
     private static let sitePermissionsDefaultsKey = "browser.site-permissions.v1"
     private static let formAssistantDisabledHostsDefaultsKey = "browser.form-assistant.disabled-hosts.v1"
+    private static let globalTabOrderDefaultsKey = "browser.global-tab-order.v1"
 
     private func loadSitePermissions() {
         guard let data = userDefaults.data(forKey: Self.sitePermissionsDefaultsKey),
@@ -197,13 +224,107 @@ final class BrowserFeatureModel {
 
     func installLoadedWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
         workspaceSnapshotsBySessionID[sessionID] = snapshot
+        reconcileGlobalTabOrder(for: sessionID)
     }
 
     func saveWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
         var normalized = snapshot
         normalized.updatedAt = Date()
         workspaceSnapshotsBySessionID[sessionID] = normalized
+        reconcileGlobalTabOrder(for: sessionID)
         persistWorkspaceSnapshot(normalized, sessionID)
+    }
+
+    var globalTabs: [BrowserGlobalTabItem] {
+        let titles = sessionContextProvider().sessionTitlesByID
+        var tabsByReference: [BrowserGlobalTabReference: AppBrowserTabSnapshot] = [:]
+        tabsByReference.reserveCapacity(globalTabOrder.count)
+        for (sessionID, snapshot) in workspaceSnapshotsBySessionID {
+            for tab in snapshot.tabs {
+                tabsByReference[BrowserGlobalTabReference(sessionID: sessionID, tabID: tab.id)] = tab
+            }
+        }
+        return globalTabOrder.compactMap { reference in
+            guard let tab = tabsByReference[reference] else { return nil }
+            return BrowserGlobalTabItem(
+                reference: reference,
+                sessionTitle: titles[reference.sessionID] ?? "未命名会话",
+                tab: tab
+            )
+        }
+    }
+
+    @discardableResult
+    func activateGlobalTab(_ reference: BrowserGlobalTabReference) -> Bool {
+        guard var snapshot = workspaceSnapshotsBySessionID[reference.sessionID],
+              snapshot.tabs.contains(where: { $0.id == reference.tabID }) else { return false }
+        snapshot.selectedTabID = reference.tabID
+        snapshot.selectionPopover = nil
+        saveWorkspaceSnapshot(snapshot, for: reference.sessionID)
+        showWorkspace(for: reference.sessionID)
+        return true
+    }
+
+    func removeGlobalTab(_ reference: BrowserGlobalTabReference) {
+        guard var snapshot = workspaceSnapshotsBySessionID[reference.sessionID],
+              let index = snapshot.tabs.firstIndex(where: { $0.id == reference.tabID }) else { return }
+        let wasSelected = snapshot.selectedTabID == reference.tabID
+        snapshot.tabs.remove(at: index)
+        snapshot.selectionPopover = snapshot.selectionPopover?.tabID == reference.tabID ? nil : snapshot.selectionPopover
+        if wasSelected {
+            snapshot.selectedTabID = snapshot.tabs.isEmpty ? nil : snapshot.tabs[min(index, snapshot.tabs.count - 1)].id
+        }
+        saveWorkspaceSnapshot(snapshot, for: reference.sessionID)
+    }
+
+    func replacementGlobalTab(afterClosing reference: BrowserGlobalTabReference) -> BrowserGlobalTabReference? {
+        let references = globalTabs.map(\.reference)
+        guard let index = references.firstIndex(of: reference), references.count > 1 else { return nil }
+        return references[index == references.count - 1 ? index - 1 : index + 1]
+    }
+
+    func removeWorkspaceSnapshot(for sessionID: String) {
+        workspaceSnapshotsBySessionID.removeValue(forKey: sessionID)
+        globalTabOrder.removeAll { $0.sessionID == sessionID }
+        persistGlobalTabOrder()
+        if workspaceSessionID == sessionID { resetWorkspaceBinding() }
+    }
+
+    func retainWorkspaceSessions(_ sessionIDs: Set<String>) {
+        workspaceSnapshotsBySessionID = workspaceSnapshotsBySessionID.filter { sessionIDs.contains($0.key) }
+        globalTabOrder.removeAll { reference in
+            guard sessionIDs.contains(reference.sessionID),
+                  let snapshot = workspaceSnapshotsBySessionID[reference.sessionID] else { return true }
+            return !snapshot.tabs.contains(where: { $0.id == reference.tabID })
+        }
+        persistGlobalTabOrder()
+    }
+
+    private func reconcileGlobalTabOrder(for sessionID: String) {
+        guard let snapshot = workspaceSnapshotsBySessionID[sessionID] else { return }
+        let validTabIDs = Set(snapshot.tabs.map(\.id))
+        var updated = globalTabOrder.filter { reference in
+            reference.sessionID != sessionID || validTabIDs.contains(reference.tabID)
+        }
+        let existing = Set(updated)
+        updated.append(contentsOf: snapshot.tabs.compactMap { tab in
+            let reference = BrowserGlobalTabReference(sessionID: sessionID, tabID: tab.id)
+            return existing.contains(reference) ? nil : reference
+        })
+        guard updated != globalTabOrder else { return }
+        globalTabOrder = updated
+        persistGlobalTabOrder()
+    }
+
+    private func loadGlobalTabOrder() {
+        guard let data = userDefaults.data(forKey: Self.globalTabOrderDefaultsKey),
+              let references = try? JSONDecoder().decode([BrowserGlobalTabReference].self, from: data) else { return }
+        globalTabOrder = references
+    }
+
+    private func persistGlobalTabOrder() {
+        guard let data = try? JSONEncoder().encode(globalTabOrder) else { return }
+        userDefaults.set(data, forKey: Self.globalTabOrderDefaultsKey)
     }
 
     @discardableResult

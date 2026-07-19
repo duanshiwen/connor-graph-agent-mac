@@ -632,6 +632,7 @@ private struct AgentChatConversationView: View {
         if let message = item.message {
             AgentChatMessageRow(
                 row: message,
+                isNoteBody: isNoteBodyMessage(message),
                 persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
                 localAttachmentFileURL: { attachment in
                     chatActions.composer.localAttachmentFileURL(attachment)
@@ -683,6 +684,16 @@ private struct AgentChatConversationView: View {
         } else if let timestamp = item.timestamp {
             AgentChatTurnTimestampRow(timestamp: timestamp)
         }
+    }
+
+    private func isNoteBodyMessage(_ message: AgentChatMessagePresentation) -> Bool {
+        guard let sessionID = model.sessions.selectedSessionID else { return false }
+        let session = (model.sessions.sessions + model.sessions.allSessions).first { $0.id == sessionID }
+        return AgentChatMessagePresentationPolicy.isNoteBody(
+            sessionKind: session?.governance.kind,
+            firstMessageID: model.run.transcript.first?.id,
+            messageID: message.message.id
+        )
     }
 
     private var isNoteModeBeforeFirstMessage: Bool {

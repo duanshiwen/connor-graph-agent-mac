@@ -427,6 +427,7 @@ struct BrowserTabChip: View {
     var isSelected: Bool
     var isLoading: Bool
     var isPrivate: Bool = false
+    var sessionTitle: String? = nil
     var onSelect: () -> Void
     var onClose: () -> Void
 
@@ -459,7 +460,11 @@ struct BrowserTabChip: View {
         .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(tabBorder, lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .onTapGesture(perform: onSelect)
-        .help(url)
+        .help([sessionTitle, url].compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }.joined(separator: "\n"))
+        .accessibilityLabel(sessionTitle.map { "\(title)，会话：\($0)" } ?? title)
     }
 
     private var tabBackground: Color { isSelected ? Color(nsColor: .controlBackgroundColor) : Color.secondary.opacity(0.045) }

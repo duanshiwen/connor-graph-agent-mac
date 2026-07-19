@@ -1,6 +1,13 @@
 import SwiftUI
 import ConnorGraphAgent
 import ConnorGraphAppSupport
+import ConnorGraphCore
+
+enum AgentChatMessagePresentationPolicy {
+    static func isNoteBody(sessionKind: AgentSessionKind?, firstMessageID: String?, messageID: String) -> Bool {
+        sessionKind == .note && firstMessageID == messageID
+    }
+}
 
 struct AgentAssistantMessageActionsPresentation: Equatable {
     var showsActions: Bool
@@ -118,6 +125,7 @@ struct AgentChatDateSeparatorRow: View {
 
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
+    var isNoteBody = false
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
@@ -171,6 +179,7 @@ struct AgentChatMessageRow: View {
     }
 
     private var isUser: Bool { row.message.role == .user }
+    private var usesTrailingUserLayout: Bool { isUser && !isNoteBody }
     private var messageBodyPointSize: CGFloat {
         AgentChatFontPreferences.validatedMessageBodyPointSize(preferredMessageBodyPointSize)
     }
@@ -201,10 +210,13 @@ struct AgentChatMessageRow: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
+            if usesTrailingUserLayout { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                    if isNoteBody {
+                        noteBodyHeader
+                    }
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
                     }
@@ -221,11 +233,11 @@ struct AgentChatMessageRow: View {
                 .foregroundStyle(Color.primary)
                 .padding(.horizontal, AgentChatLayout.messageBubbleHorizontalPadding)
                 .padding(.vertical, AgentChatLayout.messageBubbleVerticalPadding)
-                .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
+                .frame(maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
                 .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                        .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+                        .stroke(messageBorder, lineWidth: 1)
                 )
 
                 if assistantActionsPresentation.showsActions {
@@ -238,7 +250,26 @@ struct AgentChatMessageRow: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
+    }
+
+    private var noteBodyHeader: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            Image(systemName: "doc.text")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(ConnorCraftPalette.accent)
+            Text("笔记正文")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, AgentChatLayout.spaceXS)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.12))
+                .frame(height: 1)
+        }
+        .accessibilityAddTraits(.isHeader)
     }
 
     private func userActiveSkillChip(_ label: String) -> some View {
@@ -290,8 +321,14 @@ struct AgentChatMessageRow: View {
     }
 
     private var messageBackground: Color {
+        if isNoteBody { return Color(nsColor: .textBackgroundColor).opacity(0.72) }
         if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+
+    private var messageBorder: Color {
+        if isNoteBody { return ConnorCraftPalette.accent.opacity(0.20) }
+        return isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity)
     }
 }
 

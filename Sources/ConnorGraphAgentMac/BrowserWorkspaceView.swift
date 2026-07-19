@@ -212,7 +212,7 @@ struct BrowserWorkspaceView: View {
             ensureInitialTab()
             navigate(to: newValue)
         }
-        .onChange(of: chat.selectedSessionID) { _, _ in
+        .onChange(of: activeSessionID) { _, _ in
             pauseAllBrowserMedia()
             ensureInitialTab()
             isAddressEditing = false
@@ -229,7 +229,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private var activeSessionID: String {
-        chat.selectedSessionID ?? "__fallback__"
+        model.workspaceSessionID ?? chat.selectedSessionID ?? "__fallback__"
     }
 
     private var activeSession: BrowserSessionState {
@@ -239,6 +239,10 @@ struct BrowserWorkspaceView: View {
 
     private var activeTabs: [BrowserTabState] {
         activeSession.tabs
+    }
+
+    private var globalTabs: [BrowserGlobalTabItem] {
+        model.globalTabs
     }
 
     private var activeSelectedTabID: BrowserTabState.ID? {
@@ -345,21 +349,23 @@ struct BrowserWorkspaceView: View {
             let addButtonWidth: CGFloat = 30
             let interItemSpacing: CGFloat = 8
             let availableTabWidth = max(0, geometry.size.width - addButtonWidth - interItemSpacing)
-            let layout = BrowserTabStripLayoutCalculator().layout(tabCount: activeTabs.count, availableWidth: Double(availableTabWidth))
+            let visibleTabs = globalTabs
+            let layout = BrowserTabStripLayoutCalculator().layout(tabCount: visibleTabs.count, availableWidth: Double(availableTabWidth))
 
             HStack(spacing: interItemSpacing) {
                 ScrollView(.horizontal, showsIndicators: layout.requiresHorizontalScroll) {
                     HStack(spacing: 4) {
-                        ForEach(activeTabs) { tab in
+                        ForEach(visibleTabs) { item in
                             BrowserTabChip(
-                                title: tab.displayTitle,
-                                url: tab.displayURL,
+                                title: item.displayTitle,
+                                url: item.displayURL,
                                 width: CGFloat(layout.tabWidth),
-                                isSelected: tab.id == activeSelectedTabID,
-                                isLoading: tab.navigationState.isLoading,
-                                isPrivate: privateTabIDs.contains(tab.id),
-                                onSelect: { selectTab(tab.id) },
-                                onClose: { closeTab(tab.id) }
+                                isSelected: item.reference.sessionID == activeSessionID && item.reference.tabID == activeSelectedTabID,
+                                isLoading: item.tab.isLoading,
+                                isPrivate: privateTabIDs.contains(item.reference.tabID),
+                                sessionTitle: item.sessionTitle,
+                                onSelect: { selectGlobalTab(item.reference) },
+                                onClose: { closeGlobalTab(item.reference) }
                             )
                         }
                     }
@@ -816,6 +822,18 @@ struct BrowserWorkspaceView: View {
         }
     }
 
+    private func selectGlobalTab(_ reference: BrowserGlobalTabReference) {
+        if reference.sessionID == activeSessionID {
+            selectTab(reference.tabID)
+            return
+        }
+        closeFormAssistant()
+        pauseAllBrowserMedia()
+        markAllBrowserTabsHidden()
+        isAddressEditing = false
+        _ = model.activateGlobalTab(reference)
+    }
+
     private func selectTab(_ id: BrowserTabState.ID) {
         closeFormAssistant()
         mutateActiveSession { session in
@@ -826,9 +844,26 @@ struct BrowserWorkspaceView: View {
         syncAddressTextWithActiveTab()
     }
 
+    private func closeGlobalTab(_ reference: BrowserGlobalTabReference) {
+        if reference.sessionID == activeSessionID {
+            closeTab(reference.tabID)
+            return
+        }
+        let key = BrowserLiveWebViewKey(sessionID: reference.sessionID, tabID: reference.tabID)
+        prepareWebViewForTabClose(webViewsByTabID[reference.tabID])
+        model.liveWebViewStore.remove(key)
+        webViewsByTabID[reference.tabID] = nil
+        privateTabIDs.remove(reference.tabID)
+        readerHTMLByTabID[reference.tabID] = nil
+        processRecoveryAttempts.remove(reference.tabID)
+        model.removeGlobalTab(reference)
+    }
+
     private func closeTab(_ id: BrowserTabState.ID) {
         if formAssistant?.tabID == id { closeFormAssistant() }
         var shouldReturnToConversation = false
+        let closingReference = BrowserGlobalTabReference(sessionID: activeSessionID, tabID: id)
+        let replacementReference = model.replacementGlobalTab(afterClosing: closingReference)
         let wasPrivate = privateTabIDs.contains(id)
         let closingWebView = webViewsByTabID[id]
         prepareWebViewForTabClose(closingWebView)
@@ -858,7 +893,11 @@ struct BrowserWorkspaceView: View {
         }
 
         if shouldReturnToConversation {
-            model.returnFromWorkspace()
+            if let replacementReference {
+                selectGlobalTab(replacementReference)
+            } else {
+                model.returnFromWorkspace()
+            }
         } else {
             isAddressEditing = false
             syncAddressTextWithActiveTab()
