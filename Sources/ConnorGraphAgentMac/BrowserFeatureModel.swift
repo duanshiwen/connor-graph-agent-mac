@@ -32,8 +32,11 @@ final class BrowserFeatureModel {
     private(set) var filteredBookmarkRecords: [BrowserBookmarkRecord] = []
     private(set) var selectedBookmarkGroupName: String?
     private(set) var isHistoryPanelVisible = false
+    private(set) var isDownloadsPanelVisible = false
     private(set) var historyRecords: [BrowserHistoryRecord] = []
     private(set) var filteredHistoryRecords: [BrowserHistoryRecord] = []
+    private(set) var downloadItems: [BrowserDownloadItem] = []
+    private(set) var sitePermissionRecords: [String: BrowserSitePermissionRecord] = [:]
     var historySearchQuery = ""
     var internalBrowserEnabled = true
     private(set) var errorMessage: String?
@@ -41,11 +44,14 @@ final class BrowserFeatureModel {
     @ObservationIgnored private let historyStore: BrowserHistoryStore?
     @ObservationIgnored private let bookmarkStore: BrowserBookmarkStore?
     @ObservationIgnored private let nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
+    @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private var assistedFetchRequestsByTaskID: [UUID: BrowserAssistedWebFetchRequest] = [:]
     @ObservationIgnored private var assistedFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
     @ObservationIgnored private var assistedFetchTimeoutTasksByID: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var historyContentFetchTasksByID: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var historyIndexTasksByID: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var historyIndexMutationTask: Task<Void, Never>?
+    @ObservationIgnored private var historyIndexMutationGeneration: UInt64 = 0
+    @ObservationIgnored private var historyIndexRequiresRebuild = false
     @ObservationIgnored private var workspaceSessionBinding = BrowserWorkspaceSessionBinding()
     @ObservationIgnored private var isShutdown = false
 
@@ -61,16 +67,85 @@ final class BrowserFeatureModel {
     init(
         historyStore: BrowserHistoryStore?,
         bookmarkStore: BrowserBookmarkStore?,
-        nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
+        nativeSourceSearchBackend: (any NativeSourceSearchBackend)?,
+        userDefaults: UserDefaults = .standard
     ) {
         self.historyStore = historyStore
         self.bookmarkStore = bookmarkStore
         self.nativeSourceSearchBackend = nativeSourceSearchBackend
+        self.userDefaults = userDefaults
+        loadSitePermissions()
         liveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             MainActor.assumeIsolated {
                 self?.recordWebViewEviction(key: key, webView: webView, metadata: metadata)
             }
         }
+    }
+
+    func toggleDownloadsPanel() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isDownloadsPanelVisible.toggle()
+            if isDownloadsPanelVisible {
+                isBookmarksPanelVisible = false
+                isHistoryPanelVisible = false
+            }
+        }
+    }
+
+    func closeDownloadsPanel() { isDownloadsPanelVisible = false }
+
+    func updateDownload(_ item: BrowserDownloadItem) {
+        if let index = downloadItems.firstIndex(where: { $0.id == item.id }) {
+            if downloadItems[index].status == .cancelled, item.status != .cancelled { return }
+            downloadItems[index] = item
+        } else {
+            downloadItems.insert(item, at: 0)
+        }
+        if item.status == .preparing || item.status == .downloading {
+            isDownloadsPanelVisible = true
+            isBookmarksPanelVisible = false
+            isHistoryPanelVisible = false
+        }
+    }
+
+    func clearCompletedDownloads() {
+        downloadItems.removeAll { [.finished, .failed, .cancelled].contains($0.status) }
+    }
+
+    func markDownloadCancelled(_ id: UUID) {
+        guard let index = downloadItems.firstIndex(where: { $0.id == id }) else { return }
+        downloadItems[index].status = .cancelled
+    }
+
+    func permissionDecision(for origin: String, kind: BrowserSitePermissionKind) -> BrowserSitePermissionDecision? {
+        sitePermissionRecords[origin]?.decisions[kind]
+    }
+
+    func setPermissionDecision(_ decision: BrowserSitePermissionDecision, for origin: String, kind: BrowserSitePermissionKind) {
+        var record = sitePermissionRecords[origin] ?? BrowserSitePermissionRecord(origin: origin, decisions: [:])
+        record.decisions[kind] = decision
+        sitePermissionRecords[origin] = record
+        persistSitePermissions()
+    }
+
+    func resetPermissions(for origin: String) {
+        sitePermissionRecords.removeValue(forKey: origin)
+        persistSitePermissions()
+    }
+
+    private static let sitePermissionsDefaultsKey = "browser.site-permissions.v1"
+
+    private func loadSitePermissions() {
+        guard let data = userDefaults.data(forKey: Self.sitePermissionsDefaultsKey),
+              let records = try? JSONDecoder().decode([BrowserSitePermissionRecord].self, from: data)
+        else { return }
+        sitePermissionRecords = Dictionary(uniqueKeysWithValues: records.map { ($0.origin, $0) })
+    }
+
+    private func persistSitePermissions() {
+        let records = sitePermissionRecords.values.sorted { $0.origin < $1.origin }
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        userDefaults.set(data, forKey: Self.sitePermissionsDefaultsKey)
     }
 
     var currentSessionID: String {
@@ -356,7 +431,7 @@ final class BrowserFeatureModel {
     func toggleBookmarksPanel() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isBookmarksPanelVisible.toggle()
-            if isBookmarksPanelVisible { isHistoryPanelVisible = false }
+            if isBookmarksPanelVisible { isHistoryPanelVisible = false; isDownloadsPanelVisible = false }
         }
         if isBookmarksPanelVisible { loadBookmarks() }
     }
@@ -412,8 +487,9 @@ final class BrowserFeatureModel {
         guard let history = result.value else { return }
         historyRecords = history
         applyHistoryFilter()
-        startHistoryIndexTask { [weak self] in
-            try? await self?.rebuildHistorySearchIndexIfNeeded()
+        enqueueHistoryIndexMutation(repairsIndex: true) { [weak self] in
+            guard let self else { return }
+            try await self.rebuildHistorySearchIndexIfNeeded()
         }
     }
 
@@ -421,9 +497,6 @@ final class BrowserFeatureModel {
         guard let historyStore else { return }
         historyRecords = historyStore.loadHistory()
         applyHistoryFilter()
-        startHistoryIndexTask { [weak self] in
-            try? await self?.rebuildHistorySearchIndexIfNeeded()
-        }
     }
 
     func recordHistory(url: String, title: String, sessionID: String) {
@@ -448,7 +521,7 @@ final class BrowserFeatureModel {
     func toggleHistoryPanel() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isHistoryPanelVisible.toggle()
-            if isHistoryPanelVisible { isBookmarksPanelVisible = false }
+            if isHistoryPanelVisible { isBookmarksPanelVisible = false; isDownloadsPanelVisible = false }
         }
         if isHistoryPanelVisible { loadHistory() }
     }
@@ -492,17 +565,7 @@ final class BrowserFeatureModel {
 
     func fallbackSearchResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
         searchHistory(query: query, limit: limit).map { record in
-            NativeSearchResult(
-                id: "browser-history:\(record.id.uuidString)",
-                sourceKind: .browserHistory,
-                externalID: record.id.uuidString,
-                sourceInstanceID: record.sessionID,
-                title: record.title.isEmpty ? record.url : record.title,
-                snippet: [record.sessionTitle, record.url].filter { !$0.isEmpty }.joined(separator: " · "),
-                score: 1, lexicalScore: 1, freshnessScore: 0, fieldScore: 0,
-                temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
-                resultTimeLabel: record.visitedAt.connorLocalFormatted(date: .medium, time: .short)
-            )
+            Self.searchResult(for: record, now: now)
         }
     }
 
@@ -521,8 +584,8 @@ final class BrowserFeatureModel {
         assistedFetchTimeoutTasksByID.removeAll()
         for task in historyContentFetchTasksByID.values { task.cancel() }
         historyContentFetchTasksByID.removeAll()
-        for task in historyIndexTasksByID.values { task.cancel() }
-        historyIndexTasksByID.removeAll()
+        historyIndexMutationTask?.cancel()
+        historyIndexMutationTask = nil
         for (taskID, continuation) in assistedFetchContinuationsByTaskID {
             let task = assistedTasksByID[taskID]
             continuation.resume(returning: BrowserAssistedWebFetchResult(
@@ -559,18 +622,19 @@ final class BrowserFeatureModel {
                 toolCallID: UUID().uuidString, policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
                 approvedCapabilities: [.externalNetwork]
             )
+            let updatedRecord: BrowserHistoryRecord?
             do {
                 let result = try await tool.execute(arguments: arguments, context: context)
                 guard !Task.isCancelled else { return }
-                historyStore.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
+                updatedRecord = historyStore.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
             } catch {
                 guard !Task.isCancelled else { return }
-                historyStore.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
+                updatedRecord = historyStore.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
             }
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                if let updatedRecord { self?.applyFetchedHistoryRecord(updatedRecord) }
                 self?.historyContentFetchTasksByID[recordID] = nil
-                self?.loadHistory()
             }
         }
         historyContentFetchTasksByID[recordID] = task
@@ -582,6 +646,28 @@ final class BrowserFeatureModel {
             || record.title.lowercased().contains(normalized)
             || record.sessionTitle.lowercased().contains(normalized)
             || (record.contentMarkdown?.lowercased().contains(normalized) ?? false)
+    }
+
+    private static func searchResult(for record: BrowserHistoryRecord, now: Date) -> NativeSearchResult {
+        NativeSearchResult(
+            id: "browser-history:\(record.id.uuidString)",
+            sourceKind: .browserHistory,
+            externalID: record.id.uuidString,
+            sourceInstanceID: record.sessionID,
+            title: record.title.isEmpty ? record.url : record.title,
+            snippet: [record.sessionTitle, record.url].filter { !$0.isEmpty }.joined(separator: " · "),
+            score: 1, lexicalScore: 1, freshnessScore: 0, fieldScore: 0,
+            temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
+            resultTimeLabel: record.visitedAt.connorLocalFormatted(date: .medium, time: .short)
+        )
+    }
+
+    private func applyFetchedHistoryRecord(_ record: BrowserHistoryRecord) {
+        if let index = historyRecords.firstIndex(where: { $0.id == record.id }) {
+            historyRecords[index] = record
+        }
+        applyHistoryFilter()
+        indexHistoryRecord(record)
     }
 
     private func applyHistoryFilter() { filterHistory(query: historySearchQuery) }
@@ -634,30 +720,55 @@ final class BrowserFeatureModel {
 
     private func indexHistoryRecord(_ record: BrowserHistoryRecord) {
         guard let nativeSourceSearchBackend else { return }
-        startHistoryIndexTask {
-            try? await nativeSourceSearchBackend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
+        enqueueHistoryIndexMutation {
+            try await nativeSourceSearchBackend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
         }
     }
 
     private func deleteHistorySearchRecord(id: UUID) {
         guard let nativeSourceSearchBackend else { return }
-        startHistoryIndexTask {
-            try? await nativeSourceSearchBackend.delete(documentIDs: ["browser-history:\(id.uuidString)"])
+        enqueueHistoryIndexMutation {
+            try await nativeSourceSearchBackend.delete(documentIDs: ["browser-history:\(id.uuidString)"])
         }
     }
 
     private func clearHistorySearchIndex() {
         guard let nativeSourceSearchBackend else { return }
-        startHistoryIndexTask {
-            try? await nativeSourceSearchBackend.deleteBySource(kind: .browserHistory, sourceInstanceID: nil)
+        enqueueHistoryIndexMutation {
+            try await nativeSourceSearchBackend.deleteBySource(kind: .browserHistory, sourceInstanceID: nil)
         }
     }
 
-    private func startHistoryIndexTask(_ operation: @escaping @MainActor () async -> Void) {
-        let operationID = UUID()
-        historyIndexTasksByID[operationID] = Task { [weak self] in
-            await operation()
-            self?.historyIndexTasksByID[operationID] = nil
+    func synchronizeHistorySearchIndex() async {
+        var repairAttempted = false
+        while !Task.isCancelled {
+            let generation = historyIndexMutationGeneration
+            await historyIndexMutationTask?.value
+            guard generation == historyIndexMutationGeneration else { continue }
+            guard historyIndexRequiresRebuild, !repairAttempted else { return }
+            repairAttempted = true
+            enqueueHistoryIndexMutation(repairsIndex: true) { [weak self] in
+                guard let self else { return }
+                try await self.rebuildHistorySearchIndexIfNeeded()
+            }
+        }
+    }
+
+    private func enqueueHistoryIndexMutation(
+        repairsIndex: Bool = false,
+        _ operation: @escaping @MainActor () async throws -> Void
+    ) {
+        let precedingMutation = historyIndexMutationTask
+        historyIndexMutationGeneration &+= 1
+        historyIndexMutationTask = Task { [weak self] in
+            await precedingMutation?.value
+            guard !Task.isCancelled else { return }
+            do {
+                try await operation()
+                if repairsIndex { self?.historyIndexRequiresRebuild = false }
+            } catch {
+                self?.historyIndexRequiresRebuild = true
+            }
         }
     }
 

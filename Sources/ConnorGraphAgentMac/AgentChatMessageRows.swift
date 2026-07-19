@@ -373,8 +373,8 @@ struct AgentMessageAttachmentRefsView: View {
 /// 现阶段固定为康纳同学。
 struct AgentAssistantHeaderView: View {
     var displayName: String = "康纳同学"
-    var subtitle: String = "你的主动 AI 助理"
-    var slogan: String = "用知识图谱记住一切，连接日历社交，知识市场共享智慧，可靠地完成任务。"
+    var subtitle: String = "一个拥有记忆、可以自我进化的 Agent"
+    var slogan: String = "从共同经验中学习，并把知识直接用于真实任务。"
     var avatarImage: NSImage? = nil
 
     var body: some View {

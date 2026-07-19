@@ -208,12 +208,13 @@ struct BrowserTabChip: View {
     var width: CGFloat
     var isSelected: Bool
     var isLoading: Bool
+    var isPrivate: Bool = false
     var onSelect: () -> Void
     var onClose: () -> Void
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: isLoading ? "arrow.triangle.2.circlepath" : "globe")
+            Image(systemName: isLoading ? "arrow.triangle.2.circlepath" : (isPrivate ? "hand.raised.fill" : "globe"))
                 .font(BrowserFloatingTypography.tabIcon)
                 .foregroundStyle(.secondary.opacity(isSelected ? 0.85 : 0.65))
 
@@ -245,6 +246,128 @@ struct BrowserTabChip: View {
 
     private var tabBackground: Color { isSelected ? Color(nsColor: .controlBackgroundColor) : Color.secondary.opacity(0.045) }
     private var tabBorder: Color { isSelected ? Color.secondary.opacity(0.18) : Color.secondary.opacity(0.07) }
+}
+
+struct BrowserDownloadsPanelView: View {
+    var items: [BrowserDownloadItem]
+    var onClose: () -> Void
+    var onCancel: (UUID) -> Void
+    var onOpen: (BrowserDownloadItem) -> Void
+    var onReveal: (BrowserDownloadItem) -> Void
+    var onClearCompleted: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: AppShellLayout.spaceS) {
+                Image(systemName: "arrow.down.circle")
+                    .font(BrowserFloatingTypography.popoverTitle)
+                    .foregroundStyle(.secondary)
+                Text("下载")
+                    .font(BrowserFloatingTypography.popoverTitle)
+                Spacer()
+                Button(action: onClose) { Image(systemName: "xmark") }
+                    .buttonStyle(.appIcon)
+                    .help("关闭下载面板")
+            }
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.vertical, AppShellLayout.spaceS)
+            Divider()
+
+            if items.isEmpty {
+                VStack(spacing: AppShellLayout.spaceS) {
+                    Spacer()
+                    Image(systemName: "arrow.down.doc").font(.system(size: 32)).foregroundStyle(.tertiary)
+                    Text("还没有下载项目").font(BrowserFloatingTypography.hint.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("网页下载会显示在这里，并保存到“下载”文件夹。")
+                        .font(AppTypography.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                    Spacer()
+                }
+                .padding(AppShellLayout.spaceL)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(items) { item in
+                            downloadRow(item)
+                            Divider().padding(.leading, 44)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            HStack {
+                Text("\(items.count) 个项目").font(AppTypography.caption).foregroundStyle(.tertiary)
+                Spacer()
+                Button("清除已完成", action: onClearCompleted)
+                    .buttonStyle(.plain)
+                    .font(AppTypography.captionEmphasis)
+                    .disabled(!items.contains { $0.status == .finished || $0.status == .failed || $0.status == .cancelled })
+            }
+            .padding(.horizontal, AppShellLayout.spaceM)
+            .padding(.vertical, AppShellLayout.spaceS)
+        }
+        .frame(width: 300)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func downloadRow(_ item: BrowserDownloadItem) -> some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            Image(systemName: statusImage(item.status))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(statusColor(item.status))
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.filename).font(BrowserFloatingTypography.pageTitle).lineLimit(1)
+                if item.status == .preparing || item.status == .downloading {
+                    ProgressView(value: item.progress).controlSize(.small)
+                }
+                Text(statusText(item))
+                    .font(BrowserFloatingTypography.pageURL)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if item.status == .preparing || item.status == .downloading {
+                Button(action: { onCancel(item.id) }) { Image(systemName: "xmark.circle") }
+                    .buttonStyle(.plain).help("取消下载")
+            } else if item.status == .finished {
+                Menu {
+                    Button("打开", systemImage: "arrow.up.forward.app") { onOpen(item) }
+                    Button("在 Finder 中显示", systemImage: "folder") { onReveal(item) }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            }
+        }
+        .padding(.horizontal, AppShellLayout.spaceM)
+        .padding(.vertical, AppShellLayout.spaceS)
+    }
+
+    private func statusImage(_ status: BrowserDownloadStatus) -> String {
+        switch status {
+        case .preparing, .downloading: "arrow.down"
+        case .finished: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle"
+        }
+    }
+
+    private func statusColor(_ status: BrowserDownloadStatus) -> Color {
+        switch status {
+        case .finished: .green
+        case .failed: .red
+        default: .secondary
+        }
+    }
+
+    private func statusText(_ item: BrowserDownloadItem) -> String {
+        switch item.status {
+        case .preparing: "正在准备…"
+        case .downloading: "已完成 \(Int(item.progress * 100))%"
+        case .finished: "已保存到下载文件夹"
+        case .failed: item.errorMessage ?? "下载失败"
+        case .cancelled: "已取消"
+        }
+    }
 }
 
 struct BrowserToolbarIconButtonLabel: View {

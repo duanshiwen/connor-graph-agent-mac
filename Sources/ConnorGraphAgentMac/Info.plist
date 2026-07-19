@@ -6,6 +6,8 @@
     <string>康纳同学</string>
     <key>CFBundleName</key>
     <string>康纳同学</string>
+    <key>NSCameraUsageDescription</key>
+    <string>康纳同学仅在你允许网站使用摄像头时访问摄像头，用于网页视频通话、拍摄或扫码等功能。</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。</string>
     <key>NSCalendarsUsageDescription</key>

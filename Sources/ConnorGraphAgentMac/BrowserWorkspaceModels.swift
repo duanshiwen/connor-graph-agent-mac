@@ -55,6 +55,44 @@ struct BrowserSessionState {
     }
 }
 
+enum BrowserDownloadStatus: String, Equatable {
+    case preparing
+    case downloading
+    case finished
+    case failed
+    case cancelled
+}
+
+struct BrowserDownloadItem: Identifiable, Equatable {
+    var id: UUID
+    var sourceURL: URL?
+    var filename: String
+    var destinationURL: URL?
+    var progress: Double
+    var status: BrowserDownloadStatus
+    var errorMessage: String?
+    var startedAt: Date
+}
+
+enum BrowserSitePermissionKind: String, Codable, CaseIterable, Identifiable {
+    case camera
+    case microphone
+
+    var id: String { rawValue }
+    var displayName: String { self == .camera ? "摄像头" : "麦克风" }
+    var systemImage: String { self == .camera ? "video" : "mic" }
+}
+
+enum BrowserSitePermissionDecision: String, Codable {
+    case allow
+    case deny
+}
+
+struct BrowserSitePermissionRecord: Codable, Equatable {
+    var origin: String
+    var decisions: [BrowserSitePermissionKind: BrowserSitePermissionDecision]
+}
+
 struct BrowserTabState: Identifiable {
     let id: UUID
     var initialURLString: String
@@ -275,4 +313,3 @@ struct BrowserPageQuestionPayload: Decodable {
     var pageTitle: String
     var pageText: String
 }
-
