@@ -29,11 +29,25 @@ struct BrowserFormAssistantTests {
         #expect(candidates.first?.text == "谢谢你的反馈。")
     }
 
+    @Test func emptyTitleFieldOffersCreationTasksInsteadOfRewriteTasks() {
+        let tasks = BrowserFormAssistantClassifier.quickTasks(for: .title, hasText: false)
+
+        #expect(tasks.map(\.title) == ["生成标题", "突出重点", "多种风格"])
+        #expect(!tasks.map(\.title).contains("缩短标题"))
+    }
+
     @Test func fallsBackToPlainTextWhenModelDoesNotReturnJSON() {
         let candidates = BrowserFormCandidateParser.parse("可以直接使用的回复")
 
         #expect(candidates.count == 1)
         #expect(candidates.first?.text == "可以直接使用的回复")
+    }
+
+    @Test func injectedObserverRoutesPasswordFieldsThroughSensitiveHandling() {
+        let script = EmbeddedWebView.editableFieldObserverScript
+
+        #expect(script.contains("'password'"))
+        #expect(script.contains("sensitive.sensitive ? ''"))
     }
 
     @MainActor

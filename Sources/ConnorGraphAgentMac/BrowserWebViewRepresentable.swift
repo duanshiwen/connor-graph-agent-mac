@@ -89,7 +89,7 @@ struct EmbeddedWebView: NSViewRepresentable {
         if (element.isContentEditable) { return true; }
         if (element.tagName === 'TEXTAREA') { return true; }
         if (element.tagName !== 'INPUT') { return false; }
-        return ['text', 'search', 'email', 'url', 'tel'].indexOf((element.type || 'text').toLowerCase()) >= 0;
+        return ['text', 'search', 'email', 'url', 'tel', 'password'].indexOf((element.type || 'text').toLowerCase()) >= 0;
       }
       function labelFor(element) {
         if (element.labels && element.labels.length) { return clean(Array.from(element.labels).map(function(label) { return label.innerText; }).join(' '), 300); }
