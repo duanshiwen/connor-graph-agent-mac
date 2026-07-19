@@ -31,6 +31,53 @@ struct BrowserGlobalTabItem: Identifiable, Equatable, Sendable {
     var displayURL: String { tab.restoredURLString }
 }
 
+enum BrowserTabLayoutMode: String, Sendable, Equatable {
+    case horizontal
+    case vertical
+}
+
+struct BrowserGlobalTabGroup: Identifiable, Equatable, Sendable {
+    var sessionID: String
+    var sessionTitle: String
+    var tabs: [BrowserGlobalTabItem]
+
+    var id: String { sessionID }
+}
+
+struct BrowserGlobalTabGroupBuilder: Sendable {
+    func groups(from tabs: [BrowserGlobalTabItem], query: String = "") -> [BrowserGlobalTabGroup] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var sessionOrder: [String] = []
+        var groupsBySessionID: [String: BrowserGlobalTabGroup] = [:]
+
+        for tab in tabs {
+            let sessionID = tab.reference.sessionID
+            if groupsBySessionID[sessionID] == nil {
+                sessionOrder.append(sessionID)
+                groupsBySessionID[sessionID] = BrowserGlobalTabGroup(
+                    sessionID: sessionID,
+                    sessionTitle: tab.sessionTitle,
+                    tabs: []
+                )
+            }
+            groupsBySessionID[sessionID]?.tabs.append(tab)
+        }
+
+        return sessionOrder.compactMap { sessionID in
+            guard var group = groupsBySessionID[sessionID] else { return nil }
+            guard !normalizedQuery.isEmpty else { return group }
+            if group.sessionTitle.localizedCaseInsensitiveContains(normalizedQuery) {
+                return group
+            }
+            group.tabs = group.tabs.filter { tab in
+                tab.displayTitle.localizedCaseInsensitiveContains(normalizedQuery)
+                    || tab.displayURL.localizedCaseInsensitiveContains(normalizedQuery)
+            }
+            return group.tabs.isEmpty ? nil : group
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class BrowserFeatureModel {
@@ -50,6 +97,8 @@ final class BrowserFeatureModel {
     var targetURLString = BrowserBuiltInPage.blankURLString
     private(set) var workspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     private(set) var globalTabOrder: [BrowserGlobalTabReference] = []
+    private(set) var tabLayoutMode: BrowserTabLayoutMode = .horizontal
+    private(set) var isVerticalTabSidebarPinned = false
     let liveWebViewStore = BrowserLiveWebViewStore()
     private(set) var assistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     private(set) var isBookmarksPanelVisible = false
@@ -104,6 +153,7 @@ final class BrowserFeatureModel {
         loadSitePermissions()
         loadFormAssistantPreferences()
         loadGlobalTabOrder()
+        loadTabLayoutPreferences()
         liveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
             MainActor.assumeIsolated {
                 self?.recordWebViewEviction(key: key, webView: webView, metadata: metadata)
@@ -171,6 +221,36 @@ final class BrowserFeatureModel {
     private static let sitePermissionsDefaultsKey = "browser.site-permissions.v1"
     private static let formAssistantDisabledHostsDefaultsKey = "browser.form-assistant.disabled-hosts.v1"
     private static let globalTabOrderDefaultsKey = "browser.global-tab-order.v1"
+    private static let tabLayoutModeDefaultsKey = "browser.tab-layout-mode.v1"
+    private static let verticalTabSidebarPinnedDefaultsKey = "browser.vertical-tab-sidebar-pinned.v1"
+
+    func setTabLayoutMode(_ mode: BrowserTabLayoutMode) {
+        guard tabLayoutMode != mode else { return }
+        tabLayoutMode = mode
+        userDefaults.set(mode.rawValue, forKey: Self.tabLayoutModeDefaultsKey)
+    }
+
+    func toggleTabLayoutMode() {
+        setTabLayoutMode(tabLayoutMode == .horizontal ? .vertical : .horizontal)
+    }
+
+    func setVerticalTabSidebarPinned(_ isPinned: Bool) {
+        guard isVerticalTabSidebarPinned != isPinned else { return }
+        isVerticalTabSidebarPinned = isPinned
+        userDefaults.set(isPinned, forKey: Self.verticalTabSidebarPinnedDefaultsKey)
+    }
+
+    func toggleVerticalTabSidebarPinned() {
+        setVerticalTabSidebarPinned(!isVerticalTabSidebarPinned)
+    }
+
+    private func loadTabLayoutPreferences() {
+        if let rawValue = userDefaults.string(forKey: Self.tabLayoutModeDefaultsKey),
+           let mode = BrowserTabLayoutMode(rawValue: rawValue) {
+            tabLayoutMode = mode
+        }
+        isVerticalTabSidebarPinned = userDefaults.bool(forKey: Self.verticalTabSidebarPinnedDefaultsKey)
+    }
 
     private func loadSitePermissions() {
         guard let data = userDefaults.data(forKey: Self.sitePermissionsDefaultsKey),

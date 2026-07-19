@@ -74,6 +74,67 @@ struct BrowserFeatureModelTests {
         reloaded.shutdown()
     }
 
+    @Test func verticalTabPreferencesPersistAcrossModelInstances() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        fixture.model.setTabLayoutMode(.vertical)
+        fixture.model.setVerticalTabSidebarPinned(true)
+
+        let reloaded = BrowserFeatureModel(
+            historyStore: nil,
+            bookmarkStore: nil,
+            nativeSourceSearchBackend: nil,
+            userDefaults: fixture.userDefaults
+        )
+        #expect(reloaded.tabLayoutMode == .vertical)
+        #expect(reloaded.isVerticalTabSidebarPinned)
+        reloaded.shutdown()
+    }
+
+    @Test func verticalTabsGroupBySessionTitleAndFilterWithoutExposingIDs() throws {
+        let researchOne = BrowserGlobalTabItem(
+            reference: BrowserGlobalTabReference(sessionID: "session-private-id-1", tabID: UUID()),
+            sessionTitle: "产品调研",
+            tab: AppBrowserTabSnapshot(
+                initialURLString: "https://example.com/surface",
+                title: "Surface Laptop",
+                currentURLString: "https://example.com/surface"
+            )
+        )
+        let launch = BrowserGlobalTabItem(
+            reference: BrowserGlobalTabReference(sessionID: "session-private-id-2", tabID: UUID()),
+            sessionTitle: "发布计划",
+            tab: AppBrowserTabSnapshot(
+                initialURLString: "https://example.com/launch",
+                title: "Launch checklist",
+                currentURLString: "https://example.com/launch"
+            )
+        )
+        let researchTwo = BrowserGlobalTabItem(
+            reference: BrowserGlobalTabReference(sessionID: "session-private-id-1", tabID: UUID()),
+            sessionTitle: "产品调研",
+            tab: AppBrowserTabSnapshot(
+                initialURLString: "https://example.com/notes",
+                title: "Interview notes",
+                currentURLString: "https://example.com/notes"
+            )
+        )
+        let builder = BrowserGlobalTabGroupBuilder()
+
+        let groups = builder.groups(from: [researchOne, launch, researchTwo])
+        #expect(groups.map(\.sessionTitle) == ["产品调研", "发布计划"])
+        #expect(groups.map(\.tabs.count) == [2, 1])
+
+        let sessionMatch = try #require(builder.groups(from: [researchOne, launch, researchTwo], query: "产品").first)
+        #expect(sessionMatch.sessionTitle == "产品调研")
+        #expect(sessionMatch.tabs.count == 2)
+
+        let tabMatch = try #require(builder.groups(from: [researchOne, launch, researchTwo], query: "checklist").first)
+        #expect(tabMatch.sessionTitle == "发布计划")
+        #expect(tabMatch.tabs.map(\.displayTitle) == ["Launch checklist"])
+    }
+
     @Test func closingGlobalTabKeepsOtherSessionAvailableAsReplacement() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

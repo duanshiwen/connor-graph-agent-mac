@@ -471,6 +471,99 @@ struct BrowserTabChip: View {
     private var tabBorder: Color { isSelected ? Color.secondary.opacity(0.18) : Color.secondary.opacity(0.07) }
 }
 
+struct BrowserVerticalTabGroupHeader: View {
+    var title: String
+    var count: Int
+    var isExpanded: Bool
+    var isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isActive ? "bubble.left.fill" : "bubble.left")
+                .font(BrowserFloatingTypography.tabIcon)
+                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                .frame(width: 20, height: 20)
+
+            if isExpanded {
+                Text(title)
+                    .font(isActive ? BrowserFloatingTypography.tabTitleSelected : BrowserFloatingTypography.tabTitle)
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(count)")
+                    .font(BrowserFloatingTypography.tabTitle)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, isExpanded ? 6 : 8)
+        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+        .help(title)
+        .accessibilityLabel("会话：\(title)，\(count) 个标签页")
+    }
+}
+
+struct BrowserVerticalTabRow: View {
+    var item: BrowserGlobalTabItem
+    var isExpanded: Bool
+    var isSelected: Bool
+    var isPrivate: Bool
+    var onSelect: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if item.tab.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 18, height: 18)
+                    .fixedSize()
+            } else {
+                Image(systemName: isPrivate ? "hand.raised.fill" : "globe")
+                    .font(BrowserFloatingTypography.tabIcon)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .frame(width: 18, height: 18)
+            }
+
+            if isExpanded {
+                Text(item.displayTitle)
+                    .font(isSelected ? BrowserFloatingTypography.tabTitleSelected : BrowserFloatingTypography.tabTitle)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(BrowserFloatingTypography.tabCloseIcon)
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary.opacity(0.72))
+                .help("关闭标签页")
+            }
+        }
+        .padding(.horizontal, isExpanded ? 7 : 9)
+        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
+        .background(tabBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(alignment: .leading) {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(Color.accentColor)
+                    .frame(width: 2, height: 18)
+                    .padding(.leading, 1)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .onTapGesture(perform: onSelect)
+        .help("\(item.sessionTitle)\n\(item.displayTitle)\n\(item.displayURL)")
+        .accessibilityLabel("\(item.displayTitle)，会话：\(item.sessionTitle)")
+    }
+
+    private var tabBackground: Color {
+        isSelected ? Color(nsColor: .controlBackgroundColor) : Color.clear
+    }
+}
+
 struct BrowserDownloadsPanelView: View {
     var items: [BrowserDownloadItem]
     var onClose: () -> Void

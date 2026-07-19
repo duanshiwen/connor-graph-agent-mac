@@ -46,14 +46,18 @@ struct BrowserWorkspaceView: View {
     @State private var formGenerationTask: Task<Void, Never>?
     @State private var formCandidateCache: [String: BrowserFormCandidateCacheEntry] = [:]
     @State private var formUndoReceipt: BrowserFormInsertionReceipt?
+    @State private var isVerticalTabSidebarHovered = false
+    @State private var verticalTabFilter = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            tabBar
-                .padding(.horizontal, 8)
-                .padding(.top, 5)
-                .padding(.bottom, 4)
-                .background(Color(nsColor: .windowBackgroundColor))
+            if model.tabLayoutMode == .horizontal {
+                tabBar
+                    .padding(.horizontal, 8)
+                    .padding(.top, 5)
+                    .padding(.bottom, 4)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            }
 
             toolbar
                 .padding(.horizontal, 12)
@@ -64,7 +68,13 @@ struct BrowserWorkspaceView: View {
 
             Divider()
 
-            GeometryReader { geometry in
+            HStack(spacing: 0) {
+                if model.tabLayoutMode == .vertical {
+                    verticalTabSidebarContainer
+                    Divider()
+                }
+
+                GeometryReader { geometry in
                 ZStack(alignment: .topLeading) {
                     if activeTabs.isEmpty {
                         ContentUnavailableView(
@@ -189,6 +199,7 @@ struct BrowserWorkspaceView: View {
                         )
                         .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
                     }
+                }
                 }
             }
         }
@@ -390,8 +401,154 @@ struct BrowserWorkspaceView: View {
         .frame(height: 30)
     }
 
+    private var isVerticalTabSidebarExpanded: Bool {
+        model.isVerticalTabSidebarPinned || isVerticalTabSidebarHovered
+    }
+
+    private var verticalTabGroups: [BrowserGlobalTabGroup] {
+        BrowserGlobalTabGroupBuilder().groups(from: globalTabs, query: verticalTabFilter)
+    }
+
+    private var verticalTabSidebarContainer: some View {
+        ZStack(alignment: .leading) {
+            verticalTabSidebar
+        }
+        .frame(width: model.isVerticalTabSidebarPinned ? 248 : 44, alignment: .leading)
+        .zIndex(10)
+        .animation(.easeInOut(duration: 0.16), value: model.isVerticalTabSidebarPinned)
+    }
+
+    private var verticalTabSidebar: some View {
+        let isExpanded = isVerticalTabSidebarExpanded
+        let groups = verticalTabGroups
+        return VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                if isExpanded {
+                    Text("标签页")
+                        .font(BrowserFloatingTypography.tabTitleSelected)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button(action: model.toggleVerticalTabSidebarPinned) {
+                        Image(systemName: model.isVerticalTabSidebarPinned ? "pin.fill" : "pin")
+                            .font(BrowserFloatingTypography.toolbarIcon)
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(model.isVerticalTabSidebarPinned ? Color.accentColor : Color.secondary)
+                    .help(model.isVerticalTabSidebarPinned ? "取消固定展开" : "固定展开")
+                    .accessibilityLabel(model.isVerticalTabSidebarPinned ? "取消固定竖排标签页" : "固定展开竖排标签页")
+                }
+
+                Button(action: { openNewTab(urlString: model.targetURLString, select: true) }) {
+                    Image(systemName: "plus")
+                        .font(BrowserFloatingTypography.toolbarIcon)
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("新建标签页")
+                .accessibilityLabel("新建标签页")
+            }
+            .padding(.horizontal, isExpanded ? 8 : 9)
+            .frame(height: 36)
+
+            if isExpanded {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(BrowserFloatingTypography.tabIcon)
+                        .foregroundStyle(.secondary)
+                    TextField("筛选标签页", text: $verticalTabFilter)
+                        .textFieldStyle(.plain)
+                        .font(BrowserFloatingTypography.tabTitle)
+                    if !verticalTabFilter.isEmpty {
+                        Button(action: { verticalTabFilter = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(BrowserFloatingTypography.tabIcon)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("清除筛选")
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 6)
+            }
+
+            ScrollView(.vertical, showsIndicators: isExpanded) {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if groups.isEmpty, isExpanded {
+                        Text("没有匹配的标签页")
+                            .font(BrowserFloatingTypography.tabTitle)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 8)
+                    } else {
+                        ForEach(groups) { group in
+                            VStack(alignment: .leading, spacing: 3) {
+                                BrowserVerticalTabGroupHeader(
+                                    title: group.sessionTitle,
+                                    count: group.tabs.count,
+                                    isExpanded: isExpanded,
+                                    isActive: group.sessionID == activeSessionID
+                                )
+
+                                ForEach(group.tabs) { item in
+                                    BrowserVerticalTabRow(
+                                        item: item,
+                                        isExpanded: isExpanded,
+                                        isSelected: item.reference.sessionID == activeSessionID
+                                            && item.reference.tabID == activeSelectedTabID,
+                                        isPrivate: privateTabIDs.contains(item.reference.tabID),
+                                        onSelect: { selectGlobalTab(item.reference) },
+                                        onClose: { closeGlobalTab(item.reference) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.bottom, 8)
+            }
+        }
+        .frame(width: isExpanded ? 248 : 44)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipped()
+        .shadow(
+            color: isExpanded && !model.isVerticalTabSidebarPinned ? Color.black.opacity(0.16) : Color.clear,
+            radius: 8,
+            x: 3,
+            y: 0
+        )
+        .onHover { isHovering in
+            withAnimation(.easeInOut(duration: 0.16)) {
+                isVerticalTabSidebarHovered = isHovering
+            }
+        }
+        .animation(.easeInOut(duration: 0.16), value: isExpanded)
+    }
+
     private var toolbar: some View {
         HStack(spacing: 8) {
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    model.toggleTabLayoutMode()
+                }
+            }) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: "sidebar.left",
+                    isActive: model.tabLayoutMode == .vertical
+                )
+            }
+            .buttonStyle(.plain)
+            .help(model.tabLayoutMode == .vertical ? "切换为横排标签页" : "切换为竖排标签页")
+            .accessibilityLabel(model.tabLayoutMode == .vertical ? "使用横排标签页" : "使用竖排标签页")
+
             Button(action: { activeWebView?.goBack() }) {
                 BrowserToolbarIconButtonLabel(systemImage: "chevron.left")
             }
