@@ -12,15 +12,18 @@ struct GlobalSearchNativePreviewSectionResult: Sendable {
 struct GlobalSearchPreviewCoordinator: Sendable {
     var backend: any NativeSourceSearchBackend
     var timeoutMilliseconds: Int
+    var prepareSearch: @MainActor @Sendable (NativeSearchSourceKind) async -> Void
     var errorMessage: @Sendable (Error) -> String?
 
     init(
         backend: any NativeSourceSearchBackend,
         timeoutMilliseconds: Int = 250,
+        prepareSearch: @escaping @MainActor @Sendable (NativeSearchSourceKind) async -> Void = { _ in },
         errorMessage: @escaping @Sendable (Error) -> String? = GlobalSearchPreviewCoordinator.defaultErrorMessage(for:)
     ) {
         self.backend = backend
         self.timeoutMilliseconds = timeoutMilliseconds
+        self.prepareSearch = prepareSearch
         self.errorMessage = errorMessage
     }
 
@@ -30,6 +33,7 @@ struct GlobalSearchPreviewCoordinator: Sendable {
     ) -> AsyncStream<GlobalSearchNativePreviewSectionResult> {
         let backend = backend
         let timeoutMilliseconds = timeoutMilliseconds
+        let prepareSearch = prepareSearch
         let errorMessage = errorMessage
         let backendName = String(describing: type(of: backend))
         return AsyncStream { continuation in
@@ -40,8 +44,9 @@ struct GlobalSearchPreviewCoordinator: Sendable {
                         group.addTask {
                             let startedAt = Date()
                             do {
+                                if kind == .browserHistory { await prepareSearch(kind) }
                                 let results = try await Self.withTimeout(milliseconds: timeoutMilliseconds) {
-                                    try await backend.search(NativeSearchQuery(
+                                    return try await backend.search(NativeSearchQuery(
                                         text: query,
                                         sourceKinds: [kind],
                                         limit: limit,

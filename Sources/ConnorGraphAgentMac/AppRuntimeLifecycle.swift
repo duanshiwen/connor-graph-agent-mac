@@ -31,6 +31,8 @@ private enum NewSessionPreparationResult: Sendable {
 
 @MainActor
 final class AppRuntimeLifecycle {
+    static let projectWebsiteURL = URL(string: "https://duanshiwen.github.io/connor-graph-agent-mac/")!
+
     let maintenanceCoordinator = AppMaintenanceCoordinator()
     private let chatSessionListRefreshCoordinator = ChatSessionListRefreshCoordinator()
     private lazy var chatSessionCoordinator = ChatSessionCoordinator(
@@ -385,9 +387,8 @@ final class AppRuntimeLifecycle {
         NSWorkspace.shared.open(url)
     }
 
-    func openProjectGitHubHelp() {
-        guard let url = URL(string: "https://github.com/duanshiwen/connor-graph-agent-mac") else { return }
-        openURLInCurrentChatBrowser(url)
+    func openProjectWebsiteHelp() {
+        openURLInCurrentChatBrowser(Self.projectWebsiteURL)
     }
 
     func openDeepLink(_ url: URL) {
@@ -3310,7 +3311,7 @@ extension AppRuntimeLifecycle {
             ),
             settingsActions: SettingsRuntimeActions(
                 load: { [weak model] in model?.loadRuntimeSettings() },
-                openProjectHelp: { [weak model] in model?.openProjectGitHubHelp() },
+                openProjectHelp: { [weak model] in model?.openProjectWebsiteHelp() },
                 openURL: { [weak model] in model?.openURLInSystemDefaultBrowser($0) }
             ),
             commercialReadinessDashboard: { [weak model] in model?.commercialReadinessDashboard ?? CommercialReadinessDashboard(cards: []) }

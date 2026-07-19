@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
@@ -34,6 +35,12 @@ struct BrowserWorkspaceView: View {
     @State private var focusAddressRequestID = UUID()
     @State private var questionText = ""
     @State private var browserKeyMonitor: Any?
+    @State private var privateTabIDs: Set<UUID> = []
+    @State private var processRecoveryAttempts: Set<UUID> = []
+    @State private var isFindBarVisible = false
+    @State private var findQuery = ""
+    @State private var findResultText = ""
+    @State private var readerHTMLByTabID: [UUID: String] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +54,8 @@ struct BrowserWorkspaceView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color(nsColor: .windowBackgroundColor))
+
+            if isFindBarVisible { findBar }
 
             Divider()
 
@@ -131,6 +140,24 @@ struct BrowserWorkspaceView: View {
                         Spacer(minLength: 0)
                         BrowserHistoryPanelView(model: model)
                             .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
+                    }
+                }
+
+                if model.isDownloadsPanelVisible {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        BrowserDownloadsPanelView(
+                            items: model.downloadItems,
+                            onClose: model.closeDownloadsPanel,
+                            onCancel: { id in
+                                model.liveWebViewStore.cancelDownload(id)
+                                model.markDownloadCancelled(id)
+                            },
+                            onOpen: openDownloadedFile,
+                            onReveal: revealDownloadedFile,
+                            onClearCompleted: model.clearCompletedDownloads
+                        )
+                        .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
                     }
                 }
             }
@@ -220,12 +247,31 @@ struct BrowserWorkspaceView: View {
             initialURLString: tab.restoredURLString,
             onNavigationStateChanged: { state in updateNavigationState(state, for: tab.id) },
             onOpenInNewTab: { url in openNewTab(urlString: url.absoluteString, select: true) },
+            onPopupCreated: { webView, coordinator, url in
+                adoptPopup(webView: webView, coordinator: coordinator, url: url, parentTabID: tab.id)
+            },
+            onCloseRequested: closeWebViewTab,
+            onDownloadChanged: model.updateDownload,
+            onMediaPermissionRequest: { origin, kind, completion in
+                requestMediaPermission(
+                    origin: origin,
+                    kind: kind,
+                    isPrivate: privateTabIDs.contains(tab.id),
+                    completion: completion
+                )
+            },
+            onContentProcessTerminated: { webView in recoverWebContentProcess(webView, tabID: tab.id) },
             onSelectionChanged: { selection in showSelectionPopover(selection, tabID: tab.id) },
             onRestorationReady: { webView in restoreSnapshotIfNeeded(for: tab.id, in: webView) },
+            isPrivate: privateTabIDs.contains(tab.id),
             isVisible: isSelected
         )
         if lease.isNewlyCreated {
-            lease.webView.loadBrowserURLString(tab.restoredURLString)
+            if let readerHTML = readerHTMLByTabID[tab.id] {
+                lease.webView.loadHTMLString(readerHTML, baseURL: nil)
+            } else {
+                lease.webView.loadBrowserURLString(tab.restoredURLString)
+            }
             DispatchQueue.main.async { setWebView(lease.webView, for: tab.id) }
         }
         return lease.webView
@@ -278,6 +324,7 @@ struct BrowserWorkspaceView: View {
                                 width: CGFloat(layout.tabWidth),
                                 isSelected: tab.id == activeSelectedTabID,
                                 isLoading: tab.navigationState.isLoading,
+                                isPrivate: privateTabIDs.contains(tab.id),
                                 onSelect: { selectTab(tab.id) },
                                 onClose: { closeTab(tab.id) }
                             )
@@ -330,6 +377,8 @@ struct BrowserWorkspaceView: View {
             .opacity(activeWebView == nil ? 0.48 : 1)
             .help(activeTab?.navigationState.isLoading == true ? "停止加载" : "刷新")
 
+            siteSecurityMenu
+
             BrowserAddressTextField(
                 text: $addressText,
                 placeholder: "输入网址或搜索词，按 Return 打开",
@@ -361,6 +410,18 @@ struct BrowserWorkspaceView: View {
             .help("浏览历史")
             .accessibilityLabel("历史")
 
+            Button(action: { model.toggleDownloadsPanel() }) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: activeDownloadCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
+                    isActive: model.isDownloadsPanelVisible || activeDownloadCount > 0,
+                    iconFont: .system(size: 16, weight: .semibold)
+                )
+            }
+            .buttonStyle(.plain)
+            .help(activeDownloadCount > 0 ? "正在下载 \(activeDownloadCount) 个项目" : "下载")
+            .accessibilityLabel("下载")
+
+            browserToolsMenu
 
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()
@@ -384,6 +445,251 @@ struct BrowserWorkspaceView: View {
         }
     }
 
+    private var activeDownloadCount: Int {
+        model.downloadItems.filter { $0.status == .preparing || $0.status == .downloading }.count
+    }
+
+    private var activeOrigin: String? {
+        guard let url = activeWebView?.url, let host = url.host else { return nil }
+        let port = url.port.map { ":\($0)" } ?? ""
+        return "\(url.scheme ?? "https")://\(host)\(port)"
+    }
+
+    private var siteSecurityMenu: some View {
+        Menu {
+            if let url = activeWebView?.url, let host = url.host {
+                Text(host)
+                Text(url.scheme == "https" ? "连接已加密" : "连接未加密")
+                Divider()
+                if let origin = activeOrigin {
+                    ForEach(BrowserSitePermissionKind.allCases) { kind in
+                        let decision = model.permissionDecision(for: origin, kind: kind)
+                        Label(
+                            "\(kind.displayName)：\(permissionLabel(decision))",
+                            systemImage: kind.systemImage
+                        )
+                    }
+                    Button("重置此网站权限") { model.resetPermissions(for: origin) }
+                }
+                Button("清除此网站数据") { clearWebsiteData(host: host) }
+            } else {
+                Text("当前页面没有站点信息")
+            }
+        } label: {
+            BrowserToolbarIconButtonLabel(
+                systemImage: activeWebView?.url?.scheme == "https" ? "lock.fill" : "exclamationmark.triangle",
+                isActive: activeWebView?.url?.scheme == "https",
+                iconFont: .system(size: 13, weight: .semibold)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("网站信息与权限")
+        .accessibilityLabel("网站信息与权限")
+    }
+
+    private var browserToolsMenu: some View {
+        Menu {
+            Button("在页面中查找…", systemImage: "magnifyingglass") { showFindBar() }
+            Button("新建私密标签页", systemImage: "hand.raised.fill") { openPrivateTab() }
+            Divider()
+            Menu("页面缩放") {
+                Button("放大", systemImage: "plus.magnifyingglass") { adjustPageZoom(by: 0.1) }
+                Button("缩小", systemImage: "minus.magnifyingglass") { adjustPageZoom(by: -0.1) }
+                Button("实际大小", systemImage: "1.magnifyingglass") { setPageZoom(1) }
+            }
+            Button("阅读模式", systemImage: "doc.plaintext") { openReaderMode() }
+            Divider()
+            Button("打印…", systemImage: "printer") { printCurrentPage() }
+            Button("导出为 PDF…", systemImage: "doc.richtext") { exportCurrentPagePDF() }
+            Divider()
+            Button("复制网址", systemImage: "doc.on.doc") { copyCurrentURL() }
+            Button("分享…", systemImage: "square.and.arrow.up") { shareCurrentURL() }
+            Button("在默认浏览器中打开", systemImage: "safari") { openCurrentURLInDefaultBrowser() }
+            Divider()
+            Button("清除全部网站数据…", systemImage: "trash") { confirmClearAllWebsiteData() }
+            Label("Web 检查器已启用", systemImage: "hammer")
+        } label: {
+            BrowserToolbarIconButtonLabel(systemImage: "ellipsis.circle", iconFont: .system(size: 16, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("更多浏览工具")
+        .accessibilityLabel("更多浏览工具")
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(BrowserFloatingTypography.hint)
+                .foregroundStyle(.tertiary)
+            TextField("在当前网页中查找", text: $findQuery)
+                .textFieldStyle(.plain)
+                .font(BrowserFloatingTypography.input)
+                .onSubmit { findInPage(forward: true) }
+            Text(findResultText)
+                .font(BrowserFloatingTypography.hint)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 70, alignment: .trailing)
+            Button(action: { findInPage(forward: false) }) {
+                Image(systemName: "chevron.up").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("上一个匹配项")
+            Button(action: { findInPage(forward: true) }) {
+                Image(systemName: "chevron.down").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("下一个匹配项")
+            Button(action: closeFindBar) {
+                Image(systemName: "xmark").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("关闭查找")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func permissionLabel(_ decision: BrowserSitePermissionDecision?) -> String {
+        switch decision { case .allow: "允许"; case .deny: "拒绝"; case nil: "询问" }
+    }
+
+    private func showFindBar() { isFindBarVisible = true }
+    private func closeFindBar() { isFindBarVisible = false; findResultText = "" }
+
+    private func findInPage(forward: Bool) {
+        guard let webView = activeWebView else { return }
+        let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { findResultText = ""; return }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = !forward
+        configuration.wraps = true
+        webView.find(query, configuration: configuration) { result in
+            findResultText = result.matchFound ? "已找到" : "无匹配"
+        }
+    }
+
+    private func adjustPageZoom(by delta: CGFloat) { setPageZoom((activeWebView?.pageZoom ?? 1) + delta) }
+    private func setPageZoom(_ value: CGFloat) { activeWebView?.pageZoom = min(max(value, 0.5), 3) }
+
+    private func printCurrentPage() {
+        guard let webView = activeWebView else { return }
+        webView.printOperation(with: NSPrintInfo.shared).run()
+    }
+
+    private func exportCurrentPagePDF() {
+        guard let webView = activeWebView else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "\(activeTab?.displayTitle ?? "网页").pdf"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        webView.createPDF(configuration: WKPDFConfiguration()) { result in
+            switch result {
+            case .success(let data): try? data.write(to: url, options: .atomic)
+            case .failure(let error): chat.reportError("导出 PDF 失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func copyCurrentURL() {
+        guard let value = activeWebView?.url?.absoluteString else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func shareCurrentURL() {
+        guard let webView = activeWebView, let url = webView.url else { return }
+        NSSharingServicePicker(items: [url]).show(relativeTo: webView.bounds, of: webView, preferredEdge: .minY)
+    }
+
+    private func openCurrentURLInDefaultBrowser() {
+        guard let url = activeWebView?.url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func openPrivateTab() {
+        let id = UUID()
+        privateTabIDs.insert(id)
+        openNewTab(urlString: BrowserBuiltInPage.blankURLString, select: true, tabID: id)
+    }
+
+    private func clearWebsiteData(host: String) {
+        let store = activeWebView?.configuration.websiteDataStore ?? .default()
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        store.fetchDataRecords(ofTypes: types) { records in
+            let matching = records.filter { $0.displayName == host || host.hasSuffix(".\($0.displayName)") }
+            store.removeData(ofTypes: types, for: matching) { activeWebView?.reload() }
+        }
+    }
+
+    private func confirmClearAllWebsiteData() {
+        let alert = NSAlert()
+        alert.messageText = "清除全部网站数据？"
+        alert.informativeText = "将删除 Cookie、缓存和本地存储，并可能退出已登录的网站。浏览历史和书签不会删除。"
+        alert.addButton(withTitle: "清除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().removeData(ofTypes: types, modifiedSince: .distantPast) { activeWebView?.reload() }
+    }
+
+    private func openReaderMode() {
+        guard let webView = activeWebView else { return }
+        let sourceWasPrivate = activeSelectedTabID.map(privateTabIDs.contains) ?? false
+        let script = """
+        (() => JSON.stringify({
+          title: document.title || '',
+          url: location.href || '',
+          text: ((document.querySelector('article') || document.querySelector('main') || document.body)?.innerText || '').trim()
+        }))()
+        """
+        webView.evaluateJavaScript(script) { result, error in
+            guard error == nil, let json = result as? String, let data = json.data(using: .utf8),
+                  let payload = try? JSONDecoder().decode(BrowserReaderPayload.self, from: data), !payload.text.isEmpty
+            else { chat.reportError("当前网页没有可用于阅读模式的正文。"); return }
+            let tabID = UUID()
+            readerHTMLByTabID[tabID] = BrowserReaderPage.html(payload)
+            if sourceWasPrivate { privateTabIDs.insert(tabID) }
+            openNewTab(urlString: BrowserBuiltInPage.blankURLString, select: true, tabID: tabID)
+        }
+    }
+
+    private func requestMediaPermission(
+        origin: String,
+        kind: BrowserSitePermissionKind,
+        isPrivate: Bool,
+        completion: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void
+    ) {
+        if !isPrivate, let decision = model.permissionDecision(for: origin, kind: kind) {
+            completion(decision == .allow ? .grant : .deny)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "网站请求使用\(kind.displayName)"
+        alert.informativeText = "\(origin) 希望访问你的\(kind.displayName)。你可以稍后从地址栏左侧的网站信息菜单重置此权限。"
+        alert.addButton(withTitle: "允许")
+        alert.addButton(withTitle: "拒绝")
+        let response = alert.runModal()
+        let decision: BrowserSitePermissionDecision = response == .alertFirstButtonReturn ? .allow : .deny
+        if !isPrivate { model.setPermissionDecision(decision, for: origin, kind: kind) }
+        completion(decision == .allow ? .grant : .deny)
+    }
+
+    private func openDownloadedFile(_ item: BrowserDownloadItem) {
+        guard let url = item.destinationURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func revealDownloadedFile(_ item: BrowserDownloadItem) {
+        guard let url = item.destinationURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     private func ensureInitialTab() {
         if model.workspaceSnapshotsBySessionID[activeSessionID] == nil {
             let session = BrowserSessionState.default(urlString: defaultURLString)
@@ -399,9 +705,10 @@ struct BrowserWorkspaceView: View {
         webViewsByTabID = session.webViewsByTabID
     }
 
-    private func openNewTab(urlString: String, select: Bool) {
+    @discardableResult
+    private func openNewTab(urlString: String, select: Bool, tabID: UUID = UUID()) -> UUID {
         let normalized = normalizedURLString(from: urlString) ?? BrowserBuiltInPage.blankURLString
-        let tab = BrowserTabState(initialURLString: normalized)
+        let tab = BrowserTabState(id: tabID, initialURLString: normalized)
         mutateActiveSession { session in
             session.tabs.append(tab)
             if select { session.selectedTabID = tab.id }
@@ -409,6 +716,69 @@ struct BrowserWorkspaceView: View {
         if select {
             isAddressEditing = false
             addressText = normalized
+        }
+        return tab.id
+    }
+
+    private func adoptPopup(
+        webView: WKWebView,
+        coordinator: BrowserLiveWebViewStore.WebViewCoordinator,
+        url: URL?,
+        parentTabID: UUID
+    ) {
+        let tabID = UUID()
+        var tab = BrowserTabState(id: tabID, initialURLString: url?.absoluteString ?? "about:blank")
+        tab.webView = webView
+        if privateTabIDs.contains(parentTabID) { privateTabIDs.insert(tabID) }
+        coordinator.onNavigationStateChanged = { state in updateNavigationState(state, for: tabID) }
+        coordinator.onSelectionChanged = { selection in showSelectionPopover(selection, tabID: tabID) }
+        coordinator.onRestorationReady = { view in restoreSnapshotIfNeeded(for: tabID, in: view) }
+        coordinator.onContentProcessTerminated = { view in recoverWebContentProcess(view, tabID: tabID) }
+        mutateActiveSession { session in
+            session.tabs.append(tab)
+            session.selectedTabID = tabID
+            session.webViewsByTabID[tabID] = webView
+        }
+        webViewsByTabID[tabID] = webView
+        model.liveWebViewStore.adoptPopup(
+            key: liveWebViewKey(for: tabID),
+            webView: webView,
+            coordinator: coordinator,
+            isVisible: true
+        )
+    }
+
+    private func closeWebViewTab(_ webView: WKWebView) {
+        guard let tabID = webViewsByTabID.first(where: { $0.value === webView })?.key else { return }
+        closeTab(tabID)
+    }
+
+    private func recoverWebContentProcess(_ webView: WKWebView, tabID: UUID) {
+        if processRecoveryAttempts.insert(tabID).inserted {
+            updateNavigationState(
+                WebNavigationState(
+                    canGoBack: webView.canGoBack,
+                    canGoForward: webView.canGoForward,
+                    title: webView.title ?? "",
+                    url: webView.url?.absoluteString ?? "",
+                    isLoading: true,
+                    errorMessage: nil
+                ),
+                for: tabID
+            )
+            webView.reload()
+        } else {
+            updateNavigationState(
+                WebNavigationState(
+                    canGoBack: false,
+                    canGoForward: false,
+                    title: webView.title ?? "",
+                    url: webView.url?.absoluteString ?? "",
+                    isLoading: false,
+                    errorMessage: "网页进程意外终止，请手动刷新。"
+                ),
+                for: tabID
+            )
         }
     }
 
@@ -423,9 +793,14 @@ struct BrowserWorkspaceView: View {
 
     private func closeTab(_ id: BrowserTabState.ID) {
         var shouldReturnToConversation = false
+        let wasPrivate = privateTabIDs.contains(id)
         let closingWebView = webViewsByTabID[id]
         prepareWebViewForTabClose(closingWebView)
         model.liveWebViewStore.remove(liveWebViewKey(for: id))
+        privateTabIDs.remove(id)
+        readerHTMLByTabID[id] = nil
+        if wasPrivate, privateTabIDs.isEmpty { model.liveWebViewStore.clearPrivateWebsiteData() }
+        processRecoveryAttempts.remove(id)
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
             let wasSelected = session.selectedTabID == id
@@ -467,6 +842,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func updateNavigationState(_ state: WebNavigationState, for tabID: BrowserTabState.ID) {
+        if !state.isLoading, state.errorMessage == nil { processRecoveryAttempts.remove(tabID) }
         var displayURL = state.url
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
@@ -482,7 +858,7 @@ struct BrowserWorkspaceView: View {
         if tabID == activeSelectedTabID, !displayURL.isEmpty, !isAddressEditing { addressText = displayURL }
 
         // Record browser history when page finishes loading
-        if !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:") {
+        if !privateTabIDs.contains(tabID), !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:") {
             model.recordHistory(
                 url: state.url,
                 title: state.title,
@@ -646,6 +1022,34 @@ struct BrowserWorkspaceView: View {
     private func installBrowserKeyMonitorIfNeeded() {
         guard browserKeyMonitor == nil else { return }
         browserKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let characters = event.charactersIgnoringModifiers?.lowercased()
+            let commandOnly = event.modifierFlags.contains(.command)
+                && !event.modifierFlags.contains(.control)
+                && !event.modifierFlags.contains(.option)
+            if event.keyCode == 53, isFindBarVisible {
+                closeFindBar()
+                return nil
+            }
+            if commandOnly, characters == "f" {
+                showFindBar()
+                return nil
+            }
+            if commandOnly, characters == "+" || characters == "=" {
+                adjustPageZoom(by: 0.1)
+                return nil
+            }
+            if commandOnly, characters == "-" {
+                adjustPageZoom(by: -0.1)
+                return nil
+            }
+            if commandOnly, characters == "0" {
+                setPageZoom(1)
+                return nil
+            }
+            if commandOnly, characters == "p" {
+                printCurrentPage()
+                return nil
+            }
             let shortcut = BrowserKeyboardShortcutResolver().shortcut(
                 character: event.charactersIgnoringModifiers,
                 isEscape: event.keyCode == 53,
@@ -829,6 +1233,41 @@ struct BrowserWorkspaceView: View {
       });
     })();
     """
+}
+
+struct BrowserReaderPayload: Decodable {
+    var title: String
+    var url: String
+    var text: String
+}
+
+enum BrowserReaderPage {
+    static func html(_ payload: BrowserReaderPayload) -> String {
+        let title = escape(payload.title.isEmpty ? "阅读模式" : payload.title)
+        let source = escape(payload.url)
+        let paragraphs = payload.text
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { "<p>\(escape($0))</p>" }
+            .joined(separator: "\n")
+        return """
+        <!doctype html><html lang="zh-Hans"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>\(title)</title><style>
+        :root{color-scheme:light dark}body{margin:0;background:#f5f7f9;color:#172b3d;font:17px/1.85 -apple-system,BlinkMacSystemFont,sans-serif}
+        article{max-width:760px;margin:0 auto;padding:72px 32px 110px}h1{font-size:42px;line-height:1.12;letter-spacing:0;margin:0 0 16px}a{color:#2879cc;word-break:break-all}p{margin:0 0 1.25em}
+        .source{margin-bottom:42px;font-size:13px;color:#718395}@media(prefers-color-scheme:dark){body{background:#10171e;color:#e7edf2}.source{color:#91a3b2}}
+        </style></head><body><article><h1>\(title)</h1><div class="source"><a href="\(source)">\(source)</a></div>\(paragraphs)</article></body></html>
+        """
+    }
+
+    private static func escape(_ value: String) -> String {
+        value.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
+    }
 }
 
 private struct BrowserPageRestorationSnapshot: Decodable {

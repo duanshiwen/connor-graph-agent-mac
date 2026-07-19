@@ -36,6 +36,7 @@ final class GlobalSearchFeatureModel {
 
     @ObservationIgnored var sessionsProvider: () -> [AgentSession] = { [] }
     @ObservationIgnored var fallbackNativeSearchProvider: (NativeSearchSourceKind, String, Int) -> [NativeSearchResult] = { _, _, _ in [] }
+    @ObservationIgnored var prepareNativeSearchProvider: @MainActor @Sendable (NativeSearchSourceKind) async -> Void = { _ in }
     @ObservationIgnored var defaultSearchURLProvider: (String) -> URL? = { _ in nil }
     @ObservationIgnored var knowledgeMarketplaceSearchProvider: (String) async -> [CloudMarketplaceKnowledgeBase] = { _ in [] }
     @ObservationIgnored var onDestination: ((Destination) -> Void)?
@@ -351,7 +352,12 @@ final class GlobalSearchFeatureModel {
         if let nativeSourceSearchBackend {
             let health = await nativeSourceSearchBackend.health()
             applyHealth(health, query: query, tokens: tokens, generation: generation)
-            let coordinator = GlobalSearchPreviewCoordinator(backend: nativeSourceSearchBackend, timeoutMilliseconds: 250, errorMessage: Self.userFacingErrorMessage(for:))
+            let coordinator = GlobalSearchPreviewCoordinator(
+                backend: nativeSourceSearchBackend,
+                timeoutMilliseconds: 250,
+                prepareSearch: prepareNativeSearchProvider,
+                errorMessage: Self.userFacingErrorMessage(for:)
+            )
             for await sectionResult in coordinator.previewResults(query: query, limitsBySource: limits) {
                 guard canApply(query: query, generation: generation) else { return }
                 timings.append(sectionResult.timing)
@@ -367,6 +373,7 @@ final class GlobalSearchFeatureModel {
             applySection(GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil), query: query, tokens: tokens, generation: generation)
         }
     }
+
 
     private func applyHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String], generation: UInt64) {
         guard canApply(query: query, generation: generation) else { return }

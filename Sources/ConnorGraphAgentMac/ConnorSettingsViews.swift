@@ -351,12 +351,12 @@ struct SettingsAppSection: View {
                 Divider()
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("项目帮助").font(SettingsListTypography.rowTitleSelected)
-                        Text("用内置浏览器打开 Connor GitHub 项目页面。")
+                        Text("获取帮助").font(SettingsListTypography.rowTitleSelected)
+                        Text("用内置浏览器打开康纳同学官网，查看产品介绍与使用指南。")
                             .font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("打开 GitHub") { openProjectHelp() }
+                    Button("打开官网") { openProjectHelp() }
                         .buttonStyle(.bordered)
                 }
             }

@@ -99,18 +99,136 @@ struct BrowserFeatureModelTests {
         fixture.cleanup()
     }
 
+    @Test func downloadStateCanBeCancelledAndClearedWithoutLateFailureOverride() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let id = UUID()
+        let preparing = BrowserDownloadItem(
+            id: id,
+            sourceURL: URL(string: "https://example.com/archive.zip"),
+            filename: "archive.zip",
+            destinationURL: nil,
+            progress: 0,
+            status: .preparing,
+            errorMessage: nil,
+            startedAt: Date()
+        )
+
+        fixture.model.updateDownload(preparing)
+        fixture.model.markDownloadCancelled(id)
+        var lateFailure = preparing
+        lateFailure.status = .failed
+        lateFailure.errorMessage = "cancelled"
+        fixture.model.updateDownload(lateFailure)
+
+        #expect(fixture.model.downloadItems.first?.status == .cancelled)
+        fixture.model.clearCompletedDownloads()
+        #expect(fixture.model.downloadItems.isEmpty)
+    }
+
+    @Test func sitePermissionsPersistPerOriginAndCanBeReset() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let origin = "https://example.com"
+
+        fixture.model.setPermissionDecision(.allow, for: origin, kind: .camera)
+        fixture.model.setPermissionDecision(.deny, for: origin, kind: .microphone)
+
+        #expect(fixture.model.permissionDecision(for: origin, kind: .camera) == .allow)
+        #expect(fixture.model.permissionDecision(for: origin, kind: .microphone) == .deny)
+
+        let reloaded = BrowserFeatureModel(
+            historyStore: nil,
+            bookmarkStore: nil,
+            nativeSourceSearchBackend: nil,
+            userDefaults: fixture.userDefaults
+        )
+        #expect(reloaded.permissionDecision(for: origin, kind: .camera) == .allow)
+        reloaded.resetPermissions(for: origin)
+        #expect(reloaded.permissionDecision(for: origin, kind: .camera) == nil)
+        reloaded.shutdown()
+    }
+
+    @Test func historyIndexFailureIsRepairedBeforeSearchContinues() async throws {
+        let backend = BrowserHistoryIndexTestBackend(failFirstUpsert: true)
+        let fixture = try Fixture(nativeSourceSearchBackend: backend)
+        defer { fixture.cleanup() }
+
+        fixture.model.recordHistory(
+            url: "https://www.microsoftstore.com.cn/surface/surface-laptop",
+            title: "认识 Surface Laptop",
+            sessionID: "session-1"
+        )
+        await fixture.model.synchronizeHistorySearchIndex()
+
+        #expect(await backend.indexedTitles() == ["认识 Surface Laptop"])
+        #expect(await backend.rebuildCount() == 1)
+    }
+
+    @Test func historyIndexRebuildAndIncrementalWritesAreSerialized() async throws {
+        let backend = BrowserHistoryIndexTestBackend(rebuildDelayNanoseconds: 40_000_000)
+        let fixture = try Fixture(nativeSourceSearchBackend: backend)
+        defer { fixture.cleanup() }
+
+        fixture.model.applyStartupHistory(.success([]))
+        fixture.model.recordHistory(
+            url: "https://www.microsoftstore.com.cn/surface/surface-laptop",
+            title: "认识 Surface Laptop",
+            sessionID: "session-1"
+        )
+        await fixture.model.synchronizeHistorySearchIndex()
+
+        #expect(await backend.operationLog() == ["rebuild-start", "rebuild-end", "upsert"])
+        #expect(await backend.indexedTitles() == ["认识 Surface Laptop"])
+    }
+
+    @Test func readerPageEscapesUntrustedPageContent() {
+        let html = BrowserReaderPage.html(BrowserReaderPayload(
+            title: "<script>alert('title')</script>",
+            url: "https://example.com/?q=\"unsafe\"&x=1",
+            text: "Hello <img src=x onerror=alert(1)> & goodbye"
+        ))
+
+        #expect(!html.contains("<script>alert"))
+        #expect(!html.contains("<img src=x"))
+        #expect(html.contains("&lt;script&gt;"))
+        #expect(html.contains("&lt;img src=x onerror=alert(1)&gt; &amp; goodbye"))
+        #expect(html.contains("q=&quot;unsafe&quot;&amp;x=1"))
+    }
+
+    @Test func webViewCompatibilityDelegatesRemainWiredAndUserAgentIsNative() throws {
+        let source = try String(contentsOf: browserProjectSourceURL(named: "BrowserLiveWebViewStore.swift"), encoding: .utf8)
+
+        #expect(source.contains("runOpenPanelWith parameters"))
+        #expect(source.contains("runJavaScriptAlertPanelWithMessage"))
+        #expect(source.contains("requestMediaCapturePermissionFor origin"))
+        #expect(source.contains("didBecome download"))
+        #expect(source.contains("webViewDidClose"))
+        #expect(source.contains("webViewWebContentProcessDidTerminate"))
+        #expect(!source.contains("customUserAgent"))
+    }
+
     @MainActor
     private final class Fixture {
         let root: URL
         let historyStore: BrowserHistoryStore
         let model: BrowserFeatureModel
+        let userDefaults: UserDefaults
+        let userDefaultsSuiteName: String
 
-        init() throws {
+        init(nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = nil) throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("browser-feature-model-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             historyStore = BrowserHistoryStore(historyURL: root.appendingPathComponent("history.json"))
             let bookmarkStore = BrowserBookmarkStore(bookmarksURL: root.appendingPathComponent("bookmarks.json"))
-            model = BrowserFeatureModel(historyStore: historyStore, bookmarkStore: bookmarkStore, nativeSourceSearchBackend: nil)
+            userDefaultsSuiteName = "BrowserFeatureModelTests.\(UUID().uuidString)"
+            userDefaults = try #require(UserDefaults(suiteName: userDefaultsSuiteName))
+            model = BrowserFeatureModel(
+                historyStore: historyStore,
+                bookmarkStore: bookmarkStore,
+                nativeSourceSearchBackend: nativeSourceSearchBackend,
+                userDefaults: userDefaults
+            )
             model.sessionContextProvider = {
                 BrowserFeatureModel.SessionContext(
                     selectedSessionID: "session-1",
@@ -122,7 +240,65 @@ struct BrowserFeatureModelTests {
 
         func cleanup() {
             model.shutdown()
+            userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
             try? FileManager.default.removeItem(at: root)
         }
     }
+}
+
+private actor BrowserHistoryIndexTestBackend: NativeSourceSearchBackend {
+    private var documentsByID: [String: NativeSearchDocument] = [:]
+    private var shouldFailNextUpsert: Bool
+    private var rebuildDelayNanoseconds: UInt64
+    private var rebuilds = 0
+    private var operations: [String] = []
+
+    init(failFirstUpsert: Bool = false, rebuildDelayNanoseconds: UInt64 = 0) {
+        self.shouldFailNextUpsert = failFirstUpsert
+        self.rebuildDelayNanoseconds = rebuildDelayNanoseconds
+    }
+
+    func upsert(_ documents: [NativeSearchDocument]) async throws {
+        operations.append("upsert")
+        if shouldFailNextUpsert {
+            shouldFailNextUpsert = false
+            throw TestIndexError.upsertFailed
+        }
+        for document in documents { documentsByID[document.id] = document }
+    }
+
+    func delete(documentIDs: [String]) async throws {
+        for id in documentIDs { documentsByID[id] = nil }
+    }
+
+    func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String?) async throws {
+        documentsByID = documentsByID.filter { $0.value.sourceKind != kind }
+    }
+
+    func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws {
+        operations.append("rebuild-start")
+        if rebuildDelayNanoseconds > 0 { try await Task.sleep(nanoseconds: rebuildDelayNanoseconds) }
+        documentsByID = documentsByID.filter { $0.value.sourceKind != kind }
+        for document in documents { documentsByID[document.id] = document }
+        rebuilds += 1
+        operations.append("rebuild-end")
+    }
+
+    func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] { [] }
+    func health() async -> NativeSourceSearchHealthSnapshot { NativeSourceSearchHealthSnapshot() }
+
+    func indexedTitles() -> [String] { documentsByID.values.map(\.title).sorted() }
+    func rebuildCount() -> Int { rebuilds }
+    func operationLog() -> [String] { operations }
+
+    private enum TestIndexError: Error { case upsertFailed }
+}
+
+private func browserProjectSourceURL(named filename: String) -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Sources/ConnorGraphAgentMac")
+        .appendingPathComponent(filename)
 }
