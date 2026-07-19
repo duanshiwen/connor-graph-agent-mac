@@ -9,6 +9,11 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case invalidateGraphStatement
     case deleteGraphObject
     case externalNetwork
+    case readBrowserPage
+    case navigateBrowser
+    case interactBrowser
+    case commitBrowserAction
+    case transferBrowserFile
     case modelCall
     case costlyModelCall
     case readWorkspaceFile

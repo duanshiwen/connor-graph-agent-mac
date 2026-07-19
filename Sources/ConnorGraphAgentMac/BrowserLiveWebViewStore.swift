@@ -23,6 +23,7 @@ final class BrowserLiveWebViewStore {
         static let selectionMessageName = "connorSelection"
 
         var onNavigationStateChanged: ((WebNavigationState) -> Void)?
+        var onAutomationNavigationStateChanged: ((WebNavigationState) -> Void)?
         var onOpenInNewTab: ((URL) -> Void)?
         var onPopupCreated: ((WKWebView, WebViewCoordinator, URL?) -> Void)?
         var onCloseRequested: ((WKWebView) -> Void)?
@@ -33,6 +34,8 @@ final class BrowserLiveWebViewStore {
         var onContentProcessTerminated: ((WKWebView) -> Void)?
         var onSelectionChanged: ((BrowserSelectionPayload) -> Void)?
         var onRestorationReady: ((WKWebView) -> Void)?
+        var onAutomationDidFinish: ((WKWebView) -> Void)?
+        var onAutomationDidFail: ((WKWebView, Error) -> Void)?
         private var downloadCoordinators: [UUID: BrowserDownloadCoordinator] = [:]
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -46,13 +49,20 @@ final class BrowserLiveWebViewStore {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             publishNavigationState(webView)
+            onAutomationDidFinish?(webView)
             DispatchQueue.main.async { self.onRestorationReady?(webView) }
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { publishNavigationState(webView) }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            onAutomationDidFail?(webView, error)
+            handleNavigationFailure(in: webView, error: error)
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            onAutomationDidFail?(webView, error)
+            handleNavigationFailure(in: webView, error: error)
+        }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             guard navigationAction.targetFrame == nil else { return nil }
@@ -121,7 +131,7 @@ final class BrowserLiveWebViewStore {
             }
             let alert = NSAlert()
             alert.messageText = "需要登录"
-            alert.informativeText = "(challenge.protectionSpace.host) 请求用户名和密码。"
+            alert.informativeText = "\(challenge.protectionSpace.host) 请求用户名和密码。"
             let stack = NSStackView()
             stack.orientation = .vertical
             stack.spacing = 8
@@ -218,7 +228,10 @@ final class BrowserLiveWebViewStore {
                 isLoading: isLoadingOverride ?? webView.isLoading,
                 errorMessage: errorMessage
             )
-            DispatchQueue.main.async { self.onNavigationStateChanged?(state) }
+            DispatchQueue.main.async {
+                self.onNavigationStateChanged?(state)
+                self.onAutomationNavigationStateChanged?(state)
+            }
         }
     }
 
@@ -300,6 +313,7 @@ final class BrowserLiveWebViewStore {
 
     private var entries: [BrowserLiveWebViewKey: Entry] = [:]
     private var activeDownloads: [UUID: WKDownload] = [:]
+    private var activeAutomationKeys: Set<BrowserLiveWebViewKey> = []
     private let privateDataStore = WKWebsiteDataStore.nonPersistent()
     private var budgetPolicy = BrowserLiveWebViewBudgetPolicy()
     var onWillEvict: ((BrowserLiveWebViewKey, WKWebView, SnapshotMetadata) -> Void)?
@@ -359,6 +373,51 @@ final class BrowserLiveWebViewStore {
         entries[key] = Entry(key: key, webView: webView, coordinator: coordinator, lastAccessedAt: now, lastVisibleAt: isVisible ? now : nil, isVisible: isVisible, restorationStatus: .live)
     }
 
+    func leaseAutomationWebView(
+        key: BrowserLiveWebViewKey,
+        onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
+        onDidFinish: ((WKWebView) -> Void)? = nil,
+        onDidFail: ((WKWebView, Error) -> Void)? = nil
+    ) -> WebViewLease {
+        let now = Date()
+        if var entry = entries[key] {
+            entry.lastAccessedAt = now
+            entry.coordinator.onAutomationNavigationStateChanged = onNavigationStateChanged
+            if let onDidFinish { entry.coordinator.onAutomationDidFinish = onDidFinish }
+            if let onDidFail { entry.coordinator.onAutomationDidFail = onDidFail }
+            if onDidFinish != nil || onDidFail != nil { activeAutomationKeys.insert(key) }
+            entries[key] = entry
+            return WebViewLease(webView: entry.webView, isNewlyCreated: false)
+        }
+
+        let coordinator = WebViewCoordinator()
+        coordinator.onAutomationNavigationStateChanged = onNavigationStateChanged
+        coordinator.onAutomationDidFinish = onDidFinish
+        coordinator.onAutomationDidFail = onDidFail
+        let webView = Self.makeConfiguredWebView(coordinator: coordinator, isPrivate: false, privateDataStore: privateDataStore)
+        entries[key] = Entry(
+            key: key,
+            webView: webView,
+            coordinator: coordinator,
+            lastAccessedAt: now,
+            lastVisibleAt: nil,
+            isVisible: false,
+            restorationStatus: .live
+        )
+        if onDidFinish != nil || onDidFail != nil { activeAutomationKeys.insert(key) }
+        return WebViewLease(webView: webView, isNewlyCreated: true)
+    }
+
+    func webView(for key: BrowserLiveWebViewKey) -> WKWebView? {
+        entries[key]?.webView
+    }
+
+    func clearAutomationCallbacks(for key: BrowserLiveWebViewKey) {
+        entries[key]?.coordinator.onAutomationDidFinish = nil
+        entries[key]?.coordinator.onAutomationDidFail = nil
+        activeAutomationKeys.remove(key)
+    }
+
     func cancelDownload(_ id: UUID) {
         activeDownloads[id]?.cancel { [weak self] _ in self?.activeDownloads[id] = nil }
     }
@@ -407,11 +466,12 @@ final class BrowserLiveWebViewStore {
 
     func remove(_ key: BrowserLiveWebViewKey) {
         guard let entry = entries.removeValue(forKey: key) else { return }
+        activeAutomationKeys.remove(key)
         cleanup(entry.webView)
     }
 
     func enforceBudget(processMemoryMegabytes: Int? = nil) {
-        let budgetEntries = entries.values.map { entry in
+        let budgetEntries = entries.values.filter { !activeAutomationKeys.contains($0.key) }.map { entry in
             BrowserLiveWebViewBudgetEntry(
                 key: entry.key,
                 isVisible: entry.isVisible,
@@ -428,6 +488,7 @@ final class BrowserLiveWebViewStore {
 
     private func evict(_ key: BrowserLiveWebViewKey) {
         guard var entry = entries.removeValue(forKey: key) else { return }
+        activeAutomationKeys.remove(key)
         let metadata = snapshotMetadata(from: entry.webView)
         onWillEvict?(key, entry.webView, metadata)
         entry.restorationStatus = .evicted

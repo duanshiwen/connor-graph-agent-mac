@@ -183,7 +183,7 @@ final class AppRuntimeLifecycle {
         guard mode != .allowAll else { return }
         agentPermissionMode = mode
         chatRunCoordinator.mutateManager { $0.permissionMode = mode }
-        persistLLMSettings(rebuildRuntime: chatFeatureModel.run.submittingSessionIDs.isEmpty)
+        persistLLMSettings(rebuildRuntime: false)
         chatApprovalCoordinator.permissionModeDidChange()
     }
 
@@ -769,6 +769,12 @@ final class AppRuntimeLifecycle {
                 browserAssistedWebFetchHandler: { [weak self] request in
                     guard let self else { return nil }
                     return await self.browserFeatureModel.performAssistedWebFetch(request)
+                },
+                browserControlHandler: { [weak self] request in
+                    guard let self else {
+                        throw BrowserAutomationRuntimeError.invalidRequest("Browser runtime is unavailable")
+                    }
+                    return try await self.browserFeatureModel.performBrowserControl(request)
                 }
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
@@ -1697,7 +1703,7 @@ final class AppRuntimeLifecycle {
         let configuration = effectiveLoopConfiguration
         return chatRunCoordinator.makeManager(
             for: session,
-            permissionMode: configuration.permissionMode,
+            permissionMode: agentPermissionMode,
             configuration: configuration,
             sessionWorkspace: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]?.llmOverride,
@@ -2080,6 +2086,7 @@ final class AppRuntimeLifecycle {
 
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
+        let permissionMode = agentPermissionMode
         let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
         let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
@@ -2108,7 +2115,7 @@ final class AppRuntimeLifecycle {
                     try Task.checkCancellation()
                     let manager = isVisible ? runtimeFactory?.makeNativeSessionManager(
                         session: session,
-                        permissionMode: configuration.permissionMode,
+                        permissionMode: permissionMode,
                         configuration: configuration,
                         sessionWorkspace: sessionState?.workspace,
                         sessionLLMOverride: sessionState?.llmOverride,
