@@ -7,6 +7,11 @@ struct AppFeatureGraphTests {
     private let legacyMegaTypeName = "App" + "View" + "Model"
 
     @MainActor
+    @Test func projectHelpUsesOfficialWebsite() {
+        #expect(AppRuntimeLifecycle.projectWebsiteURL.absoluteString == "https://duanshiwen.github.io/connor-graph-agent-mac/")
+    }
+
+    @MainActor
     @Test func placeholderRuntimePublishesStableFeatureReferences() {
         let runtime = AppRuntimeLifecycle.placeholder()
         let graph = runtime.graph

@@ -6,6 +6,15 @@ import ConnorGraphAppSupport
 
 @Suite("Agent Chat Timeline Adapter Tests")
 struct AgentChatTimelineAdapterTests {
+    @MainActor
+    @Test func assistantHeaderUsesWebsiteBrandMessage() {
+        let header = AgentAssistantHeaderView()
+
+        #expect(header.displayName == "康纳同学")
+        #expect(header.subtitle == "一个拥有记忆、可以自我进化的 Agent")
+        #expect(header.slogan == "从共同经验中学习，并把知识直接用于真实任务。")
+    }
+
     @Test func adapterPreservesStableTimelineIDsAndKinds() {
         let messages = sampleMessages()
         let timeline = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: Date(timeIntervalSince1970: 200))

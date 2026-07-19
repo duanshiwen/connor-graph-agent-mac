@@ -5,6 +5,36 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 struct GlobalSearchPreviewCoordinatorTests {
+    @MainActor
+    @Test func globalSearchMergesRecentBrowserHistoryWithIndexedResults() async throws {
+        let backend = DelayedNativeSourceSearchBackend(delays: [:])
+        let model = GlobalSearchFeatureModel(
+            nativeSourceSearchBackend: backend,
+            sessionSearchIndexService: nil,
+            historyRepository: nil
+        )
+        let recent = NativeSearchResult(
+            id: "browser-history:surface",
+            sourceKind: .browserHistory,
+            externalID: "surface",
+            title: "认识 Surface Laptop",
+            snippet: "microsoftstore.com.cn/surface/surface-laptop",
+            score: 1,
+            lexicalScore: 1,
+            freshnessScore: 1,
+            fieldScore: 1,
+            temporal: NativeSearchTemporalMetadata(primaryTime: Date(), primaryTimeKind: .updatedAt)
+        )
+        model.recentNativeSearchProvider = { kind, _, _ in kind == .browserHistory ? [recent] : [] }
+        model.updateQuery("Surface Laptop")
+
+        await model.refreshPreview(for: "Surface Laptop")
+
+        #expect(model.previewState.browserHistoryResults.first?.id == recent.id)
+        #expect(model.previewState.browserHistoryResults.contains { $0.title == "认识 Surface Laptop" })
+        model.shutdown()
+    }
+
     @Test func previewResultsStreamsFastSourcesBeforeSlowSourcesSettle() async throws {
         let backend = DelayedNativeSourceSearchBackend(delays: [
             .mail: 20_000_000,
