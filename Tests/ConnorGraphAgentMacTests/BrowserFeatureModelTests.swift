@@ -149,8 +149,9 @@ struct BrowserFeatureModelTests {
         reloaded.shutdown()
     }
 
-    @Test func recentHistoryFallbackSearchesCurrentInMemoryRecords() throws {
-        let fixture = try Fixture()
+    @Test func historyIndexFailureIsRepairedBeforeSearchContinues() async throws {
+        let backend = BrowserHistoryIndexTestBackend(failFirstUpsert: true)
+        let fixture = try Fixture(nativeSourceSearchBackend: backend)
         defer { fixture.cleanup() }
 
         fixture.model.recordHistory(
@@ -158,15 +159,27 @@ struct BrowserFeatureModelTests {
             title: "认识 Surface Laptop",
             sessionID: "session-1"
         )
+        await fixture.model.synchronizeHistorySearchIndex()
 
-        let results = fixture.model.recentFallbackSearchResults(
-            query: "Surface Laptop",
-            now: Date(),
-            limit: 3
+        #expect(await backend.indexedTitles() == ["认识 Surface Laptop"])
+        #expect(await backend.rebuildCount() == 1)
+    }
+
+    @Test func historyIndexRebuildAndIncrementalWritesAreSerialized() async throws {
+        let backend = BrowserHistoryIndexTestBackend(rebuildDelayNanoseconds: 40_000_000)
+        let fixture = try Fixture(nativeSourceSearchBackend: backend)
+        defer { fixture.cleanup() }
+
+        fixture.model.applyStartupHistory(.success([]))
+        fixture.model.recordHistory(
+            url: "https://www.microsoftstore.com.cn/surface/surface-laptop",
+            title: "认识 Surface Laptop",
+            sessionID: "session-1"
         )
+        await fixture.model.synchronizeHistorySearchIndex()
 
-        #expect(results.count == 1)
-        #expect(results.first?.title == "认识 Surface Laptop")
+        #expect(await backend.operationLog() == ["rebuild-start", "rebuild-end", "upsert"])
+        #expect(await backend.indexedTitles() == ["认识 Surface Laptop"])
     }
 
     @Test func readerPageEscapesUntrustedPageContent() {
@@ -203,7 +216,7 @@ struct BrowserFeatureModelTests {
         let userDefaults: UserDefaults
         let userDefaultsSuiteName: String
 
-        init() throws {
+        init(nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = nil) throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("browser-feature-model-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             historyStore = BrowserHistoryStore(historyURL: root.appendingPathComponent("history.json"))
@@ -213,7 +226,7 @@ struct BrowserFeatureModelTests {
             model = BrowserFeatureModel(
                 historyStore: historyStore,
                 bookmarkStore: bookmarkStore,
-                nativeSourceSearchBackend: nil,
+                nativeSourceSearchBackend: nativeSourceSearchBackend,
                 userDefaults: userDefaults
             )
             model.sessionContextProvider = {
@@ -231,6 +244,54 @@ struct BrowserFeatureModelTests {
             try? FileManager.default.removeItem(at: root)
         }
     }
+}
+
+private actor BrowserHistoryIndexTestBackend: NativeSourceSearchBackend {
+    private var documentsByID: [String: NativeSearchDocument] = [:]
+    private var shouldFailNextUpsert: Bool
+    private var rebuildDelayNanoseconds: UInt64
+    private var rebuilds = 0
+    private var operations: [String] = []
+
+    init(failFirstUpsert: Bool = false, rebuildDelayNanoseconds: UInt64 = 0) {
+        self.shouldFailNextUpsert = failFirstUpsert
+        self.rebuildDelayNanoseconds = rebuildDelayNanoseconds
+    }
+
+    func upsert(_ documents: [NativeSearchDocument]) async throws {
+        operations.append("upsert")
+        if shouldFailNextUpsert {
+            shouldFailNextUpsert = false
+            throw TestIndexError.upsertFailed
+        }
+        for document in documents { documentsByID[document.id] = document }
+    }
+
+    func delete(documentIDs: [String]) async throws {
+        for id in documentIDs { documentsByID[id] = nil }
+    }
+
+    func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String?) async throws {
+        documentsByID = documentsByID.filter { $0.value.sourceKind != kind }
+    }
+
+    func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws {
+        operations.append("rebuild-start")
+        if rebuildDelayNanoseconds > 0 { try await Task.sleep(nanoseconds: rebuildDelayNanoseconds) }
+        documentsByID = documentsByID.filter { $0.value.sourceKind != kind }
+        for document in documents { documentsByID[document.id] = document }
+        rebuilds += 1
+        operations.append("rebuild-end")
+    }
+
+    func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] { [] }
+    func health() async -> NativeSourceSearchHealthSnapshot { NativeSourceSearchHealthSnapshot() }
+
+    func indexedTitles() -> [String] { documentsByID.values.map(\.title).sorted() }
+    func rebuildCount() -> Int { rebuilds }
+    func operationLog() -> [String] { operations }
+
+    private enum TestIndexError: Error { case upsertFailed }
 }
 
 private func browserProjectSourceURL(named filename: String) -> URL {

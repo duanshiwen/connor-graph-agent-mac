@@ -49,7 +49,9 @@ final class BrowserFeatureModel {
     @ObservationIgnored private var assistedFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
     @ObservationIgnored private var assistedFetchTimeoutTasksByID: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var historyContentFetchTasksByID: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var historyIndexTasksByID: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var historyIndexMutationTask: Task<Void, Never>?
+    @ObservationIgnored private var historyIndexMutationGeneration: UInt64 = 0
+    @ObservationIgnored private var historyIndexRequiresRebuild = false
     @ObservationIgnored private var workspaceSessionBinding = BrowserWorkspaceSessionBinding()
     @ObservationIgnored private var isShutdown = false
 
@@ -485,8 +487,9 @@ final class BrowserFeatureModel {
         guard let history = result.value else { return }
         historyRecords = history
         applyHistoryFilter()
-        startHistoryIndexTask { [weak self] in
-            try? await self?.rebuildHistorySearchIndexIfNeeded()
+        enqueueHistoryIndexMutation(repairsIndex: true) { [weak self] in
+            guard let self else { return }
+            try await self.rebuildHistorySearchIndexIfNeeded()
         }
     }
 
@@ -494,9 +497,6 @@ final class BrowserFeatureModel {
         guard let historyStore else { return }
         historyRecords = historyStore.loadHistory()
         applyHistoryFilter()
-        startHistoryIndexTask { [weak self] in
-            try? await self?.rebuildHistorySearchIndexIfNeeded()
-        }
     }
 
     func recordHistory(url: String, title: String, sessionID: String) {
@@ -569,14 +569,6 @@ final class BrowserFeatureModel {
         }
     }
 
-    func recentFallbackSearchResults(query: String, now: Date, limit: Int, recentRecordLimit: Int = 64) -> [NativeSearchResult] {
-        let records = historyRecords.suffix(max(0, recentRecordLimit))
-            .filter { Self.historyRecord($0, matches: query) }
-            .sorted { $0.visitedAt > $1.visitedAt }
-            .prefix(limit)
-        return records.map { Self.searchResult(for: $0, now: now) }
-    }
-
     func openHistorySearch(query: String) {
         historySearchQuery = query
         isHistoryPanelVisible = true
@@ -592,8 +584,8 @@ final class BrowserFeatureModel {
         assistedFetchTimeoutTasksByID.removeAll()
         for task in historyContentFetchTasksByID.values { task.cancel() }
         historyContentFetchTasksByID.removeAll()
-        for task in historyIndexTasksByID.values { task.cancel() }
-        historyIndexTasksByID.removeAll()
+        historyIndexMutationTask?.cancel()
+        historyIndexMutationTask = nil
         for (taskID, continuation) in assistedFetchContinuationsByTaskID {
             let task = assistedTasksByID[taskID]
             continuation.resume(returning: BrowserAssistedWebFetchResult(
@@ -630,18 +622,19 @@ final class BrowserFeatureModel {
                 toolCallID: UUID().uuidString, policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
                 approvedCapabilities: [.externalNetwork]
             )
+            let updatedRecord: BrowserHistoryRecord?
             do {
                 let result = try await tool.execute(arguments: arguments, context: context)
                 guard !Task.isCancelled else { return }
-                historyStore.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
+                updatedRecord = historyStore.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
             } catch {
                 guard !Task.isCancelled else { return }
-                historyStore.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
+                updatedRecord = historyStore.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
             }
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                if let updatedRecord { self?.applyFetchedHistoryRecord(updatedRecord) }
                 self?.historyContentFetchTasksByID[recordID] = nil
-                self?.loadHistory()
             }
         }
         historyContentFetchTasksByID[recordID] = task
@@ -667,6 +660,14 @@ final class BrowserFeatureModel {
             temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
             resultTimeLabel: record.visitedAt.connorLocalFormatted(date: .medium, time: .short)
         )
+    }
+
+    private func applyFetchedHistoryRecord(_ record: BrowserHistoryRecord) {
+        if let index = historyRecords.firstIndex(where: { $0.id == record.id }) {
+            historyRecords[index] = record
+        }
+        applyHistoryFilter()
+        indexHistoryRecord(record)
     }
 
     private func applyHistoryFilter() { filterHistory(query: historySearchQuery) }
@@ -719,30 +720,55 @@ final class BrowserFeatureModel {
 
     private func indexHistoryRecord(_ record: BrowserHistoryRecord) {
         guard let nativeSourceSearchBackend else { return }
-        startHistoryIndexTask {
-            try? await nativeSourceSearchBackend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
+        enqueueHistoryIndexMutation {
+            try await nativeSourceSearchBackend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
         }
     }
 
     private func deleteHistorySearchRecord(id: UUID) {
         guard let nativeSourceSearchBackend else { return }
-        startHistoryIndexTask {
-            try? await nativeSourceSearchBackend.delete(documentIDs: ["browser-history:\(id.uuidString)"])
+        enqueueHistoryIndexMutation {
+            try await nativeSourceSearchBackend.delete(documentIDs: ["browser-history:\(id.uuidString)"])
         }
     }
 
     private func clearHistorySearchIndex() {
         guard let nativeSourceSearchBackend else { return }
-        startHistoryIndexTask {
-            try? await nativeSourceSearchBackend.deleteBySource(kind: .browserHistory, sourceInstanceID: nil)
+        enqueueHistoryIndexMutation {
+            try await nativeSourceSearchBackend.deleteBySource(kind: .browserHistory, sourceInstanceID: nil)
         }
     }
 
-    private func startHistoryIndexTask(_ operation: @escaping @MainActor () async -> Void) {
-        let operationID = UUID()
-        historyIndexTasksByID[operationID] = Task { [weak self] in
-            await operation()
-            self?.historyIndexTasksByID[operationID] = nil
+    func synchronizeHistorySearchIndex() async {
+        var repairAttempted = false
+        while !Task.isCancelled {
+            let generation = historyIndexMutationGeneration
+            await historyIndexMutationTask?.value
+            guard generation == historyIndexMutationGeneration else { continue }
+            guard historyIndexRequiresRebuild, !repairAttempted else { return }
+            repairAttempted = true
+            enqueueHistoryIndexMutation(repairsIndex: true) { [weak self] in
+                guard let self else { return }
+                try await self.rebuildHistorySearchIndexIfNeeded()
+            }
+        }
+    }
+
+    private func enqueueHistoryIndexMutation(
+        repairsIndex: Bool = false,
+        _ operation: @escaping @MainActor () async throws -> Void
+    ) {
+        let precedingMutation = historyIndexMutationTask
+        historyIndexMutationGeneration &+= 1
+        historyIndexMutationTask = Task { [weak self] in
+            await precedingMutation?.value
+            guard !Task.isCancelled else { return }
+            do {
+                try await operation()
+                if repairsIndex { self?.historyIndexRequiresRebuild = false }
+            } catch {
+                self?.historyIndexRequiresRebuild = true
+            }
         }
     }
 

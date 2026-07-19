@@ -116,21 +116,23 @@ public final class BrowserHistoryStore: @unchecked Sendable {
     }
 
     /// Update fetched content for a previously appended history record.
+    @discardableResult
     public func updateContent(
         id: UUID,
         markdown: String?,
         fetchedAt: Date = Date(),
         status: BrowserHistoryContentFetchStatus,
         error: String? = nil
-    ) {
+    ) -> BrowserHistoryRecord? {
         queue.sync {
             var records = loadRecordsUnsafe()
-            guard let index = records.firstIndex(where: { $0.id == id }) else { return }
+            guard let index = records.firstIndex(where: { $0.id == id }) else { return nil }
             records[index].contentMarkdown = markdown
             records[index].contentFetchedAt = fetchedAt
             records[index].contentFetchStatus = status
             records[index].contentFetchError = error
             saveRecordsUnsafe(records)
+            return records[index]
         }
     }
 
