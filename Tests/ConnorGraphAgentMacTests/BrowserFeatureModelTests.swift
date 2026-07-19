@@ -206,6 +206,17 @@ struct BrowserFeatureModelTests {
         #expect(source.contains("webViewDidClose"))
         #expect(source.contains("webViewWebContentProcessDidTerminate"))
         #expect(!source.contains("customUserAgent"))
+
+        let backgroundSource = try String(contentsOf: browserProjectSourceURL(named: "BrowserBackgroundTaskRunnerView.swift"), encoding: .utf8)
+        #expect(!backgroundSource.contains("customUserAgent"))
+        #expect(backgroundSource.contains("assistedTaskWebView"))
+
+        let automationSource = try String(contentsOf: browserProjectSourceURL(named: "BrowserAutomationRuntime.swift"), encoding: .utf8)
+        #expect(automationSource.contains("WKContentWorld.world"))
+        #expect(automationSource.contains("serialized(key:"))
+        #expect(automationSource.contains("Task.detached(priority: .utility)"))
+        #expect(automationSource.contains("The referenced element is obscured"))
+        #expect(automationSource.contains("Sensitive fields require user handoff"))
     }
 
     @MainActor

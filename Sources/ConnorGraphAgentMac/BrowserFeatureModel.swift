@@ -54,6 +54,7 @@ final class BrowserFeatureModel {
     @ObservationIgnored private var historyIndexRequiresRebuild = false
     @ObservationIgnored private var workspaceSessionBinding = BrowserWorkspaceSessionBinding()
     @ObservationIgnored private var isShutdown = false
+    @ObservationIgnored private(set) var automationRuntime: BrowserAutomationRuntime!
 
     @ObservationIgnored var sessionContextProvider: () -> SessionContext = {
         SessionContext(selectedSessionID: nil, activeSessionID: "__fallback__", sessionTitlesByID: [:])
@@ -80,6 +81,12 @@ final class BrowserFeatureModel {
                 self?.recordWebViewEviction(key: key, webView: webView, metadata: metadata)
             }
         }
+        automationRuntime = BrowserAutomationRuntime(
+            liveStore: liveWebViewStore,
+            snapshotProvider: { [weak self] sessionID in self?.workspaceSnapshotsBySessionID[sessionID] },
+            snapshotSaver: { [weak self] snapshot, sessionID in self?.saveWorkspaceSnapshot(snapshot, for: sessionID) },
+            showWorkspace: { [weak self] sessionID in self?.showWorkspace(for: sessionID) }
+        )
     }
 
     func toggleDownloadsPanel() {
@@ -233,6 +240,88 @@ final class BrowserFeatureModel {
     }
 
     // MARK: Assisted browser work
+
+    func performBrowserControl(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
+        guard !isShutdown else { throw BrowserAutomationRuntimeError.invalidRequest("Browser feature is shut down") }
+        return try await automationRuntime.perform(request)
+    }
+
+    func shouldAttachAssistedTaskInBackground(_ task: BrowserAssistedTaskState) -> Bool {
+        guard isVisible, workspaceSessionID == task.sessionID else { return true }
+        return workspaceSnapshotsBySessionID[task.sessionID]?.selectedTabID != task.tabID
+    }
+
+    func assistedTaskWebView(for task: BrowserAssistedTaskState) -> WKWebView {
+        automationRuntime.ensureWebView(
+            sessionID: task.sessionID,
+            tabID: task.tabID,
+            initialURLString: task.urlString,
+            onDidFinish: { [weak self] webView in self?.handleAssistedNavigationFinished(taskID: task.id, webView: webView) },
+            onDidFail: { [weak self] webView, error in self?.handleAssistedNavigationFailure(taskID: task.id, webView: webView, error: error) }
+        ).webView
+    }
+
+    private func handleAssistedNavigationFinished(taskID: UUID, webView: WKWebView) {
+        guard let task = assistedTasksByID[taskID], task.status == .running else { return }
+        let urlString = webView.url?.absoluteString ?? task.urlString
+        let title = webView.title ?? task.title
+        if let reason = BrowserAssistedInterventionDetector().interventionReason(urlString: urlString, title: title) {
+            automationRuntime.clearAutomationCallbacks(sessionID: task.sessionID, tabID: task.tabID)
+            revealAssistedTask(task.id, reason: reason)
+            return
+        }
+        guard task.kind == .fetch else {
+            automationRuntime.clearAutomationCallbacks(sessionID: task.sessionID, tabID: task.tabID)
+            completeAssistedTask(task.id, message: "Completed in background")
+            return
+        }
+        let script = """
+        (() => JSON.stringify({
+          title: document.title || '',
+          url: location.href || '',
+          text: document.body ? document.body.innerText.slice(0, 100001) : '',
+          lang: document.documentElement ? (document.documentElement.lang || '') : ''
+        }))()
+        """
+        webView.evaluateJavaScript(script) { [weak self] result, error in
+            let json = result as? String ?? ""
+            Task { @MainActor [weak self] in
+                let payload = await Task.detached(priority: .utility) { () -> (String?, String?, String) in
+                    guard let data = json.data(using: .utf8),
+                          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    else { return (nil, nil, "") }
+                    return (object["title"] as? String, object["url"] as? String, object["text"] as? String ?? "")
+                }.value
+                guard let self, let current = self.assistedTasksByID[taskID], current.status == .running else { return }
+                self.automationRuntime.clearAutomationCallbacks(sessionID: current.sessionID, tabID: current.tabID)
+                if let error {
+                    self.failAssistedTask(taskID, message: error.localizedDescription)
+                    return
+                }
+                let extractedTitle = payload.0?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let extractedURL = payload.1?.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.completeAssistedWebFetch(
+                    taskID,
+                    title: extractedTitle?.isEmpty == false ? extractedTitle! : title,
+                    finalURLString: extractedURL?.isEmpty == false ? extractedURL! : urlString,
+                    text: payload.2
+                )
+            }
+        }
+    }
+
+    private func handleAssistedNavigationFailure(taskID: UUID, webView: WKWebView, error: Error) {
+        guard let task = assistedTasksByID[taskID], task.status == .running else { return }
+        let urlString = webView.url?.absoluteString ?? task.urlString
+        let title = webView.title ?? task.title
+        let message = error.localizedDescription
+        automationRuntime.clearAutomationCallbacks(sessionID: task.sessionID, tabID: task.tabID)
+        if let reason = BrowserAssistedInterventionDetector().interventionReason(urlString: urlString, title: title, errorMessage: message) {
+            revealAssistedTask(task.id, reason: reason)
+        } else if (error as NSError).code != NSURLErrorCancelled {
+            failAssistedTask(task.id, message: message)
+        }
+    }
 
     @discardableResult
     func startAssistedSearch(urlString: String, title: String, revealImmediately: Bool = false) -> BrowserAssistedTaskState {
@@ -580,6 +669,7 @@ final class BrowserFeatureModel {
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
+        automationRuntime.shutdown()
         for task in assistedFetchTimeoutTasksByID.values { task.cancel() }
         assistedFetchTimeoutTasksByID.removeAll()
         for task in historyContentFetchTasksByID.values { task.cancel() }

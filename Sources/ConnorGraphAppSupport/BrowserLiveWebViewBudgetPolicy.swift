@@ -49,10 +49,10 @@ public struct BrowserLiveWebViewBudgetConfig: Codable, Sendable, Equatable {
     public var hiddenEvictionGracePeriodSeconds: TimeInterval
 
     public init(
-        maxHiddenLiveWebViews: Int = 4,
-        minHiddenLiveWebViewsToKeep: Int = 1,
-        softProcessMemoryLimitMegabytes: Int? = 1024,
-        hiddenEvictionGracePeriodSeconds: TimeInterval = 30
+        maxHiddenLiveWebViews: Int = 8,
+        minHiddenLiveWebViewsToKeep: Int = 2,
+        softProcessMemoryLimitMegabytes: Int? = 1536,
+        hiddenEvictionGracePeriodSeconds: TimeInterval = 60
     ) {
         self.maxHiddenLiveWebViews = max(0, maxHiddenLiveWebViews)
         self.minHiddenLiveWebViewsToKeep = max(0, minHiddenLiveWebViewsToKeep)

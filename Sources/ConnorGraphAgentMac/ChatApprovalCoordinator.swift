@@ -102,9 +102,9 @@ final class ChatApprovalCoordinator {
         switch permissionMode() {
         case .trustedWrite:
             switch approval.capability {
-            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML, .readMail, .readMailBody, .createMailDraft:
+            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .interactBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML, .readMail, .readMailBody, .createMailDraft:
                 return true
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment:
+            case .invalidateGraphStatement, .deleteGraphObject, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment:
                 return false
             }
         case .allowAll:
