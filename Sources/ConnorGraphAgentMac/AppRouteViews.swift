@@ -4,6 +4,7 @@ struct ChatListRouteView: View {
     @Bindable var model: ChatFeatureModel
     @Bindable var governanceModel: GovernanceFeatureModel
     @Bindable var workspaceSettings: WorkspaceSettingsFeatureModel
+    @Bindable var browser: BrowserFeatureModel
     var sessionActions: any ChatSessionCommanding
     var rowActions: ChatSessionListActions
 
@@ -35,7 +36,14 @@ struct ChatListRouteView: View {
                 WorkspaceFileTreePaneView(
                     model: model.workspaceExplorer,
                     sessionID: model.sessions.selectedSessionID,
-                    workspaceRoots: workspaceSettings.roots
+                    workspaceRoots: workspaceSettings.roots,
+                    onOpenHTMLPreview: { node, root in
+                        browser.openLocalHTMLPreview(
+                            fileURL: node.url,
+                            readAccessRootURL: root.url,
+                            preferredSessionID: model.sessions.selectedSessionID
+                        )
+                    }
                 )
             }
         }

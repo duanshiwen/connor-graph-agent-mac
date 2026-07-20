@@ -334,6 +334,7 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
     public var focusedElementHint: String?
     public var formDrafts: [AppBrowserFormDraftSnapshot]?
     public var restorationStatus: AppBrowserTabRestorationStatus?
+    public var localFileReadAccessPath: String?
 
     public init(
         id: UUID = UUID(),
@@ -352,7 +353,8 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
         contentFingerprint: String? = nil,
         focusedElementHint: String? = nil,
         formDrafts: [AppBrowserFormDraftSnapshot]? = nil,
-        restorationStatus: AppBrowserTabRestorationStatus? = nil
+        restorationStatus: AppBrowserTabRestorationStatus? = nil,
+        localFileReadAccessPath: String? = nil
     ) {
         self.id = id
         self.initialURLString = initialURLString
@@ -371,6 +373,7 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
         self.focusedElementHint = focusedElementHint
         self.formDrafts = formDrafts
         self.restorationStatus = restorationStatus
+        self.localFileReadAccessPath = localFileReadAccessPath
     }
 }
 

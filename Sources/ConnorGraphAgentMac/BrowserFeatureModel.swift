@@ -7,6 +7,20 @@ import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
 
+enum BrowserLocalFilePreviewError: LocalizedError, Equatable {
+    case unsupportedFile(String)
+    case fileOutsideWorkspace(String)
+    case fileMissing(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedFile(let path): "只能在浏览器中预览 HTML 文件：\(path)"
+        case .fileOutsideWorkspace(let path): "文件不在当前工作区范围内：\(path)"
+        case .fileMissing(let path): "找不到要预览的文件：\(path)"
+        }
+    }
+}
+
 struct BrowserGlobalTabReference: Codable, Hashable, Identifiable, Sendable {
     var sessionID: String
     var tabID: UUID
@@ -421,6 +435,54 @@ final class BrowserFeatureModel {
         targetURLString = urlString
         saveWorkspaceSnapshot(planner.openOrFocus(urlString: urlString, in: current), for: sessionID)
         showWorkspace(for: sessionID)
+    }
+
+    func openLocalHTMLPreview(fileURL: URL, readAccessRootURL: URL, preferredSessionID: String? = nil) {
+        do {
+            let file = fileURL.standardizedFileURL.resolvingSymlinksInPath()
+            let root = readAccessRootURL.standardizedFileURL.resolvingSymlinksInPath()
+            guard ["html", "htm"].contains(file.pathExtension.lowercased()) else {
+                throw BrowserLocalFilePreviewError.unsupportedFile(file.path)
+            }
+            guard FileManager.default.fileExists(atPath: file.path) else {
+                throw BrowserLocalFilePreviewError.fileMissing(file.path)
+            }
+            let rootPrefix = root.path == "/" ? "/" : root.path + "/"
+            guard file.path == root.path || file.path.hasPrefix(rootPrefix) else {
+                throw BrowserLocalFilePreviewError.fileOutsideWorkspace(file.path)
+            }
+
+            let sessionID = preferredSessionID ?? currentSessionID
+            let urlString = file.absoluteString
+            var snapshot = workspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+            let tabID: UUID
+            if let index = snapshot.tabs.firstIndex(where: {
+                $0.initialURLString == urlString || $0.currentURLString == urlString
+            }) {
+                snapshot.tabs[index].localFileReadAccessPath = root.path
+                snapshot.selectedTabID = snapshot.tabs[index].id
+                tabID = snapshot.tabs[index].id
+            } else {
+                let tab = AppBrowserTabSnapshot(
+                    initialURLString: urlString,
+                    title: file.deletingPathExtension().lastPathComponent,
+                    currentURLString: urlString,
+                    localFileReadAccessPath: root.path
+                )
+                snapshot.tabs.append(tab)
+                snapshot.selectedTabID = tab.id
+                tabID = tab.id
+            }
+            errorMessage = nil
+            saveWorkspaceSnapshot(snapshot, for: sessionID)
+            if let webView = liveWebViewStore.webView(for: BrowserLiveWebViewKey(sessionID: sessionID, tabID: tabID)) {
+                webView.loadFileURL(file, allowingReadAccessTo: root)
+            }
+            showWorkspace(for: sessionID)
+        } catch {
+            errorMessage = error.localizedDescription
+            onEvent?(.operationFailed(error.localizedDescription))
+        }
     }
 
     func showWorkspace() {
