@@ -2604,7 +2604,7 @@ final class AppRuntimeLifecycle {
         restoreChatInputDraft(for: session.id)
         chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
         restoreWorkspaceMode(for: session.id)
-        aiConnectionsRuntimeCoordinator.syncDisplayFromLoadedState(sessionID: session.id)
+        aiConnectionsRuntimeCoordinator.syncDisplayInBackground(sessionID: session.id)
         chatFeatureModel.sessions.presentedSessionDetailID = session.id
         errorMessage = nil
         let presentationElapsed = startedAt.duration(to: ContinuousClock.now)

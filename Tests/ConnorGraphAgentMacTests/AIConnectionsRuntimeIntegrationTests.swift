@@ -59,6 +59,48 @@ private func makeRuntime(
 }
 
 @MainActor
+@Test func sessionDisplayBackgroundSyncPreservesDefaultOverrideBehavior() async throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let connection = AppLLMConnectionConfig(
+        id: "default-connection",
+        name: "Default",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-4o-mini",
+        selectedModel: "gpt-4o-mini",
+        hasAPIKey: true
+    )
+    var settings = AppLLMSettings(connections: [connection], defaultConnectionID: connection.id)
+    settings.defaultThinkingLevel = .high
+    try repository.save(settings: settings, apiKey: "real-key")
+    let model = AIConnectionsFeatureModel(settingsRepository: repository)
+    let workspace = ChatWorkspaceCoordinator()
+    let sessionID = "background-display-session"
+    let coordinator = AIConnectionsRuntimeCoordinator(
+        model: model,
+        workspace: workspace,
+        sessionRepository: nil,
+        currentSessionID: { sessionID },
+        rebuildRuntime: {}
+    )
+
+    coordinator.syncDisplayInBackground(sessionID: sessionID)
+    for _ in 0..<100 {
+        if workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride != nil { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+
+    let override = try #require(workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride)
+    #expect(override.connectionID == connection.id)
+    #expect(override.model == connection.effectiveModel)
+    #expect(model.defaultConnectionID == connection.id)
+    #expect(model.selectedModel == connection.effectiveModel)
+    #expect(model.thinkingLevel == .high)
+}
+
+@MainActor
 @Test func runtimeUsesDisabledToolErrorFuseByDefault() throws {
     let runtime = try makeRuntime()
 
