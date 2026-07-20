@@ -91,6 +91,17 @@ struct AgentChatView: View {
                 .zIndex(10)
             }
 
+            if model.workspaceExplorer.isLoadingPreview || model.workspaceExplorer.previewModel != nil {
+                WorkspaceFilePreviewOverlay(
+                    model: model.workspaceExplorer.previewModel,
+                    isLoading: model.workspaceExplorer.isLoadingPreview,
+                    onLoadMore: model.workspaceExplorer.loadMorePreview,
+                    onClose: model.workspaceExplorer.closePreview
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(10)
+            }
+
             if model.sessions.isBackgroundTasksPresented {
                 AgentBackgroundTaskOverlay(
                     tasks: chatActions.run.activeSessionBackgroundTasks,

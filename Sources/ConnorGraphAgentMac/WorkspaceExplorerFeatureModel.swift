@@ -28,14 +28,23 @@ final class WorkspaceExplorerFeatureModel {
     private(set) var loadingNodeIDs: Set<String> = []
     private(set) var errorsByNodeID: [String: String] = [:]
     private(set) var selectedNodeID: String?
+    private(set) var previewModel: WorkspaceFilePreviewModel?
+    private(set) var isLoadingPreview = false
 
     @ObservationIgnored private let loader: WorkspaceDirectoryLoader
+    @ObservationIgnored private let previewLoader: WorkspaceFilePreviewLoader
     @ObservationIgnored private var tasksByNodeID: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var previewTask: Task<Void, Never>?
+    @ObservationIgnored private var previewTextByteLimit = WorkspaceFilePreviewLoader.defaultMaximumTextByteCount
     @ObservationIgnored private var configurationID = ""
     @ObservationIgnored private var generation: UInt64 = 0
 
-    init(loader: WorkspaceDirectoryLoader = WorkspaceDirectoryLoader()) {
+    init(
+        loader: WorkspaceDirectoryLoader = WorkspaceDirectoryLoader(),
+        previewLoader: WorkspaceFilePreviewLoader = WorkspaceFilePreviewLoader()
+    ) {
         self.loader = loader
+        self.previewLoader = previewLoader
     }
 
     func configure(sessionID: String?, roots drafts: [WorkspaceRootDraft]) {
@@ -54,12 +63,16 @@ final class WorkspaceExplorerFeatureModel {
         configurationID = nextConfigurationID
         generation &+= 1
         cancelAllTasks()
+        previewTask?.cancel()
+        previewTask = nil
         roots = nextRoots
         expandedNodeIDs = []
         childrenByNodeID = [:]
         loadingNodeIDs = []
         errorsByNodeID = [:]
         selectedNodeID = nil
+        previewModel = nil
+        isLoadingPreview = false
     }
 
     func toggleRoot(_ root: WorkspaceExplorerRoot) {
@@ -68,7 +81,7 @@ final class WorkspaceExplorerFeatureModel {
 
     func toggleNode(_ node: WorkspaceFileNode) {
         guard node.isExpandable, let root = roots.first(where: { $0.id == node.rootID }) else {
-            selectedNodeID = node.id
+            select(node)
             return
         }
         toggleDirectory(nodeID: node.id, root: root, directoryURL: node.url)
@@ -76,6 +89,34 @@ final class WorkspaceExplorerFeatureModel {
 
     func select(_ node: WorkspaceFileNode) {
         selectedNodeID = node.id
+        previewTextByteLimit = WorkspaceFilePreviewLoader.defaultMaximumTextByteCount
+        previewModel = nil
+        loadPreview(node)
+    }
+
+    func loadMorePreview() {
+        guard let previewModel, previewModel.isTruncated else { return }
+        previewTextByteLimit += WorkspaceFilePreviewLoader.defaultMaximumTextByteCount
+        loadPreview(previewModel.node)
+    }
+
+    private func loadPreview(_ node: WorkspaceFileNode) {
+        previewTask?.cancel()
+        isLoadingPreview = true
+        let requestGeneration = generation
+        let textByteLimit = previewTextByteLimit
+        previewTask = Task { [weak self, previewLoader] in
+            let preview = await previewLoader.load(node, textByteLimit: textByteLimit)
+            guard !Task.isCancelled else { return }
+            self?.finishPreview(preview, generation: requestGeneration)
+        }
+    }
+
+    func closePreview() {
+        previewTask?.cancel()
+        previewTask = nil
+        previewModel = nil
+        isLoadingPreview = false
     }
 
     func collapseAll() {
@@ -103,6 +144,7 @@ final class WorkspaceExplorerFeatureModel {
     func shutdown() {
         generation &+= 1
         cancelAllTasks()
+        closePreview()
     }
 
     private func toggleDirectory(nodeID: String, root: WorkspaceExplorerRoot, directoryURL: URL) {
@@ -146,6 +188,13 @@ final class WorkspaceExplorerFeatureModel {
         errorsByNodeID[nodeID] = error.localizedDescription
         loadingNodeIDs.remove(nodeID)
         tasksByNodeID[nodeID] = nil
+    }
+
+    private func finishPreview(_ preview: WorkspaceFilePreviewModel, generation requestGeneration: UInt64) {
+        guard requestGeneration == generation else { return }
+        previewModel = preview
+        isLoadingPreview = false
+        previewTask = nil
     }
 
     private func cancelAllTasks() {
