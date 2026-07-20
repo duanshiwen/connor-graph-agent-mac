@@ -316,6 +316,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
             userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
+            workspacePromptSection(resolvedWorkspace),
             generatedImageInstruction
         ]
         .filter { !$0.isEmpty }
@@ -598,6 +599,30 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     private func userBasicInfoPromptSection() -> String {
         UserBasicInfoPromptBuilder(preferences: loadRuntimeSettings().preferences).promptSection
+    }
+
+    private func workspacePromptSection(_ workspace: ResolvedProjectWorkspace) -> String {
+        let currentDirectory = jsonQuoted(workspace.primary.path)
+        let roots = workspace.roots.map { root in
+            let marker = root.isPrimary ? " (current)" : ""
+            return "- \(jsonQuoted(root.url.path))\(marker)"
+        }.joined(separator: "\n")
+        return """
+        <connor-session-workspace>
+        Current working directory: \(currentDirectory)
+        User-authorized workspace roots:
+        \(roots)
+
+        Resolve relative file and shell paths against the current working directory above. This runtime workspace is authoritative for the current turn; do not treat a working directory mentioned earlier in the conversation as current. Local file tools must reject paths outside the authorized roots.
+        </connor-session-workspace>
+        """
+    }
+
+    private func jsonQuoted(_ value: String) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else { return #""""# }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func resolvedProjectWorkingDirectory(
