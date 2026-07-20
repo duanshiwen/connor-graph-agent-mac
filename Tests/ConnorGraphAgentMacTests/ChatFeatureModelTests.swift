@@ -120,6 +120,18 @@ struct ChatFeatureModelTests {
         #expect(model.rowPresentation(for: session).title == "Cached title")
     }
 
+    @Test func sessionListResolvesApprovalSessionTitleFromCompleteSource() {
+        let model = ChatSessionListModel()
+        model.sessions = [AgentSession(id: "visible", title: "当前会话")]
+        model.allSessions = [
+            AgentSession(id: "visible", title: "当前会话"),
+            AgentSession(id: "approval-session", title: "审批来源会话")
+        ]
+
+        #expect(model.title(for: "approval-session") == "审批来源会话")
+        #expect(model.title(for: "missing") == nil)
+    }
+
     @Test func approvalModelOwnsPendingApprovalsAndResultFeedback() {
         let model = ChatApprovalModel()
         let approval = AgentPendingApproval(

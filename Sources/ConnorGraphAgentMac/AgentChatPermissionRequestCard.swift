@@ -15,7 +15,7 @@ struct AgentChatPermissionRequestCard: View {
     }
 
     private var approvalPresentation: AppAgentPendingApprovalPresentation {
-        AppAgentPendingApprovalPresentation(approval)
+        AppAgentPendingApprovalPresentation(approval, sessionTitle: model.sessions.title(for: approval.sessionID))
     }
 
     var body: some View {
@@ -46,8 +46,8 @@ struct AgentChatPermissionRequestCard: View {
             HStack(spacing: AgentChatLayout.spaceS) {
                 Text(mailApproval.isMailSendRequest ? "确认发送邮件" : "需要权限")
                     .font(AgentChatTypography.calloutEmphasis)
-                Text(approval.capability.rawValue)
-                    .font(AgentChatTypography.monoMeta)
+                Text(approvalPresentation.capabilityLabel)
+                    .font(AgentChatTypography.meta)
                     .padding(.horizontal, AgentChatLayout.spaceS)
                     .padding(.vertical, AgentChatLayout.spaceXS)
                     .background(Color.orange.opacity(0.12), in: Capsule())
@@ -62,13 +62,14 @@ struct AgentChatPermissionRequestCard: View {
                 if mailApproval.isMailSendRequest {
                     mailSummaryDetails
                 } else {
-                    if let toolName = approval.toolName, !toolName.isEmpty {
-                        Label("Tool: \(toolName)", systemImage: "wrench.and.screwdriver")
+                    if approval.toolName?.isEmpty == false {
+                        Label("调用工具：\(approvalPresentation.toolDisplayName)", systemImage: "wrench.and.screwdriver")
                     } else {
-                        Label("Request: \(approval.requestID)", systemImage: "number")
+                        Label("请求编号：\(approval.requestID)", systemImage: "number")
                     }
 
-                    Label("Session: \(approval.sessionID)", systemImage: "bubble.left.and.bubble.right")
+                    Label("所在会话：\(approvalPresentation.sessionTitle)", systemImage: "bubble.left.and.bubble.right")
+                    Text(approvalPresentation.capabilityDescription)
 
                     payloadDisclosure
                 }
@@ -137,7 +138,7 @@ struct AgentChatPermissionRequestCard: View {
             Button {
                 chatActions.approval.approvePendingApproval(approval)
             } label: {
-                Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")
+                Label(mailApproval.isMailSendRequest ? "允许发送" : "允许", systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
@@ -146,7 +147,7 @@ struct AgentChatPermissionRequestCard: View {
                 Button {
                     chatActions.approval.alwaysAllowPendingApproval(approval)
                 } label: {
-                    Label("Always Allow", systemImage: "arrow.triangle.2.circlepath")
+                    Label("始终允许", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
@@ -156,14 +157,14 @@ struct AgentChatPermissionRequestCard: View {
             Button(role: .destructive) {
                 chatActions.approval.denyPendingApproval(approval)
             } label: {
-                Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
+                Label(mailApproval.isMailSendRequest ? "取消发送" : "拒绝", systemImage: "xmark")
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
-            Text(approvalPresentation.allowsAlwaysAllow ? "Always Allow 会记住当前会话权限模式" : (mailApproval.isMailSendRequest ? "可放大审阅；发送邮件需要逐次确认" : "可放大审阅；此操作需要逐次审批"))
+            Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会记住当前会话的权限模式" : (mailApproval.isMailSendRequest ? "可放大审阅；发送邮件需要逐次确认" : "可放大审阅；此操作需要逐次审批"))
                 .font(AgentChatTypography.meta)
                 .foregroundStyle(.secondary)
         }
@@ -188,7 +189,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
     }
 
     private var approvalPresentation: AppAgentPendingApprovalPresentation {
-        AppAgentPendingApprovalPresentation(approval)
+        AppAgentPendingApprovalPresentation(approval, sessionTitle: model.sessions.title(for: approval.sessionID))
     }
 
     var body: some View {
@@ -203,7 +204,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                         if mailApproval.isMailSendRequest {
-                            MailApprovalExpandedContent(mail: mailApproval, approval: approval)
+                            MailApprovalExpandedContent(mail: mailApproval, approval: approval, presentation: approvalPresentation)
                         } else {
                             GenericApprovalExpandedContent(approval: approval, presentation: approvalPresentation)
                         }
@@ -272,7 +273,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
                 chatActions.approval.denyPendingApproval(approval)
                 onCollapse()
             } label: {
-                Label(mailApproval.isMailSendRequest ? "取消发送" : "Deny", systemImage: "xmark")
+                Label(mailApproval.isMailSendRequest ? "取消发送" : "拒绝", systemImage: "xmark")
             }
             .buttonStyle(.bordered)
             .controlSize(AppButtonLayout.controlSize)
@@ -281,7 +282,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
                 chatActions.approval.approvePendingApproval(approval)
                 onCollapse()
             } label: {
-                Label(mailApproval.isMailSendRequest ? "允许发送" : "Allow", systemImage: "checkmark")
+                Label(mailApproval.isMailSendRequest ? "允许发送" : "允许", systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(AppButtonLayout.controlSize)
@@ -292,6 +293,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
 private struct MailApprovalExpandedContent: View {
     var mail: AppMailSendApprovalPresentation
     var approval: AgentPendingApproval
+    var presentation: AppAgentPendingApprovalPresentation
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
@@ -308,9 +310,10 @@ private struct MailApprovalExpandedContent: View {
 
             SectionBlock(title: "安全与审计", systemImage: "lock.shield") {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    InfoRow(label: "Draft ID", value: mail.draftID)
+                    InfoRow(label: "所在会话", value: presentation.sessionTitle)
+                    InfoRow(label: "草稿 ID", value: mail.draftID)
                     if let envelopeHash = mail.envelopeHash, !envelopeHash.isEmpty {
-                        InfoRow(label: "Envelope Hash", value: envelopeHash)
+                        InfoRow(label: "信封摘要", value: envelopeHash)
                     }
                     InfoRow(label: "附件数量", value: String(mail.attachmentCount))
                     if let riskSummary = mail.riskSummary, !riskSummary.isEmpty {
@@ -328,11 +331,11 @@ private struct MailApprovalExpandedContent: View {
     private var approvalInfoGrid: some View {
         SectionBlock(title: "收件与主题", systemImage: "envelope") {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                if let from = mail.from, !from.isEmpty { InfoRow(label: "From", value: from) }
-                InfoRow(label: "To", value: mail.to.isEmpty ? "草稿中配置" : mail.to.joined(separator: ", "))
-                if !mail.cc.isEmpty { InfoRow(label: "Cc", value: mail.cc.joined(separator: ", ")) }
-                if mail.bccCount > 0 { InfoRow(label: "Bcc", value: "\(mail.bccCount) hidden") }
-                InfoRow(label: "Subject", value: mail.subject?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? mail.subject! : "草稿中配置")
+                if let from = mail.from, !from.isEmpty { InfoRow(label: "发件人", value: from) }
+                InfoRow(label: "收件人", value: mail.to.isEmpty ? "草稿中配置" : mail.to.joined(separator: ", "))
+                if !mail.cc.isEmpty { InfoRow(label: "抄送", value: mail.cc.joined(separator: ", ")) }
+                if mail.bccCount > 0 { InfoRow(label: "密送", value: "已隐藏 \(mail.bccCount) 位收件人") }
+                InfoRow(label: "主题", value: mail.subject?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? mail.subject! : "草稿中配置")
             }
         }
     }
@@ -346,16 +349,17 @@ private struct GenericApprovalExpandedContent: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
             SectionBlock(title: "请求信息", systemImage: "info.circle") {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    InfoRow(label: "Capability", value: approval.capability.rawValue)
-                    InfoRow(label: "Tool", value: approval.toolName ?? "未指定")
-                    InfoRow(label: "Request ID", value: approval.requestID)
-                    InfoRow(label: "Run ID", value: approval.runID)
-                    InfoRow(label: "Session ID", value: approval.sessionID)
-                    InfoRow(label: "Status", value: presentation.statusLabel)
+                    InfoRow(label: "权限", value: presentation.capabilityLabel)
+                    InfoRow(label: "权限说明", value: presentation.capabilityDescription)
+                    InfoRow(label: "工具", value: presentation.toolDisplayName)
+                    InfoRow(label: "所在会话", value: presentation.sessionTitle)
+                    InfoRow(label: "请求 ID", value: approval.requestID)
+                    InfoRow(label: "运行 ID", value: approval.runID)
+                    InfoRow(label: "状态", value: presentation.statusLabel)
                 }
             }
 
-            SectionBlock(title: "完整 Payload", systemImage: "curlybraces") {
+            SectionBlock(title: "完整请求参数", systemImage: "curlybraces") {
                 Text(Self.prettyPayload(approval.payloadJSON))
                     .font(AgentChatTypography.monoMeta)
                     .textSelection(.enabled)

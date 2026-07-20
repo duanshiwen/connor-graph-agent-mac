@@ -28,7 +28,7 @@ public struct AppMailSendApprovalPresentation: Sendable, Equatable {
         self.riskSummary = Self.stringValue(payload["riskSummary"]) ?? Self.stringValue(payload["risk_summary"])
         self.attachmentCount = Self.intValue(payload["attachmentCount"]) ?? Self.intValue(payload["attachment_count"]) ?? 0
         self.envelopeHash = Self.stringValue(payload["envelopeHash"]) ?? Self.stringValue(payload["envelope_hash"])
-        self.warning = "点击 Allow 后，Connor 会继续执行这一次 mail_send_draft，并通过已配置 SMTP 账号发送真实邮件。请确认草稿收件人、主题和正文。"
+        self.warning = "点击“允许发送”后，康纳同学会通过已配置的 SMTP 账号发送这封真实邮件。请确认草稿的收件人、主题和正文。"
     }
 
     public var title: String { "确认发送邮件" }
@@ -44,9 +44,9 @@ public struct AppMailSendApprovalPresentation: Sendable, Equatable {
     }
 
     public var securitySummary: String {
-        var parts = ["Draft: \(draftID)"]
-        if let envelopeHash, !envelopeHash.isEmpty { parts.append("Envelope: \(envelopeHash)") }
-        if bccCount > 0 { parts.append("Bcc: \(bccCount) hidden") }
+        var parts = ["草稿：\(draftID)"]
+        if let envelopeHash, !envelopeHash.isEmpty { parts.append("信封摘要：\(envelopeHash)") }
+        if bccCount > 0 { parts.append("密送：已隐藏 \(bccCount) 位收件人") }
         return parts.joined(separator: " · ")
     }
 

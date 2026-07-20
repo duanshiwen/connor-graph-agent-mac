@@ -76,8 +76,8 @@ import ConnorGraphCore
     let mail = AppMailSendApprovalPresentation(approval)
 
     #expect(row.title == "确认发送邮件")
-    #expect(row.detail.contains("Envelope: hash-1"))
-    #expect(row.detail.contains("Bcc: 1 hidden"))
+    #expect(row.detail.contains("信封摘要：hash-1"))
+    #expect(row.detail.contains("密送：已隐藏 1 位收件人"))
     #expect(!row.detail.contains("hidden@example.com"))
     #expect(row.allowsAlwaysAllow == false)
     #expect(mail.bodyPreview == "Short preview")
