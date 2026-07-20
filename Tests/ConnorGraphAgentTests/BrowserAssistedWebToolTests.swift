@@ -146,6 +146,7 @@ struct BrowserAssistedWebToolTests {
         let tool = BrowserFetchTool(browserAssistedWebFetchHandler: { request in
             #expect(request.urlString == "https://example.com/protected")
             #expect(request.extractMode == "text")
+            #expect(request.timeoutMilliseconds == 30_000)
             return BrowserAssistedWebFetchResult(
                 status: .fetched,
                 urlString: request.urlString,
@@ -170,6 +171,30 @@ struct BrowserAssistedWebToolTests {
         #expect(result.contentText == "Authenticated browser content")
         #expect(result.contentJSON?.contains(#""engine":"wkwebview""#) == true)
         #expect(result.contentJSON?.contains(#""browserAssisted":true"#) == true)
+    }
+
+    @Test func browserFetchFailsAtItsTotalDeadline() async throws {
+        let tool = BrowserFetchTool(browserAssistedWebFetchHandler: { _ in
+            try? await Task.sleep(for: .seconds(10))
+            return nil
+        })
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        do {
+            _ = try await tool.execute(
+                arguments: AgentToolArguments(values: [
+                    "url": .string("https://example.com/slow-browser"),
+                    "timeout_ms": .int(1_000)
+                ]),
+                context: Self.context()
+            )
+            Issue.record("Expected browser_fetch to time out")
+        } catch {
+            #expect(error as? AgentToolError == .invalidArguments("browser_fetch timed out after 1000ms"))
+        }
+
+        #expect(startedAt.duration(to: clock.now) < .seconds(2))
     }
 
     @Test func browserFetchDecodesGBKMetaCharsetChineseText() throws {

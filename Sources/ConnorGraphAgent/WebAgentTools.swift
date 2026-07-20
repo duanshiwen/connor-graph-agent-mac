@@ -18,7 +18,7 @@ private enum WebFetchDeadline {
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
         let (stream, continuation) = AsyncStream<Result<Value, any Error>>.makeStream(
-            bufferingPolicy: .bufferingNewest(1)
+            bufferingPolicy: .bufferingOldest(1)
         )
         let operationTask = Task {
             do {
@@ -93,7 +93,8 @@ public struct BrowserFetchTool: AgentTool {
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "url": .string(description: "The absolute http/https URL to fetch."),
         "max_chars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
-        "user_agent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0.")
+        "user_agent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0."),
+        "timeout_ms": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
     ], required: ["url"])
 
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -107,13 +108,33 @@ public struct BrowserFetchTool: AgentTool {
             throw AgentToolError.invalidArguments("browser_fetch requires an absolute http/https url")
         }
         let maxChars = min(max(arguments.int("max_chars") ?? 12_000, 1_000), 50_000)
+        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeout_ms"))
+        return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
+            try await executeWithinDeadline(
+                arguments: arguments,
+                context: context,
+                urlString: urlString,
+                url: url,
+                maxChars: maxChars,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
+        }
+    }
 
+    private func executeWithinDeadline(
+        arguments: AgentToolArguments,
+        context: AgentToolExecutionContext,
+        urlString: String,
+        url: URL,
+        maxChars: Int,
+        timeoutMilliseconds: Int
+    ) async throws -> AgentToolResult {
         if let browserAssistedWebFetchHandler {
             let browserRequest = BrowserAssistedWebFetchRequest(
                 urlString: urlString,
                 extractMode: "text",
                 waitUntil: "networkidle",
-                timeoutMilliseconds: 720_000,
+                timeoutMilliseconds: timeoutMilliseconds,
                 revealImmediately: false
             )
             if let result = await browserAssistedWebFetchHandler(browserRequest) {
@@ -161,7 +182,7 @@ public struct BrowserFetchTool: AgentTool {
 
         let userAgent = arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
         var request = URLRequest(url: url)
-        request.timeoutInterval = 30
+        request.timeoutInterval = TimeInterval(timeoutMilliseconds) / 1_000
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
 
