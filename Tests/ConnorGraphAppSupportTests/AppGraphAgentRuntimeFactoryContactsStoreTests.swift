@@ -64,3 +64,53 @@ private final class FactoryContactsCredentialStore: CredentialStore, @unchecked 
     let fallbackStore = try SQLitePersonProfileStore(databaseURL: fallbackURL)
     #expect(try await fallbackStore.loadProfiles(includeInactive: false).isEmpty)
 }
+
+@Test func approvedPersonRegistryWritesBecomeGovernedMemoryEvidence() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-contacts-memory-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: root)
+    try storagePaths.ensureDirectoryHierarchy()
+    let graphStore = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path)
+    try graphStore.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: FactoryContactsSettingsStore(),
+        credentialStore: FactoryContactsCredentialStore()
+    )
+    let profileStore = try SQLitePersonProfileStore(databaseURL: root.appendingPathComponent("injected-people.sqlite"))
+    let factory = AppGraphAgentRuntimeFactory(
+        store: graphStore,
+        settingsRepository: settings,
+        storagePaths: storagePaths,
+        personProfileStore: profileStore
+    )
+    let controller = factory.makeAgentLoopController(permissionMode: .allowAll)
+
+    _ = try await controller.toolRegistry.execute(
+        AgentToolCall(
+            name: "contacts_write",
+            argumentsJSON: #"{"operation":"create_person","name":"Annie","email":"annie@example.com","organization":"Consulting","jobTitle":"Consultant","notes":"A friend invited to try Connor.","approved":true}"#
+        ),
+        context: AgentToolExecutionContext(
+            runID: "contacts-memory-run",
+            sessionID: "contacts-memory-session",
+            groupID: "default",
+            userPrompt: "remember Annie",
+            toolCallID: "contacts-memory-write",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
+            approvedCapabilities: [.mutateContacts]
+        )
+    )
+
+    let memoryStore = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
+    let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: memoryStore).search(
+        MemoryOSRetrievalQuery(text: "Annie 朋友 friend", layers: [.l1], limit: 10)
+    )
+
+    #expect(hits.contains { hit in
+        hit.metadata["person_registry_operation"] == "create" &&
+        hit.matchedText.contains("Display name: Annie") &&
+        !hit.matchedText.contains("annie@example.com")
+    })
+}

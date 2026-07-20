@@ -158,16 +158,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         MCPToolRegistryBridge().registerTools(catalog: catalog, into: &registry, router: pool)
     }
 
-    private func makePersonRegistryContactRuntime() -> (any AgentContactRuntime)? {
+    private func makePersonRegistryContactRuntime(memoryOSFacade: AppMemoryOSFacade?) -> (any AgentContactRuntime)? {
         if let personProfileStore {
-            return PersonRegistryAgentContactRuntime(profileStore: personProfileStore)
+            return PersonRegistryAgentContactRuntime(profileStore: personProfileStore, memoryOSFacade: memoryOSFacade)
         }
         guard let storagePaths else { return nil }
         let databaseURL = storagePaths.applicationSupportDirectory
             .appendingPathComponent("contacts", isDirectory: true)
             .appendingPathComponent("person-profiles.sqlite")
         guard let profileStore = try? SQLitePersonProfileStore(databaseURL: databaseURL) else { return nil }
-        return PersonRegistryAgentContactRuntime(profileStore: profileStore)
+        return PersonRegistryAgentContactRuntime(profileStore: profileStore, memoryOSFacade: memoryOSFacade)
     }
 
 
@@ -268,7 +268,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }
-        registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime() ?? InMemoryAgentContactRuntime())
+        registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime(memoryOSFacade: memoryOSFacade) ?? InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))

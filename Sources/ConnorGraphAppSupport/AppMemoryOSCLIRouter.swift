@@ -32,7 +32,7 @@ public enum AppMemoryOSCLIRouter {
             return try encode(record, encoder: encoder)
         case "context":
             guard let query = args.dropFirst().first, !query.hasPrefix("--") else {
-                return try encode(MemoryOSCLIError(error: "missing_query", usage: "connor memory context <query>  — query can contain multiple terms separated by ;"), encoder: encoder)
+                return try encode(MemoryOSCLIError(error: "missing_query", usage: "connor memory context <query> — query can contain multiple terms separated by whitespace, commas, semicolons, newlines, ideographic commas, or vertical bars"), encoder: encoder)
             }
             return try encode(try inspector.context(query: query), encoder: encoder)
         case "search":
