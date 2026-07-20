@@ -2589,7 +2589,6 @@ final class AppRuntimeLifecycle {
             snapshot.backgroundTasks.map(AppSessionBackgroundTask.init(persisted:)),
             sessionID: session.id
         )
-        _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
         let permissionMode = configuration.permissionMode
@@ -2605,7 +2604,7 @@ final class AppRuntimeLifecycle {
         restoreChatInputDraft(for: session.id)
         chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
         restoreWorkspaceMode(for: session.id)
-        aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
+        aiConnectionsRuntimeCoordinator.syncDisplayFromLoadedState(sessionID: session.id)
         chatFeatureModel.sessions.presentedSessionDetailID = session.id
         errorMessage = nil
         let presentationElapsed = startedAt.duration(to: ContinuousClock.now)
@@ -2614,7 +2613,7 @@ final class AppRuntimeLifecycle {
         AppPerformanceLog.chatTurnLogger.info(
             "sessionDetail.presented session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(presentationMilliseconds, privacy: .public)ms"
         )
-        let managerTask = Task.detached(priority: .userInitiated) { () -> NativeSessionManager? in
+        let managerTask = Task.detached(priority: .utility) { () -> NativeSessionManager? in
             guard !Task.isCancelled else { return nil }
             return runtimeFactory?.makeNativeSessionManager(
                 session: session,
