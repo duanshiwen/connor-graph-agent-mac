@@ -81,74 +81,90 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
     }
 
     public func upsert(_ profile: PersonProfile) async throws -> PersonProfile {
-        try queue.sync {
+        let savedProfile = try queue.sync {
             try executeInternal("BEGIN TRANSACTION;")
-        do {
-            try upsertInternal(profile)
-            try executeInternal("COMMIT;")
-            return profile
+            do {
+                try upsertInternal(profile)
+                try executeInternal("COMMIT;")
+                return profile
             } catch {
                 try? executeInternal("ROLLBACK;")
                 throw error
             }
         }
+        postChange(reason: .upserted, personIDs: [profile.id])
+        return savedProfile
     }
 
     public func markDeleted(id: ContactID, now: Date = Date()) async throws {
         try queue.sync {
             guard var profile = try profileInternal(id: id) else {
-            throw SQLitePersonProfileStoreError.profileNotFound(id.rawValue)
-        }
-        profile.status = .deleted
-        profile.updatedAt = now
-        try executeInternal("BEGIN TRANSACTION;")
-        do {
-            try upsertInternal(profile)
-            try executeInternal("COMMIT;")
+                throw SQLitePersonProfileStoreError.profileNotFound(id.rawValue)
+            }
+            profile.status = .deleted
+            profile.updatedAt = now
+            try executeInternal("BEGIN TRANSACTION;")
+            do {
+                try upsertInternal(profile)
+                try executeInternal("COMMIT;")
             } catch {
                 try? executeInternal("ROLLBACK;")
                 throw error
             }
         }
+        postChange(reason: .deleted, personIDs: [id])
     }
 
     public func merge(sourceID: ContactID, targetID: ContactID, now: Date = Date()) async throws -> PersonProfile {
-        try queue.sync {
+        let mergedProfile = try queue.sync {
             guard sourceID != targetID else { throw SQLitePersonProfileStoreError.cannotMergeSameProfile }
 
             guard var source = try profileInternal(id: sourceID) else {
-            throw SQLitePersonProfileStoreError.profileNotFound(sourceID.rawValue)
-        }
-        guard var target = try profileInternal(id: targetID) else {
-            throw SQLitePersonProfileStoreError.profileNotFound(targetID.rawValue)
-        }
+                throw SQLitePersonProfileStoreError.profileNotFound(sourceID.rawValue)
+            }
+            guard var target = try profileInternal(id: targetID) else {
+                throw SQLitePersonProfileStoreError.profileNotFound(targetID.rawValue)
+            }
 
-        target.aliases = mergeAliases(target.aliases + [source.displayName] + source.aliases, excludingPrimaryName: target.displayName)
-        target.emails = mergeEmails(target.emails + source.emails)
-        target.phones = mergePhones(target.phones + source.phones)
-        target.addresses = mergeAddresses(target.addresses + source.addresses)
-        target.organizationName = nonEmpty(target.organizationName) ?? nonEmpty(source.organizationName)
-        target.jobTitle = nonEmpty(target.jobTitle) ?? nonEmpty(source.jobTitle)
-        target.notes = mergeNotes(primary: target.notes, secondary: source.notes)
-        target.memoryEntityID = nonEmpty(target.memoryEntityID) ?? nonEmpty(source.memoryEntityID)
-        target.memoryStableKey = nonEmpty(target.memoryStableKey) ?? nonEmpty(source.memoryStableKey)
-        target.updatedAt = now
+            target.aliases = mergeAliases(target.aliases + [source.displayName] + source.aliases, excludingPrimaryName: target.displayName)
+            target.emails = mergeEmails(target.emails + source.emails)
+            target.phones = mergePhones(target.phones + source.phones)
+            target.addresses = mergeAddresses(target.addresses + source.addresses)
+            target.organizationName = nonEmpty(target.organizationName) ?? nonEmpty(source.organizationName)
+            target.jobTitle = nonEmpty(target.jobTitle) ?? nonEmpty(source.jobTitle)
+            target.notes = mergeNotes(primary: target.notes, secondary: source.notes)
+            target.memoryEntityID = nonEmpty(target.memoryEntityID) ?? nonEmpty(source.memoryEntityID)
+            target.memoryStableKey = nonEmpty(target.memoryStableKey) ?? nonEmpty(source.memoryStableKey)
+            target.updatedAt = now
 
-        source.status = .merged
-        source.mergedIntoID = targetID
-        source.updatedAt = now
+            source.status = .merged
+            source.mergedIntoID = targetID
+            source.updatedAt = now
 
-        try executeInternal("BEGIN TRANSACTION;")
-        do {
-            try upsertInternal(target)
-            try upsertInternal(source)
-            try executeInternal("COMMIT;")
-            return target
+            try executeInternal("BEGIN TRANSACTION;")
+            do {
+                try upsertInternal(target)
+                try upsertInternal(source)
+                try executeInternal("COMMIT;")
+                return target
             } catch {
                 try? executeInternal("ROLLBACK;")
                 throw error
             }
         }
+        postChange(reason: .merged, personIDs: [sourceID, targetID])
+        return mergedProfile
+    }
+
+    private func postChange(reason: PersonProfileStoreChangeReason, personIDs: [ContactID]) {
+        NotificationCenter.default.post(
+            name: .connorPersonProfileStoreDidChange,
+            object: self,
+            userInfo: [
+                PersonProfileStoreChangeNotificationUserInfoKey.personIDs: personIDs.map(\.rawValue),
+                PersonProfileStoreChangeNotificationUserInfoKey.reason: reason.rawValue
+            ]
+        )
     }
 
     private static func configurePragmas(db: OpaquePointer) throws {
