@@ -55,6 +55,32 @@ import ConnorGraphAppSupport
     #expect(!knowledgeItems.contains { $0.contains("currently splitting retrieval tools") })
 }
 
+@Test func memoryOSRecentContextToolAcceptsMixedLLMQuerySeparators() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 12_100)
+    try store.upsert(node: MemoryOSNode(id: "annie-node", stableKey: "person:annie", nodeType: "person", name: "Annie"))
+    try store.upsert(statement: MemoryOSStatement(
+        id: "annie-memory",
+        subjectID: "annie-node",
+        predicate: "received",
+        text: "Annie received the product invitation.",
+        confidence: 0.9,
+        validAt: now,
+        committedAt: now,
+        evidenceSpanIDs: []
+    ))
+
+    let result = try await MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store)).execute(
+        arguments: AgentToolArguments(json: #"{"query":"Annie,朋友|friend"}"#),
+        context: memoryOSToolContext()
+    )
+    let items = try JSONDecoder().decode([String].self, from: Data(try #require(result.contentJSON).utf8))
+
+    #expect(result.contentText.contains("for 3 search term(s): Annie, 朋友, friend"))
+    #expect(items.contains { $0.contains("Annie received the product invitation") })
+}
+
 @Test func memoryOSGetCurrentUserProfileToolAggregatesCurrentUserHitsWithoutNameCoupling() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()

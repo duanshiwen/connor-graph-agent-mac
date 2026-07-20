@@ -412,10 +412,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
     }
 
     public func context(query: String) throws -> [String] {
-        let terms = query
-            .split { $0 == ";" || $0 == "\u{FF1B}" }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let terms = MemorySearchQueryParser.parse(query).terms
         guard !terms.isEmpty else { return [] }
         let facade = AppMemoryOSFacade(store: store)
         return try facade.memoryOSRecentContext(terms: terms) + facade.memoryOSKnowledgeContext(terms: terms)
