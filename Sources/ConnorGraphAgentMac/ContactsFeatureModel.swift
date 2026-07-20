@@ -31,7 +31,10 @@ final class ContactsFeatureModel {
     @ObservationIgnored private let profileStore: (any PersonProfileStore)?
     @ObservationIgnored private let relationshipStore: (any PersonRelationshipStore)?
     @ObservationIgnored private let systemContactsLoader: SystemContactsLoader
+    @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored private var profileStoreObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
+    @ObservationIgnored private var profileStoreReloadGeneration: UInt64 = 0
     @ObservationIgnored private var ownedTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShutdown = false
     @ObservationIgnored var onEvent: ((Event) -> Void)?
@@ -41,11 +44,25 @@ final class ContactsFeatureModel {
         relationshipStore: (any PersonRelationshipStore)?,
         systemContactsLoader: @escaping SystemContactsLoader = {
             try await ContactsSystemAdapter.fetchSystemContacts()
-        }
+        },
+        notificationCenter: NotificationCenter = .default
     ) {
         self.profileStore = profileStore
         self.relationshipStore = relationshipStore
         self.systemContactsLoader = systemContactsLoader
+        self.notificationCenter = notificationCenter
+        if let profileStore {
+            profileStoreObserver = notificationCenter.addObserver(
+                forName: .connorPersonProfileStoreDidChange,
+                object: profileStore,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.startOwnedTask { [weak self] in await self?.reloadProfilesAfterStoreChange() }
+                }
+            }
+        }
     }
 
     var agentProfileStore: (any PersonProfileStore)? { profileStore }
@@ -78,6 +95,24 @@ final class ContactsFeatureModel {
             reportSuccess()
         } catch {
             reportFailure("无法加载人物关系：\(error.localizedDescription)")
+        }
+    }
+
+    private func reloadProfilesAfterStoreChange() async {
+        guard !isShutdown, let profileStore else { return }
+        profileStoreReloadGeneration &+= 1
+        let generation = profileStoreReloadGeneration
+        do {
+            let profiles = try await profileStore.loadProfiles(includeInactive: false)
+            guard !Task.isCancelled, !isShutdown, generation == profileStoreReloadGeneration else { return }
+            self.profiles = profiles
+            rebuildPresentation()
+            reportSuccess()
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !isShutdown, generation == profileStoreReloadGeneration else { return }
+            reportFailure("无法加载人物档案：\(error.localizedDescription)")
         }
     }
 
@@ -256,6 +291,11 @@ final class ContactsFeatureModel {
         guard !isShutdown else { return }
         isShutdown = true
         reloadGeneration &+= 1
+        profileStoreReloadGeneration &+= 1
+        if let profileStoreObserver {
+            notificationCenter.removeObserver(profileStoreObserver)
+            self.profileStoreObserver = nil
+        }
         for task in ownedTasks.values { task.cancel() }
         ownedTasks.removeAll()
     }
