@@ -27,7 +27,7 @@ struct WorkspaceFileTreePaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AppListPaneHeader(title: "工作区文件") {
+            AppListPaneHeader(title: "工作区目录树") {
                 Button(action: model.collapseAll) {
                     Image(systemName: "rectangle.compress.vertical")
                 }
@@ -223,11 +223,8 @@ struct WorkspaceFileTreeOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
-                Color.black.opacity(0.12)
-                    .ignoresSafeArea()
-                    .onTapGesture(perform: onClose)
-
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
                 WorkspaceFileTreePaneView(
                     model: model,
                     sessionID: sessionID,
@@ -236,8 +233,8 @@ struct WorkspaceFileTreeOverlay: View {
                     onClose: onClose
                 )
                 .frame(
-                    width: min(440, max(300, proxy.size.width - 48)),
-                    height: min(640, max(360, proxy.size.height - 48))
+                    width: min(420, max(300, proxy.size.width - 24)),
+                    height: max(300, proxy.size.height - 24)
                 )
                 .background(
                     .regularMaterial,
@@ -248,6 +245,8 @@ struct WorkspaceFileTreeOverlay: View {
                         .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
+                .padding(.vertical, 12)
+                .padding(.trailing, 12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

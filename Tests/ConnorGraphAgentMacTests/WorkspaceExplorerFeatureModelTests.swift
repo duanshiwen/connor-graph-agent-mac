@@ -118,9 +118,13 @@ struct WorkspaceExplorerFeatureModelTests {
         #expect(model.roots.count == 1)
         #expect(model.roots.first?.url.standardizedFileURL == rootURL.standardizedFileURL)
 
-        model.dismissTree()
+        model.toggleTree(sessionID: "session", workingDirectoryPath: rootURL.path)
 
         #expect(!model.isTreePresented)
+
+        model.toggleTree(sessionID: "session", workingDirectoryPath: rootURL.path)
+
+        #expect(model.isTreePresented)
     }
 
     private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async throws {
