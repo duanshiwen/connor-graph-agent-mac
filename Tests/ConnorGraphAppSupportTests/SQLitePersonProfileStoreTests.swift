@@ -137,11 +137,77 @@ struct SQLitePersonProfileStoreTests {
         #expect(profile?.status == .deleted)
     }
 
+    @Test func successfulMutationsPublishStoreScopedChangeNotifications() async throws {
+        let store = try makeStore()
+        let recorder = PersonProfileStoreChangeNotificationRecorder()
+        let observer = NotificationCenter.default.addObserver(
+            forName: .connorPersonProfileStoreDidChange,
+            object: store,
+            queue: nil
+        ) { recorder.record($0) }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let sourceID = ContactID(rawValue: "person-notification-source")
+        let targetID = ContactID(rawValue: "person-notification-target")
+
+        _ = try await store.upsert(PersonProfile(id: sourceID, displayName: "Source"))
+        _ = try await store.upsert(PersonProfile(id: targetID, displayName: "Target"))
+        try await store.markDeleted(id: sourceID, now: Date(timeIntervalSince1970: 10))
+        _ = try await store.upsert(PersonProfile(id: sourceID, displayName: "Source"))
+        _ = try await store.merge(sourceID: sourceID, targetID: targetID, now: Date(timeIntervalSince1970: 20))
+
+        let notifications = recorder.snapshot()
+        #expect(notifications.compactMap(Self.reason(from:)) == [.upserted, .upserted, .deleted, .upserted, .merged])
+        #expect(Self.personIDs(from: notifications.last) == [sourceID.rawValue, targetID.rawValue])
+    }
+
+    @Test func failedMutationDoesNotPublishChangeNotification() async throws {
+        let store = try makeStore()
+        let recorder = PersonProfileStoreChangeNotificationRecorder()
+        let observer = NotificationCenter.default.addObserver(
+            forName: .connorPersonProfileStoreDidChange,
+            object: store,
+            queue: nil
+        ) { recorder.record($0) }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        await #expect(throws: SQLitePersonProfileStoreError.self) {
+            try await store.markDeleted(id: ContactID(rawValue: "missing"), now: Date())
+        }
+
+        #expect(recorder.snapshot().isEmpty)
+    }
+
+    private static func reason(from notification: Notification) -> PersonProfileStoreChangeReason? {
+        guard let rawValue = notification.userInfo?[PersonProfileStoreChangeNotificationUserInfoKey.reason] as? String else {
+            return nil
+        }
+        return PersonProfileStoreChangeReason(rawValue: rawValue)
+    }
+
+    private static func personIDs(from notification: Notification?) -> [String] {
+        notification?.userInfo?[PersonProfileStoreChangeNotificationUserInfoKey.personIDs] as? [String] ?? []
+    }
+
     private func makeStore() throws -> SQLitePersonProfileStore {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("SQLitePersonProfileStoreTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return try SQLitePersonProfileStore(databaseURL: root.appendingPathComponent("person-profiles.sqlite"))
+    }
+}
+
+private final class PersonProfileStoreChangeNotificationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var notifications: [Notification] = []
+
+    func record(_ notification: Notification) {
+        lock.lock(); defer { lock.unlock() }
+        notifications.append(notification)
+    }
+
+    func snapshot() -> [Notification] {
+        lock.lock(); defer { lock.unlock() }
+        return notifications
     }
 }

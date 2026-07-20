@@ -17,13 +17,18 @@ import ConnorGraphCore
         updatedAt: Date(timeIntervalSince1970: 1_000)
     )
 
-    let row = AppAgentPendingApprovalPresentation(approval)
+    let row = AppAgentPendingApprovalPresentation(approval, sessionTitle: "修复登录问题")
 
     #expect(row.id == "approval-1")
     #expect(row.requestID == "permission-tool-1")
-    #expect(row.title == "Permission requested: readSession")
-    #expect(row.detail == "Request permission-tool-1 · Tool: Read · Payload: {\"file_path\":\"README.md\"}")
-    #expect(row.statusLabel == "pending")
+    #expect(row.title == "请求执行：读取文件")
+    #expect(row.detail.contains("权限：读取会话"))
+    #expect(row.detail.contains("参数：{\"file_path\":\"README.md\"}"))
+    #expect(row.toolDisplayName == "读取文件")
+    #expect(row.capabilityLabel == "读取会话")
+    #expect(row.capabilityDescription.contains("不会主动修改内容"))
+    #expect(row.sessionTitle == "修复登录问题")
+    #expect(row.statusLabel == "等待审批")
     #expect(row.severity == .warning)
     #expect(row.createdAt == Date(timeIntervalSince1970: 1_000))
 }
@@ -71,8 +76,8 @@ import ConnorGraphCore
     let mail = AppMailSendApprovalPresentation(approval)
 
     #expect(row.title == "确认发送邮件")
-    #expect(row.detail.contains("Envelope: hash-1"))
-    #expect(row.detail.contains("Bcc: 1 hidden"))
+    #expect(row.detail.contains("信封摘要：hash-1"))
+    #expect(row.detail.contains("密送：已隐藏 1 位收件人"))
     #expect(!row.detail.contains("hidden@example.com"))
     #expect(row.allowsAlwaysAllow == false)
     #expect(mail.bodyPreview == "Short preview")
@@ -110,9 +115,9 @@ import ConnorGraphCore
 @Test func appPendingApprovalPresentationShowsVerifiedCalendarTarget() {
     let approval = AgentPendingApproval(requestID: "request-calendar", runID: "run-1", sessionID: "session-1", capability: .mutateCalendar, toolName: "calendar_write", payloadJSON: "{\"operation\":\"delete_event\",\"eventID\":\"event:opaque/id\",\"expectedVersion\":\"version-1\",\"verifiedEventTitle\":\"Connor Test\",\"verifiedCalendarID\":\"calendar-test\"}")
     let row = AppAgentPendingApprovalPresentation(approval)
-    #expect(row.title == "Calendar: Delete Event")
+    #expect(row.title == "日历：删除日程")
     #expect(row.detail.contains("Connor Test"))
-    #expect(row.detail.contains("eventID: event:opaque/id"))
+    #expect(row.detail.contains("日程 ID：event:opaque/id"))
     #expect(row.detail.contains("calendar-test"))
     #expect(row.allowsAlwaysAllow == false)
 }

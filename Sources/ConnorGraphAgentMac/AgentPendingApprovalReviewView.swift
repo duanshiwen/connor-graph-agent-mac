@@ -19,8 +19,8 @@ struct AgentPendingApprovalReviewView: View {
                     Text(summary).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("request → review → decision → audit → timeline")
-                    .font(.caption.monospaced())
+                Text("请求 → 审阅 → 决策 → 审计 → 时间线")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -30,7 +30,10 @@ struct AgentPendingApprovalReviewView: View {
                 Spacer()
             } else {
                 List(model.approvals.pendingApprovals) { approval in
-                    let row = AppAgentPendingApprovalPresentation(approval)
+                    let row = AppAgentPendingApprovalPresentation(
+                        approval,
+                        sessionTitle: model.sessions.title(for: approval.sessionID)
+                    )
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(row.title)
@@ -52,16 +55,16 @@ struct AgentPendingApprovalReviewView: View {
                             .textSelection(.enabled)
 
                         HStack(spacing: 12) {
-                            Label("run \(approval.runID)", systemImage: "play.circle")
-                            Label("session \(approval.sessionID)", systemImage: "bubble.left.and.bubble.right")
-                            if let toolName = approval.toolName {
-                                Label(toolName, systemImage: "wrench.and.screwdriver")
+                            Label("运行 ID：\(approval.runID)", systemImage: "play.circle")
+                            Label("所在会话：\(row.sessionTitle)", systemImage: "bubble.left.and.bubble.right")
+                            if approval.toolName != nil {
+                                Label(row.toolDisplayName, systemImage: "wrench.and.screwdriver")
                             }
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                        DisclosureGroup("Payload JSON") {
+                        DisclosureGroup("请求参数（JSON）") {
                             Text(approval.payloadJSON)
                                 .font(.caption.monospaced())
                                 .textSelection(.enabled)
@@ -99,4 +102,3 @@ struct AgentPendingApprovalReviewView: View {
         }
     }
 }
-

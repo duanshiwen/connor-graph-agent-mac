@@ -571,7 +571,7 @@ final class BrowserFeatureModel {
     func performAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult? {
         guard !isShutdown else { return nil }
         let task = startAssistedWebFetch(request)
-        let timeout = max(3_000, min(request.timeoutMilliseconds, 720_000))
+        let timeout = max(3_000, min(request.timeoutMilliseconds, 60_000))
         return await withCheckedContinuation { continuation in
             assistedFetchContinuationsByTaskID[task.id] = continuation
             assistedFetchTimeoutTasksByID[task.id]?.cancel()

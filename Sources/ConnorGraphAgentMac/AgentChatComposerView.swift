@@ -610,7 +610,7 @@ struct AgentChatComposerView: View {
                 } else {
                     ForEach(chatActions.dependencies.workspaceSettings.recentPaths, id: \.self) { path in
                         Button {
-                            chatActions.dependencies.workspaceSettings.addRoot(path: path, makePrimary: true)
+                            chatActions.dependencies.workspaceSettings.selectWorkingDirectory(path: path)
                             isWorkspacePopoverPresented = false
                         } label: {
                             workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
@@ -751,7 +751,7 @@ struct AgentChatComposerView: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.urls.first {
-            chatActions.dependencies.workspaceSettings.addRoot(path: url.path, makePrimary: true)
+            chatActions.dependencies.workspaceSettings.selectWorkingDirectory(path: url.path)
         }
     }
 
