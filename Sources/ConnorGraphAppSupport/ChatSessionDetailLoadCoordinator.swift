@@ -33,7 +33,7 @@ public struct ChatSessionDetailLoadSnapshot: Sendable, Equatable {
     }
 }
 
-public actor ChatSessionDetailLoadCoordinator {
+public struct ChatSessionDetailLoadCoordinator: Sendable {
     public struct Limits: Sendable, Equatable {
         public var recentRunCount: Int
         public var eventsPerRun: Int
@@ -57,7 +57,7 @@ public actor ChatSessionDetailLoadCoordinator {
         repository: AppChatSessionRepository,
         sessionID: String,
         activeBackgroundTaskIDs: Set<String> = []
-    ) throws -> ChatSessionDetailLoadSnapshot? {
+    ) async throws -> ChatSessionDetailLoadSnapshot? {
         try Task.checkCancellation()
         guard let session = try repository.loadSession(id: sessionID) else { return nil }
         try Task.checkCancellation()

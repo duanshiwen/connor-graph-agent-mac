@@ -116,6 +116,18 @@ final class AIConnectionsRuntimeCoordinator {
         }
     }
 
+    func syncDisplayFromLoadedState(sessionID: String) {
+        guard let override = workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride else { return }
+        model.selectedModel = override.model
+        model.thinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? model.thinkingLevel
+        if let providerMode = AppLLMProviderMode(rawValue: override.providerMode) {
+            model.providerMode = providerMode
+        }
+        if let connectionID = override.connectionID {
+            model.defaultConnectionID = connectionID
+        }
+    }
+
     func syncActiveSession(to connection: AppLLMConnectionConfig) {
         let sessionID = currentSessionID()
         let settings = try? model.settingsRepository.loadSettings()
