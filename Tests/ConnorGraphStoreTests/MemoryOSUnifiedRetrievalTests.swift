@@ -66,6 +66,75 @@ import ConnorGraphStore
     #expect(hits.contains { $0.recordID == "relation-1" && $0.metadata["updated_at"] == iso8601(now) })
 }
 
+@Test(arguments: [
+    "Annie Friend",
+    "Annie,Friend",
+    "Annie，Friend",
+    "Annie;Friend",
+    "Annie；Friend",
+    "Annie、Friend",
+    "Annie|Friend",
+    "Annie｜Friend",
+    "Annie\nFriend"
+])
+func memoryOSUnifiedRetrievalL1UsesBroadTermsAcrossSeparators(_ query: String) throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 5_000)
+    let object = MemoryOSProvenanceObject(
+        id: "annie-source",
+        sourceType: .manual,
+        sourceID: "source-annie",
+        title: "Invitation note",
+        content: "Annie received the product invitation.",
+        occurredAt: now,
+        ingestedAt: now
+    )
+    try store.upsert(provenance: object)
+    try store.upsert(captureEvent: MemoryOSCaptureEvent(
+        id: "annie-capture",
+        provenanceObjectID: object.id,
+        eventType: "manual",
+        occurredAt: now,
+        tokenEstimate: 8
+    ))
+
+    let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(
+        MemoryOSRetrievalQuery(text: query, layers: [.l1], limit: 10)
+    )
+
+    #expect(hits.contains { $0.recordID == "annie-capture" })
+}
+
+@Test func memoryOSUnifiedRetrievalL1DoesNotRequireEveryExpansionTerm() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 5_100)
+    let object = MemoryOSProvenanceObject(
+        id: "annie-multilingual-source",
+        sourceType: .manual,
+        sourceID: "source-annie-multilingual",
+        title: "Annie note",
+        content: "A product invitation was prepared.",
+        occurredAt: now,
+        ingestedAt: now
+    )
+    try store.upsert(provenance: object)
+    try store.upsert(captureEvent: MemoryOSCaptureEvent(
+        id: "annie-multilingual-capture",
+        provenanceObjectID: object.id,
+        eventType: "manual",
+        occurredAt: now,
+        tokenEstimate: 8
+    ))
+
+    let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(
+        MemoryOSRetrievalQuery(text: "Annie 朋友 friend", layers: [.l1], limit: 10)
+    )
+
+    #expect(hits.contains { $0.recordID == "annie-multilingual-capture" })
+}
+
 private func iso8601(_ date: Date) -> String {
     ISO8601DateFormatter().string(from: date)
 }

@@ -198,12 +198,22 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     }
 
     private func searchL1(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
-        let like = "%\(text.replacingOccurrences(of: "'", with: "''"))%"
+        let terms = expandedSearchTerms(text)
+        let eventTypeClauses = terms.map { term in
+            "c.event_type LIKE \(store.quote("%\(term)%"))"
+        }
+        let eventTypePredicate = eventTypeClauses.isEmpty ? "0" : eventTypeClauses.joined(separator: " OR ")
         return try store.query(sql: """
+        WITH matched_objects AS (
+            SELECT object_id
+            FROM memory_l0_provenance_fts
+            WHERE memory_l0_provenance_fts MATCH \(store.quote(ftsQuery(text)))
+        )
         SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, '')
         FROM memory_l1_capture_events c
         JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
-        WHERE o.title LIKE '\(like)' OR o.content LIKE '\(like)' OR c.event_type LIKE '\(like)'
+        WHERE c.provenance_object_id IN (SELECT object_id FROM matched_objects)
+           OR \(eventTypePredicate)
         ORDER BY c.occurred_at DESC
         LIMIT \(limit)
         """).map { row in
@@ -289,29 +299,27 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     /// Expand search text into terms with domain-specific synonyms.
     /// All output terms are plain strings; FTS5 quoting is handled by FTS5QuerySanitizer.
     private func expandedSearchTerms(_ text: String) -> [String] {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+        let plan = MemorySearchQueryParser.parse(text)
+        guard !plan.normalizedText.isEmpty else { return [] }
 
         let weakChinesePhrases = ["有哪些", "所有", "全部", "列出", "关于", "相关", "哪些", "什么", "请问", "一下"]
-        var simplified = trimmed
-        for phrase in weakChinesePhrases {
-            simplified = simplified.replacingOccurrences(of: phrase, with: " ")
+        var terms = plan.retrievalTerms.compactMap { rawTerm -> String? in
+            var simplified = rawTerm
+            for phrase in weakChinesePhrases {
+                simplified = simplified.replacingOccurrences(of: phrase, with: " ")
+            }
+            simplified = simplified.replacingOccurrences(of: "的", with: " ")
+            let normalized = simplified.trimmingCharacters(in: .whitespacesAndNewlines)
+            return normalized.isEmpty ? nil : normalized
         }
-        simplified = simplified.replacingOccurrences(of: "的", with: " ")
 
-        var terms = simplified
-            .split { $0.isWhitespace || $0.isPunctuation }
-            .map(String.init)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        let compact = trimmed.filter { !$0.isWhitespace && !$0.isPunctuation }
+        let compact = plan.normalizedText.filter { !$0.isWhitespace && !$0.isPunctuation }
         let domainExpansions: [(String, [String])] = [
             ("国家", ["国家", "country", "主权国家", "主權國家"]),
             ("中國", ["中国", "中國", "中华人民共和国", "中華人民共和國", "China", "PRC"]),
             ("中国", ["中国", "中國", "中华人民共和国", "中華人民共和國", "China", "PRC"])
         ]
-        for (needle, expansions) in domainExpansions where compact.contains(needle) || simplified.contains(needle) {
+        for (needle, expansions) in domainExpansions where compact.contains(needle) {
             terms.append(contentsOf: expansions)
         }
 
