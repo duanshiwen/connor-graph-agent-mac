@@ -108,6 +108,7 @@ struct BrowserTabState: Identifiable {
     var focusedElementHint: String?
     var formDrafts: [AppBrowserFormDraftSnapshot]?
     var restorationStatus: AppBrowserTabRestorationStatus?
+    var localFileReadAccessPath: String?
 
     init(id: UUID = UUID(), initialURLString: String) {
         self.id = id
@@ -123,6 +124,7 @@ struct BrowserTabState: Identifiable {
         self.focusedElementHint = nil
         self.formDrafts = nil
         self.restorationStatus = .live
+        self.localFileReadAccessPath = nil
     }
 
     init(snapshot: BrowserTabSnapshot, webView: WKWebView?) {
@@ -146,6 +148,7 @@ struct BrowserTabState: Identifiable {
         self.focusedElementHint = snapshot.focusedElementHint
         self.formDrafts = snapshot.formDrafts
         self.restorationStatus = snapshot.restorationStatus
+        self.localFileReadAccessPath = snapshot.localFileReadAccessPath
     }
 
     var snapshot: BrowserTabSnapshot {
@@ -166,7 +169,8 @@ struct BrowserTabState: Identifiable {
             contentFingerprint: contentFingerprint,
             focusedElementHint: focusedElementHint,
             formDrafts: formDrafts,
-            restorationStatus: restorationStatus
+            restorationStatus: restorationStatus,
+            localFileReadAccessPath: localFileReadAccessPath
         )
     }
 

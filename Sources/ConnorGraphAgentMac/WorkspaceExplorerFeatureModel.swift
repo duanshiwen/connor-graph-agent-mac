@@ -87,6 +87,22 @@ final class WorkspaceExplorerFeatureModel {
         toggleDirectory(nodeID: node.id, root: root, directoryURL: node.url)
     }
 
+    func activateNode(
+        _ node: WorkspaceFileNode,
+        openHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
+    ) {
+        if node.isExpandable {
+            toggleNode(node)
+        } else if WorkspaceFilePreviewLoader.renderer(for: node.url) == .html,
+                  let root = roots.first(where: { $0.id == node.rootID }) {
+            selectedNodeID = node.id
+            closePreview()
+            openHTMLPreview(node, root)
+        } else {
+            select(node)
+        }
+    }
+
     func select(_ node: WorkspaceFileNode) {
         selectedNodeID = node.id
         previewTextByteLimit = WorkspaceFilePreviewLoader.defaultMaximumTextByteCount

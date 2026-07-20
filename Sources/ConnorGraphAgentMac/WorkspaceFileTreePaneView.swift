@@ -18,6 +18,7 @@ struct WorkspaceFileTreePaneView: View {
     @Bindable var model: WorkspaceExplorerFeatureModel
     var sessionID: String?
     var workspaceRoots: [WorkspaceRootDraft]
+    var onOpenHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
 
     private var configurationID: String {
         ([sessionID ?? ""] + workspaceRoots.map { "\($0.id)|\($0.path)|\($0.isPrimary)" }).joined(separator: "\n")
@@ -145,7 +146,7 @@ struct WorkspaceFileTreePaneView: View {
     }
 
     private func nodeRow(_ node: WorkspaceFileNode, depth: Int) -> some View {
-        Button(action: { model.toggleNode(node) }) {
+        Button(action: { model.activateNode(node, openHTMLPreview: onOpenHTMLPreview) }) {
             HStack(spacing: 6) {
                 if node.isExpandable {
                     disclosureIcon(isExpanded: model.expandedNodeIDs.contains(node.id))
