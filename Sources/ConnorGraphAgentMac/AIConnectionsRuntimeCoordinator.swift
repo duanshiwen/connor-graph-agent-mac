@@ -4,11 +4,17 @@ import ConnorGraphAppSupport
 
 @MainActor
 final class AIConnectionsRuntimeCoordinator {
+    private struct DisplayPreparation: Sendable {
+        var state: AppSessionStateSnapshot?
+        var settings: AppLLMSettings?
+    }
+
     private let model: AIConnectionsFeatureModel
     private let workspace: ChatWorkspaceCoordinator
     private let sessionRepository: AppChatSessionRepository?
     private let currentSessionID: () -> String
     private let rebuildRuntime: () -> Void
+    private var displaySyncTask: Task<Void, Never>?
 
     init(
         model: AIConnectionsFeatureModel,
@@ -116,15 +122,45 @@ final class AIConnectionsRuntimeCoordinator {
         }
     }
 
-    func syncDisplayFromLoadedState(sessionID: String) {
-        guard let override = workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride else { return }
-        model.selectedModel = override.model
-        model.thinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? model.thinkingLevel
-        if let providerMode = AppLLMProviderMode(rawValue: override.providerMode) {
-            model.providerMode = providerMode
-        }
-        if let connectionID = override.connectionID {
-            model.defaultConnectionID = connectionID
+    func syncDisplayInBackground(sessionID: String) {
+        displaySyncTask?.cancel()
+        let initialState = workspace.stateSnapshotsBySessionID[sessionID]
+        let settingsRepository = model.settingsRepository
+        let sessionRepository = sessionRepository
+        displaySyncTask = Task { [weak self] in
+            let preparation = await Task.detached(priority: .utility) {
+                var state = initialState
+                if state == nil {
+                    state = try? sessionRepository?.loadSessionState(sessionID: sessionID)
+                }
+                let settings = try? settingsRepository.loadSettings()
+                if state?.llmOverride?.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+                   let settings,
+                   let connection = settings.defaultConnection {
+                    let selectedModel = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !selectedModel.isEmpty {
+                        var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
+                        nextState.llmOverride = SessionLLMOverride(
+                            providerMode: connection.providerMode.rawValue,
+                            model: selectedModel,
+                            baseURLString: nil,
+                            connectionID: connection.id,
+                            thinkingLevel: settings.defaultThinkingLevel.rawValue
+                        )
+                        nextState.updatedAt = Date()
+                        try? sessionRepository?.saveSessionState(nextState, sessionID: sessionID)
+                        state = nextState
+                    }
+                }
+                return DisplayPreparation(state: state, settings: settings)
+            }.value
+            guard !Task.isCancelled,
+                  let self,
+                  self.currentSessionID() == sessionID else { return }
+            if let state = preparation.state {
+                self.workspace.stateSnapshotsBySessionID[sessionID] = state
+            }
+            self.applyDisplay(state: preparation.state, settings: preparation.settings)
         }
     }
 
@@ -161,6 +197,27 @@ final class AIConnectionsRuntimeCoordinator {
 
     private func applyGlobalDisplay() {
         let settings = try? model.settingsRepository.loadSettings()
+        applyGlobalDisplay(settings: settings)
+    }
+
+    private func applyDisplay(state: AppSessionStateSnapshot?, settings: AppLLMSettings?) {
+        guard let override = state?.llmOverride else {
+            applyGlobalDisplay(settings: settings)
+            return
+        }
+        model.selectedModel = override.model
+        model.thinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel)
+            ?? settings?.defaultThinkingLevel
+            ?? model.thinkingLevel
+        if let providerMode = AppLLMProviderMode(rawValue: override.providerMode) {
+            model.providerMode = providerMode
+        }
+        if let connectionID = override.connectionID {
+            model.defaultConnectionID = connectionID
+        }
+    }
+
+    private func applyGlobalDisplay(settings: AppLLMSettings?) {
         model.selectedModel = settings?.defaultConnection?.effectiveModel ?? ""
         model.thinkingLevel = settings?.defaultThinkingLevel ?? model.thinkingLevel
         model.providerMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
