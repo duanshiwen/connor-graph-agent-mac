@@ -103,6 +103,7 @@ public struct MemoryOSContextDeliveryService: Sendable {
             let kernelLayers = layers.compactMap { MemoryOSSearchKernelLayer(rawValue: $0.rawValue) }
             let response = try searchKernel.search(MemoryOSSearchKernelRequest(
                 query: normalizedTerms.joined(separator: ";"),
+                queries: normalizedTerms,
                 layers: kernelLayers,
                 limit: 200
             ))

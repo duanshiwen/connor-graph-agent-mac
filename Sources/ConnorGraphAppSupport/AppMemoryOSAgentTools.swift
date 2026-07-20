@@ -116,16 +116,14 @@ private extension SendableJSONValue {
 
 private enum MemoryOSLayeredContextSupport {
     static let inputSchema = AgentToolInputSchema.object(properties: [
-        "query": .string(description: "Use 2-5 focused search terms separated by semicolons (; or ；). Include aliases and both Chinese and English terms when useful.")
+        "query": .string(description: "Use 2-5 focused search terms. Separate terms with whitespace, newlines, commas, semicolons, ideographic commas, or vertical bars; wrap an exact phrase in quotes. Include aliases and both Chinese and English terms when useful.")
     ], required: ["query"])
 
     static func terms(from arguments: AgentToolArguments) throws -> [String] {
         guard let raw = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
             throw AgentToolError.invalidArguments("query is required")
         }
-        let terms = raw.split { $0 == ";" || $0 == "\u{FF1B}" }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let terms = MemorySearchQueryParser.parse(raw).terms
         guard !terms.isEmpty else { throw AgentToolError.invalidArguments("query contained no valid search terms") }
         return terms
     }
