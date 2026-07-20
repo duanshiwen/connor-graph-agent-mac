@@ -36,7 +36,7 @@ struct ChatListRouteView: View {
                 WorkspaceFileTreePaneView(
                     model: model.workspaceExplorer,
                     sessionID: model.sessions.selectedSessionID,
-                    workspaceRoots: workspaceSettings.roots,
+                    workingDirectoryPath: workspaceSettings.defaultWorkingDirectoryPath,
                     onOpenHTMLPreview: { node, root in
                         browser.openLocalHTMLPreview(
                             fileURL: node.url,

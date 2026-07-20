@@ -47,16 +47,19 @@ final class WorkspaceExplorerFeatureModel {
         self.previewLoader = previewLoader
     }
 
-    func configure(sessionID: String?, roots drafts: [WorkspaceRootDraft]) {
-        let nextRoots = drafts.map {
-            WorkspaceExplorerRoot(
-                id: $0.id,
-                displayName: $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? URL(fileURLWithPath: $0.path, isDirectory: true).lastPathComponent
-                    : $0.displayName,
-                url: URL(fileURLWithPath: $0.path, isDirectory: true),
-                isPrimary: $0.isPrimary
-            )
+    func configure(sessionID: String?, workingDirectoryPath: String) {
+        let path = workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextRoots: [WorkspaceExplorerRoot]
+        if let sessionID, !path.isEmpty {
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            nextRoots = [WorkspaceExplorerRoot(
+                id: "session-working-directory:\(sessionID)",
+                displayName: url.lastPathComponent.isEmpty ? path : url.lastPathComponent,
+                url: url,
+                isPrimary: true
+            )]
+        } else {
+            nextRoots = []
         }
         let nextConfigurationID = Self.configurationID(sessionID: sessionID, roots: nextRoots)
         guard nextConfigurationID != configurationID else { return }

@@ -17,11 +17,11 @@ private struct WorkspaceFileTreeVisibleRow: Identifiable {
 struct WorkspaceFileTreePaneView: View {
     @Bindable var model: WorkspaceExplorerFeatureModel
     var sessionID: String?
-    var workspaceRoots: [WorkspaceRootDraft]
+    var workingDirectoryPath: String
     var onOpenHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
 
     private var configurationID: String {
-        ([sessionID ?? ""] + workspaceRoots.map { "\($0.id)|\($0.path)|\($0.isPrimary)" }).joined(separator: "\n")
+        "\(sessionID ?? "")|\(workingDirectoryPath)"
     }
 
     var body: some View {
@@ -71,7 +71,7 @@ struct WorkspaceFileTreePaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: configurationID) {
-            model.configure(sessionID: sessionID, roots: workspaceRoots)
+            model.configure(sessionID: sessionID, workingDirectoryPath: workingDirectoryPath)
         }
     }
 
