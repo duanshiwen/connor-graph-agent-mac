@@ -98,7 +98,7 @@ final class AppRuntimeLifecycle {
     }
     var databasePath: String?
     let aiConnectionsModel: AIConnectionsFeatureModel
-    var agentPermissionMode: AgentPermissionMode = .readOnly
+    var agentPermissionMode: AgentPermissionMode = .askToWrite
     let governanceModel: GovernanceFeatureModel
     var governanceConfig: AppSessionGovernanceConfig { governanceModel.config }
     let productOSControlModel: ProductOSControlFeatureModel
@@ -2099,7 +2099,10 @@ final class AppRuntimeLifecycle {
 
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
-        let permissionMode = agentPermissionMode
+        let permissionMode = configuration.permissionMode
+        if isVisible {
+            agentPermissionMode = permissionMode
+        }
         let sessionState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
         let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         let previousState: AppSessionStateSnapshot? = previousSessionID.map { sessionID in
@@ -2375,6 +2378,7 @@ final class AppRuntimeLifecycle {
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
+            agentPermissionMode = effectiveLoopConfiguration.permissionMode
             chatSessionCoordinator.adoptDirectSelection(session.id)
             chatRunCoordinator.clearProcessTimelines()
             browserFeatureModel.resetWorkspaceBinding()
@@ -2588,7 +2592,8 @@ final class AppRuntimeLifecycle {
         _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
         let runtimeFactory = chatRunCoordinator.runtimeFactory
         let configuration = effectiveLoopConfiguration
-        let permissionMode = agentPermissionMode
+        let permissionMode = configuration.permissionMode
+        agentPermissionMode = permissionMode
         let runtimeState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
         let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
         let managerTask = Task.detached(priority: .userInitiated) {
