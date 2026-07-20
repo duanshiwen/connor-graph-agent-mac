@@ -106,6 +106,23 @@ struct WorkspaceExplorerFeatureModelTests {
         #expect(model.roots.isEmpty)
     }
 
+    @Test("The session file tree is presented and dismissed as a floating tool")
+    func presentsAndDismissesTree() throws {
+        let rootURL = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let model = WorkspaceExplorerFeatureModel()
+
+        model.presentTree(sessionID: "session", workingDirectoryPath: rootURL.path)
+
+        #expect(model.isTreePresented)
+        #expect(model.roots.count == 1)
+        #expect(model.roots.first?.url.standardizedFileURL == rootURL.standardizedFileURL)
+
+        model.dismissTree()
+
+        #expect(!model.isTreePresented)
+    }
+
     private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(2))

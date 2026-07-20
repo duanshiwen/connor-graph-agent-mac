@@ -16,8 +16,6 @@ struct CraftListPaneView: View {
                 ChatListRouteView(
                     model: graph.chat,
                     governanceModel: graph.governance,
-                    workspaceSettings: graph.workspaceSettings,
-                    browser: graph.browser,
                     sessionActions: graph.chatActions.session,
                     rowActions: graph.chatSessionListActions
                 )

@@ -19,6 +19,7 @@ struct WorkspaceFileTreePaneView: View {
     var sessionID: String?
     var workingDirectoryPath: String
     var onOpenHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
+    var onClose: (() -> Void)? = nil
 
     private var configurationID: String {
         "\(sessionID ?? "")|\(workingDirectoryPath)"
@@ -42,6 +43,15 @@ struct WorkspaceFileTreePaneView: View {
                 .disabled(model.roots.isEmpty)
                 .help("刷新文件树")
                 .accessibilityLabel("刷新文件树")
+
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.appIcon)
+                    .help("关闭文件树")
+                    .accessibilityLabel("关闭文件树")
+                }
             }
 
             if model.roots.isEmpty {
@@ -201,6 +211,46 @@ struct WorkspaceFileTreePaneView: View {
         case "zip", "tar", "gz", "rar", "7z": "archivebox"
         default: "doc"
         }
+    }
+}
+
+struct WorkspaceFileTreeOverlay: View {
+    @Bindable var model: WorkspaceExplorerFeatureModel
+    var sessionID: String?
+    var workingDirectoryPath: String
+    var onOpenHTMLPreview: (WorkspaceFileNode, WorkspaceExplorerRoot) -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black.opacity(0.12)
+                    .ignoresSafeArea()
+                    .onTapGesture(perform: onClose)
+
+                WorkspaceFileTreePaneView(
+                    model: model,
+                    sessionID: sessionID,
+                    workingDirectoryPath: workingDirectoryPath,
+                    onOpenHTMLPreview: onOpenHTMLPreview,
+                    onClose: onClose
+                )
+                .frame(
+                    width: min(440, max(300, proxy.size.width - 48)),
+                    height: min(640, max(360, proxy.size.height - 48))
+                )
+                .background(
+                    .regularMaterial,
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

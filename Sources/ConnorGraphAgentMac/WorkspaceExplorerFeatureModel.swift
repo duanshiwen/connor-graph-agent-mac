@@ -2,13 +2,6 @@ import Foundation
 import Observation
 import ConnorGraphAppSupport
 
-enum ChatListPaneMode: String, CaseIterable, Identifiable {
-    case sessions
-    case files
-
-    var id: String { rawValue }
-}
-
 struct WorkspaceExplorerRoot: Identifiable, Equatable {
     var id: String
     var displayName: String
@@ -21,11 +14,7 @@ struct WorkspaceExplorerRoot: Identifiable, Equatable {
 @MainActor
 @Observable
 final class WorkspaceExplorerFeatureModel {
-    var mode: ChatListPaneMode = .sessions {
-        didSet {
-            if mode == .sessions { closePreview() }
-        }
-    }
+    private(set) var isTreePresented = false
     private(set) var roots: [WorkspaceExplorerRoot] = []
     private(set) var expandedNodeIDs: Set<String> = []
     private(set) var childrenByNodeID: [String: [WorkspaceFileNode]] = [:]
@@ -62,6 +51,15 @@ final class WorkspaceExplorerFeatureModel {
     ) {
         self.loader = loader
         self.previewLoader = previewLoader
+    }
+
+    func presentTree(sessionID: String?, workingDirectoryPath: String) {
+        configure(sessionID: sessionID, workingDirectoryPath: workingDirectoryPath)
+        isTreePresented = true
+    }
+
+    func dismissTree() {
+        isTreePresented = false
     }
 
     func configure(sessionID: String?, workingDirectoryPath: String) {
@@ -198,6 +196,7 @@ final class WorkspaceExplorerFeatureModel {
         generation &+= 1
         cancelAllTasks()
         closePreview()
+        isTreePresented = false
         activeSessionID = nil
         cachedTreeStatesBySessionID = [:]
         cachedSessionIDsByRecency = []
