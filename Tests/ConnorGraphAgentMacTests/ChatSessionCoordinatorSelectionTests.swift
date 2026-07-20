@@ -271,6 +271,29 @@ struct ChatSessionRuntimeIntegrationTests {
         #expect(try fixture.repository.loadSession(id: selectedID)?.id == selectedID)
     }
 
+    @Test func creatingNewSessionUsesDefaultPermissionModeFromSettings() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.runtime.permissionSettingsModel.defaultPermissionMode = .trustedWrite
+        fixture.runtime.newChatSession()
+
+        let selectedID = try #require(fixture.runtime.chatFeatureModel.sessions.selectedSessionID)
+        await fixture.runtime.waitForNewSessionPreparation(sessionID: selectedID)
+
+        #expect(fixture.runtime.agentPermissionMode == .trustedWrite)
+        #expect(fixture.runtime.chatRunCoordinator.manager?.permissionMode == .trustedWrite)
+    }
+
+    @Test func factoryPermissionModeDefaultsToAsk() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        #expect(AgentRuntimeSettings.default.loop.permissionMode == .askToWrite)
+        #expect(fixture.runtime.permissionSettingsModel.defaultPermissionMode == .askToWrite)
+        #expect(fixture.runtime.agentPermissionMode == .askToWrite)
+    }
+
     @Test func creatingNewSessionRespectsActiveStatusFilterWithoutReloadingList() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
