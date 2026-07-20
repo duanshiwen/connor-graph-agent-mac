@@ -99,7 +99,7 @@ struct AgentChatView: View {
                     },
                     onClose: model.workspaceExplorer.dismissTree
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .transition(.move(edge: .trailing).combined(with: .opacity))
                 .zIndex(9)
             }
 

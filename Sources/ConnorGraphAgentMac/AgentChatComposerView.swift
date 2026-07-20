@@ -138,14 +138,14 @@ struct AgentChatComposerView: View {
                     workingDirectoryMenu
 
                     Button {
-                        model.workspaceExplorer.presentTree(
+                        model.workspaceExplorer.toggleTree(
                             sessionID: model.sessions.selectedSessionID,
                             workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
                         )
                     } label: {
                         AgentComposerOptionBadge(
-                            title: "文件",
-                            systemImage: "folder",
+                            title: "工作区目录树",
+                            systemImage: "list.bullet.indent",
                             tint: model.workspaceExplorer.isTreePresented ? composerControlActiveForeground : composerControlForeground,
                             showsChevron: false,
                             isActive: model.workspaceExplorer.isTreePresented,
@@ -154,8 +154,8 @@ struct AgentChatComposerView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .help("浏览当前会话工作目录")
-                    .accessibilityLabel("打开当前会话文件树")
+                    .help("展开或收回当前会话工作区目录树")
+                    .accessibilityLabel("切换工作区目录树")
 
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(

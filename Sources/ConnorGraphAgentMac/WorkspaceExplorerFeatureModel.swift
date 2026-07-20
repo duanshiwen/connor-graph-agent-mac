@@ -58,6 +58,14 @@ final class WorkspaceExplorerFeatureModel {
         isTreePresented = true
     }
 
+    func toggleTree(sessionID: String?, workingDirectoryPath: String) {
+        if isTreePresented {
+            dismissTree()
+        } else {
+            presentTree(sessionID: sessionID, workingDirectoryPath: workingDirectoryPath)
+        }
+    }
+
     func dismissTree() {
         isTreePresented = false
     }
