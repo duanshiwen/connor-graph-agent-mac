@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use tantivy::collector::TopDocs;
-use tantivy::query::{QueryParser, TermQuery};
+use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, TermQuery};
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{DocAddress, Index, TantivyDocument, Term};
 
@@ -67,8 +67,20 @@ impl ConnorMemorySearchKernel {
         let searcher = reader.searcher();
         let query_fields = vec![fields.title, fields.aliases, fields.summary, fields.body, fields.keywords, fields.ids, fields.exact_terms];
         let parser = QueryParser::for_index(&index, query_fields);
-        let query_text = query_terms(&request.query).join(" OR ");
-        let query = parser.parse_query(&query_text).map_err(|err| KernelError::new(err.to_string()))?;
+        let terms = query_terms(&request.query);
+        if terms.is_empty() {
+            return Ok(MemorySearchResponse { hits: vec![], backend: "tantivy-embedded".to_string() });
+        }
+        let clauses = terms
+            .iter()
+            .map(|term| {
+                parser
+                    .parse_query(&literal_query(term))
+                    .map(|query| (Occur::Should, query))
+                    .map_err(|err| KernelError::new(err.to_string()))
+            })
+            .collect::<KernelResult<Vec<(Occur, Box<dyn Query>)>>>()?;
+        let query = BooleanQuery::new(clauses);
         let limit = request.limit.max(1).min(100);
         let fetch_limit = (limit * 100).max(500).min(5_000);
         let mut top_docs = searcher.search(&query, &TopDocs::with_limit(fetch_limit)).map_err(|err| KernelError::new(err.to_string()))?;
@@ -136,6 +148,11 @@ impl ConnorMemorySearchKernel {
     }
 }
 
+fn literal_query(term: &str) -> String {
+    let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
 fn dedupe_doc_addresses(items: &mut Vec<(f32, DocAddress)>) {
     let mut seen = HashSet::new();
     items.retain(|(_, address)| seen.insert(*address));
@@ -180,7 +197,7 @@ fn exact_match_boost(query: &str, record_id: &str, record_kind: &str, title: &st
 }
 
 fn field_match_explanation(query: &str, fields: &[(&str, &String)]) -> Vec<String> {
-    let mut needles = query_terms(query);
+    let mut needles = query_terms(query).into_iter().map(|term| term.to_lowercase()).collect::<Vec<_>>();
     let raw = query.trim().to_lowercase();
     if !raw.is_empty() && !needles.contains(&raw) { needles.push(raw); }
     let mut matched = Vec::new();
@@ -235,5 +252,47 @@ mod tests {
         assert!(first.rank_reason.contains("aliases"));
         assert!(first.rank_reason.contains("boosts="));
         assert!(first.rank_reason.contains("exact_raw:+1000"));
+    }
+
+    #[test]
+    fn kernel_broadly_recalls_known_term_across_query_separators() {
+        let dir = tempdir().expect("tempdir");
+        let kernel = ConnorMemorySearchKernel::open(dir.path()).expect("open");
+        let docs = vec![MemorySearchDocument {
+            id: "L1:annie-capture".to_string(),
+            layer: SearchLayer::L1,
+            record_id: "annie-capture".to_string(),
+            record_kind: SearchRecordKind::CaptureEvent,
+            title: "Invitation note".to_string(),
+            aliases: vec![],
+            summary: "Annie received the product invitation.".to_string(),
+            body: "Annie received the product invitation.".to_string(),
+            keywords: vec![],
+            ids: vec![],
+            created_at: None,
+            updated_at: None,
+            metadata_json: "{}".to_string(),
+        }];
+        kernel.rebuild_from_documents(&docs).expect("rebuild");
+
+        for query in [
+            "Annie Friend",
+            "Annie,Friend",
+            "Annie，Friend",
+            "Annie;Friend",
+            "Annie；Friend",
+            "Annie、Friend",
+            "Annie|Friend",
+            "Annie｜Friend",
+            "Annie\nFriend",
+            "Annie 朋友 friend",
+            "Annie OR Friend",
+        ] {
+            let response = kernel
+                .search(MemorySearchRequest { query: query.to_string(), layers: vec![SearchLayer::L1], limit: 10 })
+                .expect(query);
+            assert_eq!(response.hits.first().map(|hit| hit.record_id.as_str()), Some("annie-capture"), "query={query:?}");
+            assert!(response.hits[0].rank_reason.contains("matched_fields=body"), "query={query:?}; reason={}", response.hits[0].rank_reason);
+        }
     }
 }
