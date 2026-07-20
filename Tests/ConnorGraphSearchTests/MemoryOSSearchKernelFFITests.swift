@@ -17,12 +17,21 @@ struct MemoryOSSearchKernelFFITests {
         try makeSQLiteFixture(at: db)
         let kernel = try MemoryOSSearchKernel(libraryURL: libraryURL, indexDirectory: temp.appendingPathComponent("index", isDirectory: true))
         let count = try kernel.rebuildFromSQLite(databaseURL: db)
-        #expect(count == 6)
+        #expect(count == 8)
 
         let response = try kernel.search(.init(query: "中国", layers: [.l4], limit: 5))
         #expect(response.backend == "tantivy-embedded")
         #expect(response.hits.contains { $0.recordID == "wikidata:Q148" })
         #expect(response.hits.contains { $0.recordID == "wikidata:Q148" && $0.updatedAt == "2026-06-24" })
+
+        let structuredResponse = try kernel.search(.init(
+            query: "Annie 朋友 friend",
+            queries: ["Annie", "朋友", "friend"],
+            layers: [.l1],
+            limit: 5
+        ))
+        #expect(structuredResponse.hits.contains { $0.recordID == "c2" })
+        #expect(structuredResponse.hits.contains { $0.recordID == "c2" && !$0.rankReason.contains("query_terms=;") })
     }
 }
 
@@ -36,7 +45,9 @@ private func makeSQLiteFixture(at url: URL) throws {
     CREATE TABLE memory_l4_entity_aliases (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, alias TEXT NOT NULL, normalized_alias TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE memory_l4_entity_statements (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, predicate TEXT NOT NULL, object_entity_id TEXT, text TEXT NOT NULL, assertion_kind TEXT NOT NULL, confidence REAL NOT NULL, valid_at TEXT NOT NULL, committed_at TEXT NOT NULL, evidence_span_ids_json TEXT NOT NULL DEFAULT '[]', source_artifact_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
     INSERT INTO memory_l0_provenance_objects VALUES ('p1','chat',NULL,'标题','内容','h','2026-06-24','2026-06-24',NULL,NULL,'personal','active','{}');
+    INSERT INTO memory_l0_provenance_objects VALUES ('p2','chat',NULL,'Invitation note','Annie received the product invitation.','h2','2026-06-25','2026-06-25',NULL,NULL,'personal','active','{}');
     INSERT INTO memory_l1_capture_events VALUES ('c1','p1','message','2026-06-24',1,'pending','{}');
+    INSERT INTO memory_l1_capture_events VALUES ('c2','p2','message','2026-06-25',1,'pending','{}');
     INSERT INTO memory_l2_statements VALUES ('s1','subj','likes',NULL,'用户喜欢图谱','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
     INSERT INTO memory_l3_beliefs VALUES ('b1','图谱检索应当 graph-first','knowledge-management','Knowledge graph','2026-06-24','2026-06-24');
     INSERT INTO memory_l4_entities VALUES ('wikidata:Q148','wikidata:Q148','country','中华人民共和国','["中国"]','东亚国家',0.9,'2026-06-24','2026-06-24',NULL,'{}');

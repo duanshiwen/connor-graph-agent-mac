@@ -10,11 +10,13 @@ public enum MemoryOSSearchKernelLayer: String, Sendable, Codable, Equatable, Has
 
 public struct MemoryOSSearchKernelRequest: Sendable, Codable, Equatable {
     public var query: String
+    public var queries: [String]?
     public var layers: [MemoryOSSearchKernelLayer]
     public var limit: Int
 
-    public init(query: String, layers: [MemoryOSSearchKernelLayer] = MemoryOSSearchKernelLayer.allCases, limit: Int = 10) {
+    public init(query: String, queries: [String]? = nil, layers: [MemoryOSSearchKernelLayer] = MemoryOSSearchKernelLayer.allCases, limit: Int = 10) {
         self.query = query
+        self.queries = queries
         self.layers = layers
         self.limit = limit
     }
