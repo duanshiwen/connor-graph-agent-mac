@@ -52,6 +52,20 @@ struct SettingsFeatureModelsTests {
         #expect(model.recentPaths == ["/tmp/project"])
     }
 
+    @Test func selectingWorkingDirectoryReplacesPreviousWorkspaceAuthorization() {
+        let model = WorkspaceSettingsFeatureModel()
+        var savedRoots: [WorkspaceRootDraft] = []
+        model.onSaveSessionWorkspace = { roots, _ in savedRoots = roots }
+        model.addRoot(path: "/tmp/old-project", makePrimary: true)
+
+        model.selectWorkingDirectory(path: "/tmp/new-project")
+
+        #expect(model.roots.map(\.path) == ["/tmp/new-project"])
+        #expect(model.defaultWorkingDirectoryPath == "/tmp/new-project")
+        #expect(savedRoots.map(\.path) == ["/tmp/new-project"])
+        #expect(model.recentPaths == ["/tmp/new-project", "/tmp/old-project"])
+    }
+
     @Test func persistenceCoordinatorPreservesFullLoopConfiguration() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("settings-coordinator-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
