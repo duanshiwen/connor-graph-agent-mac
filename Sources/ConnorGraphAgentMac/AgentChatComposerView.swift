@@ -137,6 +137,26 @@ struct AgentChatComposerView: View {
 
                     workingDirectoryMenu
 
+                    Button {
+                        model.workspaceExplorer.presentTree(
+                            sessionID: model.sessions.selectedSessionID,
+                            workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
+                        )
+                    } label: {
+                        AgentComposerOptionBadge(
+                            title: "文件",
+                            systemImage: "folder",
+                            tint: model.workspaceExplorer.isTreePresented ? composerControlActiveForeground : composerControlForeground,
+                            showsChevron: false,
+                            isActive: model.workspaceExplorer.isTreePresented,
+                            style: .compact,
+                            showsBorder: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("浏览当前会话工作目录")
+                    .accessibilityLabel("打开当前会话文件树")
+
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
                             title: chatActions.dependencies.browser.isVisible ? "隐藏浏览器" : "浏览器",

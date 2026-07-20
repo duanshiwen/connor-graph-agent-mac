@@ -25,6 +25,10 @@ struct AgentChatView: View {
             chatActions.session.reloadChatSessionsIfNeededAfterInitialLoad()
             chatActions.approval.reloadPendingApprovals()
         }
+        .onChange(of: model.sessions.selectedSessionID) { _, _ in
+            model.workspaceExplorer.dismissTree()
+            model.workspaceExplorer.closePreview()
+        }
     }
 
     private var activeSessionContent: some View {
@@ -77,7 +81,26 @@ struct AgentChatView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(8)
                 .padding(.top, AgentChatLayout.spaceL)
-                .padding(.trailing, AgentChatLayout.spaceL)
+                    .padding(.trailing, AgentChatLayout.spaceL)
+            }
+
+            if model.workspaceExplorer.isTreePresented {
+                WorkspaceFileTreeOverlay(
+                    model: model.workspaceExplorer,
+                    sessionID: model.sessions.selectedSessionID,
+                    workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath,
+                    onOpenHTMLPreview: { node, root in
+                        model.workspaceExplorer.dismissTree()
+                        chatActions.dependencies.browser.openLocalHTMLPreview(
+                            fileURL: node.url,
+                            readAccessRootURL: root.url,
+                            preferredSessionID: model.sessions.selectedSessionID
+                        )
+                    },
+                    onClose: model.workspaceExplorer.dismissTree
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(9)
             }
 
             if let previewModel = model.composer.attachmentPreviewModel {
