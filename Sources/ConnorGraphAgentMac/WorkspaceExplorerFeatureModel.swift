@@ -148,7 +148,7 @@ final class WorkspaceExplorerFeatureModel {
     }
 
     func loadMorePreview() {
-        guard let previewModel, previewModel.isTruncated else { return }
+        guard !isLoadingPreview, let previewModel, previewModel.isTruncated else { return }
         previewTextByteLimit += WorkspaceFilePreviewLoader.defaultMaximumTextByteCount
         loadPreview(previewModel.node)
     }

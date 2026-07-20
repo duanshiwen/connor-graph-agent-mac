@@ -116,26 +116,32 @@ struct WorkspaceFilePreviewOverlay: View {
         switch model.renderer {
         case .markdown:
             ScrollView {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                     AgentMarkdownPreviewText(markdown: model.body)
-                    continuationControl(model)
+                    continuationControl(model, automaticallyLoadWhenVisible: true)
                 }
                     .padding(AgentChatLayout.spaceM)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .monospacedText:
             VStack(spacing: 0) {
-                WorkspaceCodePreviewTextView(text: model.body, spans: model.codeHighlightSpans)
-                continuationControl(model)
+                WorkspaceCodePreviewTextView(
+                    contentID: "\(model.node.id):\(model.loadedByteCount)",
+                    text: model.body,
+                    spans: model.codeHighlightSpans,
+                    canLoadMore: model.isTruncated && !isLoading,
+                    onApproachEnd: onLoadMore
+                )
+                continuationControl(model, automaticallyLoadWhenVisible: false)
                     .padding(.horizontal, AgentChatLayout.spaceM)
             }
         case .plainText:
             ScrollView {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                     Text(model.body)
                         .font(AgentChatTypography.body)
                         .textSelection(.enabled)
-                    continuationControl(model)
+                    continuationControl(model, automaticallyLoadWhenVisible: true)
                 }
                     .padding(AgentChatLayout.spaceM)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -156,7 +162,10 @@ struct WorkspaceFilePreviewOverlay: View {
     }
 
     @ViewBuilder
-    private func continuationControl(_ model: WorkspaceFilePreviewModel) -> some View {
+    private func continuationControl(
+        _ model: WorkspaceFilePreviewModel,
+        automaticallyLoadWhenVisible: Bool
+    ) -> some View {
         if model.isTruncated {
             HStack {
                 Spacer()
@@ -168,6 +177,11 @@ struct WorkspaceFilePreviewOverlay: View {
                 Spacer()
             }
             .padding(.vertical, AgentChatLayout.spaceS)
+            .id(model.loadedByteCount)
+            .onAppear {
+                guard automaticallyLoadWhenVisible, !isLoading else { return }
+                onLoadMore()
+            }
         }
     }
 
