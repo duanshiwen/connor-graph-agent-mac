@@ -39,6 +39,19 @@ struct ChatFeatureModelTests {
         #expect(model.selectedArtifactDirectories == artifacts)
     }
 
+    @Test func selectedContentStopsShowingLoadingBeforeRuntimePreparationFinishes() {
+        let model = ChatSessionListModel()
+        model.selectedSessionID = "session-1"
+        model.loadingSessionDetailID = "session-1"
+
+        #expect(model.isWaitingForSelectedPresentation)
+
+        model.presentedSessionDetailID = "session-1"
+
+        #expect(!model.isWaitingForSelectedPresentation)
+        #expect(model.loadingSessionDetailID == "session-1")
+    }
+
     @Test func sessionListBuildsSidebarSummaryOnceFromCompleteSessionSource() {
         let todo = AgentSession(
             id: "todo",

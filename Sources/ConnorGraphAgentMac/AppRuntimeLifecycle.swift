@@ -2596,8 +2596,27 @@ final class AppRuntimeLifecycle {
         agentPermissionMode = permissionMode
         let runtimeState = chatWorkspaceCoordinator.stateSnapshotsBySessionID[session.id]
         let remoteKnowledgeBaseIDs = effectiveRemoteKnowledgeBaseIDs(sessionID: session.id)
-        let managerTask = Task.detached(priority: .userInitiated) {
-            runtimeFactory?.makeNativeSessionManager(
+        chatRunCoordinator.applySelectedSnapshot(
+            session: session,
+            manager: nil,
+            timeline: snapshot.timeline,
+            summary: snapshot.latestSummary
+        )
+        restoreChatInputDraft(for: session.id)
+        chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
+        restoreWorkspaceMode(for: session.id)
+        aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
+        chatFeatureModel.sessions.presentedSessionDetailID = session.id
+        errorMessage = nil
+        let presentationElapsed = startedAt.duration(to: ContinuousClock.now)
+        let presentationMilliseconds = Double(presentationElapsed.components.seconds) * 1_000
+            + Double(presentationElapsed.components.attoseconds) / 1_000_000_000_000_000
+        AppPerformanceLog.chatTurnLogger.info(
+            "sessionDetail.presented session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(presentationMilliseconds, privacy: .public)ms"
+        )
+        let managerTask = Task.detached(priority: .userInitiated) { () -> NativeSessionManager? in
+            guard !Task.isCancelled else { return nil }
+            return runtimeFactory?.makeNativeSessionManager(
                 session: session,
                 permissionMode: permissionMode,
                 configuration: configuration,
@@ -2607,25 +2626,19 @@ final class AppRuntimeLifecycle {
                 allowedMCPToolNames: runtimeState?.allowedMCPToolNames
             )
         }
-        let manager = await managerTask.value
+        let manager = await withTaskCancellationHandler {
+            await managerTask.value
+        } onCancel: {
+            managerTask.cancel()
+        }
         guard !Task.isCancelled,
               chatFeatureModel.sessions.selectedSessionID == session.id,
               chatFeatureModel.sessions.loadingSessionDetailID == session.id
         else { return }
-        chatRunCoordinator.applySelectedSnapshot(
-            session: session,
-            manager: manager,
-            timeline: snapshot.timeline,
-            summary: snapshot.latestSummary
-        )
-        restoreChatInputDraft(for: session.id)
-        chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
-        restoreWorkspaceMode(for: session.id)
-        aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
-        errorMessage = nil
+        chatRunCoordinator.installManager(manager, fallbackSession: session)
         let elapsed = startedAt.duration(to: ContinuousClock.now)
         let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-        AppPerformanceLog.chatTurnLogger.info("sessionDetail.loaded session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
+        AppPerformanceLog.chatTurnLogger.info("sessionRuntime.prepared session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
     }
 
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {

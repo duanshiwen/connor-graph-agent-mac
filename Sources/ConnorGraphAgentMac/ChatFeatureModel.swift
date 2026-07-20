@@ -43,6 +43,7 @@ final class ChatSessionListModel {
     private(set) var rowPresentationsByID: [String: AgentChatSessionPresentation] = [:]
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
+    var presentedSessionDetailID: String?
     var readStates: [String: SessionReadState] = [:]
     var regeneratingTitleSessionIDs: Set<String> = []
     var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
@@ -59,6 +60,11 @@ final class ChatSessionListModel {
         let title = (allSessions.first { $0.id == sessionID } ?? sessions.first { $0.id == sessionID })?
             .title.trimmingCharacters(in: .whitespacesAndNewlines)
         return title?.isEmpty == false ? title : nil
+    }
+
+    var isWaitingForSelectedPresentation: Bool {
+        guard let selectedSessionID, loadingSessionDetailID == selectedSessionID else { return false }
+        return presentedSessionDetailID != selectedSessionID
     }
 }
 
