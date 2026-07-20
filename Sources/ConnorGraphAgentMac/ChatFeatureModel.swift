@@ -54,6 +54,12 @@ final class ChatSessionListModel {
     func rowPresentation(for session: AgentSession) -> AgentChatSessionPresentation {
         rowPresentationsByID[session.id] ?? AgentChatSessionPresentation(session: session)
     }
+
+    func title(for sessionID: String) -> String? {
+        let title = (allSessions.first { $0.id == sessionID } ?? sessions.first { $0.id == sessionID })?
+            .title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title?.isEmpty == false ? title : nil
+    }
 }
 
 @MainActor

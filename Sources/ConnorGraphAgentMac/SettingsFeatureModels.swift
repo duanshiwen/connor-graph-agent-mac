@@ -248,6 +248,14 @@ final class WorkspaceSettingsFeatureModel {
         if makePrimary { rememberRecentPath(defaultWorkingDirectoryPath) }
         save()
     }
+    func selectWorkingDirectory(path: String) {
+        var selectedRoots: [WorkspaceRootDraft] = []
+        guard AppWorkspaceRootDraftEditor.addRoot(path: path, to: &selectedRoots, makePrimary: true) else { return }
+        roots = selectedRoots
+        defaultWorkingDirectoryPath = primaryRoot?.path ?? ""
+        rememberRecentPath(defaultWorkingDirectoryPath)
+        save()
+    }
     func addRoots(paths: [String]) { for path in paths { addRoot(path: path) } }
     func removeRoot(id: String) { AppWorkspaceRootDraftEditor.removeRoot(id: id, from: &roots); defaultWorkingDirectoryPath = primaryRoot?.path ?? ""; save() }
     func setPrimaryRoot(id: String) { AppWorkspaceRootDraftEditor.setPrimaryRoot(id: id, in: &roots); defaultWorkingDirectoryPath = primaryRoot?.path ?? ""; save() }
