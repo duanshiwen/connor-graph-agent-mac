@@ -103,6 +103,11 @@
 		E71500010000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */; };
 		E71500010000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */; };
 		E71500010000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71500000000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift */; };
+		F71000010000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift */; };
+		F71000010000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift */; };
+		F71000010000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */; };
+		F71000010000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */; };
+		F71000010000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */; };
 		A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */; };
 		A00000000000000000000074 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000075 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift */; };
 		A00000000000000000000076 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000077 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift */; };
@@ -191,6 +196,11 @@
 		E71500000000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift; sourceTree = "<group>"; };
 		E71500000000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppRouteViews.swift; sourceTree = "<group>"; };
 		E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift; sourceTree = "<group>"; };
+		F71000000000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift; sourceTree = "<group>"; };
+		F71000000000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift; sourceTree = "<group>"; };
+		F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift; sourceTree = "<group>"; };
+		F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift; sourceTree = "<group>"; };
+		F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift; sourceTree = "<group>"; };
 		E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift; sourceTree = "<group>"; };
 		E71500000000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000019 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift; sourceTree = "<group>"; };
@@ -391,6 +401,11 @@
 				E71500000000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift */,
 				E71500000000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift */,
 				E71500000000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift */,
+				F71000000000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift */,
+				F71000000000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift */,
+				F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */,
+				F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */,
+				F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */,
 				A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */,
 				A00000000000000000000075 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift */,
 				A00000000000000000000077 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift */,
@@ -693,6 +708,11 @@
 				E71500010000000000000001 /* Sources/ConnorGraphAgentMac/AppRoutePerformanceTracker.swift in Sources */,
 				E71500010000000000000002 /* Sources/ConnorGraphAgentMac/AppRouteViews.swift in Sources */,
 				E71500010000000000000003 /* Sources/ConnorGraphAgentMac/RetainedRouteHostView.swift in Sources */,
+				F71000010000000000000001 /* Sources/ConnorGraphAgentMac/NativeFilePreviewViews.swift in Sources */,
+				F71000010000000000000002 /* Sources/ConnorGraphAgentMac/WorkspaceCodePreviewTextView.swift in Sources */,
+				F71000010000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift in Sources */,
+				F71000010000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift in Sources */,
+				F71000010000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift in Sources */,
 				A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */,
 				A00000000000000000000074 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift in Sources */,
 				A00000000000000000000076 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift in Sources */,

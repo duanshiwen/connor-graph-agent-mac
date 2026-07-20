@@ -8,6 +8,40 @@ import ConnorGraphCore
 @MainActor
 @Suite("BrowserFeatureModel Tests")
 struct BrowserFeatureModelTests {
+    @Test func localHTMLPreviewPersistsRestrictedReadAccessAndReusesTab() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let workspace = fixture.root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let html = workspace.appendingPathComponent("index.html")
+        try "<h1>Local preview</h1>".write(to: html, atomically: true, encoding: .utf8)
+
+        fixture.model.openLocalHTMLPreview(fileURL: html, readAccessRootURL: workspace)
+        fixture.model.openLocalHTMLPreview(fileURL: html, readAccessRootURL: workspace)
+
+        let snapshot = try #require(fixture.model.workspaceSnapshotsBySessionID["session-1"])
+        let tab = try #require(snapshot.tabs.first)
+        #expect(snapshot.tabs.count == 1)
+        #expect(tab.currentURLString == html.absoluteString)
+        #expect(tab.localFileReadAccessPath == workspace.path)
+        #expect(fixture.model.isVisible)
+        #expect(fixture.model.errorMessage == nil)
+    }
+
+    @Test func localHTMLPreviewRejectsFilesOutsideWorkspaceRoot() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let workspace = fixture.root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let outside = fixture.root.appendingPathComponent("outside.html")
+        try "<p>Outside</p>".write(to: outside, atomically: true, encoding: .utf8)
+
+        fixture.model.openLocalHTMLPreview(fileURL: outside, readAccessRootURL: workspace)
+
+        #expect(fixture.model.workspaceSnapshotsBySessionID["session-1"] == nil)
+        #expect(fixture.model.errorMessage?.contains("不在当前工作区范围内") == true)
+    }
+
     @Test func workspaceOpenPersistsSnapshotAndEmitsTypedIntent() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

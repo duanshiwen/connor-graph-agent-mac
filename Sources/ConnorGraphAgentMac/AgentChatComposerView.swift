@@ -137,6 +137,26 @@ struct AgentChatComposerView: View {
 
                     workingDirectoryMenu
 
+                    Button {
+                        model.workspaceExplorer.toggleTree(
+                            sessionID: model.sessions.selectedSessionID,
+                            workingDirectoryPath: chatActions.dependencies.workspaceSettings.defaultWorkingDirectoryPath
+                        )
+                    } label: {
+                        AgentComposerOptionBadge(
+                            title: "工作区目录树",
+                            systemImage: "list.bullet.indent",
+                            tint: model.workspaceExplorer.isTreePresented ? composerControlActiveForeground : composerControlForeground,
+                            showsChevron: false,
+                            isActive: model.workspaceExplorer.isTreePresented,
+                            style: .compact,
+                            showsBorder: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("展开或收回当前会话工作区目录树")
+                    .accessibilityLabel("切换工作区目录树")
+
                     Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
                             title: chatActions.dependencies.browser.isVisible ? "隐藏浏览器" : "浏览器",

@@ -110,6 +110,7 @@ final class ChatFeatureModel {
     let composer = ChatComposerModel()
     let run = ChatRunModel()
     let approvals = ChatApprovalModel()
+    let workspaceExplorer = WorkspaceExplorerFeatureModel()
 
-    func shutdown() {}
+    func shutdown() { workspaceExplorer.shutdown() }
 }
