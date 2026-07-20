@@ -37,6 +37,53 @@ struct WorkspaceExplorerFeatureModelTests {
         #expect(model.selectedNodeID == nil)
     }
 
+    @Test("Switching back restores only that session's expanded tree")
+    func restoresTreeStatePerSession() async throws {
+        let firstRootURL = try temporaryDirectory()
+        let secondRootURL = try temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: firstRootURL)
+            try? FileManager.default.removeItem(at: secondRootURL)
+        }
+        try "first".write(to: firstRootURL.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+        let model = WorkspaceExplorerFeatureModel()
+        model.configure(sessionID: "first", workingDirectoryPath: firstRootURL.path)
+        let firstRoot = try #require(model.roots.first)
+        model.toggleRoot(firstRoot)
+        try await waitUntil { model.childrenByNodeID[firstRoot.nodeID] != nil }
+
+        model.configure(sessionID: "second", workingDirectoryPath: secondRootURL.path)
+        #expect(model.expandedNodeIDs.isEmpty)
+        #expect(model.childrenByNodeID.isEmpty)
+
+        model.configure(sessionID: "first", workingDirectoryPath: firstRootURL.path)
+        #expect(model.expandedNodeIDs == Set([firstRoot.nodeID]))
+        #expect(model.childrenByNodeID[firstRoot.nodeID]?.map(\.name) == ["first.txt"])
+    }
+
+    @Test("Changing sessions closes the active file preview")
+    func closesPreviewOnSessionChange() async throws {
+        let firstRootURL = try temporaryDirectory()
+        let secondRootURL = try temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: firstRootURL)
+            try? FileManager.default.removeItem(at: secondRootURL)
+        }
+        try "preview".write(to: firstRootURL.appendingPathComponent("preview.txt"), atomically: true, encoding: .utf8)
+        let model = WorkspaceExplorerFeatureModel()
+        model.configure(sessionID: "first", workingDirectoryPath: firstRootURL.path)
+        let firstRoot = try #require(model.roots.first)
+        model.toggleRoot(firstRoot)
+        try await waitUntil { model.childrenByNodeID[firstRoot.nodeID] != nil }
+        model.select(try #require(model.childrenByNodeID[firstRoot.nodeID]?.first))
+        try await waitUntil { model.previewModel != nil }
+
+        model.configure(sessionID: "second", workingDirectoryPath: secondRootURL.path)
+
+        #expect(model.previewModel == nil)
+        #expect(model.selectedNodeID == nil)
+    }
+
     @Test("Only the selected session working directory becomes a root")
     func usesSingleSessionWorkingDirectory() throws {
         let rootURL = try temporaryDirectory()

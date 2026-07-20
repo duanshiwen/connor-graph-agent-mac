@@ -21,7 +21,11 @@ struct WorkspaceExplorerRoot: Identifiable, Equatable {
 @MainActor
 @Observable
 final class WorkspaceExplorerFeatureModel {
-    var mode: ChatListPaneMode = .sessions
+    var mode: ChatListPaneMode = .sessions {
+        didSet {
+            if mode == .sessions { closePreview() }
+        }
+    }
     private(set) var roots: [WorkspaceExplorerRoot] = []
     private(set) var expandedNodeIDs: Set<String> = []
     private(set) var childrenByNodeID: [String: [WorkspaceFileNode]] = [:]
@@ -37,7 +41,20 @@ final class WorkspaceExplorerFeatureModel {
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var previewTextByteLimit = WorkspaceFilePreviewLoader.defaultMaximumTextByteCount
     @ObservationIgnored private var configurationID = ""
+    @ObservationIgnored private var activeSessionID: String?
+    @ObservationIgnored private var cachedTreeStatesBySessionID: [String: CachedTreeState] = [:]
+    @ObservationIgnored private var cachedSessionIDsByRecency: [String] = []
     @ObservationIgnored private var generation: UInt64 = 0
+
+    private struct CachedTreeState {
+        var workingDirectoryPath: String
+        var roots: [WorkspaceExplorerRoot]
+        var expandedNodeIDs: Set<String>
+        var childrenByNodeID: [String: [WorkspaceFileNode]]
+        var errorsByNodeID: [String: String]
+    }
+
+    private static let maximumCachedSessionCount = 5
 
     init(
         loader: WorkspaceDirectoryLoader = WorkspaceDirectoryLoader(),
@@ -48,7 +65,8 @@ final class WorkspaceExplorerFeatureModel {
     }
 
     func configure(sessionID: String?, workingDirectoryPath: String) {
-        let path = workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawPath = workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = rawPath.isEmpty ? "" : URL(fileURLWithPath: rawPath, isDirectory: true).standardizedFileURL.path
         let nextRoots: [WorkspaceExplorerRoot]
         if let sessionID, !path.isEmpty {
             let url = URL(fileURLWithPath: path, isDirectory: true)
@@ -63,16 +81,32 @@ final class WorkspaceExplorerFeatureModel {
         }
         let nextConfigurationID = Self.configurationID(sessionID: sessionID, roots: nextRoots)
         guard nextConfigurationID != configurationID else { return }
+        cacheActiveTreeState()
         configurationID = nextConfigurationID
+        activeSessionID = sessionID
         generation &+= 1
         cancelAllTasks()
         previewTask?.cancel()
         previewTask = nil
-        roots = nextRoots
-        expandedNodeIDs = []
-        childrenByNodeID = [:]
+        if let sessionID,
+           let cached = cachedTreeStatesBySessionID[sessionID],
+           cached.workingDirectoryPath == path {
+            roots = cached.roots
+            expandedNodeIDs = cached.expandedNodeIDs
+            childrenByNodeID = cached.childrenByNodeID
+            errorsByNodeID = cached.errorsByNodeID
+            markSessionCacheAsRecent(sessionID)
+        } else {
+            if let sessionID {
+                cachedTreeStatesBySessionID[sessionID] = nil
+                cachedSessionIDsByRecency.removeAll { $0 == sessionID }
+            }
+            roots = nextRoots
+            expandedNodeIDs = []
+            childrenByNodeID = [:]
+            errorsByNodeID = [:]
+        }
         loadingNodeIDs = []
-        errorsByNodeID = [:]
         selectedNodeID = nil
         previewModel = nil
         isLoadingPreview = false
@@ -164,6 +198,9 @@ final class WorkspaceExplorerFeatureModel {
         generation &+= 1
         cancelAllTasks()
         closePreview()
+        activeSessionID = nil
+        cachedTreeStatesBySessionID = [:]
+        cachedSessionIDsByRecency = []
     }
 
     private func toggleDirectory(nodeID: String, root: WorkspaceExplorerRoot, directoryURL: URL) {
@@ -219,6 +256,27 @@ final class WorkspaceExplorerFeatureModel {
     private func cancelAllTasks() {
         tasksByNodeID.values.forEach { $0.cancel() }
         tasksByNodeID.removeAll(keepingCapacity: true)
+    }
+
+    private func cacheActiveTreeState() {
+        guard let activeSessionID, let root = roots.first else { return }
+        cachedTreeStatesBySessionID[activeSessionID] = CachedTreeState(
+            workingDirectoryPath: root.url.path,
+            roots: roots,
+            expandedNodeIDs: expandedNodeIDs,
+            childrenByNodeID: childrenByNodeID,
+            errorsByNodeID: errorsByNodeID
+        )
+        markSessionCacheAsRecent(activeSessionID)
+        while cachedSessionIDsByRecency.count > Self.maximumCachedSessionCount {
+            let evictedSessionID = cachedSessionIDsByRecency.removeLast()
+            cachedTreeStatesBySessionID[evictedSessionID] = nil
+        }
+    }
+
+    private func markSessionCacheAsRecent(_ sessionID: String) {
+        cachedSessionIDsByRecency.removeAll { $0 == sessionID }
+        cachedSessionIDsByRecency.insert(sessionID, at: 0)
     }
 
     private static func configurationID(sessionID: String?, roots: [WorkspaceExplorerRoot]) -> String {
