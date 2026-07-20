@@ -218,6 +218,74 @@ struct BrowserAssistedWebToolTests {
         #expect(result.citations == ["https://example.com/native"])
     }
 
+    @Test func webFetchFailsAtItsTotalDeadline() async throws {
+        let nativeClient = NativeWebFetchClient(httpClient: DelayedNativeWebHTTPClient(
+            delay: .seconds(10),
+            response: .html("<html></html>", url: "https://example.com/slow")
+        ))
+        let tool = NativeWebFetchTool(nativeFetchClient: nativeClient)
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        do {
+            _ = try await tool.execute(
+                arguments: AgentToolArguments(values: [
+                    "url": .string("https://example.com/slow"),
+                    "render_mode": .string("http"),
+                    "timeout_ms": .int(1_000)
+                ]),
+                context: Self.context()
+            )
+            Issue.record("Expected web_fetch to time out")
+        } catch {
+            #expect(error as? AgentToolError == .invalidArguments("web_fetch timed out after 1000ms"))
+        }
+
+        #expect(startedAt.duration(to: clock.now) < .seconds(2))
+    }
+
+    @Test func webFetchCapsTimeoutPassedToBrowserFallback() async throws {
+        final class Recorder: @unchecked Sendable {
+            var timeoutMilliseconds: Int?
+        }
+        let recorder = Recorder()
+        let nativeClient = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: NativeWebHTTPResponse(
+            data: Data(),
+            statusCode: 403,
+            mimeType: "text/html",
+            finalURL: URL(string: "https://example.com/protected"),
+            textEncodingName: "utf-8"
+        )))
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
+            recorder.timeoutMilliseconds = request.timeoutMilliseconds
+            return BrowserAssistedWebFetchResult(
+                status: .fetched,
+                urlString: request.urlString,
+                finalURLString: request.urlString,
+                title: "Fetched",
+                contentText: "Fetched in browser",
+                taskID: "task-timeout-cap",
+                sessionID: "session-timeout-cap",
+                tabID: "tab-timeout-cap",
+                errorMessage: nil,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 18
+            )
+        }, nativeFetchClient: nativeClient)
+
+        _ = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "url": .string("https://example.com/protected"),
+                "render_mode": .string("auto"),
+                "timeout_ms": .int(720_000)
+            ]),
+            context: Self.context()
+        )
+
+        #expect(recorder.timeoutMilliseconds == 60_000)
+    }
+
     @Test func javascriptWebFetchReturnsExtractedContentFromBrowserAssistedHandler() async throws {
         final class Recorder: @unchecked Sendable {
             var requests: [BrowserAssistedWebFetchRequest] = []
@@ -411,6 +479,16 @@ struct BrowserAssistedWebToolTests {
 
         func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
             response
+        }
+    }
+
+    private struct DelayedNativeWebHTTPClient: NativeWebHTTPClient {
+        var delay: Duration
+        var response: NativeWebHTTPResponse
+
+        func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
+            try await Task.sleep(for: delay)
+            return response
         }
     }
 

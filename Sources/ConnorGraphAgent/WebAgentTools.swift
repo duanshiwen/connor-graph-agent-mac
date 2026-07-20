@@ -1,6 +1,57 @@
 import Foundation
 import ConnorGraphCore
 
+enum WebFetchTimeoutPolicy {
+    static let defaultMilliseconds = 30_000
+    static let minimumMilliseconds = 1_000
+    static let maximumMilliseconds = 60_000
+
+    static func normalized(_ requestedMilliseconds: Int?) -> Int {
+        min(max(requestedMilliseconds ?? defaultMilliseconds, minimumMilliseconds), maximumMilliseconds)
+    }
+}
+
+private enum WebFetchDeadline {
+    static func run<Value: Sendable>(
+        toolName: String,
+        timeoutMilliseconds: Int,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        let (stream, continuation) = AsyncStream<Result<Value, any Error>>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        let operationTask = Task {
+            do {
+                continuation.yield(.success(try await operation()))
+            } catch {
+                continuation.yield(.failure(error))
+            }
+            continuation.finish()
+        }
+        let timeoutTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(timeoutMilliseconds))
+            } catch {
+                return
+            }
+            continuation.yield(.failure(AgentToolError.invalidArguments(
+                "\(toolName) timed out after \(timeoutMilliseconds)ms"
+            )))
+            continuation.finish()
+        }
+        defer {
+            operationTask.cancel()
+            timeoutTask.cancel()
+            continuation.finish()
+        }
+
+        guard let result = await stream.first(where: { _ in true }) else {
+            throw CancellationError()
+        }
+        return try result.get()
+    }
+}
+
 public struct BrowserAssistedSearchRequest: Sendable, Equatable {
     public var query: String
     public var engine: String
@@ -510,7 +561,7 @@ public struct NativeWebFetchTool: AgentTool {
         "extract_mode": .string(description: "markdown or text. Defaults to markdown."),
         "render_mode": .string(description: "auto, http, or js. Defaults to auto."),
         "wait_until": .string(description: "load, domcontentloaded, networkidle, or commit. Defaults to networkidle."),
-        "timeout_ms": .integer(description: "Timeout in milliseconds. Defaults to 720000.")
+        "timeout_ms": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
     ], required: ["url"])
 
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -531,7 +582,27 @@ public struct NativeWebFetchTool: AgentTool {
         let renderMode = (arguments.string("render_mode") ?? "auto").lowercased()
         let extractMode = (arguments.string("extract_mode") ?? "markdown").lowercased()
         let waitUntil = (arguments.string("wait_until") ?? "networkidle").lowercased()
-        let timeoutMilliseconds = arguments.int("timeout_ms") ?? 720_000
+        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeout_ms"))
+        return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
+            try await executeWithinDeadline(
+                url: url,
+                renderMode: renderMode,
+                extractMode: extractMode,
+                waitUntil: waitUntil,
+                timeoutMilliseconds: timeoutMilliseconds,
+                context: context
+            )
+        }
+    }
+
+    private func executeWithinDeadline(
+        url: String,
+        renderMode: String,
+        extractMode: String,
+        waitUntil: String,
+        timeoutMilliseconds: Int,
+        context: AgentToolExecutionContext
+    ) async throws -> AgentToolResult {
         if renderMode == "js", let result = try await executeBrowserAssistedFetch(
             url: url,
             extractMode: extractMode,
