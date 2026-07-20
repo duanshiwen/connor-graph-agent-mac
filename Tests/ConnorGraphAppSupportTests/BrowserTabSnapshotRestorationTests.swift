@@ -29,6 +29,7 @@ struct BrowserTabSnapshotRestorationTests {
         #expect(snapshot.focusedElementHint == nil)
         #expect(snapshot.formDrafts == nil)
         #expect(snapshot.restorationStatus == nil)
+        #expect(snapshot.localFileReadAccessPath == nil)
     }
 
     @Test func roundTripsRestorationMetadata() throws {
@@ -59,7 +60,8 @@ struct BrowserTabSnapshotRestorationTests {
                     valueHash: "hash-hello"
                 )
             ],
-            restorationStatus: .evicted
+            restorationStatus: .evicted,
+            localFileReadAccessPath: "/tmp/workspace"
         )
 
         let data = try JSONEncoder().encode(snapshot)
@@ -67,5 +69,6 @@ struct BrowserTabSnapshotRestorationTests {
 
         #expect(decoded == snapshot)
         #expect(decoded.restoredURLString == "https://example.com/article")
+        #expect(decoded.localFileReadAccessPath == "/tmp/workspace")
     }
 }

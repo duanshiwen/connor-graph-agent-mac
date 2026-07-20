@@ -274,7 +274,7 @@ struct BrowserWorkspaceView: View {
 
     private var activeTabCanBeBookmarked: Bool {
         guard let url = activeTab?.displayURL.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else { return false }
-        return !url.hasPrefix("connor://") && !url.hasPrefix("about:") && !url.hasPrefix("data:")
+        return !url.hasPrefix("connor://") && !url.hasPrefix("about:") && !url.hasPrefix("data:") && !url.hasPrefix("file:")
     }
 
     private var activeURLIsBookmarked: Bool {
@@ -316,6 +316,12 @@ struct BrowserWorkspaceView: View {
         if lease.isNewlyCreated {
             if let readerHTML = readerHTMLByTabID[tab.id] {
                 lease.webView.loadHTMLString(readerHTML, baseURL: nil)
+            } else if let readAccessPath = tab.localFileReadAccessPath,
+                      let fileURL = URL(string: tab.restoredURLString), fileURL.isFileURL {
+                lease.webView.loadFileURL(
+                    fileURL,
+                    allowingReadAccessTo: URL(fileURLWithPath: readAccessPath, isDirectory: true)
+                )
             } else {
                 lease.webView.loadBrowserURLString(tab.restoredURLString)
             }
@@ -1089,7 +1095,7 @@ struct BrowserWorkspaceView: View {
         if tabID == activeSelectedTabID, !displayURL.isEmpty, !isAddressEditing { addressText = displayURL }
 
         // Record browser history when page finishes loading
-        if !privateTabIDs.contains(tabID), !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:") {
+        if !privateTabIDs.contains(tabID), !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:"), !state.url.hasPrefix("file:") {
             model.recordHistory(
                 url: state.url,
                 title: state.title,
@@ -1141,6 +1147,7 @@ struct BrowserWorkspaceView: View {
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == selectedTabID }) else { return }
             session.tabs[index].initialURLString = normalized
+            session.tabs[index].localFileReadAccessPath = nil
             if session.tabs[index].webView?.url?.absoluteString != normalized {
                 session.tabs[index].webView?.loadBrowserURLString(normalized)
             }
