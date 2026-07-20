@@ -124,6 +124,24 @@ struct ContactsFeatureModelTests {
         #expect(fixture.model.profiles.isEmpty)
     }
 
+    @Test func externalProfileWriteRefreshesVisibleContactsWithoutManualReload() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        await fixture.model.reload()
+        let profile = PersonProfile(
+            id: ContactID(rawValue: "agent-created-person"),
+            displayName: "Agent Created"
+        )
+
+        _ = try await fixture.profileStore.upsert(profile)
+        await Task.yield()
+        await fixture.model.waitForPendingOperations()
+
+        #expect(fixture.model.profiles.map(\.id) == [profile.id])
+        #expect(fixture.model.contactRecords.map(\.id) == [profile.id])
+        #expect(fixture.model.presentation.rows.map(\.id) == [profile.id])
+    }
+
     private func makeFixture(
         systemLoader: @escaping ContactsFeatureModel.SystemContactsLoader = { [] }
     ) throws -> Fixture {
@@ -145,6 +163,9 @@ struct ContactsFeatureModelTests {
         let root: URL
         let profileStore: SQLitePersonProfileStore
         let model: ContactsFeatureModel
-        func cleanup() { try? FileManager.default.removeItem(at: root) }
+        @MainActor func cleanup() {
+            model.shutdown()
+            try? FileManager.default.removeItem(at: root)
+        }
     }
 }
