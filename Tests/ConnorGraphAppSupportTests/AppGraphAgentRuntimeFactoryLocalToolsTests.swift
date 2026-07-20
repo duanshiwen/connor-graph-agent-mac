@@ -195,6 +195,48 @@ import ConnorGraphStore
     #expect(result.contentJSON?.contains("session-project") == true)
 }
 
+@Test func agentLoopRuntimeFactoryInstructionDeclaresCurrentSessionWorkspace() throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryWorkspaceInstruction-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let oldWorkspace = appDirectory.appendingPathComponent("old-project", isDirectory: true)
+    let newWorkspace = appDirectory.appendingPathComponent("new-project", isDirectory: true)
+    try FileManager.default.createDirectory(at: oldWorkspace, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: newWorkspace, withIntermediateDirectories: true)
+
+    let store = try SQLiteGraphKernelStore(path: appDirectory.appendingPathComponent("store.sqlite").path)
+    try store.migrate()
+    let factory = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: AppLLMSettingsRepository(
+            settingsStore: LocalToolsSettingsStore(),
+            credentialStore: LocalToolsCredentialStore()
+        )
+    )
+    let sessionWorkspace = AppSessionWorkspaceReference(
+        workingDirectoryPath: newWorkspace.path,
+        source: "session",
+        roots: [
+            AppSessionWorkspaceRootReference(
+                id: "new",
+                displayName: "New",
+                path: newWorkspace.path,
+                role: "project",
+                isPrimary: true
+            )
+        ]
+    )
+
+    let controller = factory.makeAgentLoopController(sessionWorkspace: sessionWorkspace)
+    let instruction = controller.configuration.instructionAppendix
+
+    #expect(instruction.contains("Current working directory: \"\(newWorkspace.path)\""))
+    #expect(instruction.contains("This runtime workspace is authoritative for the current turn"))
+    #expect(!instruction.contains(oldWorkspace.path))
+}
+
 @Test func agentLoopRuntimeFactoryNativeReadAllowsAdditionalWorkspaceRoot() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryLocalToolsMultiRootWorkspace-", isDirectory: true)
