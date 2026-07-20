@@ -58,21 +58,35 @@ public actor ChatSessionDetailLoadCoordinator {
         sessionID: String,
         activeBackgroundTaskIDs: Set<String> = []
     ) throws -> ChatSessionDetailLoadSnapshot? {
+        try Task.checkCancellation()
         guard let session = try repository.loadSession(id: sessionID) else { return nil }
+        try Task.checkCancellation()
         let timeline = try loadTimeline(repository: repository, sessionID: sessionID)
+        try Task.checkCancellation()
         let backgroundTasks = try reconcileBackgroundTasks(
             repository: repository,
             sessionID: sessionID,
             activeIDs: activeBackgroundTaskIDs
         )
+        try Task.checkCancellation()
+        let latestSummary = try repository.loadLatestSummary(sessionID: sessionID)
+        try Task.checkCancellation()
+        let artifactDirectories = try repository.artifactDirectories(sessionID: sessionID)
+        try Task.checkCancellation()
+        let sessionState = try repository.loadSessionState(sessionID: sessionID)
+        try Task.checkCancellation()
+        let sessionRecords = try repository.loadSessionRecords(sessionID: sessionID, limit: nil)
+        try Task.checkCancellation()
+        let browserState = try repository.loadBrowserState(sessionID: sessionID)
+        try Task.checkCancellation()
         return ChatSessionDetailLoadSnapshot(
             session: session,
             timeline: timeline,
-            latestSummary: try repository.loadLatestSummary(sessionID: sessionID),
-            artifactDirectories: try repository.artifactDirectories(sessionID: sessionID),
-            sessionState: try repository.loadSessionState(sessionID: sessionID),
-            sessionRecords: try repository.loadSessionRecords(sessionID: sessionID, limit: nil),
-            browserState: try repository.loadBrowserState(sessionID: sessionID),
+            latestSummary: latestSummary,
+            artifactDirectories: artifactDirectories,
+            sessionState: sessionState,
+            sessionRecords: sessionRecords,
+            browserState: browserState,
             backgroundTasks: backgroundTasks
         )
     }
@@ -86,6 +100,7 @@ public actor ChatSessionDetailLoadCoordinator {
         for index in tasks.indices
         where (tasks[index].status == .queued || tasks[index].status == .running)
             && !activeIDs.contains(tasks[index].id) {
+            try Task.checkCancellation()
             tasks[index].status = .interrupted
             tasks[index].updatedAt = Date()
             tasks[index].errorMessage = "应用重启或会话恢复后，旧后台任务不会自动继续执行。"
@@ -100,6 +115,7 @@ public actor ChatSessionDetailLoadCoordinator {
     ) throws -> [AgentEventPresentation] {
         let cached = try repository.loadActivityTimelineCache(sessionID: sessionID)
         if !cached.isEmpty { return cached }
+        try Task.checkCancellation()
 
         let runs = try repository.loadRuns(
             sessionID: sessionID,
@@ -107,11 +123,13 @@ public actor ChatSessionDetailLoadCoordinator {
             limit: limits.recentRunCount
         )
         for run in runs {
+            try Task.checkCancellation()
             let events = try repository.loadRunEvents(runID: run.id, limit: limits.eventsPerRun)
             let restored = restorer.presentations(from: events)
             if !restored.isEmpty { return restored }
         }
 
+        try Task.checkCancellation()
         let recentEvents = try repository.loadRecentJournalEvents(
             sessionID: sessionID,
             limit: limits.recentJournalEventCount
