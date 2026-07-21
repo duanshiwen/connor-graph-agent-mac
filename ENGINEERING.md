@@ -227,15 +227,17 @@ graph/evaluations/reports/*.json
 每条新的用户消息启动一个 user run；每个 run 只执行一次固定 bootstrap，工具结果返回后的内部模型 turn 不重复执行：
 
 1. 调用 `get_current_time` 获取当前时间。
-2. 同时调用 `memory_os_recent_context` 与 `memory_os_knowledge_context`；前者提供 L1/L2 可变操作状态，后者提供 L3/L4 持久知识和默认五跳关系上下文。
+2. 调用 `memory_os_recent_context` 与 `memory_os_knowledge_context`；前者提供 L1/L2 可变操作状态，后者提供 L3/L4 持久知识与关系。
 3. 调用 `memory_os_get_current_user_profile` 获取 preferences、habits、traits、constraints 与 interaction guidance。
-4. 无条件调用一次 `web_search`。当外部资料会实质支持回答时，使用 `web_fetch` 读取原始页面；若遇到 HTTP 403、认证态、JavaScript 渲染、反爬或其他不可用内容，改用 `browser_fetch` 通过系统浏览器态读取，但不得绕过授权。
+4. 仅当答案完全来自内部 Memory OS，且只需读取、回忆、总结、整理、比较或推理时，可跳过 `web_search`；其他任务以及不确定的任务必须调用。关键外部事实通过 `web_fetch` 读取原始页面；页面需要浏览器态时可改用 `browser_fetch`，但不得绕过授权。
 5. 考虑已安装技能。
 6. 再决定回答、计划、编辑、调试、研究或提出澄清问题。
 
-工具不可用、权限拒绝、无结果或失败时，Agent 应透明说明并使用最佳可用证据继续，不能无限重试。`web_search`、`web_fetch` 和 `browser_fetch` 均受 `.externalNetwork` Policy Engine 边界约束；`readOnly` 模式不会绕过该边界。
+运行时在首次完成前检查三个 Memory 工具，以及非纯记忆任务的 Web Search；缺失时只补救一次。工具不可用、权限拒绝、无结果或失败时，Agent 应透明说明并使用最佳可用证据继续，不能无限重试。`web_search`、`web_fetch` 和 `browser_fetch` 均受 `.externalNetwork` Policy Engine 边界约束；`readOnly` 模式不会绕过该边界。
 
-System prompt 只引用对话时需要的三个 Memory OS 只读工具。Memory OS 写工具与低层图谱原语不注册到主会话 Agent，只用于受治理的后台作业。
+主会话不再自动注入旧 Graph/Graph Hybrid Context，也不从旧上下文生成 citations。System prompt 只引用对话时需要的三个 Memory OS 只读工具；返回记录包含真实 `record_id`，citations 只来自本轮工具结果。Recent/Knowledge 的 `limit` 默认且最小为 10，可按累计目标提高；Knowledge 的 `depth` 默认 1、初始上限 6，两者均可通过 `MemoryOSContextToolConfiguration` 配置。相同 run 和查询扩大 limit 时仅返回新增记录；容量不足按完整记录/路径裁剪，并通过 `partial` 与诚实的 `hasMore` 表示。
+
+Memory OS 证据描述用户历史、偏好、决定、关系和内部项目；Web 证据描述外部公开事实，两者不得互相覆盖。当前状态优先 active、较新且有证据的 L1/L2，历史问题保留旧记录，无法消解的冲突必须展示。
 
 ### 5.5 MCP Source Platform
 
@@ -322,7 +324,9 @@ LLM-facing Memory OS tools 注册在 `AppMemoryOSAgentTools.swift`。
 
 读取工具包括：
 
-- `memory_os_context`
+- `memory_os_recent_context`
+- `memory_os_knowledge_context`
+- `memory_os_get_current_user_profile`
 - `memory_os_search`
 - `memory_os_read_record`
 - `memory_os_read_provenance`

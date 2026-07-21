@@ -542,7 +542,7 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     func deleteSecret(service: String, account: String) throws { secrets.removeValue(forKey: service + ":" + account) }
 }
 
-@Test func agentLoopRuntimeFactoryRegistersMemoryOSToolsInsteadOfLegacyGraphWriteTools() throws {
+@Test func agentLoopRuntimeFactoryRegistersMemoryOSToolsInsteadOfLegacyGraphWriteTools() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-factory-memory-os-tools-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -554,7 +554,12 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
         settingsStore: LocalToolsSettingsStore(),
         credentialStore: LocalToolsCredentialStore()
     )
-    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let factory = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: settings,
+        storagePaths: storagePaths,
+        memoryOSContextToolConfiguration: .init(minimumResultLimit: 17, defaultResultLimit: 17, maxDepth: 3)
+    )
 
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let names = controller.toolRegistry.definitions.map(\.name)
@@ -589,6 +594,23 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_update_current_user_profile"))
     #expect(!names.contains("memory_os_l4_update_entities"))
     #expect(!names.contains("memory_os_l3_update_beliefs"))
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(id: "configured-memory", runID: "run", sessionID: "session", name: "memory_os_recent_context", argumentsJSON: #"{"query":"configuration"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run",
+            sessionID: "session",
+            groupID: "default",
+            userPrompt: "configuration",
+            toolCallID: "configured-memory",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+    let response = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(result.contentJSON).utf8)
+    )
+    #expect(response.requestedLimit == 17)
     // memory_os_trace_evidence was removed - verify it's gone
     #expect(!names.contains("memory_os_trace_evidence"))
     #expect(!names.contains("graph_ingest_episode"))

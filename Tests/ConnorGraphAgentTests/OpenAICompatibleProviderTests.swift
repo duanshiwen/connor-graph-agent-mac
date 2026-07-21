@@ -141,7 +141,7 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     let response = try await provider.complete(prompt: "How should memory work?", context: context)
 
     #expect(response.text == "Graph grounded answer.")
-    #expect(response.citations == ["entity:memory"])
+    #expect(response.citations.isEmpty)
     #expect(client.captured?.url.absoluteString == "https://llm.example.com/v1/chat/completions")
     #expect(client.captured?.method == "POST")
     #expect(client.captured?.headers["Authorization"] == "Bearer test-key")
@@ -151,7 +151,7 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("You are 康纳同学 (Connor), a personal AI assistant for everyday work and life."))
     #expect(requestText.contains("Connor Graph Agent") == false)
     #expect(requestText.contains("How should memory work?"))
-    #expect(requestText.contains("Graph memory context"))
+    #expect(!requestText.contains("Graph memory context"))
 }
 
 @Test func openAICompatibleProviderUsesFirstModelFromCommaSeparatedModelList() async throws {
