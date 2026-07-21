@@ -147,9 +147,6 @@ final class ChatSessionCoordinator {
                 try Task.checkCancellation()
                 guard self.isCurrent(sessionID: sessionID, generation: generation) else { return }
                 await self.onSelectionLoaded(snapshot, generation, startedAt)
-                if self.isCurrent(sessionID: sessionID, generation: generation) {
-                    self.model.loadingSessionDetailID = nil
-                }
             } catch is CancellationError {
                 return
             } catch {

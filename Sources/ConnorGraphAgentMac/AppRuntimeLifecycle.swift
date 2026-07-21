@@ -155,6 +155,7 @@ final class AppRuntimeLifecycle {
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var globalSearchRuntimeCoordinator: GlobalSearchRuntimeCoordinator?
     private var newSessionPreparationTasks: [String: Task<Void, Never>] = [:]
+    private var sessionRuntimePreparationTask: Task<Void, Never>?
     private var workspaceStatePersistenceTask: Task<Void, Never>?
     private var pendingRemoteKnowledgeRuntimeRebuild = false
 
@@ -1047,6 +1048,8 @@ final class AppRuntimeLifecycle {
         }
         chatSessionCoordinator.onSelectionWillChange = { [weak self] previousID, _ in
             guard let self else { return }
+            self.sessionRuntimePreparationTask?.cancel()
+            self.sessionRuntimePreparationTask = nil
             if previousID != nil { _ = self.stopSpeechTranscriptionIfRunningForLeavingSession(previousID) }
             self.rememberCurrentWorkspaceMode()
         }
@@ -1358,6 +1361,8 @@ final class AppRuntimeLifecycle {
     func shutdownRuntimeResources() {
         for task in newSessionPreparationTasks.values { task.cancel() }
         newSessionPreparationTasks.removeAll()
+        sessionRuntimePreparationTask?.cancel()
+        sessionRuntimePreparationTask = nil
         workspaceStatePersistenceTask?.cancel()
         workspaceStatePersistenceTask = nil
         maintenanceCoordinator.shutdown()
@@ -2613,9 +2618,10 @@ final class AppRuntimeLifecycle {
         AppPerformanceLog.chatTurnLogger.info(
             "sessionDetail.presented session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) messages=\(session.messages.count, privacy: .public) timeline=\(snapshot.timeline.count, privacy: .public) duration=\(presentationMilliseconds, privacy: .public)ms"
         )
-        let managerTask = Task.detached(priority: .utility) { () -> NativeSessionManager? in
-            guard !Task.isCancelled else { return nil }
-            return runtimeFactory?.makeNativeSessionManager(
+        sessionRuntimePreparationTask?.cancel()
+        sessionRuntimePreparationTask = Task.detached(priority: .utility) { [weak self] in
+            guard !Task.isCancelled else { return }
+            let manager = runtimeFactory?.makeNativeSessionManager(
                 session: session,
                 permissionMode: permissionMode,
                 configuration: configuration,
@@ -2624,20 +2630,23 @@ final class AppRuntimeLifecycle {
                 remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs,
                 allowedMCPToolNames: runtimeState?.allowedMCPToolNames
             )
+            guard !Task.isCancelled else { return }
+            let elapsed = startedAt.duration(to: ContinuousClock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1_000
+                + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
+            await MainActor.run {
+                guard let self,
+                      self.chatFeatureModel.sessions.selectedSessionID == session.id,
+                      self.chatFeatureModel.sessions.loadingSessionDetailID == session.id
+                else { return }
+                self.chatRunCoordinator.installManager(manager, fallbackSession: session)
+                self.chatFeatureModel.sessions.loadingSessionDetailID = nil
+                self.sessionRuntimePreparationTask = nil
+                AppPerformanceLog.chatTurnLogger.info(
+                    "sessionRuntime.prepared session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) duration=\(milliseconds, privacy: .public)ms"
+                )
+            }
         }
-        let manager = await withTaskCancellationHandler {
-            await managerTask.value
-        } onCancel: {
-            managerTask.cancel()
-        }
-        guard !Task.isCancelled,
-              chatFeatureModel.sessions.selectedSessionID == session.id,
-              chatFeatureModel.sessions.loadingSessionDetailID == session.id
-        else { return }
-        chatRunCoordinator.installManager(manager, fallbackSession: session)
-        let elapsed = startedAt.duration(to: ContinuousClock.now)
-        let milliseconds = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-        AppPerformanceLog.chatTurnLogger.info("sessionRuntime.prepared session=\(session.id, privacy: .public) generation=\(generation, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
     }
 
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
