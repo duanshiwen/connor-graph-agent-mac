@@ -1743,7 +1743,10 @@ final class AppRuntimeLifecycle {
     }
 
     private func rebuildNativeSessionManagerForActiveSession() {
-        let session = activeChatSession
+        rebuildNativeSessionManager(for: activeChatSession)
+    }
+
+    private func rebuildNativeSessionManager(for session: AgentSession) {
         _ = aiConnectionsRuntimeCoordinator.ensureOverride(sessionID: session.id)
         chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
     }
@@ -2099,6 +2102,7 @@ final class AppRuntimeLifecycle {
         browserFeatureModel.isVisible = false
         browserFeatureModel.resetWorkspaceBinding()
         installEmptySessionCapsuleState(sessionID: session.id, synchronizeWorkspaceDrafts: isVisible)
+        aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
         chatWorkspaceCoordinator.setMode(.conversation, for: session.id)
         errorMessage = nil
 
@@ -2969,6 +2973,7 @@ final class AppRuntimeLifecycle {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
+        let submittedManagerRevision = chatRunCoordinator.managerRevision
         let submittingSessionID = manager.session.id
         guard chatFeatureModel.sessions.selectedSessionID == nil || chatFeatureModel.sessions.selectedSessionID == submittingSessionID else { return nil }
         guard !chatFeatureModel.run.submittingSessionIDs.contains(submittingSessionID) else { return nil }
@@ -3050,11 +3055,15 @@ final class AppRuntimeLifecycle {
             chatRunCoordinator.setTimeline(manager.eventPresentations, sessionID: submittingSessionID)
             await flushActivityTimelineCache(sessionID: submittingSessionID)
             if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
-                chatRunCoordinator.applyCompletedRun(
+                let restoredSubmittedManager = chatRunCoordinator.applyCompletedRun(
                     manager: manager,
                     session: response.session,
-                    summary: try chatSessionRepository?.loadLatestSummary(sessionID: response.session.id)
+                    summary: try chatSessionRepository?.loadLatestSummary(sessionID: response.session.id),
+                    submittedManagerRevision: submittedManagerRevision
                 )
+                if !restoredSubmittedManager {
+                    rebuildNativeSessionManager(for: response.session)
+                }
                 chatSessionCoordinator.adoptDirectSelection(response.session.id)
             }
             chatSessionCoordinator.synchronize(response.session)
@@ -3081,11 +3090,15 @@ final class AppRuntimeLifecycle {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
             globalSearchFeatureModel.upsertSessionIndex(recoveredSession)
             if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
-                chatRunCoordinator.applyRecoveredRun(
+                let restoredSubmittedManager = chatRunCoordinator.applyRecoveredRun(
                     manager: manager,
                     session: recoveredSession,
-                    transcript: recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
+                    transcript: recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages,
+                    submittedManagerRevision: submittedManagerRevision
                 )
+                if !restoredSubmittedManager {
+                    rebuildNativeSessionManager(for: recoveredSession)
+                }
             }
             chatSessionCoordinator.synchronize(recoveredSession)
             chatApprovalCoordinator.reload()

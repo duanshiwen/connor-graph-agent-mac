@@ -394,6 +394,8 @@ struct LLMConnectionSetupTests {
                 #expect(config.extraHeaders["Editor-Version"] == "vscode/1.107.0")
                 #expect(config.extraHeaders["Editor-Plugin-Version"] == "copilot-chat/0.35.0")
                 #expect(config.extraHeaders["Copilot-Integration-Id"] == "vscode-chat")
+                #expect(config.extraHeaders["Openai-Intent"] == "conversation-edits")
+                #expect(config.extraHeaders["X-Initiator"] == "user")
                 #expect(config.extraHeaders["OpenAI-Organization"] == nil)
                 return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
             }
@@ -414,6 +416,8 @@ struct LLMConnectionSetupTests {
         #expect(result.connection.extraHTTPHeaders["Editor-Version"] == "vscode/1.107.0")
         #expect(result.connection.extraHTTPHeaders["Editor-Plugin-Version"] == "copilot-chat/0.35.0")
         #expect(result.connection.extraHTTPHeaders["Copilot-Integration-Id"] == "vscode-chat")
+        #expect(result.connection.extraHTTPHeaders["Openai-Intent"] == "conversation-edits")
+        #expect(result.connection.extraHTTPHeaders["X-Initiator"] == "user")
         #expect(result.connection.extraHTTPHeaders["OpenAI-Organization"] == nil)
         #expect(try repository.apiKey(for: "github-test") == "copilot-token")
     }
@@ -440,7 +444,10 @@ struct LLMConnectionSetupTests {
         ))
 
         #expect(result.connection.baseURLString == "https://api.individual.githubcopilot.com")
-        #expect(try repository.openAICompatibleConfig(connectionID: "github-derived-endpoint-test")?.baseURL.absoluteString == "https://api.individual.githubcopilot.com")
+        let storedConfig = try repository.openAICompatibleConfig(connectionID: "github-derived-endpoint-test")
+        #expect(storedConfig?.baseURL.absoluteString == "https://api.individual.githubcopilot.com")
+        #expect(storedConfig?.extraHeaders["Openai-Intent"] == "conversation-edits")
+        #expect(storedConfig?.extraHeaders["X-Initiator"] == "user")
         #expect(try repository.oauthTokens(for: "github-derived-endpoint-test")?.refreshToken == "github-token")
     }
 
@@ -468,7 +475,7 @@ struct LLMConnectionSetupTests {
         ), connectionID: "github-refresh-test")
 
         final class CapturedConfigBox: @unchecked Sendable {
-            var config: OpenAICompatibleConfig?
+            var configs: [OpenAICompatibleConfig] = []
         }
         let box = CapturedConfigBox()
         let provider = GitHubCopilotTokenRefreshingAgentModelProvider(
@@ -483,7 +490,7 @@ struct LLMConnectionSetupTests {
                 return AppLLMOAuthTokens(accessToken: newToken, refreshToken: githubAccessToken, expiresAt: 2_000_000)
             },
             makeProvider: { config in
-                box.config = config
+                box.configs.append(config)
                 return AnyAgentModelProvider(
                     modelID: config.model,
                     capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
@@ -493,10 +500,17 @@ struct LLMConnectionSetupTests {
         )
 
         let response = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "hi")]))
+        _ = try await provider.complete(AgentModelRequest(messages: [
+            AgentModelMessage(role: .assistant, content: "calling tool"),
+            AgentModelMessage(role: .tool, content: "tool result")
+        ]))
 
         #expect(response.text == "ok")
-        #expect(box.config?.apiKey == newToken)
-        #expect(box.config?.baseURL.absoluteString == "https://api.business.githubcopilot.com")
+        #expect(box.configs.first?.apiKey == newToken)
+        #expect(box.configs.first?.baseURL.absoluteString == "https://api.business.githubcopilot.com")
+        #expect(box.configs.first?.extraHeaders["Openai-Intent"] == "conversation-edits")
+        #expect(box.configs.first?.extraHeaders["X-Initiator"] == "user")
+        #expect(box.configs.last?.extraHeaders["X-Initiator"] == "agent")
         #expect(try repository.apiKey(for: "github-refresh-test") == newToken)
         #expect(try repository.oauthTokens(for: "github-refresh-test")?.accessToken == newToken)
         #expect(try repository.loadSettings().connection(id: "github-refresh-test")?.baseURLString == "https://api.business.githubcopilot.com")
