@@ -149,6 +149,56 @@ import ConnorGraphAppSupport
     #expect(processes[1].summary == "第 2 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 3 条 · 约 36 tokens · 安全")
 }
 
+@Test func paginatedTimelinePreservesAbsoluteTurnNumbers() {
+    let messages = (1...18).flatMap { turn in
+        [
+            AgentMessage(id: "user-\(turn)", role: .user, content: "Question \(turn)"),
+            AgentMessage(id: "assistant-\(turn)", role: .assistant, content: "Answer \(turn)")
+        ]
+    }
+    let visibleMessages = Array(messages.suffix(8))
+    let cursor = AgentChatTurnCursor.beforeVisibleSuffix(
+        of: messages,
+        visibleCount: visibleMessages.count
+    )
+
+    let items = AgentChatTurnTimelineItem.items(
+        messages: visibleMessages,
+        lastContext: nil,
+        isSubmitting: false,
+        startingTurnCursor: cursor
+    )
+    let messageRows = items.compactMap(\.message)
+    let processes = items.compactMap(\.process)
+
+    #expect(messageRows.first?.turnNumber == 15)
+    #expect(messageRows.last?.turnNumber == 18)
+    #expect(processes.last?.turnNumber == 18)
+    #expect(processes.last?.title == "第 18 轮处理详情")
+}
+
+@Test func paginatedTimelinePreservesAnOpenUserTurnAcrossWindowBoundary() {
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "First"),
+        AgentMessage(id: "assistant-1", role: .assistant, content: "Answer 1"),
+        AgentMessage(id: "user-2", role: .user, content: "Second"),
+        AgentMessage(id: "assistant-2", role: .assistant, content: "Answer 2")
+    ]
+    let visibleMessages = Array(messages.suffix(1))
+    let cursor = AgentChatTurnCursor.beforeVisibleSuffix(
+        of: messages,
+        visibleCount: visibleMessages.count
+    )
+
+    let rows = AgentChatMessagePresentation.rows(
+        messages: visibleMessages,
+        lastContext: nil,
+        startingTurnCursor: cursor
+    )
+
+    #expect(rows.map(\.turnNumber) == [2])
+}
+
 @Test func agentChatTurnTimelinePlacesPendingProcessAfterOpenUserTurn() {
     let messages = [AgentMessage(id: "user-1", role: .user, content: "memory")]
 
