@@ -10,6 +10,8 @@ struct ComposerPlaceholderPresentationTests {
             sendHint: "Shift + Return 换行"
         )
 
+        #expect(placeholder.contains("输入 / 调用技能"))
+        #expect(placeholder.contains("输入 @ 提及人物"))
         #expect(placeholder.contains("如需创建、更新或删除文件，请先选择一个工作目录"))
         #expect(placeholder.contains("Shift + Return 换行"))
     }
@@ -21,7 +23,7 @@ struct ComposerPlaceholderPresentationTests {
             sendHint: "⌘ + Return 发送"
         )
 
-        #expect(placeholder == "输入 / 选择技能，输入 @ 选择人名；⌘ + Return 发送")
+        #expect(placeholder == "输入 / 调用技能，输入 @ 提及人物；⌘ + Return 发送")
     }
 
     @Test func noteModeKeepsItsDedicatedPlaceholder() {

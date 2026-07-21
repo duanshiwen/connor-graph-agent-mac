@@ -1176,6 +1176,17 @@ struct AIConnectionSetupView: View {
                 .frame(maxWidth: .infinity)
                 .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
+                aiConnectionCard {
+                    VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+                        aiConnectionSettingsRow(title: "模型", help: "远程模型目录不可用时使用；多个模型可用逗号分隔。") {
+                            aiConnectionTextField("gpt-4o-mini", text: $model)
+                        }
+                        aiConnectionSettingsRow(title: "默认模型", help: "新会话默认选择的模型。") {
+                            aiConnectionTextField("gpt-4o-mini", text: $selectedModel)
+                        }
+                    }
+                }
+
                 if didOpenBrowser {
                     Text("系统默认浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
                         .font(SettingsListTypography.header)

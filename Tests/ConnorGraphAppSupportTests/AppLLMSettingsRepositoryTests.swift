@@ -323,22 +323,181 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 
 @Test func modelCatalogLoadsOpenAICompatibleModelsFromProvider() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let configuredConnection = AppLLMConnectionConfig(
+        id: "openai-compatible",
+        name: "OpenAI Compatible",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "gpt-current, gpt-local",
+        selectedModel: "gpt-current",
+        extraHTTPHeaders: [AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey: OpenAICompatibleAPIKeyHeaderKind.apiKey.rawValue]
+    )
     try repository.save(
-        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "gpt-current, gpt-local", selectedModel: "gpt-current", hasAPIKey: false, providerMode: .openAICompatible),
+        settings: AppLLMSettings(connections: [configuredConnection], defaultConnectionID: configuredConnection.id),
         apiKey: "secret-key"
     )
-    let body = #"{"data":[{"id":"gpt-z"},{"id":"gpt-a"}]}"#.data(using: .utf8)!
+    let body = #"{"data":[{"id":"gpt-z"},{"id":"text-embedding-3-large"},{"id":"gpt-image-1"},{"id":"qwen-image-plus"},{"id":"whisper-1"},{"id":"omni-moderation-latest"},{"id":"gpt-a"}]}"#.data(using: .utf8)!
+    let client = FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    let state = client.state
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: client
+    )
+
+    let connections = await catalog.loadConnections()
+    let connection = try #require(connections.first)
+    let request = try #require(await state.requests().first)
+
+    #expect(connection.providerMode == .openAICompatible)
+    #expect(connection.isLiveCatalog == true)
+    #expect(connection.models.map(\.id) == ["gpt-a", "gpt-z"])
+    #expect(request.headers["api-key"] == "secret-key")
+    #expect(request.headers["Authorization"] == nil)
+    #expect(request.headers[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] == nil)
+}
+
+@Test func modelCatalogPreservesOpenAIResponsesProviderMode() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "openai-responses",
+        name: "OpenAI Responses",
+        providerMode: .openAIResponses,
+        connectionKind: .openAIResponses,
+        baseURLString: "https://api.openai.com/v1",
+        model: "gpt-4.1",
+        selectedModel: "gpt-4.1"
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "secret-key"
+    )
+    let body = #"{"data":[{"id":"gpt-5"}]}"#.data(using: .utf8)!
     let catalog = AppLLMModelCatalog(
         settingsRepository: repository,
         httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
     )
 
     let connections = await catalog.loadConnections()
-    let connection = try #require(connections.first)
+    let loadedConnection = try #require(connections.first)
 
-    #expect(connection.providerMode == .openAICompatible)
-    #expect(connection.isLiveCatalog == true)
-    #expect(connection.models.map(\.id) == ["gpt-a", "gpt-z"])
+    #expect(loadedConnection.providerMode == .openAIResponses)
+    #expect(loadedConnection.isLiveCatalog == true)
+    #expect(loadedConnection.models.map(\.id) == ["gpt-5"])
+}
+
+@Test func modelCatalogFallsBackWhenRemoteCatalogHasNoChatModels() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "non-chat-only",
+        name: "Non-chat Catalog",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "configured-chat-model",
+        selectedModel: "configured-chat-model"
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "secret-key"
+    )
+    let body = #"{"data":[{"id":"text-embedding-3-large"},{"id":"gpt-image-1"}]}"#.data(using: .utf8)!
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    )
+
+    let connections = await catalog.loadConnections()
+    let loadedConnection = try #require(connections.first)
+
+    #expect(loadedConnection.providerMode == .openAICompatible)
+    #expect(loadedConnection.isLiveCatalog == false)
+    #expect(loadedConnection.models.map(\.id) == ["configured-chat-model"])
+    #expect(loadedConnection.subtitle.contains("未发现可用聊天模型"))
+}
+
+@Test func modelCatalogLoadsGitHubCopilotModelsWithRequiredHeaders() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "github-copilot",
+        name: "GitHub Copilot",
+        providerMode: .openAICompatible,
+        connectionKind: .githubCopilot,
+        baseURLString: "https://api.githubcopilot.com",
+        model: "gpt-4.1",
+        selectedModel: "gpt-4.1",
+        extraHTTPHeaders: [
+            "User-Agent": "GitHubCopilotChat/0.35.0",
+            "Editor-Version": "vscode/1.107.0",
+            "Copilot-Integration-Id": "vscode-chat"
+        ]
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "copilot-token"
+    )
+    let body = #"{"data":[{"id":"gpt-4.1"},{"id":"claude-sonnet-4"}]}"#.data(using: .utf8)!
+    let client = FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    let state = client.state
+    let catalog = AppLLMModelCatalog(settingsRepository: repository, httpClient: client)
+
+    let connections = await catalog.loadConnections()
+    let loadedConnection = try #require(connections.first)
+    let request = try #require(await state.requests().first)
+
+    #expect(loadedConnection.isLiveCatalog == true)
+    #expect(loadedConnection.models.map(\.id) == ["claude-sonnet-4", "gpt-4.1"])
+    #expect(request.url.absoluteString == "https://api.githubcopilot.com/models")
+    #expect(request.headers["Authorization"] == "Bearer copilot-token")
+    #expect(request.headers["Accept"] == "application/json")
+    #expect(request.headers["User-Agent"] == "GitHubCopilotChat/0.35.0")
+    #expect(request.headers["Editor-Version"] == "vscode/1.107.0")
+    #expect(request.headers["Copilot-Integration-Id"] == "vscode-chat")
+}
+
+@Test func modelCatalogRefreshesExpiredGitHubCopilotTokenAndEndpoint() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "github-copilot-refresh",
+        name: "GitHub Copilot",
+        providerMode: .openAICompatible,
+        connectionKind: .githubCopilot,
+        baseURLString: "https://api.old.githubcopilot.com",
+        model: "gpt-4.1",
+        selectedModel: "gpt-4.1",
+        extraHTTPHeaders: ["Copilot-Integration-Id": "vscode-chat"]
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "old-copilot-token"
+    )
+    try repository.saveOAuthTokens(
+        AppLLMOAuthTokens(accessToken: "old-copilot-token", refreshToken: "github-access-token", expiresAt: 1_000),
+        connectionID: connection.id
+    )
+    let body = #"{"data":[{"id":"gpt-5"}]}"#.data(using: .utf8)!
+    let client = FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    let state = client.state
+    let refreshedToken = "tid=new;proxy-ep=proxy.business.githubcopilot.com;exp=200"
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: client,
+        now: { Date(timeIntervalSince1970: 1) },
+        refreshGitHubCopilotTokens: { githubAccessToken in
+            #expect(githubAccessToken == "github-access-token")
+            return AppLLMOAuthTokens(accessToken: refreshedToken, refreshToken: githubAccessToken, expiresAt: 2_000_000)
+        }
+    )
+
+    let connections = await catalog.loadConnections()
+    let loadedConnection = try #require(connections.first)
+    let request = try #require(await state.requests().first)
+
+    #expect(loadedConnection.isLiveCatalog == true)
+    #expect(loadedConnection.models.map(\.id) == ["gpt-5"])
+    #expect(request.url.absoluteString == "https://api.business.githubcopilot.com/models")
+    #expect(request.headers["Authorization"] == "Bearer \(refreshedToken)")
+    #expect(try repository.apiKey(for: connection.id) == refreshedToken)
+    #expect(try repository.oauthTokens(for: connection.id)?.accessToken == refreshedToken)
+    #expect(try repository.loadSettings().connection(id: connection.id)?.baseURLString == "https://api.business.githubcopilot.com")
 }
 
 @Test func modelCatalogDoesNotInjectConfiguredModelsIntoLiveOpenAICompatibleCatalog() async throws {
