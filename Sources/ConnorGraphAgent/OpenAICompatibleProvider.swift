@@ -372,6 +372,9 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
                 contentParts: message.contentParts,
                 toolCallID: message.toolCallID,
                 name: message.name,
+                reasoningContent: message.providerMetadata?.providerID == "openai-compatible"
+                    ? message.providerMetadata?.reasoningContent
+                    : nil,
                 toolCalls: message.toolCalls?.map { call in
                     OpenAIToolCall(
                         id: call.id,
@@ -449,7 +452,10 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             toolCalls: toolCalls,
             usage: usage,
             finishReason: finishReason,
-            rawResponseJSON: String(data: data, encoding: .utf8)
+            rawResponseJSON: String(data: data, encoding: .utf8),
+            providerMetadata: message?.reasoningContent.map {
+                AgentModelProviderMetadata(providerID: "openai-compatible", reasoningContent: $0)
+            }
         )
     }
 
@@ -526,6 +532,7 @@ private struct OpenAIChatMessage: Codable {
     var contentParts: [AgentModelMessageContentPart]?
     var toolCallID: String?
     var name: String?
+    var reasoningContent: String?
     var toolCalls: [OpenAIToolCall]?
 
     init(
@@ -534,6 +541,7 @@ private struct OpenAIChatMessage: Codable {
         contentParts: [AgentModelMessageContentPart]? = nil,
         toolCallID: String? = nil,
         name: String? = nil,
+        reasoningContent: String? = nil,
         toolCalls: [OpenAIToolCall]? = nil
     ) {
         self.role = role
@@ -541,6 +549,7 @@ private struct OpenAIChatMessage: Codable {
         self.contentParts = contentParts
         self.toolCallID = toolCallID
         self.name = name
+        self.reasoningContent = reasoningContent
         self.toolCalls = toolCalls
     }
 
@@ -549,6 +558,7 @@ private struct OpenAIChatMessage: Codable {
         case content
         case toolCallID = "tool_call_id"
         case name
+        case reasoningContent = "reasoning_content"
         case toolCalls = "tool_calls"
     }
 
@@ -559,6 +569,7 @@ private struct OpenAIChatMessage: Codable {
         contentParts = nil
         toolCallID = try container.decodeIfPresent(String.self, forKey: .toolCallID)
         name = try container.decodeIfPresent(String.self, forKey: .name)
+        reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
         toolCalls = try container.decodeIfPresent([OpenAIToolCall].self, forKey: .toolCalls)
     }
 
@@ -572,6 +583,7 @@ private struct OpenAIChatMessage: Codable {
         }
         try container.encodeIfPresent(toolCallID, forKey: .toolCallID)
         try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
         try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
     }
 }
@@ -699,11 +711,13 @@ private struct OpenAIChatCompletionStreamChunk: Decodable {
     struct Delta: Decodable {
         var role: String?
         var content: String?
+        var reasoningContent: String?
         var toolCalls: [ToolCallDelta]?
 
         enum CodingKeys: String, CodingKey {
             case role
             case content
+            case reasoningContent = "reasoning_content"
             case toolCalls = "tool_calls"
         }
     }
@@ -729,6 +743,7 @@ private struct OpenAIChatCompletionStreamAccumulator {
     }
 
     private var text = ""
+    private var reasoningContent = ""
     private var finishReason: AgentModelFinishReason = .unknown
     private var usage: AgentModelUsage?
     private var rawEvents: [String] = []
@@ -747,6 +762,10 @@ private struct OpenAIChatCompletionStreamAccumulator {
             if let content = choice.delta.content, !content.isEmpty {
                 text += content
                 events.append(.textDelta(content))
+            }
+            if let reasoning = choice.delta.reasoningContent, !reasoning.isEmpty {
+                reasoningContent += reasoning
+                events.append(.thinkingDelta(reasoning))
             }
             for toolCall in choice.delta.toolCalls ?? [] {
                 var state = toolCalls[toolCall.index] ?? ToolCallState()
@@ -773,7 +792,10 @@ private struct OpenAIChatCompletionStreamAccumulator {
             toolCalls: calls,
             usage: usage,
             finishReason: finishReason,
-            rawResponseJSON: rawEvents.joined(separator: "\n")
+            rawResponseJSON: rawEvents.joined(separator: "\n"),
+            providerMetadata: reasoningContent.isEmpty
+                ? nil
+                : AgentModelProviderMetadata(providerID: "openai-compatible", reasoningContent: reasoningContent)
         )
     }
 }

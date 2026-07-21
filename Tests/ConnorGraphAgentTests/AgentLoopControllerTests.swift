@@ -461,6 +461,36 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(toolMessage.content != "{\"exitCode\":0,\"truncated\":false}")
 }
 
+@Test func agentLoopPreservesProviderReasoningMetadataAcrossToolContinuation() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-reasoning", name: "echo_args", argumentsJSON: #"{"value":"step"}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls,
+            providerMetadata: AgentModelProviderMetadata(
+                providerID: "openai-compatible",
+                reasoningContent: "I need the tool result to continue."
+            )
+        ),
+        AgentModelResponse(
+            text: "Done.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-reasoning", userMessage: "Continue after the tool")) {}
+
+    let followUpMessages = try #require(await provider.requests.last?.messages)
+    let assistantMessage = try #require(followUpMessages.first { $0.role == .assistant })
+    #expect(assistantMessage.providerMetadata?.reasoningContent == "I need the tool result to continue.")
+}
+
 @Test func agentLoopGatesLargeToolResultBeforeFollowUpModelRequest() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
