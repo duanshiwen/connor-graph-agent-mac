@@ -173,6 +173,26 @@ final class ChatViewportController: ObservableObject {
         }
     }
 
+    func requestPendingInitialAnchorNow() {
+        guard let pendingInitialAnchor, currentDataSetItemCount > 0 else { return }
+        self.pendingInitialAnchor = nil
+        switch pendingInitialAnchor {
+        case .top:
+            setSnapshot(
+                ChatViewportSnapshot(
+                    mode: .programmaticScroll(.top(animated: false)),
+                    isPinnedToBottom: false,
+                    shouldShowJumpToLatest: configuration.showsJumpToLatestButton,
+                    pendingNewItemCount: 0
+                )
+            )
+        case .bottom:
+            scrollToBottom(animated: false)
+        case .none:
+            break
+        }
+    }
+
     private func apply(_ event: ChatViewportEvent) {
         setSnapshot(stateMachine.reduce(snapshot: snapshot, event: event))
     }
