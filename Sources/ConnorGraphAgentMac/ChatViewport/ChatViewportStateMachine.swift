@@ -144,6 +144,13 @@ struct ChatViewportStateMachine {
     }
 
     private func reduceMetricsChanged(snapshot: ChatViewportSnapshot, metrics: ChatViewportMetrics) -> ChatViewportSnapshot {
+        if case .programmaticScroll = snapshot.mode {
+            return snapshot
+        }
+        if case .correctingAfterDataChange = snapshot.mode {
+            return snapshot
+        }
+
         let isPinned = metrics.isUnderfilled && configuration.preservesBottomAnchorForUnderfilledContent
             || metrics.distanceToBottom <= configuration.bottomPinThreshold
 
