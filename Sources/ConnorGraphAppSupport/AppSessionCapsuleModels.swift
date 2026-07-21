@@ -321,6 +321,7 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
     public var initialURLString: String
     public var title: String
     public var currentURLString: String
+    public var faviconURLString: String?
     public var isLoading: Bool
     public var canGoBack: Bool
     public var canGoForward: Bool
@@ -341,6 +342,7 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
         initialURLString: String,
         title: String = "",
         currentURLString: String,
+        faviconURLString: String? = nil,
         isLoading: Bool = false,
         canGoBack: Bool = false,
         canGoForward: Bool = false,
@@ -360,6 +362,7 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
         self.initialURLString = initialURLString
         self.title = title
         self.currentURLString = currentURLString
+        self.faviconURLString = faviconURLString
         self.isLoading = isLoading
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward

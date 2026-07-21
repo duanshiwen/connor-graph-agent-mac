@@ -72,6 +72,10 @@ struct CommercialChatItem: Identifiable, Equatable {
 }
 
 struct AgentChatTimelineAdapter {
+    func prependAnchorItemID(in items: [CommercialChatItem]) -> String? {
+        items.first(where: { $0.kind == .message })?.id
+    }
+
     func items(
         from timelineItems: [AgentChatTurnTimelineItem],
         unreadBoundary: CommercialChatUnreadBoundary? = nil,
