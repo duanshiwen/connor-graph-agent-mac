@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import ConnorGraphAppSupport
 
@@ -69,6 +70,13 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
                     }
                 )
+                .background(
+                    ChatViewportNativeScrollObserver { nativeMetrics in
+                        publishMetrics(nativeMetrics: nativeMetrics)
+                        requestOlderItemsIfNeeded(distanceToTop: nativeMetrics.distanceToTop)
+                    }
+                    .id(dataSetID)
+                )
                 .onPreferenceChange(ChatViewportViewportHeightKey.self) { height in
                     viewportHeight = height
                     publishMetrics()
@@ -101,6 +109,21 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .onChange(of: items.count) { _, newCount in
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
+                }
+                .onChange(of: isLoadingOlderItems) { wasLoading, isLoading in
+                    guard wasLoading, !isLoading else { return }
+                    didRequestOlderItemsForCurrentTopReach = false
+                }
+                .onChange(of: controller.isResolvingInitialAnchor) { wasResolving, isResolving in
+                    guard wasResolving,
+                    !isResolving,
+                    ChatViewportTopLoadPolicy.shouldReevaluateAfterInitialAnchor(
+                        viewportHeight: viewportHeight,
+                        contentHeight: contentHeight
+                    ) else { return }
+                    DispatchQueue.main.async {
+                        requestOlderItemsIfNeeded()
+                    }
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
                     consumePendingScrollCommandIfAvailable(proxy: proxy)
@@ -173,10 +196,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         dataSetID.namespacedElementID(String(describing: item.id))
     }
 
-    private func publishMetrics() {
+    private func publishMetrics(nativeMetrics: ChatViewportNativeScrollMetrics? = nil) {
         guard viewportHeight > 0 else { return }
-        let distanceToBottom = max(0, bottomSentinelMaxY - viewportHeight)
-        let distanceToTop = max(0, -topSentinelMinY)
+        let distanceToBottom = nativeMetrics?.distanceToBottom
+            ?? max(0, bottomSentinelMaxY - viewportHeight)
+        let distanceToTop = nativeMetrics?.distanceToTop
+            ?? max(0, -topSentinelMinY)
         controller.updateMetrics(
             ChatViewportMetrics(
                 viewportHeight: viewportHeight,
@@ -187,8 +212,8 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         )
     }
 
-    private func requestOlderItemsIfNeeded() {
-        let distanceToTop = max(0, -topSentinelMinY)
+    private func requestOlderItemsIfNeeded(distanceToTop: CGFloat? = nil) {
+        let distanceToTop = distanceToTop ?? max(0, -topSentinelMinY)
         guard ChatViewportTopLoadPolicy.shouldRequestOlderItems(
             hasOlderItems: hasOlderItems,
             isLoadingOlderItems: isLoadingOlderItems,
@@ -262,6 +287,119 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
         DispatchQueue.main.async {
             controller.completeProgrammaticScroll()
+        }
+    }
+}
+
+struct ChatViewportNativeScrollMetrics: Equatable {
+    var distanceToTop: CGFloat
+    var distanceToBottom: CGFloat
+
+    static func calculate(
+        documentBounds: CGRect,
+        visibleBounds: CGRect,
+        isFlipped: Bool
+    ) -> Self {
+        if isFlipped {
+            return Self(
+                distanceToTop: max(0, visibleBounds.minY - documentBounds.minY),
+                distanceToBottom: max(0, documentBounds.maxY - visibleBounds.maxY)
+            )
+        }
+        return Self(
+            distanceToTop: max(0, documentBounds.maxY - visibleBounds.maxY),
+            distanceToBottom: max(0, visibleBounds.minY - documentBounds.minY)
+        )
+    }
+}
+
+private struct ChatViewportNativeScrollObserver: NSViewRepresentable {
+    var onMetricsChanged: (ChatViewportNativeScrollMetrics) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onMetricsChanged: onMetricsChanged)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.attachWhenAvailable(from: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.onMetricsChanged = onMetricsChanged
+        context.coordinator.attachWhenAvailable(from: view)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator {
+        var onMetricsChanged: (ChatViewportNativeScrollMetrics) -> Void
+        private weak var scrollView: NSScrollView?
+        private var boundsObserver: NSObjectProtocol?
+        private var isAttachmentScheduled = false
+        private var isDismantled = false
+        private var lastPublishedMetrics: ChatViewportNativeScrollMetrics?
+
+        init(onMetricsChanged: @escaping (ChatViewportNativeScrollMetrics) -> Void) {
+            self.onMetricsChanged = onMetricsChanged
+        }
+
+        func attachWhenAvailable(from view: NSView) {
+            guard scrollView == nil, !isAttachmentScheduled, !isDismantled else { return }
+            isAttachmentScheduled = true
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self else { return }
+                isAttachmentScheduled = false
+                guard !isDismantled, let scrollView = view?.enclosingScrollView else { return }
+                attach(to: scrollView)
+            }
+        }
+
+        func detach() {
+            isDismantled = true
+            removeObservation()
+        }
+
+        private func removeObservation() {
+            if let boundsObserver {
+                NotificationCenter.default.removeObserver(boundsObserver)
+            }
+            boundsObserver = nil
+            scrollView = nil
+            lastPublishedMetrics = nil
+        }
+
+        private func attach(to scrollView: NSScrollView) {
+            guard self.scrollView !== scrollView else { return }
+            removeObservation()
+            self.scrollView = scrollView
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            boundsObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.publishMetrics()
+                }
+            }
+            publishMetrics()
+        }
+
+        private func publishMetrics() {
+            guard let scrollView, let documentView = scrollView.documentView else { return }
+            let metrics = ChatViewportNativeScrollMetrics.calculate(
+                documentBounds: documentView.bounds,
+                visibleBounds: scrollView.contentView.bounds,
+                isFlipped: documentView.isFlipped
+            )
+            guard metrics != lastPublishedMetrics else { return }
+            lastPublishedMetrics = metrics
+            onMetricsChanged(metrics)
         }
     }
 }

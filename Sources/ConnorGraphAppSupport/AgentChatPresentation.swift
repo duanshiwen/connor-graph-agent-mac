@@ -252,6 +252,45 @@ public struct AgentChatTurnTimestampPresentation: Sendable, Equatable {
     }()
 }
 
+public struct AgentChatTurnCursor: Sendable, Hashable {
+    private var currentTurn: Int
+    private var hasOpenUserTurn: Bool
+
+    public static let initial = AgentChatTurnCursor(currentTurn: 0, hasOpenUserTurn: false)
+
+    public static func beforeVisibleSuffix(of messages: [AgentMessage], visibleCount: Int) -> Self {
+        var cursor = Self.initial
+        let hiddenCount = max(0, messages.count - max(0, visibleCount))
+        for message in messages.prefix(hiddenCount) {
+            cursor.advance(for: message.role)
+        }
+        return cursor
+    }
+
+    fileprivate mutating func advance(for role: AgentRole) {
+        switch role {
+        case .user:
+            currentTurn += 1
+            hasOpenUserTurn = true
+        case .assistant:
+            if !hasOpenUserTurn {
+                currentTurn += 1
+            }
+            hasOpenUserTurn = false
+        case .system:
+            if currentTurn == 0 { currentTurn = 1 }
+        }
+    }
+
+    fileprivate var displayedTurnNumber: Int {
+        max(currentTurn, 1)
+    }
+
+    fileprivate var pendingTurnNumber: Int {
+        hasOpenUserTurn ? displayedTurnNumber : max(currentTurn + 1, 1)
+    }
+}
+
 public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
     private static let defaultTimestampDisplayInterval: TimeInterval = 5 * 60
 
@@ -283,8 +322,12 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         )
     }
 
-    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, preservesOpenProcess: Bool = false, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
-        let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
+    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, preservesOpenProcess: Bool = false, startingTurnCursor: AgentChatTurnCursor = .initial, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
+        let rows = AgentChatMessagePresentation.rows(
+            messages: messages,
+            lastContext: lastContext,
+            startingTurnCursor: startingTurnCursor
+        )
         let conversationHistoryStorage = AgentChatConversationHistoryStorage(rows: rows)
         var items: [AgentChatTurnTimelineItem] = []
         var lastTimestampDate: Date?
@@ -311,7 +354,10 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         if isSubmitting || preservesOpenProcess {
             let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
             items.append(.process(AgentChatTurnProcessPresentation(
-                pending: AgentChatPendingAssistantPresentation(messages: messages),
+                pending: AgentChatPendingAssistantPresentation(
+                    messages: messages,
+                    startingTurnCursor: startingTurnCursor
+                ),
                 conversationHistoryStorage: conversationHistoryStorage,
                 conversationHistoryCount: rows.count,
                 state: state
@@ -338,32 +384,22 @@ public struct AgentChatPendingAssistantPresentation: Sendable, Equatable, Identi
     public var title: String
     public var processingSummary: String
 
-    public init(messages: [AgentMessage]) {
+    public init(messages: [AgentMessage], startingTurnCursor: AgentChatTurnCursor = .initial) {
         self.id = "pending-assistant"
-        self.turnNumber = Self.pendingTurnNumber(messages: messages)
+        self.turnNumber = Self.pendingTurnNumber(messages: messages, startingTurnCursor: startingTurnCursor)
         self.title = "助手正在思考…"
         self.processingSummary = "正在准备图谱上下文和提示词…"
     }
 
-    private static func pendingTurnNumber(messages: [AgentMessage]) -> Int {
-        var currentTurn = 0
-        var hasOpenUserTurn = false
+    private static func pendingTurnNumber(
+        messages: [AgentMessage],
+        startingTurnCursor: AgentChatTurnCursor
+    ) -> Int {
+        var cursor = startingTurnCursor
         for message in messages {
-            switch message.role {
-            case .user:
-                currentTurn += 1
-                hasOpenUserTurn = true
-            case .assistant:
-                if !hasOpenUserTurn {
-                    currentTurn += 1
-                }
-                hasOpenUserTurn = false
-            case .system:
-                if currentTurn == 0 { currentTurn = 1 }
-            }
+            cursor.advance(for: message.role)
         }
-        if hasOpenUserTurn { return max(currentTurn, 1) }
-        return max(currentTurn + 1, 1)
+        return cursor.pendingTurnNumber
     }
 }
 
@@ -409,26 +445,18 @@ public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
         }
     }
 
-    public static func rows(messages: [AgentMessage], lastContext: AgentContext?) -> [AgentChatMessagePresentation] {
+    public static func rows(
+        messages: [AgentMessage],
+        lastContext: AgentContext?,
+        startingTurnCursor: AgentChatTurnCursor = .initial
+    ) -> [AgentChatMessagePresentation] {
         let latestAssistantID = messages.last(where: { $0.role == .assistant })?.id
-        var currentTurn = 0
-        var hasOpenUserTurn = false
+        var cursor = startingTurnCursor
         return messages.map { message in
-            switch message.role {
-            case .user:
-                currentTurn += 1
-                hasOpenUserTurn = true
-            case .assistant:
-                if !hasOpenUserTurn {
-                    currentTurn += 1
-                }
-                hasOpenUserTurn = false
-            case .system:
-                if currentTurn == 0 { currentTurn = 1 }
-            }
+            cursor.advance(for: message.role)
             return AgentChatMessagePresentation(
                 message: message,
-                turnNumber: max(currentTurn, 1),
+                turnNumber: cursor.displayedTurnNumber,
                 isLatestAssistantMessage: message.id == latestAssistantID,
                 lastContext: lastContext
             )

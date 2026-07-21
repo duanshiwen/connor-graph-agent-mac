@@ -541,10 +541,17 @@ private struct AgentChatConversationView: View {
 
     @MainActor
     private final class TimelineCache {
+        struct TurnCursorKey: Hashable {
+            var sessionID: String?
+            var transcriptRevision: Int
+            var visibleMessageCount: Int
+        }
+
         struct Key: Hashable {
             var sessionID: String?
             var messageCount: Int
             var messageSignature: Int
+            var startingTurnCursor: AgentChatTurnCursor
             var contextSignature: Int
             var isSubmitting: Bool
             var preservesOpenProcess: Bool
@@ -552,11 +559,29 @@ private struct AgentChatConversationView: View {
 
         static let shared = TimelineCache()
         private var entries: [Key: [AgentChatTurnTimelineItem]] = [:]
+        private var turnCursors: [TurnCursorKey: AgentChatTurnCursor] = [:]
         private let limit = 24
+
+        func turnCursor(
+            key: TurnCursorKey,
+            messages: [AgentMessage]
+        ) -> AgentChatTurnCursor {
+            if let cached = turnCursors[key] { return cached }
+            let cursor = AgentChatTurnCursor.beforeVisibleSuffix(
+                of: messages,
+                visibleCount: key.visibleMessageCount
+            )
+            if turnCursors.count >= limit {
+                turnCursors.removeAll(keepingCapacity: true)
+            }
+            turnCursors[key] = cursor
+            return cursor
+        }
 
         func items(
             key: Key,
             messages: [AgentMessage],
+            startingTurnCursor: AgentChatTurnCursor,
             lastContext: AgentContext?,
             isSubmitting: Bool,
             preservesOpenProcess: Bool
@@ -566,7 +591,8 @@ private struct AgentChatConversationView: View {
                 messages: messages,
                 lastContext: lastContext,
                 isSubmitting: isSubmitting,
-                preservesOpenProcess: preservesOpenProcess
+                preservesOpenProcess: preservesOpenProcess,
+                startingTurnCursor: startingTurnCursor
             )
             if entries.count >= limit {
                 entries.removeAll(keepingCapacity: true)
@@ -584,7 +610,10 @@ private struct AgentChatConversationView: View {
         return true
     }
 
-    private var timelineCacheKey: TimelineCache.Key {
+    private func timelineCacheKey(
+        visibleTranscript: [AgentMessage],
+        startingTurnCursor: AgentChatTurnCursor
+    ) -> TimelineCache.Key {
         let messageSignature = visibleTranscript.reduce(into: 0) { result, message in
             result &+= message.id.hashValue
             result &*= 31
@@ -601,6 +630,7 @@ private struct AgentChatConversationView: View {
             sessionID: model.sessions.selectedSessionID,
             messageCount: visibleTranscript.count,
             messageSignature: messageSignature,
+            startingTurnCursor: startingTurnCursor,
             contextSignature: contextSignature,
             isSubmitting: model.run.isSubmitting,
             preservesOpenProcess: shouldPreserveOpenProcess
@@ -608,9 +638,22 @@ private struct AgentChatConversationView: View {
     }
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
-        TimelineCache.shared.items(
-            key: timelineCacheKey,
+        let visibleTranscript = visibleTranscript
+        let startingTurnCursor = TimelineCache.shared.turnCursor(
+            key: TimelineCache.TurnCursorKey(
+                sessionID: model.sessions.selectedSessionID,
+                transcriptRevision: model.run.transcriptRevision,
+                visibleMessageCount: visibleTranscript.count
+            ),
+            messages: model.run.transcript
+        )
+        return TimelineCache.shared.items(
+            key: timelineCacheKey(
+                visibleTranscript: visibleTranscript,
+                startingTurnCursor: startingTurnCursor
+            ),
             messages: visibleTranscript,
+            startingTurnCursor: startingTurnCursor,
             lastContext: model.run.lastContext,
             isSubmitting: model.run.isSubmitting,
             preservesOpenProcess: shouldPreserveOpenProcess
@@ -779,7 +822,10 @@ private struct AgentChatConversationView: View {
                         hasOlderItems: hasOlderMessages,
                         isLoadingOlderItems: isLoadingOlderMessages,
                         onTopReached: {
-                            loadOlderMessagesIfNeeded(firstVisibleItemID: chatItems.first?.id, dataSetID: chatDataSetID)
+                            loadOlderMessagesIfNeeded(
+                                firstVisibleItemID: AgentChatTimelineAdapter().prependAnchorItemID(in: chatItems),
+                                dataSetID: chatDataSetID
+                            )
                         }
                     ) { chatItem in
                         if let item = chatItem.timelineItem {

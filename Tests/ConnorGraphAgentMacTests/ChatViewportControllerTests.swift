@@ -1,9 +1,38 @@
+import Combine
+import CoreGraphics
 import Testing
 @testable import ConnorGraphAgentMac
 
 @MainActor
 @Suite("Chat Viewport Controller Tests")
 struct ChatViewportControllerTests {
+    @Test func continuousMetricsWithinSameScrollStateDoNotRepublishUIChanges() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        controller.updateMetrics(.init(
+            viewportHeight: 600,
+            contentHeight: 2_000,
+            distanceToBottom: 1_000,
+            distanceToTop: 400
+        ))
+
+        var publicationCount = 0
+        let observation = controller.objectWillChange.sink {
+            publicationCount += 1
+        }
+
+        for distanceToTop in stride(from: 401, through: 500, by: 1) {
+            controller.updateMetrics(.init(
+                viewportHeight: 600,
+                contentHeight: 2_000,
+                distanceToBottom: 1_000 - CGFloat(distanceToTop - 400),
+                distanceToTop: CGFloat(distanceToTop)
+            ))
+        }
+
+        #expect(publicationCount == 0)
+        withExtendedLifetime(observation) {}
+    }
+
     @Test func jumpToLatestPublishesBottomScrollCommand() {
         let controller = ChatViewportController(configuration: .init())
 

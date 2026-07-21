@@ -292,6 +292,7 @@ struct BrowserWorkspaceView: View {
             key: liveWebViewKey(for: tab.id),
             initialURLString: tab.restoredURLString,
             onNavigationStateChanged: { state in updateNavigationState(state, for: tab.id) },
+            onFaviconURLChanged: { urlString in updateFaviconURL(urlString, for: tab.id) },
             onOpenInNewTab: { url in openNewTab(urlString: url.absoluteString, select: true) },
             onPopupCreated: { webView, coordinator, url in
                 adoptPopup(webView: webView, coordinator: coordinator, url: url, parentTabID: tab.id)
@@ -378,6 +379,7 @@ struct BrowserWorkspaceView: View {
                                 width: CGFloat(layout.tabWidth),
                                 isSelected: item.reference.sessionID == activeSessionID && item.reference.tabID == activeSelectedTabID,
                                 isLoading: item.tab.isLoading,
+                                faviconURL: item.tab.faviconURLString.flatMap(URL.init(string:)),
                                 isPrivate: privateTabIDs.contains(item.reference.tabID),
                                 sessionTitle: item.sessionTitle,
                                 onSelect: { selectGlobalTab(item.reference) },
@@ -931,6 +933,7 @@ struct BrowserWorkspaceView: View {
         tab.webView = webView
         if privateTabIDs.contains(parentTabID) { privateTabIDs.insert(tabID) }
         coordinator.onNavigationStateChanged = { state in updateNavigationState(state, for: tabID) }
+        coordinator.onFaviconURLChanged = { urlString in updateFaviconURL(urlString, for: tabID) }
         coordinator.onSelectionChanged = { selection in showSelectionPopover(selection, tabID: tabID) }
         coordinator.onEditableFieldChanged = { payload in handleEditableField(payload, tabID: tabID) }
         coordinator.onRestorationReady = { view in restoreSnapshotIfNeeded(for: tabID, in: view) }
@@ -1101,6 +1104,13 @@ struct BrowserWorkspaceView: View {
                 title: state.title,
                 sessionID: activeSessionID
             )
+        }
+    }
+
+    private func updateFaviconURL(_ urlString: String?, for tabID: BrowserTabState.ID) {
+        mutateActiveSession { session in
+            guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
+            session.tabs[index].faviconURLString = urlString
         }
     }
 

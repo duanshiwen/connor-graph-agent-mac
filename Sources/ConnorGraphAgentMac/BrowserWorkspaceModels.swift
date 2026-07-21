@@ -3,6 +3,31 @@ import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
+enum BrowserFaviconResolver {
+    static let javaScript = """
+    (() => {
+      const links = Array.from(document.querySelectorAll('link[rel][href]'));
+      const icon = links.find(link =>
+        link.rel.toLowerCase().split(/\\s+/).some(value => value === 'icon' || value.endsWith('-icon'))
+      );
+      if (icon && /^https?:$/i.test(new URL(icon.href, document.baseURI).protocol)) {
+        return new URL(icon.href, document.baseURI).href;
+      }
+      if (/^https?:$/i.test(location.protocol)) {
+        return new URL('/favicon.ico', location.origin).href;
+      }
+      return null;
+    })()
+    """
+
+    static func normalizedURLString(from result: Any?) -> String? {
+        guard let value = result as? String,
+              let url = URL(string: value),
+              url.scheme == "https" || url.scheme == "http" else { return nil }
+        return url.absoluteString
+    }
+}
+
 struct BrowserSessionState {
     var tabs: [BrowserTabState]
     var selectedTabID: BrowserTabState.ID?
@@ -98,6 +123,7 @@ struct BrowserTabState: Identifiable {
     var initialURLString: String
     var webView: WKWebView?
     var navigationState: WebNavigationState
+    var faviconURLString: String?
     var lastAccessedAt: Date?
     var lastVisibleAt: Date?
     var scrollX: Double?
@@ -114,6 +140,7 @@ struct BrowserTabState: Identifiable {
         self.id = id
         self.initialURLString = initialURLString
         self.navigationState = WebNavigationState(canGoBack: false, canGoForward: false, title: "", url: initialURLString)
+        self.faviconURLString = nil
         self.lastAccessedAt = Date()
         self.lastVisibleAt = nil
         self.scrollX = nil
@@ -138,6 +165,7 @@ struct BrowserTabState: Identifiable {
             url: snapshot.currentURLString,
             isLoading: snapshot.isLoading
         )
+        self.faviconURLString = snapshot.faviconURLString
         self.lastAccessedAt = snapshot.lastAccessedAt
         self.lastVisibleAt = snapshot.lastVisibleAt
         self.scrollX = snapshot.scrollX
@@ -157,6 +185,7 @@ struct BrowserTabState: Identifiable {
             initialURLString: initialURLString,
             title: navigationState.title,
             currentURLString: displayURL,
+            faviconURLString: faviconURLString,
             isLoading: navigationState.isLoading,
             canGoBack: navigationState.canGoBack,
             canGoForward: navigationState.canGoForward,
