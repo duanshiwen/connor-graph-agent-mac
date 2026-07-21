@@ -343,6 +343,24 @@ private struct EchoArgumentsTool: AgentTool {
     }
 }
 
+private struct RetrievalEvidenceTool: AgentTool {
+    let name: String
+    let description = "Return deterministic retrieval evidence"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "retrieved by \(name)",
+            citations: name.hasPrefix("memory_os_") ? ["record:\(name)"] : []
+        )
+    }
+}
+
 private struct NamedDelayTool: AgentTool {
     let name: String
     let delayNanoseconds: UInt64
@@ -661,7 +679,7 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(userContent.contains("Current user request:\n继续"))
 }
 
-@Test func agentLoopInjectsInitialGraphContextIntoModelRequest() async throws {
+@Test func agentLoopDoesNotInjectInitialGraphContextIntoModelRequest() async throws {
     let provider = CapturingFinalAnswerProvider()
     let contextBuilder = AgentContextBuilder(
         hybridSearchService: TestHybridSearchService(hits: [
@@ -690,14 +708,48 @@ private struct BashLikeOutputTool: AgentTool {
     }
 
     let request = await provider.lastRequest
-    #expect(request?.messages.contains(where: { $0.role == .system && $0.content.contains("Relevant Memory OS Context") }) == true)
-    #expect(request?.messages.contains(where: { $0.content.contains("诗闻喜欢结构化推进") }) == true)
+    #expect(request?.messages.contains(where: { $0.role == .system && $0.content.contains("Relevant Memory OS Context") }) == false)
+    #expect(request?.messages.contains(where: { $0.content.contains("诗闻喜欢结构化推进") }) == false)
     let textComplete = events.compactMap { event -> AgentTextCompleteEvent? in
         if case .textComplete(let payload) = event { return payload }
         return nil
     }.first
-    #expect(textComplete?.citations == ["episode:episode-1"])
-    #expect(textComplete?.contextSnapshot?.contains("诗闻喜欢结构化推进") == true)
+    #expect(textComplete?.citations == [])
+    #expect(textComplete?.contextSnapshot == nil)
+}
+
+@Test func retrievalComplianceRequiresMemoryAndWebForNonMemoryTasks() async throws {
+    let toolNames = AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"]
+    let calls = toolNames.enumerated().map { index, name in
+        AgentToolCall(id: "required-\(index)", name: name, argumentsJSON: "{}")
+    }
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "premature"),
+        AgentModelResponse(text: nil, toolCalls: calls, finishReason: .toolCalls),
+        AgentModelResponse(text: "grounded")
+    ])
+    var registry = AgentToolRegistry()
+    for name in toolNames { registry.register(RetrievalEvidenceTool(name: name)) }
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "compliance-web", userMessage: "Explain Swift concurrency")) {
+        if case .textComplete(let payload) = event { completed = payload }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    #expect(requests[1].messages.last?.content.contains("blocked the first completion") == true)
+    #expect(completed?.text == "grounded")
+    #expect(completed?.citations.count == 3)
+    #expect(completed?.citations.allSatisfy { $0.hasPrefix("record:memory_os_") } == true)
+}
+
+@Test func retrievalComplianceExemptsPureMemoryTasksFromWebSearch() async throws {
+    let policy = AgentRetrievalCompliancePolicy()
+    #expect(policy.isPureMemoryTask("请根据我的记忆总结我们之前的决定"))
+    #expect(!policy.isPureMemoryTask("请搜索最新 Swift 版本"))
+    #expect(policy.requiredTools(for: "回忆我的偏好") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
 }
 
 @Test func agentLoopPreservesAssistantToolCallBatchBeforeToolResults() async throws {
