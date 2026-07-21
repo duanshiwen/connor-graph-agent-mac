@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import ConnorGraphAppSupport
 
@@ -149,7 +150,11 @@ struct WorkspaceFilePreviewOverlay: View {
         case .pdf:
             NativeFilePDFPreview(fileURL: model.node.url)
         case .quickLook:
-            NativeFileQuickLookPreview(fileURL: model.node.url)
+            if let image = NSImage(contentsOf: model.node.url) {
+                ZoomableImagePreview(image: image)
+            } else {
+                NativeFileQuickLookPreview(fileURL: model.node.url)
+            }
         case .html:
             ContentUnavailableView("将在浏览器中预览", systemImage: "globe", description: Text(model.node.relativePath))
         case .unsupported:

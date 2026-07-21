@@ -23,11 +23,14 @@ final class WorkspaceExplorerFeatureModel {
     private(set) var selectedNodeID: String?
     private(set) var previewModel: WorkspaceFilePreviewModel?
     private(set) var isLoadingPreview = false
+    private(set) var gitStatusesByPath: [String: WorkspaceGitFileStatus] = [:]
 
     @ObservationIgnored private let loader: WorkspaceDirectoryLoader
     @ObservationIgnored private let previewLoader: WorkspaceFilePreviewLoader
+    @ObservationIgnored private let gitStatusLoader: WorkspaceGitStatusLoader
     @ObservationIgnored private var tasksByNodeID: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var previewTask: Task<Void, Never>?
+    @ObservationIgnored private var gitStatusTask: Task<Void, Never>?
     @ObservationIgnored private var previewTextByteLimit = WorkspaceFilePreviewLoader.defaultMaximumTextByteCount
     @ObservationIgnored private var configurationID = ""
     @ObservationIgnored private var activeSessionID: String?
@@ -41,16 +44,19 @@ final class WorkspaceExplorerFeatureModel {
         var expandedNodeIDs: Set<String>
         var childrenByNodeID: [String: [WorkspaceFileNode]]
         var errorsByNodeID: [String: String]
+        var gitStatusesByPath: [String: WorkspaceGitFileStatus]
     }
 
     private static let maximumCachedSessionCount = 5
 
     init(
         loader: WorkspaceDirectoryLoader = WorkspaceDirectoryLoader(),
-        previewLoader: WorkspaceFilePreviewLoader = WorkspaceFilePreviewLoader()
+        previewLoader: WorkspaceFilePreviewLoader = WorkspaceFilePreviewLoader(),
+        gitStatusLoader: WorkspaceGitStatusLoader = WorkspaceGitStatusLoader()
     ) {
         self.loader = loader
         self.previewLoader = previewLoader
+        self.gitStatusLoader = gitStatusLoader
     }
 
     func presentTree(sessionID: String?, workingDirectoryPath: String) {
@@ -94,6 +100,8 @@ final class WorkspaceExplorerFeatureModel {
         cancelAllTasks()
         previewTask?.cancel()
         previewTask = nil
+        gitStatusTask?.cancel()
+        gitStatusTask = nil
         if let sessionID,
            let cached = cachedTreeStatesBySessionID[sessionID],
            cached.workingDirectoryPath == path {
@@ -101,6 +109,7 @@ final class WorkspaceExplorerFeatureModel {
             expandedNodeIDs = cached.expandedNodeIDs
             childrenByNodeID = cached.childrenByNodeID
             errorsByNodeID = cached.errorsByNodeID
+            gitStatusesByPath = cached.gitStatusesByPath
             markSessionCacheAsRecent(sessionID)
         } else {
             if let sessionID {
@@ -111,11 +120,13 @@ final class WorkspaceExplorerFeatureModel {
             expandedNodeIDs = []
             childrenByNodeID = [:]
             errorsByNodeID = [:]
+            gitStatusesByPath = [:]
         }
         loadingNodeIDs = []
         selectedNodeID = nil
         previewModel = nil
         isLoadingPreview = false
+        loadGitStatuses()
     }
 
     func toggleRoot(_ root: WorkspaceExplorerRoot) {
@@ -193,6 +204,8 @@ final class WorkspaceExplorerFeatureModel {
         childrenByNodeID = [:]
         loadingNodeIDs = []
         errorsByNodeID = [:]
+        gitStatusesByPath = [:]
+        loadGitStatuses()
         Task { [weak self, loader] in
             await loader.invalidateAll()
             guard let self, self.generation == refreshGeneration else { return }
@@ -203,11 +216,37 @@ final class WorkspaceExplorerFeatureModel {
     func shutdown() {
         generation &+= 1
         cancelAllTasks()
+        gitStatusTask?.cancel()
+        gitStatusTask = nil
         closePreview()
         isTreePresented = false
         activeSessionID = nil
         cachedTreeStatesBySessionID = [:]
         cachedSessionIDsByRecency = []
+    }
+
+    func gitStatus(for node: WorkspaceFileNode) -> WorkspaceGitFileStatus? {
+        gitStatusesByPath[node.url.standardizedFileURL.path]
+    }
+
+    private func loadGitStatuses() {
+        gitStatusTask?.cancel()
+        guard let root = roots.first else { return }
+        let requestGeneration = generation
+        gitStatusTask = Task { [weak self, gitStatusLoader] in
+            let statuses = await gitStatusLoader.statuses(for: root.url)
+            guard !Task.isCancelled else { return }
+            self?.finishLoadingGitStatuses(statuses, generation: requestGeneration)
+        }
+    }
+
+    private func finishLoadingGitStatuses(
+        _ statuses: [String: WorkspaceGitFileStatus],
+        generation requestGeneration: UInt64
+    ) {
+        guard requestGeneration == generation else { return }
+        gitStatusesByPath = statuses
+        gitStatusTask = nil
     }
 
     private func toggleDirectory(nodeID: String, root: WorkspaceExplorerRoot, directoryURL: URL) {
@@ -272,7 +311,8 @@ final class WorkspaceExplorerFeatureModel {
             roots: roots,
             expandedNodeIDs: expandedNodeIDs,
             childrenByNodeID: childrenByNodeID,
-            errorsByNodeID: errorsByNodeID
+            errorsByNodeID: errorsByNodeID,
+            gitStatusesByPath: gitStatusesByPath
         )
         markSessionCacheAsRecent(activeSessionID)
         while cachedSessionIDsByRecency.count > Self.maximumCachedSessionCount {
