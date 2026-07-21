@@ -264,7 +264,7 @@ public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let evidenceRegistry: CalendarDetailReadEvidenceRegistry?
     public var name: String { "calendar_write" }
-    public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. Always pass operation explicitly. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict." }
+    public var description: String { "Create, update, or delete a non-recurring calendar event after trusted mutateCalendar approval. Every call must include operation, even when the other fields make it seem obvious; for creation use {\"operation\":\"create_event\",\"calendarID\":\"<exact writable ID>\",\"title\":\"<title>\",\"start\":\"<ISO-8601>\",\"end\":\"<ISO-8601>\",\"isAllDay\":false}. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputExamples: [[String: SendableJSONValue]] {
         [

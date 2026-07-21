@@ -234,6 +234,8 @@ struct CalendarContactsAgentToolsTests {
         #expect(tool.inputExamples.first?["calendarID"] != .string("calendar-work"))
         #expect(tool.description.contains("calendarID is only for create_event"))
         #expect(tool.description.contains("eventID and expectedVersion are only for update_event and delete_event"))
+        #expect(tool.description.contains("Every call must include operation"))
+        #expect(tool.description.contains("{\"operation\":\"create_event\""))
         #expect(tool.inputExamples.count == 3)
         #expect(tool.inputExamples[1]["calendarID"] == nil)
         #expect(tool.inputExamples[2]["calendarID"] == nil)
