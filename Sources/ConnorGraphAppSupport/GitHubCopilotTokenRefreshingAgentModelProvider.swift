@@ -1,6 +1,19 @@
 import Foundation
 import ConnorGraphAgent
 
+enum GitHubCopilotRequestHeaders {
+    static func applying(to headers: [String: String], initiator: String = "user") -> [String: String] {
+        var result = headers
+        result["User-Agent"] = "GitHubCopilotChat/0.35.0"
+        result["Editor-Version"] = "vscode/1.107.0"
+        result["Editor-Plugin-Version"] = "copilot-chat/0.35.0"
+        result["Copilot-Integration-Id"] = "vscode-chat"
+        result["Openai-Intent"] = "conversation-edits"
+        result["X-Initiator"] = initiator
+        return result
+    }
+}
+
 public struct GitHubCopilotTokenRefreshingAgentModelProvider: StreamingAgentModelProvider {
     public let modelID: String
     public let capabilities: AgentModelCapabilities
@@ -43,7 +56,7 @@ public struct GitHubCopilotTokenRefreshingAgentModelProvider: StreamingAgentMode
     }
 
     public func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        let provider = try await makeCurrentProvider()
+        let provider = try await makeCurrentProvider(initiator: initiator(for: request))
         return try await provider.complete(request)
     }
 
@@ -51,7 +64,7 @@ public struct GitHubCopilotTokenRefreshingAgentModelProvider: StreamingAgentMode
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    let provider = try await makeCurrentProvider()
+                    let provider = try await makeCurrentProvider(initiator: initiator(for: request))
                     for try await event in provider.streamComplete(request) {
                         continuation.yield(event)
                     }
@@ -63,16 +76,21 @@ public struct GitHubCopilotTokenRefreshingAgentModelProvider: StreamingAgentMode
         }
     }
 
-    private func makeCurrentProvider() async throws -> AnyAgentModelProvider {
+    private func makeCurrentProvider(initiator: String) async throws -> AnyAgentModelProvider {
         try await refreshIfNeeded()
-        guard let config = try settingsRepository.openAICompatibleConfig(
+        guard var config = try settingsRepository.openAICompatibleConfig(
             connectionID: connectionID,
             modelOverride: modelOverride,
             baseURLOverride: baseURLOverride
         ) else {
             throw OpenAICompatibleProviderError.missingAPIKey
         }
+        config.extraHeaders = GitHubCopilotRequestHeaders.applying(to: config.extraHeaders, initiator: initiator)
         return makeProvider(config)
+    }
+
+    private func initiator(for request: AgentModelRequest) -> String {
+        request.messages.last?.role == .user ? "user" : "agent"
     }
 
     private func refreshIfNeeded() async throws {

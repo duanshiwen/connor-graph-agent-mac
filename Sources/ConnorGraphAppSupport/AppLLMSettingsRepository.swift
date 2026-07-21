@@ -648,6 +648,9 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[Self.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
         var extraHeaders = connection.extraHTTPHeaders
         extraHeaders.removeValue(forKey: Self.openAIAPIKeyHeaderKindMetadataKey)
+        if connection.connectionKind == .githubCopilot {
+            extraHeaders = GitHubCopilotRequestHeaders.applying(to: extraHeaders)
+        }
         return OpenAICompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
