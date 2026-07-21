@@ -200,13 +200,24 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     )
 
     _ = try await provider.complete(AgentModelRequest(messages: [
-        AgentModelMessage(role: .assistant, content: "", toolCalls: [AgentToolCall(id: "call_1", name: "graph_search", argumentsJSON: "{\"query\":\"memory\"}")]),
+        AgentModelMessage(
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "call_1", name: "graph_search", argumentsJSON: "{\"query\":\"memory\"}")],
+            providerMetadata: AgentModelProviderMetadata(
+                providerID: "openai-responses",
+                rawOutputItemsJSON: #"[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"graph_search","arguments":"{\"query\":\"memory\"}","status":"completed"}]"#,
+                reasoningEncryptedContentPresent: true
+            )
+        ),
         AgentModelMessage(role: .tool, content: "{\"result\":\"found\"}", toolCallID: "call_1", name: "graph_search")
     ]))
 
     let requestBody = try #require(client.captured?.body)
     let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
     let input = try #require(object["input"] as? [[String: Any]])
+    let reasoning = try #require(input.first { $0["type"] as? String == "reasoning" })
+    #expect(reasoning["encrypted_content"] as? String == "opaque")
     let functionCall = try #require(input.first { $0["type"] as? String == "function_call" })
     #expect(functionCall["call_id"] as? String == "call_1")
     #expect(functionCall["name"] as? String == "graph_search")

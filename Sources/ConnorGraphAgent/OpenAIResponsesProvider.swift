@@ -284,7 +284,13 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
                     "call_id": message.toolCallID ?? message.id,
                     "output": message.content
                 ]]
-            case .assistant where message.toolCalls?.isEmpty == false:
+            case .assistant:
+                if let preservedItems = preservedOutputItems(for: message) {
+                    return preservedItems
+                }
+                guard message.toolCalls?.isEmpty == false else {
+                    return [inputMessageItem(for: message, role: role)]
+                }
                 return message.toolCalls?.map { call in
                     [
                         "type": "function_call",
@@ -294,15 +300,29 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
                     ]
                 } ?? []
             default:
-                var item: [String: Any] = ["role": role]
-                if let contentParts = responsesContentParts(for: message), !contentParts.isEmpty {
-                    item["content"] = contentParts
-                } else {
-                    item["content"] = message.content
-                }
-                return [item]
+                return [inputMessageItem(for: message, role: role)]
             }
         }
+    }
+
+    private func inputMessageItem(for message: AgentModelMessage, role: String) -> [String: Any] {
+        var item: [String: Any] = ["role": role]
+        if let contentParts = responsesContentParts(for: message), !contentParts.isEmpty {
+            item["content"] = contentParts
+        } else {
+            item["content"] = message.content
+        }
+        return item
+    }
+
+    private func preservedOutputItems(for message: AgentModelMessage) -> [[String: Any]]? {
+        guard message.providerMetadata?.providerID == "openai-responses",
+              let rawItems = message.providerMetadata?.rawOutputItemsJSON,
+              let data = rawItems.data(using: .utf8),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              !items.isEmpty
+        else { return nil }
+        return items
     }
 
     private func responsesContentParts(for message: AgentModelMessage) -> [[String: Any]]? {
