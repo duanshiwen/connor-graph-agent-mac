@@ -19,6 +19,7 @@ final class ChatRunCoordinator {
     private var timelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var isShutdown = false
     private var generation = 0
+    private(set) var managerRevision = 0
 
     @ObservationIgnored var selectedSessionID: () -> String? = { nil }
     @ObservationIgnored var onTimelineChanged: (String, [AgentEventPresentation]) -> Void = { _, _ in }
@@ -75,7 +76,7 @@ final class ChatRunCoordinator {
     }
 
     func clearSelectedRuntime() {
-        manager = nil
+        installManager(nil)
         replaceTranscript([])
         replaceVisibleTimeline([])
         model.latestSummary = nil
@@ -102,18 +103,42 @@ final class ChatRunCoordinator {
         model.lastPromptInspection = nil
     }
 
-    func applyCompletedRun(manager: NativeSessionManager, session: AgentSession, summary: AgentSessionSummary?) {
-        installManager(manager, fallbackSession: session)
+    @discardableResult
+    func applyCompletedRun(
+        manager: NativeSessionManager,
+        session: AgentSession,
+        summary: AgentSessionSummary?,
+        submittedManagerRevision: Int? = nil
+    ) -> Bool {
+        let shouldRestoreSubmittedManager = submittedManagerRevision.map { $0 == managerRevision } ?? true
+        if shouldRestoreSubmittedManager {
+            installManager(manager, fallbackSession: session)
+        } else {
+            fallbackSession = session
+        }
         replaceTranscript(manager.session.messages)
         replaceVisibleTimeline(manager.eventPresentations)
         model.latestSummary = summary
         model.lastContext = nil
         model.lastPromptInspection = nil
+        return shouldRestoreSubmittedManager
     }
 
-    func applyRecoveredRun(manager: NativeSessionManager, session: AgentSession, transcript: [AgentMessage]) {
-        installManager(manager, fallbackSession: session)
+    @discardableResult
+    func applyRecoveredRun(
+        manager: NativeSessionManager,
+        session: AgentSession,
+        transcript: [AgentMessage],
+        submittedManagerRevision: Int? = nil
+    ) -> Bool {
+        let shouldRestoreSubmittedManager = submittedManagerRevision.map { $0 == managerRevision } ?? true
+        if shouldRestoreSubmittedManager {
+            installManager(manager, fallbackSession: session)
+        } else {
+            fallbackSession = session
+        }
         replaceTranscript(transcript)
+        return shouldRestoreSubmittedManager
     }
 
     func installRuntimeFactory(_ factory: AppGraphAgentRuntimeFactory?) { runtimeFactory = factory }
@@ -146,12 +171,15 @@ final class ChatRunCoordinator {
         guard !isShutdown else { return }
         if let fallbackSession { self.fallbackSession = fallbackSession }
         self.manager = manager
+        managerRevision &+= 1
     }
 
     func updateFallbackSession(_ session: AgentSession) { guard !isShutdown else { return }; fallbackSession = session }
     func mutateManager(_ mutation: (inout NativeSessionManager) -> Void) {
         guard !isShutdown, var manager else { return }
-        mutation(&manager); self.manager = manager
+        mutation(&manager)
+        self.manager = manager
+        managerRevision &+= 1
     }
 
     func begin(sessionID: String, backend: AnyAgentBackend) -> Bool {
@@ -288,6 +316,7 @@ final class ChatRunCoordinator {
         runIDsBySessionID.removeAll(); backendsByRunID.removeAll(); backendsBySessionID.removeAll(); pendingCancellationReasons.removeAll()
         model.submittingSessionIDs.removeAll(); model.isSubmitting = false
         manager = nil
+        managerRevision &+= 1
         onSubmittingChanged()
     }
 }
