@@ -44,6 +44,14 @@ import ConnorGraphAgent
     #expect(profile.signals.contains(.modelNameHeuristic))
 }
 
+@Test(arguments: ["glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flash"])
+func currentGLMVisionModelsAdvertiseVision(modelID: String) throws {
+    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: modelID)
+
+    #expect(profile.supportsVision)
+    #expect(profile.signals.contains(.modelNameHeuristic))
+}
+
 @Test func anthropicClaudeModelAdvertisesVision() throws {
     let profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: "claude-3-5-sonnet-latest")
 
