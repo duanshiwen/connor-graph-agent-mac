@@ -56,7 +56,10 @@ final class ChatViewportController: ObservableObject {
 
     func updateMetrics(_ metrics: ChatViewportMetrics) {
         latestMetrics = metrics
-        apply(.metricsChanged(metrics))
+        let nextSnapshot = stateMachine.reduce(snapshot: snapshot, event: .metricsChanged(metrics))
+        if nextSnapshot != snapshot {
+            setSnapshot(nextSnapshot)
+        }
         completePendingInitialAnchorIfNeeded()
     }
 

@@ -1,6 +1,13 @@
 import Foundation
 
 struct ChatViewportTopLoadPolicy {
+    static func shouldReevaluateAfterInitialAnchor(
+        viewportHeight: Double,
+        contentHeight: Double
+    ) -> Bool {
+        viewportHeight > 0 && contentHeight <= viewportHeight + 1
+    }
+
     static func didFinishLoadingOlderItems(
         wasLoadingOlderItems: Bool,
         isLoadingOlderItems: Bool
