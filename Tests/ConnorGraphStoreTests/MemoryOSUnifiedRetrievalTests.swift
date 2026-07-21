@@ -3,6 +3,32 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphStore
 
+@Test func memoryOSRetrievalDefaultsToDepthOneAndAllowsConfiguredDepthSix() {
+    #expect(MemoryOSRetrievalQuery(text: "memory").depth == 1)
+    #expect(MemoryOSGraphExpansionPolicy(maxDepth: 6).maxDepth == 6)
+}
+
+@Test func memoryOSRetrievalSortsByEffectiveTimeThenScoreAndStableID() {
+    let hits = [
+        MemoryOSRetrievalHit(layer: .l2, recordID: "missing", title: "missing", score: 100),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "b", title: "b", score: 2, metadata: ["effective_updated_at": "2026-07-20T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "a", title: "a", score: 2, metadata: ["effective_updated_at": "2026-07-20T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "older", title: "older", score: 50, metadata: ["effective_updated_at": "2026-07-19T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "higher", title: "higher", score: 3, metadata: ["effective_updated_at": "2026-07-20T10:00:00Z"])
+    ]
+
+    let sorted = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
+
+    #expect(sorted.map(\.recordID) == ["higher", "a", "b", "older", "missing"])
+}
+
+@Test func memoryOSRetrievalExposesTemporalStatusSemantics() {
+    let conflicted = MemoryOSRetrievalHit(layer: .l3, recordID: "conflict", title: "conflict", metadata: ["status": "conflicted"])
+    let unspecified = MemoryOSRetrievalHit(layer: .l3, recordID: "active", title: "active")
+    #expect(conflicted.temporalStatus == .conflicted)
+    #expect(unspecified.temporalStatus == .active)
+}
+
 @Test func memoryOSUnifiedRetrievalSearchesAcrossAllLayersAndRanksHits() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
     try store.migrate()

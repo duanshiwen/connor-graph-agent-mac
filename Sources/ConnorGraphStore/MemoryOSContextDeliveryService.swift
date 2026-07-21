@@ -139,6 +139,10 @@ public struct MemoryOSContextDeliveryService: Sendable {
         if metadata["updated_at"] == nil, let updatedAt = hit.updatedAt, !updatedAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             metadata["updated_at"] = updatedAt
         }
+        if metadata["effective_updated_at"] == nil, let updatedAt = metadata["updated_at"] {
+            metadata["effective_updated_at"] = updatedAt
+        }
+        if metadata["status"] == nil { metadata["status"] = MemoryOSRecordTemporalStatus.active.rawValue }
         return MemoryOSRetrievalHit(
             layer: layer,
             recordID: hit.recordID,
