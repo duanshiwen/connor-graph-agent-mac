@@ -3,6 +3,28 @@ import Testing
 
 @Suite("Chat Viewport State Machine Tests")
 struct ChatViewportStateMachineTests {
+    @Test func metricsDoNotInterruptProgrammaticBottomAnchor() {
+        let machine = ChatViewportStateMachine(configuration: .init(bottomPinThreshold: 64))
+        let scrolling = ChatViewportSnapshot(
+            mode: .programmaticScroll(.bottom(animated: false)),
+            isPinnedToBottom: true,
+            shouldShowJumpToLatest: false,
+            pendingNewItemCount: 0
+        )
+
+        let updated = machine.reduce(
+            snapshot: scrolling,
+            event: .metricsChanged(.init(
+                viewportHeight: 600,
+                contentHeight: 2_400,
+                distanceToBottom: 1_800,
+                distanceToTop: 0
+            ))
+        )
+
+        #expect(updated == scrolling)
+    }
+
     @Test func initialUnderfilledContentIsBottomAnchoredWhenConfigured() {
         let machine = ChatViewportStateMachine(configuration: .init(preservesBottomAnchorForUnderfilledContent: true))
 

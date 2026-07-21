@@ -108,6 +108,7 @@
 		F71000010000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */; };
 		F71000010000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */; };
 		F71000010000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */; };
+		F71000010000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71000000000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift */; };
 		A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */; };
 		A00000000000000000000074 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000075 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift */; };
 		A00000000000000000000076 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000077 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift */; };
@@ -201,6 +202,7 @@
 		F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift; sourceTree = "<group>"; };
 		F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift; sourceTree = "<group>"; };
 		F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift; sourceTree = "<group>"; };
+		F71000000000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift; sourceTree = "<group>"; };
 		E71500000000000000000004 /* Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailHTMLRenderCache.swift; sourceTree = "<group>"; };
 		E71500000000000000000005 /* Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MailWebViewConfigurationProvider.swift; sourceTree = "<group>"; };
 		7C0C0DE0000000000000019 /* Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/PersonProfileEditorView.swift; sourceTree = "<group>"; };
@@ -406,6 +408,7 @@
 				F71000000000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift */,
 				F71000000000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift */,
 				F71000000000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift */,
+				F71000000000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift */,
 				A00000000000000000000073 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift */,
 				A00000000000000000000075 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift */,
 				A00000000000000000000077 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift */,
@@ -713,6 +716,7 @@
 				F71000010000000000000003 /* Sources/ConnorGraphAgentMac/WorkspaceExplorerFeatureModel.swift in Sources */,
 				F71000010000000000000004 /* Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift in Sources */,
 				F71000010000000000000005 /* Sources/ConnorGraphAgentMac/WorkspaceFileTreePaneView.swift in Sources */,
+				F71000010000000000000006 /* Sources/ConnorGraphAgentMac/ZoomableImagePreview.swift in Sources */,
 				A00000000000000000000072 /* Sources/ConnorGraphAgentMac/AIConnectionsFeatureModel.swift in Sources */,
 				A00000000000000000000074 /* Sources/ConnorGraphAgentMac/GovernanceFeatureModel.swift in Sources */,
 				A00000000000000000000076 /* Sources/ConnorGraphAgentMac/AppSessionBackgroundTask.swift in Sources */,
@@ -992,7 +996,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;
@@ -1030,7 +1034,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.0.9;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;

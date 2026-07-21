@@ -34,13 +34,15 @@ final class ChatRunCoordinator {
     var isActive: Bool { !model.submittingSessionIDs.isEmpty }
 
     func replaceTranscript(_ messages: [AgentMessage]) {
+        let previous = model.transcript
         model.transcript = messages
         model.transcriptRevision += 1
+        releaseOffMain(previous)
     }
 
     func prepareSelection(sessionID: String) {
         replaceTranscript([])
-        model.eventTimeline = timeline(sessionID: sessionID) ?? []
+        replaceVisibleTimeline(timeline(sessionID: sessionID) ?? [])
         model.latestSummary = nil
         model.summaryMessage = nil
         model.lastContext = nil
@@ -75,7 +77,7 @@ final class ChatRunCoordinator {
     func clearSelectedRuntime() {
         manager = nil
         replaceTranscript([])
-        model.eventTimeline = []
+        replaceVisibleTimeline([])
         model.latestSummary = nil
         model.summaryMessage = nil
         model.lastContext = nil
@@ -95,15 +97,15 @@ final class ChatRunCoordinator {
 
     func applyOptimisticTranscript(_ messages: [AgentMessage], sessionID: String) {
         guard selectedSessionID() == sessionID else { return }
-        model.transcript = messages
+        replaceTranscript(messages)
         model.lastContext = nil
         model.lastPromptInspection = nil
     }
 
     func applyCompletedRun(manager: NativeSessionManager, session: AgentSession, summary: AgentSessionSummary?) {
         installManager(manager, fallbackSession: session)
-        model.transcript = manager.session.messages
-        model.eventTimeline = manager.eventPresentations
+        replaceTranscript(manager.session.messages)
+        replaceVisibleTimeline(manager.eventPresentations)
         model.latestSummary = summary
         model.lastContext = nil
         model.lastPromptInspection = nil
@@ -111,7 +113,7 @@ final class ChatRunCoordinator {
 
     func applyRecoveredRun(manager: NativeSessionManager, session: AgentSession, transcript: [AgentMessage]) {
         installManager(manager, fallbackSession: session)
-        model.transcript = transcript
+        replaceTranscript(transcript)
     }
 
     func installRuntimeFactory(_ factory: AppGraphAgentRuntimeFactory?) { runtimeFactory = factory }
@@ -157,7 +159,7 @@ final class ChatRunCoordinator {
         backendsBySessionID[sessionID] = backend
         timelinesBySessionID[sessionID] = []
         timelinesByProcessKey = timelinesByProcessKey.filter { !$0.key.hasPrefix("\(sessionID):") }
-        if selectedSessionID() == sessionID { model.eventTimeline = [] }
+        if selectedSessionID() == sessionID { replaceVisibleTimeline([]) }
         model.submittingSessionIDs.insert(sessionID)
         runIDsBySessionID.removeValue(forKey: sessionID)
         refreshSelectedSubmittingState()
@@ -182,7 +184,7 @@ final class ChatRunCoordinator {
     func setTimeline(_ timeline: [AgentEventPresentation], sessionID: String) {
         guard !isShutdown else { return }
         timelinesBySessionID[sessionID] = timeline
-        if selectedSessionID() == sessionID { model.eventTimeline = timeline }
+        if selectedSessionID() == sessionID { replaceVisibleTimeline(timeline) }
         onTimelineChanged(sessionID, timeline)
     }
 
@@ -193,6 +195,18 @@ final class ChatRunCoordinator {
     func cacheProcessTimeline(_ timeline: [AgentEventPresentation], key: String) { timelinesByProcessKey[key] = timeline }
     func clearProcessTimelines() { timelinesByProcessKey.removeAll(keepingCapacity: true) }
     func clearProcessTimelines(sessionID: String) { timelinesByProcessKey = timelinesByProcessKey.filter { !$0.key.hasPrefix("\(sessionID):") } }
+
+    private func replaceVisibleTimeline(_ timeline: [AgentEventPresentation]) {
+        let previous = model.eventTimeline
+        model.eventTimeline = timeline
+        releaseOffMain(previous)
+    }
+
+    private func releaseOffMain<Value: Sendable>(_ value: Value) {
+        Task.detached(priority: .background) {
+            _fixLifetime(value)
+        }
+    }
 
     func backend(for approval: AgentPendingApproval) -> AnyAgentBackend? {
         backendsByRunID[approval.runID] ?? backendsBySessionID[approval.sessionID] ?? manager?.backend
