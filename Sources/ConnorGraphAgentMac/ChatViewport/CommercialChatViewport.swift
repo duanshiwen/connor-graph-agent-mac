@@ -102,6 +102,21 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 .onChange(of: items.count) { _, newCount in
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
                 }
+                .onChange(of: isLoadingOlderItems) { wasLoading, isLoading in
+                    guard ChatViewportTopLoadPolicy.didFinishLoadingOlderItems(
+                        wasLoadingOlderItems: wasLoading,
+                        isLoadingOlderItems: isLoading
+                    ) else { return }
+                    didRequestOlderItemsForCurrentTopReach = false
+                    reevaluateOlderItemsOnNextRunLoop()
+                }
+                .onChange(of: controller.isResolvingInitialAnchor) { wasResolving, isResolving in
+                    guard ChatViewportTopLoadPolicy.didFinishResolvingInitialAnchor(
+                        wasResolvingInitialAnchor: wasResolving,
+                        isResolvingInitialAnchor: isResolving
+                    ) else { return }
+                    reevaluateOlderItemsOnNextRunLoop()
+                }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
                     consumePendingScrollCommandIfAvailable(proxy: proxy)
                 }
@@ -209,6 +224,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
         didRequestOlderItemsForCurrentTopReach = true
         onTopReached?()
+    }
+
+    private func reevaluateOlderItemsOnNextRunLoop() {
+        DispatchQueue.main.async {
+            requestOlderItemsIfNeeded()
+        }
     }
 
     private func consumePendingScrollCommandIfAvailable(proxy: ScrollViewProxy) {
