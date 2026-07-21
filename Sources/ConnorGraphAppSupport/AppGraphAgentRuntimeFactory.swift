@@ -602,18 +602,28 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     private func workspacePromptSection(_ workspace: ResolvedProjectWorkspace) -> String {
+        if workspace.primary.source == .processCurrentDirectory {
+            return """
+            <connor-session-workspace selected="false">
+            No user-selected working directory is active for this session. The process current directory is an internal runtime fallback only; it is not user authorization for local file access.
+
+            For requests to inspect, create, update, move, rename, or delete local files, do not call file or shell tools. End the current task and ask the user to select an appropriate working directory in the Composer first.
+            </connor-session-workspace>
+            """
+        }
+
         let currentDirectory = jsonQuoted(workspace.primary.path)
         let roots = workspace.roots.map { root in
             let marker = root.isPrimary ? " (current)" : ""
             return "- \(jsonQuoted(root.url.path))\(marker)"
         }.joined(separator: "\n")
         return """
-        <connor-session-workspace>
+        <connor-session-workspace selected="true">
         Current working directory: \(currentDirectory)
         User-authorized workspace roots:
         \(roots)
 
-        Resolve relative file and shell paths against the current working directory above. This runtime workspace is authoritative for the current turn; do not treat a working directory mentioned earlier in the conversation as current. Local file tools must reject paths outside the authorized roots.
+        Resolve relative file and shell paths against the current working directory above. This runtime workspace is authoritative for the current turn; do not treat a working directory mentioned earlier in the conversation as current. If a requested path is outside every authorized root, do not call local file or shell tools for it; end the current task and ask the user to select an appropriate working directory. Local file tools must reject paths outside the authorized roots.
         </connor-session-workspace>
         """
     }

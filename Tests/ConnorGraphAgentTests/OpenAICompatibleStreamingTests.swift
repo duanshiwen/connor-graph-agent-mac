@@ -110,7 +110,8 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
 
 @Test func openAICompatibleProviderStreamsToolCallArgumentsAndCompletedResponse() async throws {
     let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
-        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"graph_search\",\"arguments\":\"{\\\"query\\\":\"}}]}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"I should search \"}}]}\n",
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"the graph.\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"graph_search\",\"arguments\":\"{\\\"query\\\":\"}}]}}]}\n",
         "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"memory\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n",
         "data: [DONE]\n"
     ])
@@ -131,10 +132,13 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
 
     #expect(events.contains(.toolInputDelta(toolCallID: "call_1", name: "graph_search", partialJSON: "{\"query\":")))
     #expect(events.contains(.toolInputDelta(toolCallID: "call_1", name: "graph_search", partialJSON: "memory\"}")))
+    #expect(events.contains(.thinkingDelta("I should search ")))
+    #expect(events.contains(.thinkingDelta("the graph.")))
     let completed = try #require(events.compactMap { event -> AgentModelResponse? in
         if case .completed(let response) = event { return response }
         return nil
     }.last)
     #expect(completed.finishReason == .toolCalls)
     #expect(completed.toolCalls == [AgentToolCall(id: "call_1", name: "graph_search", argumentsJSON: "{\"query\":memory\"}")])
+    #expect(completed.providerMetadata?.reasoningContent == "I should search the graph.")
 }

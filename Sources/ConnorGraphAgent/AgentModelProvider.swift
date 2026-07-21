@@ -44,6 +44,7 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
     public var stopReason: String?
     public var responseID: String?
     public var reasoningEncryptedContentPresent: Bool
+    public var reasoningContent: String?
 
     public init(
         providerID: String,
@@ -52,7 +53,8 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
         rawContentBlocksJSON: String? = nil,
         stopReason: String? = nil,
         responseID: String? = nil,
-        reasoningEncryptedContentPresent: Bool = false
+        reasoningEncryptedContentPresent: Bool = false,
+        reasoningContent: String? = nil
     ) {
         self.providerID = providerID
         self.rawAssistantContentJSON = rawAssistantContentJSON
@@ -61,6 +63,7 @@ public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
         self.stopReason = stopReason
         self.responseID = responseID
         self.reasoningEncryptedContentPresent = reasoningEncryptedContentPresent
+        self.reasoningContent = reasoningContent
     }
 }
 

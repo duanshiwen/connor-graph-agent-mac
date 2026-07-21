@@ -39,6 +39,16 @@ import ConnorGraphAgent
     #expect(!prompt.contains("all requests containing the word note must avoid file tools"))
 }
 
+@Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Before reading, listing, searching, creating, updating, moving, renaming, or deleting local files"))
+    #expect(prompt.contains("no user-selected working directory is active"))
+    #expect(prompt.contains("尚未选择合适的工作目录。请先在 Composer 中选择工作目录后再试。"))
+    #expect(prompt.contains("outside every user-authorized workspace root"))
+    #expect(prompt.contains("They do not block reading attachment content already supplied"))
+}
+
 @Test func defaultSystemPromptProtectsInternalPromptsAndSecurityMechanisms() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

@@ -736,6 +736,13 @@ enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
         }
     }
 
+    var connectionNameComponent: String {
+        switch self {
+        case .openAICompatible: "OpenAI"
+        case .anthropicCompatible: "Anthropic"
+        }
+    }
+
     var modelValidationEndpointDescription: String {
         switch self {
         case .openAICompatible: "OpenAI 兼容连接测试"
@@ -784,7 +791,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen3-coder-plus", "qwen3-vl-plus", "qwen3-vl-flash", "qwen3-omni-flash", "qwen3-asr-flash", "qwen3-tts-flash", "qwen-image-plus", "qwen-image-edit"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-seed-1-6-vision", "doubao-seed-1-6-embedding", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2.6", supportedModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-8k-vision-preview", "moonshot-v1-32k-vision-preview", "moonshot-v1-128k-vision-preview"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-5.1", supportedModels: ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-airx", "glm-4-long", "glm-4-flashx-250414", "glm-4.7-flash", "glm-4.5-flash", "glm-4-flash-250414", "glm-4-plus", "glm-4-flash", "glm-z1-air", "glm-4.5v", "glm-5v-turbo", "glm-4.6v", "glm-ocr", "glm-realtime", "glm-4-voice", "glm-tts", "glm-tts-clone", "glm-asr-2512", "embedding-2"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-5.2", supportedModels: ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6", "glm-4.5-air", "glm-4.5-airx", "glm-4-long", "glm-4-flashx-250414", "glm-4-flash-250414", "glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flashx", "glm-4.1v-thinking-flash", "glm-4v-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, defaultVisionModels: ["glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flashx", "glm-4.1v-thinking-flash", "glm-4v-flash"]),
         AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M3", supportedModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "M2-her", "MiniMax-M1", "MiniMax-Text-01", "MiniMax-VL-01", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step3.7-flash", supportedModels: ["step3.7-flash", "step3.5-flash", "step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
@@ -1020,6 +1027,7 @@ struct AIConnectionSetupView: View {
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
     @State private var visionSupportOverride: Bool? = nil // nil = auto-detect, true = force enable, false = force disable
+    @State private var lastSuggestedConnectionName = ""
 
     var body: some View {
         ScrollView {
@@ -1046,6 +1054,8 @@ struct AIConnectionSetupView: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
         .onAppear(perform: initializeDrafts)
+        .onChange(of: baseURLString) { _, _ in refreshSuggestedConnectionName() }
+        .onChange(of: customProtocol) { _, _ in refreshSuggestedConnectionName() }
     }
 
     private var setupHero: some View {
@@ -1165,6 +1175,17 @@ struct AIConnectionSetupView: View {
                 .padding(.vertical, 22)
                 .frame(maxWidth: .infinity)
                 .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                aiConnectionCard {
+                    VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+                        aiConnectionSettingsRow(title: "模型", help: "远程模型目录不可用时使用；多个模型可用逗号分隔。") {
+                            aiConnectionTextField("gpt-4o-mini", text: $model)
+                        }
+                        aiConnectionSettingsRow(title: "默认模型", help: "新会话默认选择的模型。") {
+                            aiConnectionTextField("gpt-4o-mini", text: $selectedModel)
+                        }
+                    }
+                }
 
                 if didOpenBrowser {
                     Text("系统默认浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
@@ -1976,7 +1997,11 @@ struct AIConnectionSetupView: View {
     private func initializeDrafts() {
         guard connectionName.isEmpty else { return }
         baseURLString = option.baseURLString
-        connectionName = defaultDraftConnectionName(endpoint: option.baseURLString, fallback: option.connectionName)
+        setSuggestedConnectionName(
+            endpoint: option.baseURLString,
+            fallback: option.connectionName,
+            protocolName: optionProtocolNameComponent
+        )
         model = option.model
         selectedModel = option.selectedModel
         selectedModelIDs = Set(option.modelOptionsFallback)
@@ -1999,26 +2024,26 @@ struct AIConnectionSetupView: View {
     private func applyXiaomiMiMoConnectionMode() {
         guard isXiaomiMiMoOption else { return }
         baseURLString = xiaomiMiMoConnectionMode.openAIEndpoint
-        connectionName = defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
+        setSuggestedConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: AIConnectionCustomProtocol.openAICompatible.connectionNameComponent)
     }
 
     private func applySelectedProviderPreset() {
         let preset = activeProviderPreset
         if preset.id != "custom" {
             baseURLString = preset.endpoint
-            connectionName = defaultDraftConnectionName(endpoint: preset.endpoint, fallback: preset.title)
+            customProtocol = preset.protocolKind
+            setSuggestedConnectionName(endpoint: preset.endpoint, fallback: preset.title, protocolName: preset.protocolKind.connectionNameComponent)
             model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
             selectedModelIDs = Set(preset.availableModels)
-            customProtocol = preset.protocolKind
         } else {
             baseURLString = ""
-            connectionName = option.connectionName
             model = ""
             selectedModel = ""
             selectedModelIDs = []
             customProtocol = .openAICompatible
             shouldFetchModelsList = true
+            setSuggestedConnectionName(endpoint: "", fallback: option.connectionName, protocolName: customProtocol.connectionNameComponent)
         }
     }
 
@@ -2054,11 +2079,41 @@ struct AIConnectionSetupView: View {
     private func submittedConnectionNameForSubmit() -> String {
         let trimmedName = connectionName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedName.isEmpty { return trimmedName }
-        return defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
+        return defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: currentProtocolNameComponent)
     }
 
-    private func defaultDraftConnectionName(endpoint: String, fallback: String) -> String {
-        AppLLMEndpointDisplayName.defaultConnectionName(from: endpoint, fallback: fallback)
+    private var optionProtocolNameComponent: String {
+        switch option.providerMode {
+        case .openAIResponses: "OpenAI Responses"
+        case .openAICompatible: "OpenAI"
+        case .anthropicMessages: "Anthropic"
+        }
+    }
+
+    private var currentProtocolNameComponent: String {
+        if option.id == "china-provider" || option.id == "other-provider" {
+            return customProtocol.connectionNameComponent
+        }
+        return optionProtocolNameComponent
+    }
+
+    private func refreshSuggestedConnectionName() {
+        let suggested = defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: currentProtocolNameComponent)
+        let current = connectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty || current == lastSuggestedConnectionName {
+            connectionName = suggested
+        }
+        lastSuggestedConnectionName = suggested
+    }
+
+    private func setSuggestedConnectionName(endpoint: String, fallback: String, protocolName: String) {
+        let suggested = defaultDraftConnectionName(endpoint: endpoint, fallback: fallback, protocolName: protocolName)
+        connectionName = suggested
+        lastSuggestedConnectionName = suggested
+    }
+
+    private func defaultDraftConnectionName(endpoint: String, fallback: String, protocolName: String) -> String {
+        AppLLMEndpointDisplayName.defaultConnectionName(from: endpoint, fallback: fallback, protocolName: protocolName)
     }
 
     private func effectiveModelListForSubmit() -> String {

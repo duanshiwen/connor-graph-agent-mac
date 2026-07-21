@@ -22,6 +22,7 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
           "message": {
             "role": "assistant",
             "content": null,
+            "reasoning_content": "I should search the graph before answering.",
             "tool_calls": [
               {
                 "id": "call-1",
@@ -58,6 +59,8 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(response.toolCalls.map(\.name) == ["graph_search"])
     #expect(response.toolCalls.first?.argumentsJSON.contains("memory") == true)
     #expect(response.usage?.totalTokens == 17)
+    #expect(response.providerMetadata?.providerID == "openai-compatible")
+    #expect(response.providerMetadata?.reasoningContent == "I should search the graph before answering.")
     let captured = try #require(client.storage.capturedBody)
     let requestText = String(data: captured, encoding: .utf8) ?? ""
     #expect(requestText.contains("tools"))
@@ -223,7 +226,11 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
         AgentModelMessage(
             role: .assistant,
             content: "",
-            toolCalls: [AgentToolCall(id: "call-1", name: "graph_search", argumentsJSON: #"{"query":"memory"}"#)]
+            toolCalls: [AgentToolCall(id: "call-1", name: "graph_search", argumentsJSON: #"{"query":"memory"}"#)],
+            providerMetadata: AgentModelProviderMetadata(
+                providerID: "openai-compatible",
+                reasoningContent: "I need the graph result before answering."
+            )
         ),
         AgentModelMessage(role: .tool, content: #"{"hits":[]}"#, toolCallID: "call-1", name: "graph_search")
     ]))
@@ -232,6 +239,7 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
     let messages = try #require(object["messages"] as? [[String: Any]])
     let assistant = try #require(messages.first(where: { $0["role"] as? String == "assistant" }))
+    #expect(assistant["reasoning_content"] as? String == "I need the graph result before answering.")
     let toolCalls = try #require(assistant["tool_calls"] as? [[String: Any]])
     #expect(toolCalls.first?["id"] as? String == "call-1")
     let function = try #require(toolCalls.first?["function"] as? [String: Any])
