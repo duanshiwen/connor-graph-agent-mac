@@ -3,6 +3,32 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphStore
 
+@Test func memoryOSRetrievalDefaultsToDepthOneAndAllowsConfiguredDepthSix() {
+    #expect(MemoryOSRetrievalQuery(text: "memory").depth == 1)
+    #expect(MemoryOSGraphExpansionPolicy(maxDepth: 6).maxDepth == 6)
+}
+
+@Test func memoryOSRetrievalSortsByEffectiveTimeThenScoreAndStableID() {
+    let hits = [
+        MemoryOSRetrievalHit(layer: .l2, recordID: "missing", title: "missing", score: 100),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "b", title: "b", score: 2, metadata: ["effective_updated_at": "2026-07-20T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "a", title: "a", score: 2, metadata: ["effective_updated_at": "2026-07-20T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "older", title: "older", score: 50, metadata: ["effective_updated_at": "2026-07-19T10:00:00Z"]),
+        MemoryOSRetrievalHit(layer: .l2, recordID: "higher", title: "higher", score: 3, metadata: ["effective_updated_at": "2026-07-20T10:00:00Z"])
+    ]
+
+    let sorted = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
+
+    #expect(sorted.map(\.recordID) == ["higher", "a", "b", "older", "missing"])
+}
+
+@Test func memoryOSRetrievalExposesTemporalStatusSemantics() {
+    let conflicted = MemoryOSRetrievalHit(layer: .l3, recordID: "conflict", title: "conflict", metadata: ["status": "conflicted"])
+    let unspecified = MemoryOSRetrievalHit(layer: .l3, recordID: "active", title: "active")
+    #expect(conflicted.temporalStatus == .conflicted)
+    #expect(unspecified.temporalStatus == .active)
+}
+
 @Test func memoryOSUnifiedRetrievalSearchesAcrossAllLayersAndRanksHits() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
     try store.migrate()
@@ -50,6 +76,23 @@ import ConnorGraphStore
     #expect(expansion.first?.recordID == "relation-2")
     #expect((expansion.first?.score ?? 0) > (expansion.first(where: { $0.recordID == "relation-1" })?.score ?? 0))
     #expect(expansion.first(where: { $0.recordID == "relation-1" })?.updatedAt == iso8601(now))
+}
+
+@Test func memoryOSL4ExpansionPreservesCompletePathOrderAtIndirectDepth() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 4_500)
+    for index in 0...2 {
+        try store.upsert(entity: MemoryOSEntity(id: "path-entity-\(index)", stableKey: "path:\(index)", entityType: "concept", name: index == 0 ? "Path Seed" : "Path Entity \(index)", confidence: 0.9))
+    }
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "path-edge-1", entityID: "path-entity-0", predicate: .dependsOn, objectEntityID: "path-entity-1", text: "Path Seed depends on Path Entity 1.", assertionKind: .summarized, confidence: 0.9, validAt: now, committedAt: now))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "path-edge-2", entityID: "path-entity-1", predicate: .dependsOn, objectEntityID: "path-entity-2", text: "Path Entity 1 depends on Path Entity 2.", assertionKind: .summarized, confidence: 0.9, validAt: now, committedAt: now))
+
+    let expansion = try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityName: "Path Seed", depth: 2, limit: 10)
+    let indirect = try #require(expansion.first { $0.recordID == "path-edge-2" })
+
+    #expect(indirect.depth == 2)
+    #expect(indirect.pathRecordIDs == ["path-edge-1", "path-edge-2"])
 }
 
 @Test func memoryOSUnifiedRetrievalReturnsUpdatedAtForL4StatementHits() throws {

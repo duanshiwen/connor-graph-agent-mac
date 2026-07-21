@@ -189,7 +189,7 @@ public struct MemoryOSGraphExpansionPolicy: Sendable, Codable, Equatable {
         expansionStrategy: MemoryOSGraphExpansionStrategy = .mixed
     ) {
         self.enabled = enabled
-        self.maxDepth = max(0, min(maxDepth, 5))
+        self.maxDepth = max(0, maxDepth)
         self.maxEdgesPerSeed = max(0, maxEdgesPerSeed)
         self.allowedPredicates = allowedPredicates
         self.blockedPredicates = blockedPredicates

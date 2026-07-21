@@ -207,7 +207,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
         }
         let text = try parseResponse(response.body)
-        return LLMResponse(text: text, citations: context.items.map(\.sourceID))
+        return LLMResponse(text: text, citations: [])
     }
 
     public func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
@@ -329,7 +329,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             model: config.requestModel,
             messages: [
                 OpenAIChatMessage(role: "system", content: systemPrompt),
-                OpenAIChatMessage(role: "user", content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+                OpenAIChatMessage(role: "user", content: "Question:\n\(prompt)")
             ],
             temperature: 0.2,
             reasoningEffort: config.reasoningEffort

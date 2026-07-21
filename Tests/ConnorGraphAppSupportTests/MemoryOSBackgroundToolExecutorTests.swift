@@ -75,9 +75,54 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(!recent.contentText.contains("durable semantics"))
         #expect(knowledge.contentText.contains("durable semantics"))
         #expect(!knowledge.contentText.contains("currently active"))
+        let recentResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(recent.contentJSON.utf8))
+        #expect(recentResponse.requestedLimit == 10)
+        #expect(recentResponse.records.contains { $0.recordID == "status" && $0.layer == "L2" })
+        #expect(recent.citations.contains("status"))
+        #expect(recentResponse.hasMore == nil)
+        #expect(recentResponse.partial == false)
         #expect(throws: MemoryOSBackgroundToolExecutionError.self) {
             try executor.execute(MemoryOSBackgroundToolCall(id: "legacy", name: "memory_os_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
         }
+    }
+
+    @Test func contextLimitExpansionReturnsOnlyNewStructuredRecordsWithinRun() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 3_000)
+        for index in 0..<6 {
+            try store.upsert(belief: MemoryOSBelief(
+                id: "belief-\(index)",
+                statement: "Incremental protocol evidence \(index)",
+                domain: "reliability",
+                relatedObjectNames: "Incremental protocol",
+                createdAt: now.addingTimeInterval(Double(index)),
+                updatedAt: now.addingTimeInterval(Double(index))
+            ))
+        }
+        let executor = MemoryOSBackgroundToolExecutor(
+            facade: AppMemoryOSFacade(store: store),
+            contextToolConfiguration: .init(minimumResultLimit: 2, defaultResultLimit: 2, maxDepth: 4)
+        )
+        let context = MemoryOSBackgroundToolExecutionContext(runID: "incremental-run", iteration: 1)
+
+        let first = try executor.execute(
+            .init(id: "first", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Incremental protocol","limit":2}"#),
+            context: context
+        )
+        let expanded = try executor.execute(
+            .init(id: "expanded", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Incremental protocol","limit":5}"#),
+            context: context
+        )
+        let firstResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(first.contentJSON.utf8))
+        let expandedResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(expanded.contentJSON.utf8))
+
+        #expect(firstResponse.returnedCount == 2)
+        #expect(firstResponse.cumulativeReturnedCount == 2)
+        #expect(expandedResponse.returnedCount == 3)
+        #expect(expandedResponse.cumulativeReturnedCount == 5)
+        #expect(Set(firstResponse.records.map(\.recordID)).isDisjoint(with: expandedResponse.records.map(\.recordID)))
+        #expect(expandedResponse.records.allSatisfy { $0.depth == 0 && $0.status == "active" })
     }
 
     @Test func l2UpdateToolAcceptsStatementStringShorthandInBackgroundExecutor() throws {

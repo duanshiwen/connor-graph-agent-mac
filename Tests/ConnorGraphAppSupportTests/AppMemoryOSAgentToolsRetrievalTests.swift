@@ -42,17 +42,16 @@ import ConnorGraphAppSupport
     let knowledgeResult = try await MemoryOSKnowledgeContextTool(facade: facade).execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS;reusable knowledge"}"#), context: memoryOSToolContext())
 
     #expect(recentResult.toolName == "memory_os_recent_context")
-    #expect(recentResult.contentText.contains("operational context"))
-    let recentItems = try JSONDecoder().decode([String].self, from: Data(try #require(recentResult.contentJSON).utf8))
-    #expect(recentItems.contains { $0.contains("currently splitting retrieval tools") })
-    #expect(!recentItems.contains { $0.contains("reusable knowledge") })
+    let recentPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(recentResult.contentJSON).utf8))
+    #expect(recentPayload.records.contains { $0.text.contains("currently splitting retrieval tools") })
+    #expect(!recentPayload.records.contains { $0.text.contains("reusable knowledge") })
+    #expect(recentPayload.records.allSatisfy { !$0.recordID.isEmpty && ["L1", "L2"].contains($0.layer) })
 
     #expect(knowledgeResult.toolName == "memory_os_knowledge_context")
-    #expect(knowledgeResult.contentText.contains("knowledge context"))
-    let knowledgeItems = try JSONDecoder().decode([String].self, from: Data(try #require(knowledgeResult.contentJSON).utf8))
-    #expect(knowledgeItems.contains { $0.contains("reusable knowledge") })
-    #expect(knowledgeItems.contains { $0.contains("L4 Stable Entity Layer") })
-    #expect(!knowledgeItems.contains { $0.contains("currently splitting retrieval tools") })
+    let knowledgePayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(knowledgeResult.contentJSON).utf8))
+    #expect(knowledgePayload.records.contains { $0.text.contains("reusable knowledge") })
+    #expect(knowledgePayload.records.contains { $0.text.contains("L4 Stable Entity Layer") })
+    #expect(!knowledgePayload.records.contains { $0.text.contains("currently splitting retrieval tools") })
 }
 
 @Test func memoryOSRecentContextToolAcceptsMixedLLMQuerySeparators() async throws {
@@ -75,10 +74,68 @@ import ConnorGraphAppSupport
         arguments: AgentToolArguments(json: #"{"query":"Annie,朋友|friend"}"#),
         context: memoryOSToolContext()
     )
-    let items = try JSONDecoder().decode([String].self, from: Data(try #require(result.contentJSON).utf8))
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
 
-    #expect(result.contentText.contains("for 3 search term(s): Annie, 朋友, friend"))
-    #expect(items.contains { $0.contains("Annie received the product invitation") })
+    #expect(payload.query == "Annie 朋友 friend")
+    #expect(payload.records.contains { $0.text.contains("Annie received the product invitation") })
+}
+
+@Test func memoryOSRecentContextLimitExpansionReturnsOnlyIncrementalRecords() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 13_000)
+    for index in 0..<35 {
+        let nodeID = "incremental-node-\(index)"
+        try store.upsert(node: MemoryOSNode(id: nodeID, stableKey: nodeID, nodeType: "project", name: "Incremental Project \(index)"))
+        try store.upsert(statement: MemoryOSStatement(id: "incremental-statement-\(index)", subjectID: nodeID, predicate: "status", text: "Incremental memory result \(index).", confidence: 0.9, validAt: now.addingTimeInterval(Double(index)), committedAt: now.addingTimeInterval(Double(index)), evidenceSpanIDs: []))
+    }
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
+    let context = memoryOSToolContext()
+
+    let first = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Incremental memory","limit":10}"#), context: context)
+    let expanded = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Incremental memory","limit":30}"#), context: context)
+    let firstPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(first.contentJSON).utf8))
+    let expandedPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(expanded.contentJSON).utf8))
+
+    #expect(firstPayload.requestedLimit == 10)
+    #expect(firstPayload.returnedCount == 10)
+    #expect(expandedPayload.requestedLimit == 30)
+    #expect(expandedPayload.returnedCount == 20)
+    #expect(expandedPayload.cumulativeReturnedCount == 30)
+    #expect(Set(firstPayload.records.map(\.recordID)).isDisjoint(with: Set(expandedPayload.records.map(\.recordID))))
+    #expect(firstPayload.hasMore == true)
+    #expect(!firstPayload.partial && !expandedPayload.partial)
+}
+
+@Test func memoryOSContextToolsClampLimitAndDepthFromConfiguration() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let config = MemoryOSContextToolConfiguration(minimumResultLimit: 12, defaultResultLimit: 15, maxDepth: 4)
+    let tool = MemoryOSKnowledgeContextTool(facade: AppMemoryOSFacade(store: store), configuration: config)
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"missing memory","limit":1,"depth":99}"#), context: memoryOSToolContext())
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
+    #expect(payload.requestedLimit == 12)
+    #expect(payload.returnedCount == 0)
+    #expect(payload.hasMore == nil)
+    #expect(!payload.partial)
+}
+
+@Test func memoryOSContextCapacityDropsWholeRecordsAndMarksPartial() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let node = MemoryOSNode(id: "capacity-node", stableKey: "capacity-node", nodeType: "project", name: "Capacity")
+    try store.upsert(node: node)
+    try store.upsert(statement: MemoryOSStatement(id: "capacity-record", subjectID: node.id, predicate: "detail", text: "Capacity " + String(repeating: "complete-record-content ", count: 200), confidence: 0.9, evidenceSpanIDs: []))
+    let config = MemoryOSContextToolConfiguration(maxResponseCharacters: 1_024)
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store), configuration: config)
+
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Capacity complete record"}"#), context: memoryOSToolContext())
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
+
+    #expect(payload.records.isEmpty)
+    #expect(payload.partial)
+    #expect(payload.hasMore == true)
+    #expect(!result.contentText.contains("complete-record-content"))
 }
 
 @Test func memoryOSGetCurrentUserProfileToolAggregatesCurrentUserHitsWithoutNameCoupling() async throws {
@@ -96,13 +153,12 @@ import ConnorGraphAppSupport
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
-    let lines = try JSONDecoder().decode([String].self, from: Data(json.utf8))
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(json.utf8))
     #expect(result.toolName == "memory_os_get_current_user_profile")
-    #expect(result.contentText.contains("current_user profile"))
-    #expect(lines.contains { $0.contains("structured architectural explanations") })
-    #expect(lines.contains { $0.contains("structured architectural explanations") && $0.contains("(updated_at: \(iso8601(now)))") })
-    #expect(lines.contains { $0.contains("phase-by-phase execution updates") })
-    #expect(lines.contains { $0.contains("phase-by-phase execution updates") && $0.contains("(updated_at: \(iso8601(now)))") })
+    #expect(payload.query == "current_user profile")
+    #expect(payload.records.contains { $0.text.contains("structured architectural explanations") && $0.updatedAt == iso8601(now) })
+    #expect(payload.records.contains { $0.text.contains("phase-by-phase execution updates") && $0.updatedAt == iso8601(now) })
+    #expect(Set(result.citations) == Set(payload.records.map(\.recordID)))
     #expect(!json.contains("shiwen"))
 }
 
@@ -154,9 +210,9 @@ import ConnorGraphAppSupport
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
-    let lines = try JSONDecoder().decode([String].self, from: Data(json.utf8))
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(json.utf8))
     #expect(result.toolName == "memory_os_get_current_user_profile")
-    #expect(lines.isEmpty)
+    #expect(payload.records.isEmpty)
     #expect(!json.contains("wikidata-user"))
     #expect(!json.contains("communication user"))
     #expect(!json.contains("使用电脑或网络服务的人"))

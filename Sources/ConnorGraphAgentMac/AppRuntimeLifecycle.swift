@@ -1779,12 +1779,12 @@ final class AppRuntimeLifecycle {
 
     private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
         let provider = try sessionAgentModelProvider(sessionID: sessionID)
-        return AnyLLMProvider { prompt, context in
+        return AnyLLMProvider { prompt, _ in
             let response = try await provider.complete(AgentModelRequest(messages: [
                 AgentModelMessage(role: .system, content: AgentInstructionSection.defaultConnorInstruction),
-                AgentModelMessage(role: .user, content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+                AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
             ]))
-            return LLMResponse(text: response.text ?? "", citations: context.items.map(\.sourceID))
+            return LLMResponse(text: response.text ?? "", citations: [])
         }
     }
 
