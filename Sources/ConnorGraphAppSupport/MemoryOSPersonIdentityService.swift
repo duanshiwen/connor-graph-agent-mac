@@ -112,6 +112,40 @@ public struct MemoryOSPersonIdentityService: Sendable {
         return lines
     }
 
+    public func currentUserProfileHits(store: SQLiteMemoryOSStore) throws -> [MemoryOSRetrievalHit] {
+        guard let anchor = try resolveCurrentUserAnchor(store: store) else { return [] }
+        let formatter = ISO8601DateFormatter()
+        let l4 = try loadEntityStatements(store: store, entityID: anchor.id).map { statement in
+            let updatedAt = formatter.string(from: statement.committedAt)
+            return MemoryOSRetrievalHit(
+                layer: .l4,
+                recordID: statement.id,
+                title: statement.predicate.rawValue,
+                summary: statement.text,
+                matchedText: statement.text,
+                score: 1,
+                evidenceRefs: statement.evidenceSpanIDs,
+                entityRefs: [statement.entityID] + [statement.objectEntityID].compactMap { $0 },
+                metadata: ["updated_at": updatedAt, "effective_updated_at": updatedAt, "confidence": String(statement.confidence), "status": statement.metadata["status"] ?? MemoryOSRecordTemporalStatus.active.rawValue]
+            )
+        }
+        let l2 = try loadCurrentUserL2Statements(store: store, anchor: anchor).map { statement in
+            let updatedAt = formatter.string(from: statement.committedAt)
+            return MemoryOSRetrievalHit(
+                layer: .l2,
+                recordID: statement.id,
+                title: statement.predicate,
+                summary: statement.text,
+                matchedText: statement.text,
+                score: 1,
+                evidenceRefs: statement.evidenceSpanIDs,
+                entityRefs: [statement.subjectID] + [statement.objectID].compactMap { $0 },
+                metadata: ["updated_at": updatedAt, "effective_updated_at": updatedAt, "confidence": String(statement.confidence), "status": statement.metadata["status"] ?? MemoryOSRecordTemporalStatus.active.rawValue]
+            )
+        }
+        return (l4 + l2).sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
+    }
+
     private func appendUpdatedAtSuffix(_ text: String, updatedAt: Date) -> String {
         guard !text.contains("(updated_at:") else { return text }
         return "\(text) (updated_at: \(ISO8601DateFormatter().string(from: updatedAt)))"

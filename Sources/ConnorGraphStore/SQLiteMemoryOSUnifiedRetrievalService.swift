@@ -82,8 +82,9 @@ public struct MemoryOSL4ExpansionHit: Sendable, Codable, Equatable, Identifiable
     public var depth: Int
     public var score: Double
     public var updatedAt: String?
+    public var pathRecordIDs: [String]
 
-    public init(recordID: String, sourceEntityID: String, relatedEntityID: String?, predicate: String, text: String, depth: Int, score: Double = 1.0, updatedAt: String? = nil) {
+    public init(recordID: String, sourceEntityID: String, relatedEntityID: String?, predicate: String, text: String, depth: Int, score: Double = 1.0, updatedAt: String? = nil, pathRecordIDs: [String] = []) {
         self.recordID = recordID
         self.sourceEntityID = sourceEntityID
         self.relatedEntityID = relatedEntityID
@@ -92,6 +93,7 @@ public struct MemoryOSL4ExpansionHit: Sendable, Codable, Equatable, Identifiable
         self.depth = depth
         self.score = score
         self.updatedAt = updatedAt
+        self.pathRecordIDs = pathRecordIDs.isEmpty ? [recordID] : pathRecordIDs
     }
 }
 
@@ -172,6 +174,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         var results: [MemoryOSL4ExpansionHit] = []
         var frontier: Set<String> = [entityID]
         var visited: Set<String> = [entityID]
+        var pathByEntity: [String: [String]] = [entityID: []]
 
         for currentDepth in 1...depth {
             guard !frontier.isEmpty, results.count < limit else { break }
@@ -187,12 +190,15 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             for row in rows {
                 let source = row[1]
                 let object = row[3].isEmpty ? nil : row[3]
-                let related = source == entityID || frontier.contains(source) ? object : source
+                let baseEntity = frontier.contains(source) ? source : (object.flatMap { frontier.contains($0) ? $0 : nil } ?? source)
+                let related = baseEntity == source ? object : source
                 let score = l4ExpansionScore(predicate: row[2], depth: currentDepth)
-                results.append(MemoryOSL4ExpansionHit(recordID: row[0], sourceEntityID: source, relatedEntityID: related, predicate: row[2], text: row[4], depth: currentDepth, score: score, updatedAt: firstNonEmpty(row[5], row[6])))
+                let path = (pathByEntity[baseEntity] ?? []) + [row[0]]
+                results.append(MemoryOSL4ExpansionHit(recordID: row[0], sourceEntityID: source, relatedEntityID: related, predicate: row[2], text: row[4], depth: currentDepth, score: score, updatedAt: firstNonEmpty(row[5], row[6]), pathRecordIDs: path))
                 if let related, !visited.contains(related) {
                     visited.insert(related)
                     nextFrontier.insert(related)
+                    pathByEntity[related] = path
                 }
             }
             frontier = nextFrontier

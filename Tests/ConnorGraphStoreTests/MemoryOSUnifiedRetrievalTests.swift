@@ -78,6 +78,23 @@ import ConnorGraphStore
     #expect(expansion.first(where: { $0.recordID == "relation-1" })?.updatedAt == iso8601(now))
 }
 
+@Test func memoryOSL4ExpansionPreservesCompletePathOrderAtIndirectDepth() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 4_500)
+    for index in 0...2 {
+        try store.upsert(entity: MemoryOSEntity(id: "path-entity-\(index)", stableKey: "path:\(index)", entityType: "concept", name: index == 0 ? "Path Seed" : "Path Entity \(index)", confidence: 0.9))
+    }
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "path-edge-1", entityID: "path-entity-0", predicate: .dependsOn, objectEntityID: "path-entity-1", text: "Path Seed depends on Path Entity 1.", assertionKind: .summarized, confidence: 0.9, validAt: now, committedAt: now))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "path-edge-2", entityID: "path-entity-1", predicate: .dependsOn, objectEntityID: "path-entity-2", text: "Path Entity 1 depends on Path Entity 2.", assertionKind: .summarized, confidence: 0.9, validAt: now, committedAt: now))
+
+    let expansion = try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityName: "Path Seed", depth: 2, limit: 10)
+    let indirect = try #require(expansion.first { $0.recordID == "path-edge-2" })
+
+    #expect(indirect.depth == 2)
+    #expect(indirect.pathRecordIDs == ["path-edge-1", "path-edge-2"])
+}
+
 @Test func memoryOSUnifiedRetrievalReturnsUpdatedAtForL4StatementHits() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
     try store.migrate()

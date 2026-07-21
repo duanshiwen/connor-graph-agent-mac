@@ -282,6 +282,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return try MemoryOSPersonIdentityService().currentUserProfileContext(store: store, now: now)
     }
 
+    public func currentUserProfileHits() throws -> [MemoryOSRetrievalHit] {
+        try MemoryOSPersonIdentityService().currentUserProfileHits(store: store)
+    }
+
     public func expandMemoryOSL4(entityName: String, depth: Int = 5, limit: Int = 200) throws -> [MemoryOSL4ExpansionHit] {
         try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityName: entityName, depth: depth, limit: limit)
     }
