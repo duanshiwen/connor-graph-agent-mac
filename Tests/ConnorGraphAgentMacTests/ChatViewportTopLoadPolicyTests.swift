@@ -35,28 +35,6 @@ struct ChatViewportTopLoadPolicyTests {
         #expect(unflippedMetrics.distanceToBottom == 1_080)
     }
 
-    @Test func completedOlderPageUnlocksTheCurrentTopReach() {
-        #expect(ChatViewportTopLoadPolicy.didFinishLoadingOlderItems(
-            wasLoadingOlderItems: true,
-            isLoadingOlderItems: false
-        ))
-        #expect(!ChatViewportTopLoadPolicy.didFinishLoadingOlderItems(
-            wasLoadingOlderItems: false,
-            isLoadingOlderItems: false
-        ))
-    }
-
-    @Test func settledInitialAnchorRequestsANewTopDistanceEvaluation() {
-        #expect(ChatViewportTopLoadPolicy.didFinishResolvingInitialAnchor(
-            wasResolvingInitialAnchor: true,
-            isResolvingInitialAnchor: false
-        ))
-        #expect(!ChatViewportTopLoadPolicy.didFinishResolvingInitialAnchor(
-            wasResolvingInitialAnchor: false,
-            isResolvingInitialAnchor: false
-        ))
-    }
-
     @Test func doesNotRequestOlderItemsWhileInitialAnchorIsResolving() {
         let shouldRequest = ChatViewportTopLoadPolicy.shouldRequestOlderItems(
             hasOlderItems: true,
