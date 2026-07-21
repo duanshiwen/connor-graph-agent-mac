@@ -87,6 +87,78 @@ struct ChatSessionRuntimeCoordinatorTests {
         #expect(!coordinator.begin(sessionID: "session", backend: backend))
     }
 
+    @Test func completedRunDoesNotRestoreManagerReplacedDuringSubmission() throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let completedSession = AgentSession(
+            id: "session",
+            messages: [AgentMessage(role: .assistant, content: "completed")]
+        )
+        let submittedManager = NativeSessionManager(
+            backend: CoordinatorTestBackend(),
+            sessionRepository: fixture.repository,
+            session: completedSession,
+            permissionMode: .askToWrite
+        )
+        let replacementManager = NativeSessionManager(
+            backend: CoordinatorTestBackend(),
+            sessionRepository: fixture.repository,
+            session: AgentSession(id: "session"),
+            permissionMode: .trustedWrite
+        )
+        let model = ChatRunModel()
+        let coordinator = ChatRunCoordinator(model: model, fallbackSession: completedSession)
+        coordinator.installManager(submittedManager)
+        let submittedRevision = coordinator.managerRevision
+        coordinator.installManager(replacementManager)
+
+        let restored = coordinator.applyCompletedRun(
+            manager: submittedManager,
+            session: completedSession,
+            summary: nil,
+            submittedManagerRevision: submittedRevision
+        )
+
+        #expect(!restored)
+        #expect(coordinator.manager?.permissionMode == .trustedWrite)
+        #expect(model.transcript.map(\.content) == ["completed"])
+    }
+
+    @Test func failedRunDoesNotRestoreManagerReplacedDuringSubmission() throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanup() }
+        let session = AgentSession(id: "session")
+        let submittedManager = NativeSessionManager(
+            backend: CoordinatorTestBackend(),
+            sessionRepository: fixture.repository,
+            session: session,
+            permissionMode: .askToWrite
+        )
+        let replacementManager = NativeSessionManager(
+            backend: CoordinatorTestBackend(),
+            sessionRepository: fixture.repository,
+            session: session,
+            permissionMode: .trustedWrite
+        )
+        let recoveredTranscript = [AgentMessage(role: .user, content: "recover me")]
+        let model = ChatRunModel()
+        let coordinator = ChatRunCoordinator(model: model, fallbackSession: session)
+        coordinator.installManager(submittedManager)
+        let submittedRevision = coordinator.managerRevision
+        coordinator.installManager(replacementManager)
+
+        let restored = coordinator.applyRecoveredRun(
+            manager: submittedManager,
+            session: session,
+            transcript: recoveredTranscript,
+            submittedManagerRevision: submittedRevision
+        )
+
+        #expect(!restored)
+        #expect(coordinator.manager?.permissionMode == .trustedWrite)
+        #expect(model.transcript.map(\.content) == ["recover me"])
+    }
+
     @Test func composerCoordinatorPreservesLiveDraftAndConsumesSubmissionState() {
         let model = ChatComposerModel()
         let coordinator = ChatComposerCoordinator(model: model, storagePaths: nil)
