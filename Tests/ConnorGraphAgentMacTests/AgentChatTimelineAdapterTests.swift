@@ -108,6 +108,27 @@ struct AgentChatTimelineAdapterTests {
         #expect(items.filter { $0.timelineItem != nil }.map(\.id) == timeline.map(\.id))
     }
 
+    @Test func prependAnchorUsesStableMessageInsteadOfLeadingDecorations() {
+        let calendar = fixedCalendar()
+        let now = date(year: 2026, month: 6, day: 25, hour: 20, calendar: calendar)
+        let timeline = AgentChatTurnTimelineItem.items(
+            messages: sampleMessages(),
+            lastContext: nil,
+            isSubmitting: false,
+            now: now,
+            calendar: calendar
+        )
+        let items = AgentChatTimelineAdapter().items(
+            from: timeline,
+            insertsDateSeparators: true,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(items.first?.kind == .dateSeparator)
+        #expect(AgentChatTimelineAdapter().prependAnchorItemID(in: items) == "user-1")
+    }
+
     private func sampleMessages() -> [AgentMessage] {
         [
             AgentMessage(id: "user-1", role: .user, content: "你好", createdAt: Date(timeIntervalSince1970: 100)),
