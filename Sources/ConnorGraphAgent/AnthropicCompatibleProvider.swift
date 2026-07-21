@@ -140,10 +140,10 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
     public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
         let response = try await complete(AgentModelRequest(messages: [
             AgentModelMessage(role: .system, content: AgentInstructionSection.defaultConnorInstruction),
-            AgentModelMessage(role: .user, content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+            AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
         ]))
         guard let text = response.text, !text.isEmpty else { throw AnthropicCompatibleProviderError.missingAssistantMessage }
-        return LLMResponse(text: text, citations: context.items.map(\.sourceID))
+        return LLMResponse(text: text, citations: [])
     }
 
     private static var visionDegradationWarning: String { "⚠️ 当前模型不支持图片输入，已自动发送文字内容。图片内容已忽略。" }
