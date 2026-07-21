@@ -171,6 +171,9 @@ struct WorkspaceFileTreePaneView: View {
                     .font(AppListTypography.rowTitle)
                     .lineLimit(1)
                     .foregroundStyle(node.isHidden ? .secondary : .primary)
+                if let status = model.gitStatus(for: node) {
+                    gitStatusBadge(status)
+                }
                 Spacer(minLength: 0)
             }
             .workspaceTreeRowSurface(isSelected: model.selectedNodeID == node.id, depth: depth)
@@ -178,6 +181,15 @@ struct WorkspaceFileTreePaneView: View {
         .buttonStyle(.plain)
         .help(node.relativePath)
         .accessibilityLabel(node.name)
+    }
+
+    private func gitStatusBadge(_ status: WorkspaceGitFileStatus) -> some View {
+        Text(status == .added ? "A" : "M")
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(status == .added ? Color.green : Color.orange)
+            .frame(width: 14, height: 14)
+            .help(status == .added ? "Git 新增文件" : "Git 已更改文件")
+            .accessibilityLabel(status == .added ? "Git 新增文件" : "Git 已更改文件")
     }
 
     private func disclosureIcon(isExpanded: Bool) -> some View {

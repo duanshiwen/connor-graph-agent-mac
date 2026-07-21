@@ -4,6 +4,18 @@ import Testing
 
 @Suite("Workspace Directory Loader")
 struct WorkspaceDirectoryLoaderTests {
+    @Test("Parses added and modified Git files")
+    func parsesGitStatuses() {
+        let root = URL(fileURLWithPath: "/tmp/workspace-git-status", isDirectory: true)
+        let data = Data("?? New.swift\0 M Changed.swift\0A  Staged.swift\0".utf8)
+
+        let statuses = WorkspaceGitStatusLoader.parsePorcelainV1Z(data, repositoryRootURL: root)
+
+        #expect(statuses[root.appendingPathComponent("New.swift").path] == .added)
+        #expect(statuses[root.appendingPathComponent("Changed.swift").path] == .modified)
+        #expect(statuses[root.appendingPathComponent("Staged.swift").path] == .added)
+    }
+
     @Test("Loads only direct children with stable ordering")
     func loadsDirectChildren() async throws {
         let root = try temporaryDirectory()

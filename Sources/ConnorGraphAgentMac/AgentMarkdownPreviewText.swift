@@ -26,34 +26,50 @@ struct AgentMarkdownPreviewText: View {
     var lineLimit: Int? = nil
     var maxRenderedBlocks: Int? = nil
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
+    @State private var loadedDocument: AgentMarkdownCompiledDocument?
 
-    @MainActor
-    private final class RenderCache {
+    private final class RenderCache: @unchecked Sendable {
         static let shared = RenderCache()
         private let documentCache = AgentMarkdownCompiledDocumentCache(limit: 600)
 
-        func document(_ markdown: String) -> AgentMarkdownCompiledDocument {
-            documentCache.document(for: markdown)
+        func document(
+            _ markdown: String,
+            persistentCacheContext: AgentMarkdownPersistentCacheContext?
+        ) -> AgentMarkdownCompiledDocument {
+            documentCache.document(
+                for: markdown,
+                loadBlocks: { source in
+                    guard let persistentCacheContext else { return nil }
+                    return try? persistentCacheContext.store.loadBlocks(
+                        sessionID: persistentCacheContext.sessionID,
+                        messageID: persistentCacheContext.messageID,
+                        content: source
+                    )
+                },
+                persistBlocks: { source, blocks in
+                    guard let persistentCacheContext else { return }
+                    try? persistentCacheContext.store.saveBlocks(
+                        sessionID: persistentCacheContext.sessionID,
+                        messageID: persistentCacheContext.messageID,
+                        content: source,
+                        blocks: blocks
+                    )
+                }
+            )
         }
     }
 
-    private var compiledDocument: AgentMarkdownCompiledDocument {
-        RenderCache.shared.document(markdown)
+    private var documentLoadID: String {
+        let contentID = AgentMarkdownDocumentCompiler.stableFingerprint(markdown)
+        guard let persistentCacheContext else { return contentID }
+        return "\(persistentCacheContext.sessionID)|\(persistentCacheContext.messageID)|\(contentID)"
     }
 
-    private var renderWindow: AgentMarkdownCompiledRenderWindow {
+    private func renderWindow(for document: AgentMarkdownCompiledDocument) -> AgentMarkdownCompiledRenderWindow {
         AgentMarkdownCompiledRenderWindowPolicy().window(
-            for: compiledDocument,
+            for: document,
             maxRenderedBlocks: maxRenderedBlocks
         )
-    }
-
-    private var compiledInlineRendered: AttributedString {
-        if let block = compiledDocument.blocks.first,
-           case .paragraph(_, let inline) = block.content {
-            return inline
-        }
-        return lightweightInlineRendered
     }
 
     private var lightweightInlineRendered: AttributedString {
@@ -76,45 +92,73 @@ struct AgentMarkdownPreviewText: View {
 
     @ViewBuilder
     var body: some View {
-        switch renderStrategy {
-        case .inlineOnly:
-            Text(lightweightInlineRendered)
-                .font(monospacedFallback ? monospacedBodyFont : font)
-                .lineLimit(lineLimit)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .plainText:
-            Text(markdown)
-                .font(monospacedBodyFont)
-                .textSelection(.enabled)
+        Group {
+            switch renderStrategy {
+            case .inlineOnly:
+                Text(lightweightInlineRendered)
+                    .font(monospacedFallback ? monospacedBodyFont : font)
+                    .lineLimit(lineLimit)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .plainText:
+                Text(markdown)
+                    .font(monospacedBodyFont)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .deferredPreview:
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(lightweightInlineRendered)
+                        .font(font)
+                        .lineLimit(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("内容较长，已先显示轻量预览以保持界面响应。")
+                        .font(secondaryFont)
+                        .foregroundStyle(.secondary)
+                }
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        case .deferredPreview:
-            VStack(alignment: .leading, spacing: 7) {
-                Text(lightweightInlineRendered)
-                    .font(font)
-                    .lineLimit(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("内容较长，已先显示轻量预览以保持界面响应。")
-                    .font(secondaryFont)
-                    .foregroundStyle(.secondary)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-        case .compiledDocument:
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(renderWindow.blocks) { block in
-                    view(for: block)
-                }
-                if renderWindow.omittedBlockCount > 0 {
-                    omittedBlocksIndicator(count: renderWindow.omittedBlockCount)
+                .textSelection(.enabled)
+            case .compiledDocument:
+                if let loadedDocument, loadedDocument.source == markdown {
+                    compiledDocumentView(loadedDocument)
+                } else {
+                    Color.clear
+                        .frame(height: bodyPointSize ?? 17)
+                        .accessibilityHidden(true)
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
         }
+        .task(id: documentLoadID) {
+            guard renderStrategy == .compiledDocument else { return }
+            let source = markdown
+            let cacheContext = persistentCacheContext
+            let loadTask = Task.detached(priority: .utility) {
+                RenderCache.shared.document(source, persistentCacheContext: cacheContext)
+            }
+            let document = await withTaskCancellationHandler {
+                await loadTask.value
+            } onCancel: {
+                loadTask.cancel()
+            }
+            guard !Task.isCancelled, document.source == markdown else { return }
+            loadedDocument = document
+        }
+    }
+
+    private func compiledDocumentView(_ document: AgentMarkdownCompiledDocument) -> some View {
+        let window = renderWindow(for: document)
+        return VStack(alignment: .leading, spacing: 7) {
+            ForEach(window.blocks) { block in
+                view(for: block)
+            }
+            if window.omittedBlockCount > 0 {
+                omittedBlocksIndicator(count: window.omittedBlockCount)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
     }
 
     @ViewBuilder

@@ -58,6 +58,23 @@ struct ChatSessionDetailLoadCoordinatorTests {
         #expect(snapshot == nil)
     }
 
+    @Test func cancelledLoadStopsBeforeReadingSessionDetail() async throws {
+        let store = try SQLiteGraphKernelStore(path: temporaryDatabaseURL().path)
+        try store.migrate()
+        let repository = AppChatSessionRepository(store: store)
+        let session = try repository.createSession(title: "Cancelled")
+        let coordinator = ChatSessionDetailLoadCoordinator()
+        let task = Task {
+            try await coordinator.load(repository: repository, sessionID: session.id)
+        }
+
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await task.value
+        }
+    }
+
     @Test func loadReconcilesOnlyOrphanedBackgroundTasks() async throws {
         let store = try SQLiteGraphKernelStore(path: temporaryDatabaseURL().path)
         try store.migrate()

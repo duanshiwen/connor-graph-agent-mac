@@ -116,6 +116,7 @@ final class ChatSessionCoordinator {
         let startedAt = ContinuousClock.now
         model.selectedSessionID = sessionID
         model.loadingSessionDetailID = sessionID
+        model.presentedSessionDetailID = nil
         onSelectionStarted(sessionID)
         errorMessage = nil
         let activeBackgroundTaskIDs = Set(model.backgroundTasksBySessionID[sessionID, default: []]
@@ -123,22 +124,29 @@ final class ChatSessionCoordinator {
             .map(\.id))
         selectionTask = Task(priority: .userInitiated) { [weak self] in
             do {
-                guard let snapshot = try await self?.detailLoader.load(
-                    repository: repository,
-                    sessionID: sessionID,
-                    activeBackgroundTaskIDs: activeBackgroundTaskIDs
-                ) else {
-                    guard let self, self.isCurrent(sessionID: sessionID, generation: generation) else { return }
+                guard let self else { return }
+                let detailLoader = self.detailLoader
+                let detailTask = Task.detached(priority: .userInitiated) {
+                    try await detailLoader.load(
+                        repository: repository,
+                        sessionID: sessionID,
+                        activeBackgroundTaskIDs: activeBackgroundTaskIDs
+                    )
+                }
+                let loadedSnapshot = try await withTaskCancellationHandler {
+                    try await detailTask.value
+                } onCancel: {
+                    detailTask.cancel()
+                }
+                guard let snapshot = loadedSnapshot else {
+                    guard self.isCurrent(sessionID: sessionID, generation: generation) else { return }
                     self.model.loadingSessionDetailID = nil
                     self.report("无法加载所选会话。")
                     return
                 }
                 try Task.checkCancellation()
-                guard let self, self.isCurrent(sessionID: sessionID, generation: generation) else { return }
+                guard self.isCurrent(sessionID: sessionID, generation: generation) else { return }
                 await self.onSelectionLoaded(snapshot, generation, startedAt)
-                if self.isCurrent(sessionID: sessionID, generation: generation) {
-                    self.model.loadingSessionDetailID = nil
-                }
             } catch is CancellationError {
                 return
             } catch {
@@ -155,6 +163,7 @@ final class ChatSessionCoordinator {
         selectionGeneration += 1
         model.loadingSessionDetailID = nil
         model.selectedSessionID = sessionID
+        model.presentedSessionDetailID = sessionID
     }
 
     /// Installs a newly persisted session without synchronously reloading every
@@ -179,6 +188,7 @@ final class ChatSessionCoordinator {
         guard model.selectedSessionID == sessionID,
               model.loadingSessionDetailID == sessionID else { return }
         model.loadingSessionDetailID = nil
+        model.presentedSessionDetailID = sessionID
     }
 
     func discardPreparingNewSession(sessionID: String) {
@@ -204,6 +214,7 @@ final class ChatSessionCoordinator {
             selectionGeneration += 1
             model.selectedSessionID = session.id
             model.loadingSessionDetailID = isPreparing ? session.id : nil
+            model.presentedSessionDetailID = isPreparing ? nil : session.id
             if isPreparing {
                 pendingNewSessionIDs.insert(session.id)
                 onSelectionStarted(session.id)
@@ -222,6 +233,7 @@ final class ChatSessionCoordinator {
         selectionGeneration += 1
         model.loadingSessionDetailID = nil
         model.selectedSessionID = nil
+        model.presentedSessionDetailID = nil
         onSelectionCleared()
     }
 
@@ -316,6 +328,7 @@ final class ChatSessionCoordinator {
         importedSessionFlushTask = nil
         pendingImportedSessions.removeAll()
         model.loadingSessionDetailID = nil
+        model.presentedSessionDetailID = nil
     }
 
     static func filter(_ sessions: [AgentSession], by filter: AgentSessionListFilter) -> [AgentSession] {

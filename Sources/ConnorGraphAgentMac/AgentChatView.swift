@@ -496,12 +496,14 @@ private struct AgentChatConversationView: View {
             topLoadTriggerOffset: 96,
             preservesBottomAnchorForUnderfilledContent: true,
             showsJumpToLatestButton: true,
+            // The eight-row window bounds eager layout cost and avoids LazyVStack
+            // retaining an invalid scroll offset when sessions are replaced.
             contentLayout: .eager
         )
     )
 
-    private static let initialVisibleMessageLimit = 80
-    private static let messagePageSize = 40
+    private static let initialVisibleMessageLimit = 8
+    private static let messagePageSize = 8
 
     private struct PendingPrependCorrection: Equatable {
         var previousFirstItemID: String
@@ -762,7 +764,7 @@ private struct AgentChatConversationView: View {
                         .frame(maxWidth: .infinity, maxHeight: 0)
                         .clipped()
                         .allowsHitTesting(false)
-                } else if chatActions.session.isLoadingSelectedChatSessionDetail {
+                } else if model.sessions.isWaitingForSelectedPresentation {
                     AgentChatSessionLoadingView()
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
                 } else if chatItems.isEmpty {

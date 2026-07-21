@@ -74,7 +74,13 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     publishMetrics()
                 }
                 .onPreferenceChange(ChatViewportContentHeightKey.self) { height in
+                    let previousHeight = contentHeight
                     contentHeight = height
+                    if previousHeight > 0,
+                       abs(height - previousHeight) > 1,
+                       controller.isPinnedToBottom {
+                        controller.notifyDataChange(.itemHeightChanged(id: "viewport-content"))
+                    }
                     publishMetrics()
                 }
                 .onPreferenceChange(ChatViewportTopSentinelMinYKey.self) { minY in
