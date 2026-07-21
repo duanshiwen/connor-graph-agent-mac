@@ -124,18 +124,28 @@ final class ChatSessionCoordinator {
             .map(\.id))
         selectionTask = Task(priority: .userInitiated) { [weak self] in
             do {
-                guard let snapshot = try await self?.detailLoader.load(
-                    repository: repository,
-                    sessionID: sessionID,
-                    activeBackgroundTaskIDs: activeBackgroundTaskIDs
-                ) else {
-                    guard let self, self.isCurrent(sessionID: sessionID, generation: generation) else { return }
+                guard let self else { return }
+                let detailLoader = self.detailLoader
+                let detailTask = Task.detached(priority: .userInitiated) {
+                    try await detailLoader.load(
+                        repository: repository,
+                        sessionID: sessionID,
+                        activeBackgroundTaskIDs: activeBackgroundTaskIDs
+                    )
+                }
+                let loadedSnapshot = try await withTaskCancellationHandler {
+                    try await detailTask.value
+                } onCancel: {
+                    detailTask.cancel()
+                }
+                guard let snapshot = loadedSnapshot else {
+                    guard self.isCurrent(sessionID: sessionID, generation: generation) else { return }
                     self.model.loadingSessionDetailID = nil
                     self.report("无法加载所选会话。")
                     return
                 }
                 try Task.checkCancellation()
-                guard let self, self.isCurrent(sessionID: sessionID, generation: generation) else { return }
+                guard self.isCurrent(sessionID: sessionID, generation: generation) else { return }
                 await self.onSelectionLoaded(snapshot, generation, startedAt)
                 if self.isCurrent(sessionID: sessionID, generation: generation) {
                     self.model.loadingSessionDetailID = nil
