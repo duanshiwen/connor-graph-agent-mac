@@ -500,8 +500,8 @@ private struct AgentChatConversationView: View {
         )
     )
 
-    private static let initialVisibleMessageLimit = 80
-    private static let messagePageSize = 40
+    private static let initialVisibleMessageLimit = 16
+    private static let messagePageSize = 16
 
     private struct PendingPrependCorrection: Equatable {
         var previousFirstItemID: String
