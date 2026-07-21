@@ -496,7 +496,7 @@ private struct AgentChatConversationView: View {
             topLoadTriggerOffset: 96,
             preservesBottomAnchorForUnderfilledContent: true,
             showsJumpToLatestButton: true,
-            contentLayout: .eager
+            contentLayout: .lazy
         )
     )
 
