@@ -17,7 +17,7 @@ struct ChatViewportContentLayoutTests {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         #expect(source.contains("contentLayout: .eager"))
-        #expect(source.contains("private static let initialVisibleMessageLimit = 16"))
-        #expect(source.contains("private static let messagePageSize = 16"))
+        #expect(source.contains("private static let initialVisibleMessageLimit = 8"))
+        #expect(source.contains("private static let messagePageSize = 8"))
     }
 }
