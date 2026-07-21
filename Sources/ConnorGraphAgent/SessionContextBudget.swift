@@ -108,12 +108,26 @@ extension SessionContextBudget {
         // DeepSeek
         "deepseek-chat": 128_000,
         "deepseek-reasoner": 128_000,
+        // Zhipu GLM
+        "glm-5.2": 1_000_000,
+        "glm-4-long": 1_000_000,
+        "glm-4.5-air": 128_000,
+        "glm-4.5-airx": 128_000,
+        "glm-4-flashx-250414": 128_000,
+        "glm-4-flash-250414": 128_000,
+        "glm-5v-turbo": 200_000,
+        "glm-4.6v": 128_000,
+        "glm-4.6v-flash": 128_000,
+        "glm-4.1v-thinking-flashx": 64_000,
+        "glm-4.1v-thinking-flash": 64_000,
+        "glm-4v-flash": 16_000,
     ]
 
     /// Try to infer the context window size from a model identifier.
     /// Falls back to 200_000 if the model is unknown.
     public static func inferContextWindowSize(modelID: String?) -> Int {
         guard let modelID = modelID?.lowercased() else { return 200_000 }
+        if let exactSize = wellKnownContextWindows[modelID] { return exactSize }
         for (key, size) in wellKnownContextWindows {
             if modelID.contains(key) { return size }
         }

@@ -236,7 +236,7 @@ public enum AgentModelCapabilityKernel {
     ]
 
     private static let visionMarkers = [
-        "vision", "-vl", "_vl", "vl-", "vl_", "qwen-vl", "qwen3-vl", "omni", "gpt-4o", "gpt-4.1", "gpt-5", "claude", "gemini", "glm-4.5v", "glm-5v", "glm-4v", "minimax-vl", "pixtral",
+        "vision", "-vl", "_vl", "vl-", "vl_", "qwen-vl", "qwen3-vl", "omni", "gpt-4o", "gpt-4.1", "gpt-5", "claude", "gemini", "glm-4.1v", "glm-4.5v", "glm-4.6v", "glm-5v", "glm-4v", "minimax-vl", "pixtral",
         "mimo-v2.5" // Xiaomi MiMo V2.5: native omnimodal model with image/video/audio support
     ]
 }

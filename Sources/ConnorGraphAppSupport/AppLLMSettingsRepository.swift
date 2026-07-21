@@ -692,10 +692,24 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
 public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
     public var httpClient: Client
+    private let githubCopilotRefreshSkew: TimeInterval
+    private let now: @Sendable () -> Date
+    private let refreshGitHubCopilotTokens: @Sendable (String) async throws -> AppLLMOAuthTokens
 
-    public init(settingsRepository: AppLLMSettingsRepository, httpClient: Client) {
+    public init(
+        settingsRepository: AppLLMSettingsRepository,
+        httpClient: Client,
+        githubCopilotRefreshSkew: TimeInterval = 5 * 60,
+        now: @escaping @Sendable () -> Date = Date.init,
+        refreshGitHubCopilotTokens: @escaping @Sendable (String) async throws -> AppLLMOAuthTokens = { githubAccessToken in
+            try await AppLLMOAuthService.shared.refreshGitHubCopilotTokens(githubAccessToken: githubAccessToken)
+        }
+    ) {
         self.settingsRepository = settingsRepository
         self.httpClient = httpClient
+        self.githubCopilotRefreshSkew = githubCopilotRefreshSkew
+        self.now = now
+        self.refreshGitHubCopilotTokens = refreshGitHubCopilotTokens
     }
 
     public func loadConnections() async -> [AppLLMModelConnection] {
@@ -734,40 +748,84 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
     }
 
     private func openAICompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) async -> AppLLMModelConnection {
+        let providerMode = connection.providerMode
+        let providerTitle = providerMode == .openAIResponses ? "OpenAI Responses" : "OpenAI Compatible"
         guard connection.shouldFetchModelsList else {
             return AppLLMModelConnection(
                 id: connection.id,
                 title: connection.name + (isDefault ? " · 默认" : ""),
-                subtitle: "OpenAI Compatible · 使用手动模型列表",
-                providerMode: .openAICompatible,
+                subtitle: "\(providerTitle) · 使用手动模型列表",
+                providerMode: providerMode,
                 models: configuredOptions(from: connection),
                 isLiveCatalog: false
             )
         }
-        guard let baseURL = URL(string: connection.baseURLString) else {
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · Base URL 无效", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
+        let activeConnection: AppLLMConnectionConfig
+        do {
+            activeConnection = try await refreshingGitHubCopilotConnectionIfNeeded(connection)
+        } catch {
+            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "GitHub Copilot · 凭据刷新失败，请重新连接", providerMode: providerMode, models: configuredOptions(from: connection), isLiveCatalog: false)
         }
-        guard let apiKey = try? settingsRepository.apiKey(for: connection.id), !apiKey.isEmpty else {
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 缺少 API Key", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
+        guard let baseURL = URL(string: activeConnection.baseURLString) else {
+            return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · Base URL 无效", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
+        }
+        guard let apiKey = try? settingsRepository.apiKey(for: activeConnection.id), !apiKey.isEmpty else {
+            return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · 缺少 API Key", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
         }
         var client = httpClient
+        let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: activeConnection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+        var headers = activeConnection.extraHTTPHeaders
+        headers.removeValue(forKey: AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey)
+        headers.removeValue(forKey: AppLLMSettingsRepository.anthropicAuthHeaderKindMetadataKey)
+        headers["Accept"] = "application/json"
+        switch apiKeyHeaderKind {
+        case .bearer:
+            headers["Authorization"] = "Bearer \(apiKey)"
+        case .apiKey:
+            headers["api-key"] = apiKey
+        }
         let request = AgentHTTPRequest(
             url: baseURL.appendingPathComponent("models"),
             method: "GET",
-            headers: ["Authorization": "Bearer \(apiKey)"],
+            headers: headers,
             body: Data()
         )
         do {
             let response = try await client.send(request)
             guard response.statusCode >= 200, response.statusCode < 300 else {
-                return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 模型列表请求失败（HTTP \(response.statusCode)）", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
+                return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · 模型列表请求失败（HTTP \(response.statusCode)）", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
             }
-            let modelIDs = try Self.parseModelIDs(response.body)
+            let modelIDs = try Self.parseModelIDs(response.body).filter(Self.isChatSelectableModelID)
+            guard !modelIDs.isEmpty else {
+                return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · 未发现可用聊天模型", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
+            }
             let options = modelIDs.map { AppLLMModelOption(id: $0) }
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · \(baseURL.absoluteString)", providerMode: .openAICompatible, models: options, isLiveCatalog: true)
+            return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · \(baseURL.absoluteString)", providerMode: providerMode, models: options, isLiveCatalog: true)
         } catch {
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 模型列表解析失败", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
+            return AppLLMModelConnection(id: activeConnection.id, title: activeConnection.name + (isDefault ? " · 默认" : ""), subtitle: "\(providerTitle) · 模型列表解析失败", providerMode: providerMode, models: configuredOptions(from: activeConnection), isLiveCatalog: false)
         }
+    }
+
+    private func refreshingGitHubCopilotConnectionIfNeeded(_ connection: AppLLMConnectionConfig) async throws -> AppLLMConnectionConfig {
+        guard connection.connectionKind == .githubCopilot,
+              let tokens = try settingsRepository.oauthTokens(for: connection.id),
+              let expiresAt = tokens.expiresAt,
+              expiresAt <= (now().timeIntervalSince1970 + githubCopilotRefreshSkew) * 1000,
+              let githubAccessToken = tokens.refreshToken,
+              !githubAccessToken.isEmpty
+        else { return connection }
+
+        let refreshed = try await refreshGitHubCopilotTokens(githubAccessToken)
+        try settingsRepository.saveOAuthTokens(refreshed, connectionID: connection.id)
+        try settingsRepository.saveAPIKey(refreshed.accessToken, connectionID: connection.id)
+
+        guard let baseURLString = AppLLMOAuthService.copilotBaseURL(from: refreshed.accessToken),
+              baseURLString != connection.baseURLString
+        else { return connection }
+        var updated = connection
+        updated.baseURLString = baseURLString
+        try settingsRepository.updateConnection(updated)
+        return updated
     }
 
     private func fallbackConnections(error: Error) -> [AppLLMModelConnection] {
@@ -789,6 +847,18 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             .map(\.id)
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private static func isChatSelectableModelID(_ modelID: String) -> Bool {
+        let normalized = modelID.lowercased()
+        let nonChatFragments = [
+            "embedding", "rerank", "moderation", "whisper", "transcription", "transcribe",
+            "-tts", "_tts", "/tts", "tts-", "text-to-speech",
+            "-asr", "_asr", "/asr", "asr-",
+            "dall-e", "gpt-image", "-image-", "/image/", "-image-edit", "_image_edit", "/image-edit",
+            "image-generation", "image_generation", "stable-image", "flux-", "/flux", "sora", "realtime",
+        ]
+        return !nonChatFragments.contains { normalized.contains($0) }
     }
 }
 

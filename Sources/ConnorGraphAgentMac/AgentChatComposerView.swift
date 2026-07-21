@@ -27,6 +27,17 @@ struct ComposerModelSelectionPresentation: Equatable, Sendable {
     }
 }
 
+enum ComposerPlaceholderPresentation {
+    static func text(isNoteMode: Bool, hasWorkingDirectory: Bool, sendHint: String) -> String {
+        if isNoteMode { return "写下你的笔记..." }
+        let inputHints = "输入 / 调用技能，输入 @ 提及人物"
+        if !hasWorkingDirectory {
+            return "\(inputHints)；如需创建、更新或删除文件，请先选择一个工作目录；\(sendHint)"
+        }
+        return "\(inputHints)；\(sendHint)"
+    }
+}
+
 struct AgentChatComposerView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
@@ -345,11 +356,12 @@ struct AgentChatComposerView: View {
     }
 
     private var composerPlaceholder: String {
-        if composerState.displayMode == .note {
-            return "写下你的笔记..."
-        }
         let sendHint = chatActions.dependencies.inputSettings.composerSendShortcut == "cmd-return" ? "⌘ + Return 发送" : "Shift + Return 换行"
-        return "输入 / 选择技能，输入 @ 选择人名；\(sendHint)"
+        return ComposerPlaceholderPresentation.text(
+            isNoteMode: composerState.displayMode == .note,
+            hasWorkingDirectory: chatActions.dependencies.workspaceSettings.primaryRoot != nil,
+            sendHint: sendHint
+        )
     }
 
     @ViewBuilder
