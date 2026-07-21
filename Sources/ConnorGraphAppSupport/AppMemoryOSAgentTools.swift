@@ -114,7 +114,7 @@ private extension SendableJSONValue {
     }
 }
 
-private enum MemoryOSLayeredContextSupport {
+enum MemoryOSLayeredContextSupport {
     static let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Use focused search terms. Include aliases and both Chinese and English terms when useful."),
         "limit": .integer(description: "Cumulative result target. Values below the configured minimum are raised to that minimum. Increase limit when more records are needed; there is no business-level maximum."),
@@ -1095,15 +1095,21 @@ public struct MemoryOSL3UpdateBeliefsTool: AgentTool {
 
 public extension AgentToolRegistry {
     /// Conversation-time read-only tools expose operational context, durable knowledge, and user profile separately.
-    mutating func registerMemoryOSReadTools(facade: AppMemoryOSFacade) {
-        register(MemoryOSRecentContextTool(facade: facade))
-        register(MemoryOSKnowledgeContextTool(facade: facade))
-        register(MemoryOSGetCurrentUserProfileTool(facade: facade))
+    mutating func registerMemoryOSReadTools(
+        facade: AppMemoryOSFacade,
+        configuration: MemoryOSContextToolConfiguration = .init()
+    ) {
+        register(MemoryOSRecentContextTool(facade: facade, configuration: configuration))
+        register(MemoryOSKnowledgeContextTool(facade: facade, configuration: configuration))
+        register(MemoryOSGetCurrentUserProfileTool(facade: facade, configuration: configuration))
     }
 
     /// Full tool set for batch/background jobs — includes write tools and low-level graph primitives.
-    mutating func registerMemoryOSFullTools(facade: AppMemoryOSFacade) {
-        registerMemoryOSReadTools(facade: facade)
+    mutating func registerMemoryOSFullTools(
+        facade: AppMemoryOSFacade,
+        configuration: MemoryOSContextToolConfiguration = .init()
+    ) {
+        registerMemoryOSReadTools(facade: facade, configuration: configuration)
         // Write tools
         register(MemoryOSL2UpdateEntitiesTool(facade: facade))
         register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))

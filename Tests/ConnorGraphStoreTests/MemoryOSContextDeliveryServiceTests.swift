@@ -70,7 +70,7 @@ import ConnorGraphStore
     #expect(!results.contains { $0.contains("Stable project knowledge") })
 }
 
-@Test func knowledgeContextReturnsL3AndL4AndActuallyTraversesFiveHops() throws {
+@Test func knowledgeContextDefaultsToOneHopAndHonorsExplicitDeeperTraversal() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSContextDeliveryDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 43_000)
@@ -84,14 +84,17 @@ import ConnorGraphStore
     for index in 0..<6 {
         try store.upsert(entityStatement: MemoryOSEntityStatement(id: "edge-\(index)", entityID: "hop-\(index)", predicate: .dependsOn, objectEntityID: "hop-\(index + 1)", text: "Hop \(index) depends on Hop \(index + 1).", assertionKind: .summarized, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
     }
-    let results = try MemoryOSContextDeliveryService(store: store).knowledgeContext(terms: ["Knowledge Seed"])
+    let service = MemoryOSContextDeliveryService(store: store)
+    let defaultResults = try service.knowledgeContext(terms: ["Knowledge Seed"])
+    let deeperResults = try service.knowledgeContext(terms: ["Knowledge Seed"], l4Depth: 5)
 
-    #expect(results.contains { $0.contains("durable graph reasoning") })
-    #expect(results.contains { $0.contains("Hop 4") && $0.contains("Hop 5") })
-    #expect(!results.contains { $0.contains("Hop 5") && $0.contains("Hop 6") })
-    #expect(!results.contains { $0.contains("transient operational status") })
-    #expect(results.allSatisfy { !$0.hasPrefix("「") && !$0.hasPrefix("{") })
-    #expect(Set(results).count == results.count)
+    #expect(defaultResults.contains { $0.contains("durable graph reasoning") })
+    #expect(!defaultResults.contains { $0.contains("Hop 1") && $0.contains("Hop 2") })
+    #expect(deeperResults.contains { $0.contains("Hop 4") && $0.contains("Hop 5") })
+    #expect(!deeperResults.contains { $0.contains("Hop 5") && $0.contains("Hop 6") })
+    #expect(!deeperResults.contains { $0.contains("transient operational status") })
+    #expect(deeperResults.allSatisfy { !$0.hasPrefix("「") && !$0.hasPrefix("{") })
+    #expect(Set(deeperResults).count == deeperResults.count)
 }
 
 private func temporaryMemoryOSContextDeliveryDatabaseURL() -> URL {

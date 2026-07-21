@@ -51,6 +51,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
+    public var memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
     private let sharedCache: AppGraphAgentRuntimeSharedCache
 
@@ -70,6 +71,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
+        memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration = .init(),
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
     ) {
         self.store = store
@@ -87,6 +89,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
+        self.memoryOSContextToolConfiguration = memoryOSContextToolConfiguration
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
         self.sharedCache = AppGraphAgentRuntimeSharedCache()
     }
@@ -187,7 +190,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(GraphSearchTool(searchService: searchService))
         let memoryOSFacade = makeMemoryOSFacade()
         if let memoryOSFacade {
-            registry.registerMemoryOSReadTools(facade: memoryOSFacade)
+            registry.registerMemoryOSReadTools(
+                facade: memoryOSFacade,
+                configuration: memoryOSContextToolConfiguration
+            )
         }
         if let cloudKnowledgeConsumptionClient {
             registry.registerCloudKnowledgeConsumptionTools(
