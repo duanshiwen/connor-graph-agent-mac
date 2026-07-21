@@ -49,4 +49,21 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(messageRows.components(separatedBy: "bodyPointSize: messageBodyPointSize").count >= 4)
         #expect(preview.contains("bodyPointSize + semanticSize - systemBodySize"))
     }
+
+    @Test func compiledMarkdownLoadsOutsideTheMainActorAndHonorsCancellation() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let root = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let preview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift"),
+            encoding: .utf8
+        )
+
+        #expect(preview.contains("Task.detached(priority: .utility)"))
+        #expect(preview.contains("loadTask.cancel()"))
+        #expect(preview.contains("guard !Task.isCancelled, document.source == markdown else { return }"))
+        #expect(preview.contains("persistentCacheContext.store.loadBlocks"))
+    }
 }
