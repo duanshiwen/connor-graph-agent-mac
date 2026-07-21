@@ -2099,6 +2099,7 @@ final class AppRuntimeLifecycle {
         browserFeatureModel.isVisible = false
         browserFeatureModel.resetWorkspaceBinding()
         installEmptySessionCapsuleState(sessionID: session.id, synchronizeWorkspaceDrafts: isVisible)
+        aiConnectionsRuntimeCoordinator.syncDisplay(sessionID: session.id)
         chatWorkspaceCoordinator.setMode(.conversation, for: session.id)
         errorMessage = nil
 
