@@ -72,10 +72,10 @@ public struct MemoryOSContextDeliveryService: Sendable {
         return builder.buildRecentContextStrings(hits: hits)
     }
 
-    /// Search reusable knowledge and stable graph memory only. Every matching L4 entity is
-    /// expanded through five relationship hops by default and rendered into natural language.
-    public func knowledgeContext(terms: [String], l4Depth: Int = 5) throws -> [String] {
-        let depth = max(1, min(l4Depth, 5))
+    /// Search reusable knowledge and stable graph memory only. Callers select the minimum
+    /// relationship depth needed; the compatibility API defaults to one hop.
+    public func knowledgeContext(terms: [String], l4Depth: Int = 1) throws -> [String] {
+        let depth = max(1, l4Depth)
         let hits = try searchTerms(terms, layers: [.l3, .l4])
         var expansions: [String: [MemoryOSL4ExpansionHit]] = [:]
         let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
@@ -139,6 +139,10 @@ public struct MemoryOSContextDeliveryService: Sendable {
         if metadata["updated_at"] == nil, let updatedAt = hit.updatedAt, !updatedAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             metadata["updated_at"] = updatedAt
         }
+        if metadata["effective_updated_at"] == nil, let updatedAt = metadata["updated_at"] {
+            metadata["effective_updated_at"] = updatedAt
+        }
+        if metadata["status"] == nil { metadata["status"] = MemoryOSRecordTemporalStatus.active.rawValue }
         return MemoryOSRetrievalHit(
             layer: layer,
             recordID: hit.recordID,

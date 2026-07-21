@@ -62,7 +62,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
     public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
         let response = try await complete(AgentModelRequest(messages: [
             AgentModelMessage(role: .system, content: "You are Connor, a concise and helpful graph-memory-native assistant."),
-            AgentModelMessage(role: .user, content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+            AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
         ]))
         guard let text = response.text, !text.isEmpty else { throw OpenAICompatibleProviderError.missingAssistantMessage }
         return LLMResponse(text: text, citations: [])

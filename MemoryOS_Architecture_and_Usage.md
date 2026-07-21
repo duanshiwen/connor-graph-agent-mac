@@ -151,8 +151,14 @@ economic_entity, award, unknown
 | 工具名 | 层级 | 描述 |
 |--------|------|------|
 | `memory_os_recent_context` | L1/L2 | 搜索近期事件、当前任务/项目状态和其他可变操作上下文 |
-| `memory_os_knowledge_context` | L3/L4 | 搜索可复用知识、稳定实体和持久关系；L4 默认五跳展开并返回自然语言陈述，LLM 自主决定如何分析和使用结果 |
+| `memory_os_knowledge_context` | L3/L4 | 搜索可复用知识、稳定实体和持久关系；depth 默认 1，可按需要逐步提高到配置上限（初始为 6） |
 | `memory_os_get_current_user_profile` | L2 | 获取 preferences、habits、traits、constraints 与 interaction guidance |
+
+Recent/Knowledge 接受累计目标 `limit`（默认与最小值初始均为 10，无业务固定最大值）。同一 run 下相同规范化 query/layers/depth 扩大 limit 时只返回新增记录。响应包含 `requestedLimit`、`returnedCount`、`cumulativeReturnedCount`、`hasMore`、`partial` 和完整 `records`；无法可靠判断是否耗尽时 `hasMore` 为 `null`，不会伪造 `false`。物理容量不足时按完整记录或完整路径裁剪，不截断记录文本。
+
+每条记录至少包含 `record_id`、`layer`、`text`、effective `updated_at`、`confidence`、`depth`、`evidence_refs`、`status` 和 retrieval score。状态为 `active`、`historical`、`superseded`、`uncertain` 或 `conflicted`。`depth >= 2` 只表示间接图路径，不能表述成直接关系或因果；retrieval score 只表示相关度，不等于 confidence。
+
+候选先过滤最低相关性，再按 effective `updated_at` 降序、score 降序、record ID 稳定排序，缺时间排后；图路径内部边顺序保持不变。effective 时间回退为：L0 `ingested_at -> occurred_at`，L1 `occurred_at`，L2 node `updated_at -> created_at`，L2 statement `committed_at -> valid_at`，L3 belief `updated_at -> created_at`，L4 entity `updated_at -> created_at -> valid_from`，L4 statement/relation `committed_at -> valid_at`。
 
 ### 3.2 后台作业额外读取工具（11个）
 
@@ -359,9 +365,10 @@ economic_entity, award, unknown
    get_current_time
    ```
 
-2. **检索记忆上下文**：
+2. **检索近期与知识上下文**：
    ```
-   memory_os_context(query: "搜索词1;搜索词2;搜索词3")
+   memory_os_recent_context(query: "搜索词1;搜索词2", limit: 10)
+   memory_os_knowledge_context(query: "搜索词1;搜索词2", limit: 10, depth: 1)
    ```
 
 3. **获取用户配置文件**：
@@ -369,7 +376,7 @@ economic_entity, award, unknown
    memory_os_get_current_user_profile()
    ```
 
-4. **搜索记忆**：
+4. **后台低层搜索（主会话不注册）**：
    ```
    memory_os_search(query: "搜索查询", layers: ["L2", "L3", "L4"], limit: 20)
    ```

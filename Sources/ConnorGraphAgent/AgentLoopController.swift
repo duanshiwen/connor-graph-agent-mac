@@ -171,16 +171,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
                 let budgetMeter = AgentBudgetMeter(configuration: configuration.budget)
-                let memoryContract = await initialGraphMemoryContract(for: request)
-                let usableMemoryContract = memoryContract.flatMap { $0.items.isEmpty ? nil : $0 }
-                let usableInitialContext = usableMemoryContract?.agentContext
-                let promptAssembly = await buildPromptAssembly(for: request, memoryContract: usableMemoryContract)
+                let promptAssembly = await buildPromptAssembly(for: request)
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
                 var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
                 var messages = modelRequest.messages
+                var retrievalCompliance = AgentRetrievalComplianceState(
+                    prompt: request.userMessage,
+                    definitions: toolRegistry.definitions
+                )
+                var memoryCitations: [String] = []
+                let isPureMemoryTask = AgentRetrievalCompliancePolicy().isPureMemoryTask(request.userMessage)
+                var memoryEvidencePayloads: [String] = []
+                var didRequestClaimCorrection = false
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -252,20 +257,49 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         if modelResponse.toolCalls.isEmpty {
-                            if let text = modelResponse.text {
+                            if let correction = retrievalCompliance.correctionMessageIfNeeded() {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .user, content: correction))
+                                continue
+                            }
+                            let claimValidation = AgentMemoryClaimValidator().validate(
+                                answer: modelResponse.text ?? "",
+                                evidencePayloads: memoryEvidencePayloads,
+                                citations: memoryCitations
+                            )
+                            if isPureMemoryTask, let correction = claimValidation.correctionInstruction, !didRequestClaimCorrection {
+                                didRequestClaimCorrection = true
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .user, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
+                                continue
+                            }
+                            var finalText = modelResponse.text
+                            if let notice = retrievalCompliance.degradationNotice {
+                                finalText = [finalText, notice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+                            }
+                            if !retrievalCompliance.missingTools.isEmpty {
+                                let missing = retrievalCompliance.missingTools.joined(separator: ", ")
+                                let notice = "Required retrieval remained incomplete after one correction attempt: \(missing). The answer is conservatively degraded."
+                                finalText = [finalText, notice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+                            }
+                            if isPureMemoryTask, claimValidation.status != .supported, didRequestClaimCorrection {
+                                let notice = "Memory claim-evidence validation remains \(claimValidation.status.rawValue); unsupported specifics have not been treated as established facts."
+                                finalText = [finalText, notice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+                            }
+                            if let text = finalText {
                                 yield(.textComplete(AgentTextCompleteEvent(
                                     runID: run.id,
                                     sessionID: run.sessionID,
                                     text: text,
-                                    citations: usableInitialContext?.items.map(\.sourceID) ?? [],
-                                    contextSnapshot: usableInitialContext?.renderedText
+                                    citations: memoryCitations,
+                                    contextSnapshot: nil
                                 )), to: continuation, recorder: eventRecorder)
                             }
                             yield(.turnCompleted(AgentTurnCompletedEvent(
                                 runID: run.id,
                                 sessionID: run.sessionID,
                                 turnIndex: iterationCount,
-                                assistantText: modelResponse.text,
+                                assistantText: finalText,
                                 toolCallCount: 0,
                                 toolResultCount: 0,
                                 stoppedAfterTurn: false
@@ -319,6 +353,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )
 
                         for batchResult in batchResults {
+                            retrievalCompliance.record(batchResult.result)
+                            if AgentRetrievalCompliancePolicy.requiredMemoryTools.contains(batchResult.call.name),
+                               batchResult.result.error == nil {
+                                memoryEvidencePayloads.append(batchResult.result.contentJSON ?? batchResult.result.contentText)
+                                for citation in batchResult.result.citations where !memoryCitations.contains(citation) {
+                                    memoryCitations.append(citation)
+                                }
+                            }
                             if batchResult.result.error == nil {
                                 consecutiveToolResultErrors = 0
                             } else {
@@ -329,6 +371,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 content: toolResultGate.gatedContent(for: batchResult.result),
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
+                            ))
+                        }
+
+                        if batchResults.contains(where: { AgentRetrievalCompliancePolicy.requiredMemoryTools.contains($0.call.name) }) {
+                            messages.append(AgentModelMessage(
+                                role: .user,
+                                content: "Trusted runtime answer constraint: use Memory results only as evidence; cite current-run record_id values, qualify depth >= 2 as indirect, surface unresolved conflicts, and omit unsupported specifics. Keep the answer concise."
                             ))
                         }
 
@@ -616,8 +665,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         continuation.yield(event)
     }
 
-    private func buildPromptAssembly(for request: AgentChatRequest, memoryContract: AgentGraphMemoryContextContract?) async -> AgentPromptAssembly {
-        var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: memoryContract)
+    private func buildPromptAssembly(for request: AgentChatRequest) async -> AgentPromptAssembly {
+        var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
         let appendix = configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines)
         if !appendix.isEmpty {
             assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), appendix]
@@ -668,15 +717,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             appliedTransformers: diagnostics.appliedTransformers,
             renderedPromptSnapshot: nil
         )
-    }
-
-    private func initialGraphMemoryContract(for request: AgentChatRequest) async -> AgentGraphMemoryContextContract? {
-        guard let contextBuilder else { return nil }
-        do {
-            return try await contextBuilder.memoryContextContract(for: request)
-        } catch {
-            return nil
-        }
     }
 
 }

@@ -10,7 +10,7 @@ import ConnorGraphAgent
 
     #expect(assembly.instruction.text.contains("康纳同学 (Connor)"))
     #expect(assembly.instruction.text.contains("personal AI assistant"))
-    #expect(assembly.instruction.text.contains("Graph memory is background evidence"))
+    #expect(assembly.instruction.text.contains("Memory OS tool results are evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
     #expect(assembly.instruction.text.contains("## Mandatory Task Bootstrap"))
@@ -24,7 +24,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("ISO-8601 timestamps"))
     #expect(assembly.instruction.text.contains("session_get_status"))
     #expect(assembly.instruction.text.contains("session_set_status"))
-    #expect(assembly.instruction.text.contains("prefer the information with the later `updated_at`"))
+    #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
@@ -68,8 +68,9 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Mandatory Task Bootstrap"))
-    #expect(prompt.contains("Every new user run must search both Memory OS context layers"))
-    #expect(prompt.contains("Every new user run must call `web_search`"))
+    #expect(prompt.contains("Every new user run must call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile`"))
+    #expect(prompt.contains("Every other task must call `web_search`"))
+    #expect(prompt.contains("Pure memory tasks do not require Web Search"))
     #expect(prompt.contains("Use `web_fetch` to read original pages"))
     #expect(prompt.contains("If `web_fetch` returns HTTP 403"))
     #expect(prompt.contains("use `browser_fetch` as the fallback"))
@@ -88,16 +89,13 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("L1/L2"))
-    #expect(prompt.contains("recent events, current project or task state"))
-    #expect(prompt.contains("mutable operational context"))
-    #expect(prompt.contains("prioritize later `updated_at`"))
+    #expect(prompt.contains("mutable operational evidence"))
     #expect(prompt.contains("L3/L4"))
-    #expect(prompt.contains("reusable knowledge, stable entities, concepts, and durable relationships"))
-    #expect(prompt.contains("five relationship hops"))
-    #expect(prompt.contains("natural-language statements"))
-    #expect(prompt.contains("Every new user run must call both tools"))
-    #expect(prompt.contains("Decide how to analyze, combine, validate, and present"))
-    #expect(prompt.contains("Do not use L3/L4 knowledge as proof of current operational state"))
+    #expect(prompt.contains("L3/L4 durable knowledge and relationships"))
+    #expect(prompt.contains("Start knowledge retrieval at depth 1"))
+    #expect(prompt.contains("depth >= 2 is an indirect path"))
+    #expect(prompt.contains("retrieval_score"))
+    #expect(prompt.contains("hasMore: true"))
     #expect(!prompt.contains("read them directly rather than parsing graph cards"))
     #expect(!prompt.contains("do not parse entity cards or relation-card syntax"))
     #expect(!prompt.contains("do not request a separate depth expansion"))
@@ -113,11 +111,13 @@ import ConnorGraphAgent
     #expect(prompt.contains("supplement rather than replace local Memory OS results"))
 }
 
-@Test func defaultSystemPromptRequiresMemoryAndWebSearchForEveryNewUserRun() {
+@Test func defaultSystemPromptRequiresMemoryAndConditionallyRequiresWebSearch() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Every new user run must search both Memory OS context layers"))
-    #expect(prompt.contains("Every new user run must call `web_search`"))
+    #expect(prompt.contains("Every new user run must call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile`"))
+    #expect(prompt.contains("Pure memory tasks do not require Web Search"))
+    #expect(prompt.contains("Every other task must call `web_search`"))
+    #expect(prompt.contains("when uncertain, search the Web"))
     #expect(prompt.contains("A user's request to skip research does not cancel this system-level minimum"))
     #expect(prompt.contains("If a required tool is unavailable"))
     #expect(!prompt.contains("when external grounding"))
@@ -254,7 +254,7 @@ import ConnorGraphAgent
     let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: knowledgeIndex..<prompt.endIndex)?.lowerBound)
     let webSearchIndex = try #require(prompt.range(of: "web_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
     let skillIndex = try #require(prompt.range(of: "connor_skill_activate", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
-    let synthesizeIndex = try #require(prompt.range(of: "Only after current time, both memory contexts, current-user profile, web research, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
+    let synthesizeIndex = try #require(prompt.range(of: "Only after current time, all three Memory tools, required Web research, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
 
     #expect(currentTimeIndex < recentIndex)
     #expect(recentIndex < knowledgeIndex)

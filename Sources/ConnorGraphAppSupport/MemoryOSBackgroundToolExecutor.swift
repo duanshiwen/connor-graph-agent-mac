@@ -29,6 +29,65 @@ public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, Cu
     }
 }
 
+private final class MemoryOSBackgroundContextCursorStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var deliveredByKey: [String: Set<String>] = [:]
+
+    func response(
+        runID: String,
+        queryKey: String,
+        query: String,
+        requestedLimit: Int,
+        candidates: [MemoryOSContextToolRecord],
+        maxResponseCharacters: Int
+    ) throws -> MemoryOSContextToolResponse {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let key = "\(runID)|\(queryKey)"
+        var delivered = deliveredByKey[key] ?? []
+        let target = candidates.prefix(requestedLimit).filter { !delivered.contains(Self.cursorID(for: $0)) }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var selected: [MemoryOSContextToolRecord] = []
+        var capacityPartial = false
+
+        for record in target {
+            let tentative = selected + [record]
+            let response = MemoryOSContextToolResponse(
+                query: query,
+                requestedLimit: requestedLimit,
+                returnedCount: tentative.count,
+                cumulativeReturnedCount: delivered.count + tentative.count,
+                hasMore: candidates.count > requestedLimit ? true : nil,
+                partial: false,
+                records: tentative
+            )
+            if try encoder.encode(response).count > maxResponseCharacters {
+                capacityPartial = true
+                break
+            }
+            selected = tentative
+        }
+
+        delivered.formUnion(selected.map(Self.cursorID))
+        deliveredByKey[key] = delivered
+        return MemoryOSContextToolResponse(
+            query: query,
+            requestedLimit: requestedLimit,
+            returnedCount: selected.count,
+            cumulativeReturnedCount: delivered.count,
+            hasMore: candidates.count > requestedLimit || capacityPartial ? true : nil,
+            partial: capacityPartial,
+            records: selected
+        )
+    }
+
+    private static func cursorID(for record: MemoryOSContextToolRecord) -> String {
+        ([record.recordID] + record.path.map(\.recordID)).joined(separator: ">")
+    }
+}
+
 public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public static let defaultAllowedToolNames: Set<String> = [
         "memory_os_recent_context",
@@ -46,9 +105,16 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     ]
 
     public var facade: AppMemoryOSFacade
+    public var contextToolConfiguration: MemoryOSContextToolConfiguration
+    private let contextCursorStore: MemoryOSBackgroundContextCursorStore
 
-    public init(facade: AppMemoryOSFacade) {
+    public init(
+        facade: AppMemoryOSFacade,
+        contextToolConfiguration: MemoryOSContextToolConfiguration = .init()
+    ) {
         self.facade = facade
+        self.contextToolConfiguration = contextToolConfiguration
+        self.contextCursorStore = MemoryOSBackgroundContextCursorStore()
     }
 
     public func execute(_ call: MemoryOSBackgroundToolCall, context: MemoryOSBackgroundToolExecutionContext) throws -> MemoryOSBackgroundToolResult {
@@ -64,13 +130,43 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                 throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("query contained no valid search terms")
             }
             let isRecent = call.name == "memory_os_recent_context"
-            let items = try isRecent ? facade.memoryOSRecentContext(terms: terms) : facade.memoryOSKnowledgeContext(terms: terms)
-            let json = try JSONSerialization.data(withJSONObject: items)
-            let jsonString = String(data: json, encoding: .utf8) ?? "[]"
-            let label = isRecent ? "operational context" : "knowledge context"
-            let header = "Memory OS \(label) returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", "))."
-            let body = items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: jsonString, contentText: items.isEmpty ? header : "\(header)\n\n\(body)", citations: [])
+            let requestedLimit = max(contextToolConfiguration.minimumResultLimit, args.int("limit") ?? contextToolConfiguration.defaultResultLimit)
+            let depth = isRecent ? 1 : max(1, min(args.int("depth") ?? 1, contextToolConfiguration.maxDepth))
+            let query = terms.joined(separator: " ")
+            let layers: [MemoryOSRetrievalLayer] = isRecent ? [.l1, .l2] : [.l3, .l4]
+            let hits = try facade.searchMemoryOS(.init(text: query, layers: layers, limit: requestedLimit + 1, depth: depth))
+            var candidates = hits.map(MemoryOSLayeredContextSupport.record)
+            if !isRecent {
+                for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
+                    let entity = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
+                    candidates += MemoryOSLayeredContextSupport.records(
+                        from: try facade.expandMemoryOSL4(entityName: entity, depth: depth, limit: requestedLimit + 1)
+                    )
+                }
+                candidates.sort(by: Self.contextRecordPrecedes)
+            }
+            let queryKey = "\(query.lowercased())|\(layers.map(\.rawValue).joined(separator: ","))|\(depth)"
+            let response = try contextCursorStore.response(
+                runID: context.runID,
+                queryKey: queryKey,
+                query: query,
+                requestedLimit: requestedLimit,
+                candidates: candidates,
+                maxResponseCharacters: contextToolConfiguration.maxResponseCharacters
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let jsonString = String(data: try encoder.encode(response), encoding: .utf8) ?? "{}"
+            let citations = response.records.flatMap { [$0.recordID] + $0.path.map(\.recordID) }.reduce(into: [String]()) {
+                if !$0.contains($1) { $0.append($1) }
+            }
+            return MemoryOSBackgroundToolResult(
+                callID: call.id,
+                name: call.name,
+                contentJSON: jsonString,
+                contentText: jsonString,
+                citations: citations
+            )
 
         case "memory_os_search":
             let query = try args.requiredString("query")
@@ -216,6 +312,17 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         default:
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
         }
+    }
+
+    private static func contextRecordPrecedes(_ lhs: MemoryOSContextToolRecord, _ rhs: MemoryOSContextToolRecord) -> Bool {
+        switch (lhs.updatedAt, rhs.updatedAt) {
+        case let (left?, right?) where left != right: return left > right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: break
+        }
+        if lhs.retrievalScore != rhs.retrievalScore { return lhs.retrievalScore > rhs.retrievalScore }
+        return lhs.recordID < rhs.recordID
     }
 
     private static func buildCurrentUserFactJSON(statement: String, factType: String, predicate: GraphPredicate, anchor: MemoryOSEntity, now: Date) throws -> String {
