@@ -1,6 +1,20 @@
 import Foundation
 
 struct ChatViewportTopLoadPolicy {
+    static func didFinishLoadingOlderItems(
+        wasLoadingOlderItems: Bool,
+        isLoadingOlderItems: Bool
+    ) -> Bool {
+        wasLoadingOlderItems && !isLoadingOlderItems
+    }
+
+    static func didFinishResolvingInitialAnchor(
+        wasResolvingInitialAnchor: Bool,
+        isResolvingInitialAnchor: Bool
+    ) -> Bool {
+        wasResolvingInitialAnchor && !isResolvingInitialAnchor
+    }
+
     static func shouldRequestOlderItems(
         hasOlderItems: Bool,
         isLoadingOlderItems: Bool,
