@@ -481,6 +481,7 @@ struct BrowserTabChip: View {
     var width: CGFloat
     var isSelected: Bool
     var isLoading: Bool
+    var faviconURL: URL? = nil
     var isPrivate: Bool = false
     var sessionTitle: String? = nil
     var onSelect: () -> Void
@@ -488,9 +489,12 @@ struct BrowserTabChip: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: isLoading ? "arrow.triangle.2.circlepath" : (isPrivate ? "hand.raised.fill" : "globe"))
-                .font(BrowserFloatingTypography.tabIcon)
-                .foregroundStyle(.secondary.opacity(isSelected ? 0.85 : 0.65))
+            BrowserFaviconView(
+                faviconURL: faviconURL,
+                isLoading: isLoading,
+                isPrivate: isPrivate,
+                tint: .secondary.opacity(isSelected ? 0.85 : 0.65)
+            )
 
             Text(title)
                 .font(isSelected ? BrowserFloatingTypography.tabTitleSelected : BrowserFloatingTypography.tabTitle)
@@ -574,10 +578,13 @@ struct BrowserVerticalTabRow: View {
                     .frame(width: 18, height: 18)
                     .fixedSize()
             } else {
-                Image(systemName: isPrivate ? "hand.raised.fill" : "globe")
-                    .font(BrowserFloatingTypography.tabIcon)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                    .frame(width: 18, height: 18)
+                BrowserFaviconView(
+                    faviconURL: item.tab.faviconURLString.flatMap(URL.init(string:)),
+                    isLoading: false,
+                    isPrivate: isPrivate,
+                    tint: isSelected ? Color.accentColor : Color.secondary
+                )
+                .frame(width: 18, height: 18)
             }
 
             if isExpanded {
@@ -616,6 +623,38 @@ struct BrowserVerticalTabRow: View {
 
     private var tabBackground: Color {
         isSelected ? Color(nsColor: .controlBackgroundColor) : Color.clear
+    }
+}
+
+private struct BrowserFaviconView: View {
+    var faviconURL: URL?
+    var isLoading: Bool
+    var isPrivate: Bool
+    var tint: Color
+
+    var body: some View {
+        Group {
+            if isLoading {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(tint)
+            } else if isPrivate {
+                Image(systemName: "hand.raised.fill")
+                    .foregroundStyle(tint)
+            } else if let faviconURL {
+                AsyncImage(url: faviconURL) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFit()
+                    } else {
+                        Image(systemName: "globe").foregroundStyle(tint)
+                    }
+                }
+            } else {
+                Image(systemName: "globe")
+                    .foregroundStyle(tint)
+            }
+        }
+        .font(BrowserFloatingTypography.tabIcon)
+        .frame(width: 16, height: 16)
     }
 }
 
