@@ -233,8 +233,35 @@ import ConnorGraphStore
     let instruction = controller.configuration.instructionAppendix
 
     #expect(instruction.contains("Current working directory: \"\(newWorkspace.path)\""))
+    #expect(instruction.contains("<connor-session-workspace selected=\"true\">"))
     #expect(instruction.contains("This runtime workspace is authoritative for the current turn"))
+    #expect(instruction.contains("outside every authorized root"))
     #expect(!instruction.contains(oldWorkspace.path))
+}
+
+@Test func agentLoopRuntimeFactoryInstructionRejectsFileWorkWithoutUserSelectedWorkspace() throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryMissingWorkspaceInstruction-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+
+    let store = try SQLiteGraphKernelStore(path: appDirectory.appendingPathComponent("store.sqlite").path)
+    try store.migrate()
+    let factory = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: AppLLMSettingsRepository(
+            settingsStore: LocalToolsSettingsStore(),
+            credentialStore: LocalToolsCredentialStore()
+        )
+    )
+
+    let instruction = factory.makeAgentLoopController().configuration.instructionAppendix
+
+    #expect(instruction.contains("<connor-session-workspace selected=\"false\">"))
+    #expect(instruction.contains("No user-selected working directory is active"))
+    #expect(instruction.contains("process current directory is an internal runtime fallback only"))
+    #expect(instruction.contains("do not call file or shell tools"))
 }
 
 @Test func agentLoopRuntimeFactoryRejectsPreviousWorkspaceAfterReplacement() async throws {
