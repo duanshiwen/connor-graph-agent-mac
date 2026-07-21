@@ -29,6 +29,57 @@ public struct AgentRetrievalCompliancePolicy: Sendable, Equatable {
     }
 }
 
+public enum AgentMemoryClaimStatus: String, Sendable, Equatable {
+    case supported
+    case inferred
+    case unsupported
+    case conflicted
+}
+
+public struct AgentMemoryClaimValidation: Sendable, Equatable {
+    public var status: AgentMemoryClaimStatus
+    public var correctionInstruction: String?
+}
+
+public struct AgentMemoryClaimValidator: Sendable, Equatable {
+    public init() {}
+
+    public func validate(answer: String, evidencePayloads: [String], citations: [String]) -> AgentMemoryClaimValidation {
+        let lower = answer.lowercased()
+        let evidence = evidencePayloads.joined(separator: "\n").lowercased()
+        let hasAbsoluteClaim = ["确定", "肯定", "一定", "当前是", "就是", "definitely", "certainly", "always"].contains(where: lower.contains)
+        if evidence.contains("\"status\":\"conflicted\"") && hasAbsoluteClaim {
+            return .init(status: .conflicted, correctionInstruction: "Memory evidence is conflicted. Present the conflicting records and avoid an absolute conclusion.")
+        }
+        let hasIndirectPath = (2...6).contains { evidence.contains("\"depth\":\($0)") }
+        let isQualified = ["可能", "推断", "间接", "may", "might", "inferred", "indirect"].contains(where: lower.contains)
+        if hasIndirectPath && !isQualified {
+            return .init(status: .inferred, correctionInstruction: "The answer relies on a depth >= 2 indirect path. Lower certainty and label the relationship as indirect or inferred; do not state direct relation or causality.")
+        }
+        if !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && citations.isEmpty {
+            return .init(status: .unsupported, correctionInstruction: "No current-run Memory OS record IDs support the memory answer. Remove unsupported names, entities, dates, numbers, amounts, counts, current-state claims, direct/indirect relations, causality, and absolute assertions, or state that memory did not provide an answer.")
+        }
+        return .init(status: .supported, correctionInstruction: nil)
+    }
+}
+
+public enum AgentModelToolResultReliability: String, Sendable, Equatable {
+    case verified
+    case unknown
+}
+
+public struct AgentModelReliabilityRegistry: Sendable, Equatable {
+    public var toolResultReliabilityByModelID: [String: AgentModelToolResultReliability]
+
+    public init(toolResultReliabilityByModelID: [String: AgentModelToolResultReliability] = [:]) {
+        self.toolResultReliabilityByModelID = toolResultReliabilityByModelID
+    }
+
+    public func toolResultReliability(for modelID: String) -> AgentModelToolResultReliability {
+        toolResultReliabilityByModelID[modelID] ?? .unknown
+    }
+}
+
 struct AgentRetrievalComplianceState: Sendable {
     let requiredTools: [String]
     let availableTools: Set<String>

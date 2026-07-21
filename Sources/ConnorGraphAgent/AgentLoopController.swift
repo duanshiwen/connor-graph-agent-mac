@@ -183,6 +183,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     definitions: toolRegistry.definitions
                 )
                 var memoryCitations: [String] = []
+                let isPureMemoryTask = AgentRetrievalCompliancePolicy().isPureMemoryTask(request.userMessage)
+                var memoryEvidencePayloads: [String] = []
+                var didRequestClaimCorrection = false
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -259,6 +262,17 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .user, content: correction))
                                 continue
                             }
+                            let claimValidation = AgentMemoryClaimValidator().validate(
+                                answer: modelResponse.text ?? "",
+                                evidencePayloads: memoryEvidencePayloads,
+                                citations: memoryCitations
+                            )
+                            if isPureMemoryTask, let correction = claimValidation.correctionInstruction, !didRequestClaimCorrection {
+                                didRequestClaimCorrection = true
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .user, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
+                                continue
+                            }
                             var finalText = modelResponse.text
                             if let notice = retrievalCompliance.degradationNotice {
                                 finalText = [finalText, notice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
@@ -266,6 +280,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             if !retrievalCompliance.missingTools.isEmpty {
                                 let missing = retrievalCompliance.missingTools.joined(separator: ", ")
                                 let notice = "Required retrieval remained incomplete after one correction attempt: \(missing). The answer is conservatively degraded."
+                                finalText = [finalText, notice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+                            }
+                            if isPureMemoryTask, claimValidation.status != .supported, didRequestClaimCorrection {
+                                let notice = "Memory claim-evidence validation remains \(claimValidation.status.rawValue); unsupported specifics have not been treated as established facts."
                                 finalText = [finalText, notice].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
                             }
                             if let text = finalText {
@@ -338,6 +356,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             retrievalCompliance.record(batchResult.result)
                             if AgentRetrievalCompliancePolicy.requiredMemoryTools.contains(batchResult.call.name),
                                batchResult.result.error == nil {
+                                memoryEvidencePayloads.append(batchResult.result.contentJSON ?? batchResult.result.contentText)
                                 for citation in batchResult.result.citations where !memoryCitations.contains(citation) {
                                     memoryCitations.append(citation)
                                 }
@@ -352,6 +371,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 content: toolResultGate.gatedContent(for: batchResult.result),
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
+                            ))
+                        }
+
+                        if batchResults.contains(where: { AgentRetrievalCompliancePolicy.requiredMemoryTools.contains($0.call.name) }) {
+                            messages.append(AgentModelMessage(
+                                role: .user,
+                                content: "Trusted runtime answer constraint: use Memory results only as evidence; cite current-run record_id values, qualify depth >= 2 as indirect, surface unresolved conflicts, and omit unsupported specifics. Keep the answer concise."
                             ))
                         }
 
