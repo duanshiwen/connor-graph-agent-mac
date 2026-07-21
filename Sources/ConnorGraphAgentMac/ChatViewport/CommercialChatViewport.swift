@@ -94,16 +94,13 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .onAppear {
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
-                    controller.requestPendingInitialAnchorNow()
                 }
                 .onChange(of: dataSetID) { _, newDataSetID in
                     resetMeasurementsForDataSetReplacement()
                     controller.replaceDataSet(id: newDataSetID, itemCount: items.count, initialAnchor: .bottom)
-                    controller.requestPendingInitialAnchorNow()
                 }
                 .onChange(of: items.count) { _, newCount in
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
-                    controller.requestPendingInitialAnchorNow()
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
                     consumePendingScrollCommandIfAvailable(proxy: proxy)
