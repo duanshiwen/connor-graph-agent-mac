@@ -4,6 +4,24 @@ import ConnorGraphAppSupport
 
 @Suite("Browser Tab Snapshot Restoration Tests")
 struct BrowserTabSnapshotRestorationTests {
+    @Test func legacySnapshotWithoutFaviconStillDecodes() throws {
+        let data = Data("""
+        {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "initialURLString": "https://example.com",
+          "title": "Example",
+          "currentURLString": "https://example.com",
+          "isLoading": false,
+          "canGoBack": false,
+          "canGoForward": false
+        }
+        """.utf8)
+
+        let snapshot = try JSONDecoder().decode(AppBrowserTabSnapshot.self, from: data)
+
+        #expect(snapshot.faviconURLString == nil)
+    }
+
     @Test func decodesLegacyBrowserTabSnapshotWithoutRestorationFields() throws {
         let tabID = UUID()
         let json = """
@@ -40,6 +58,7 @@ struct BrowserTabSnapshotRestorationTests {
             initialURLString: "https://example.com",
             title: "Example",
             currentURLString: "https://example.com/article",
+            faviconURLString: "https://example.com/favicon.png",
             isLoading: false,
             canGoBack: true,
             canGoForward: false,
@@ -69,6 +88,7 @@ struct BrowserTabSnapshotRestorationTests {
 
         #expect(decoded == snapshot)
         #expect(decoded.restoredURLString == "https://example.com/article")
+        #expect(decoded.faviconURLString == "https://example.com/favicon.png")
         #expect(decoded.localFileReadAccessPath == "/tmp/workspace")
     }
 }

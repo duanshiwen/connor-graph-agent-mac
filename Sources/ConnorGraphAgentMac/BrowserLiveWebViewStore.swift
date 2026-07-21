@@ -25,6 +25,7 @@ final class BrowserLiveWebViewStore {
 
         var onNavigationStateChanged: ((WebNavigationState) -> Void)?
         var onAutomationNavigationStateChanged: ((WebNavigationState) -> Void)?
+        var onFaviconURLChanged: ((String?) -> Void)?
         var onOpenInNewTab: ((URL) -> Void)?
         var onPopupCreated: ((WKWebView, WebViewCoordinator, URL?) -> Void)?
         var onCloseRequested: ((WKWebView) -> Void)?
@@ -61,12 +62,16 @@ final class BrowserLiveWebViewStore {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             publishNavigationState(webView)
+            resolveFaviconURL(in: webView)
             onAutomationDidFinish?(webView)
             DispatchQueue.main.async { self.onRestorationReady?(webView) }
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { publishNavigationState(webView) }
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            onFaviconURLChanged?(nil)
+            publishNavigationState(webView)
+        }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             onAutomationDidFail?(webView, error)
             handleNavigationFailure(in: webView, error: error)
@@ -189,6 +194,7 @@ final class BrowserLiveWebViewStore {
 
         private func copyRuntimeHandlers(from other: WebViewCoordinator) {
             onNavigationStateChanged = other.onNavigationStateChanged
+            onFaviconURLChanged = other.onFaviconURLChanged
             onPopupCreated = other.onPopupCreated
             onCloseRequested = other.onCloseRequested
             onDownloadChanged = other.onDownloadChanged
@@ -244,6 +250,14 @@ final class BrowserLiveWebViewStore {
             DispatchQueue.main.async {
                 self.onNavigationStateChanged?(state)
                 self.onAutomationNavigationStateChanged?(state)
+            }
+        }
+
+        private func resolveFaviconURL(in webView: WKWebView) {
+            let pageURLString = webView.url?.absoluteString
+            webView.evaluateJavaScript(BrowserFaviconResolver.javaScript) { [weak self] result, _ in
+                guard webView.url?.absoluteString == pageURLString else { return }
+                self?.onFaviconURLChanged?(BrowserFaviconResolver.normalizedURLString(from: result))
             }
         }
     }
@@ -335,6 +349,7 @@ final class BrowserLiveWebViewStore {
         key: BrowserLiveWebViewKey,
         initialURLString: String,
         onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
+        onFaviconURLChanged: @escaping (String?) -> Void,
         onOpenInNewTab: @escaping (URL) -> Void,
         onPopupCreated: @escaping (WKWebView, WebViewCoordinator, URL?) -> Void,
         onCloseRequested: @escaping (WKWebView) -> Void,
@@ -353,6 +368,7 @@ final class BrowserLiveWebViewStore {
             entry.isVisible = isVisible
             if isVisible { entry.lastVisibleAt = now }
             entry.coordinator.onNavigationStateChanged = onNavigationStateChanged
+            entry.coordinator.onFaviconURLChanged = onFaviconURLChanged
             entry.coordinator.onOpenInNewTab = onOpenInNewTab
             configure(entry.coordinator, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
             entry.coordinator.onSelectionChanged = onSelectionChanged
@@ -364,6 +380,7 @@ final class BrowserLiveWebViewStore {
 
         let coordinator = WebViewCoordinator()
         coordinator.onNavigationStateChanged = onNavigationStateChanged
+        coordinator.onFaviconURLChanged = onFaviconURLChanged
         coordinator.onOpenInNewTab = onOpenInNewTab
         configure(coordinator, onPopupCreated: onPopupCreated, onCloseRequested: onCloseRequested, onDownloadChanged: onDownloadChanged, onMediaPermissionRequest: onMediaPermissionRequest, onContentProcessTerminated: onContentProcessTerminated)
         coordinator.onSelectionChanged = onSelectionChanged

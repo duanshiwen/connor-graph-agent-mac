@@ -357,6 +357,14 @@ struct BrowserFeatureModelTests {
         #expect(html.contains("q=&quot;unsafe&quot;&amp;x=1"))
     }
 
+    @Test func faviconResolverAcceptsWebIconsAndRejectsUnsupportedSchemes() {
+        #expect(BrowserFaviconResolver.normalizedURLString(from: "https://example.com/icon.png") == "https://example.com/icon.png")
+        #expect(BrowserFaviconResolver.normalizedURLString(from: "http://example.com/favicon.ico") == "http://example.com/favicon.ico")
+        #expect(BrowserFaviconResolver.normalizedURLString(from: "data:image/png;base64,abc") == nil)
+        #expect(BrowserFaviconResolver.normalizedURLString(from: NSNull()) == nil)
+        #expect(BrowserFaviconResolver.javaScript.contains("/favicon.ico"))
+    }
+
     @Test func webViewCompatibilityDelegatesRemainWiredAndUserAgentIsNative() throws {
         let source = try String(contentsOf: browserProjectSourceURL(named: "BrowserLiveWebViewStore.swift"), encoding: .utf8)
 
