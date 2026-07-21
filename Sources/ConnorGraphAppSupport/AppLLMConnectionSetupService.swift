@@ -254,12 +254,7 @@ public struct AppLLMConnectionSetupService: Sendable {
             : input.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: baseURLString) else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
         let model = normalizedModel(input.model).isEmpty ? "gpt-4.1" : normalizedModel(input.model)
-        let extraHeaders = [
-            "User-Agent": "GitHubCopilotChat/0.35.0",
-            "Editor-Version": "vscode/1.107.0",
-            "Editor-Plugin-Version": "copilot-chat/0.35.0",
-            "Copilot-Integration-Id": "vscode-chat"
-        ]
+        let extraHeaders = GitHubCopilotRequestHeaders.applying(to: [:])
         let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: runtimeToken, model: model, extraHeaders: extraHeaders)
         let health = try await openAICompatibleHealthCheck(config)
         guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }

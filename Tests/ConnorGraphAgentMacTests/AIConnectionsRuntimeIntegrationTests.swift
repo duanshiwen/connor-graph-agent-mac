@@ -101,6 +101,46 @@ private func makeRuntime(
 }
 
 @MainActor
+@Test func newSessionUsesDefaultModelInsteadOfPreviousSessionModel() async throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let connection = AppLLMConnectionConfig(
+        id: "default-connection",
+        name: "Default",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "default-model,previous-session-model",
+        selectedModel: "default-model",
+        hasAPIKey: true
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "real-key"
+    )
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsRuntimeCoordinator.selectModel(
+        "previous-session-model",
+        providerMode: .openAICompatible,
+        connectionID: connection.id
+    )
+    #expect(runtime.aiConnectionsModel.selectedModel == "previous-session-model")
+
+    runtime.newChatSession()
+
+    let sessionID = try #require(runtime.chatFeatureModel.sessions.selectedSessionID)
+    let override = try #require(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride)
+    #expect(override.connectionID == connection.id)
+    #expect(override.model == "default-model")
+    #expect(runtime.aiConnectionsModel.selectedModel == "default-model")
+
+    await runtime.waitForNewSessionPreparation(sessionID: sessionID)
+    let preparedOverride = try #require(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride)
+    #expect(preparedOverride.connectionID == connection.id)
+    #expect(preparedOverride.model == "default-model")
+}
+
+@MainActor
 @Test func runtimeUsesDisabledToolErrorFuseByDefault() throws {
     let runtime = try makeRuntime()
 
