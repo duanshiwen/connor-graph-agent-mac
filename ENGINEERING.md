@@ -239,6 +239,8 @@ graph/evaluations/reports/*.json
 
 Memory OS 证据描述用户历史、偏好、决定、关系和内部项目；Web 证据描述外部公开事实，两者不得互相覆盖。当前状态优先 active、较新且有证据的 L1/L2，历史问题保留旧记录，无法消解的冲突必须展示。
 
+最终回答实际采用 `web_search`、`web_fetch` 或 `browser_fetch` 返回的网页内容时，正文末尾必须列出去重后的“参考资料”Markdown 链接，仅包含真正支撑回答的页面；未采用网页内容时不添加该章节，内部 Memory OS record ID 也不得混入网页参考资料。
+
 ### 5.5 MCP Source Platform
 
 - Source registry 和 runtime repository。
