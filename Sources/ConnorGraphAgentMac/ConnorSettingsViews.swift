@@ -736,6 +736,13 @@ enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
         }
     }
 
+    var connectionNameComponent: String {
+        switch self {
+        case .openAICompatible: "OpenAI"
+        case .anthropicCompatible: "Anthropic"
+        }
+    }
+
     var modelValidationEndpointDescription: String {
         switch self {
         case .openAICompatible: "OpenAI 兼容连接测试"
@@ -1020,6 +1027,7 @@ struct AIConnectionSetupView: View {
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
     @State private var visionSupportOverride: Bool? = nil // nil = auto-detect, true = force enable, false = force disable
+    @State private var lastSuggestedConnectionName = ""
 
     var body: some View {
         ScrollView {
@@ -1046,6 +1054,8 @@ struct AIConnectionSetupView: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
         .onAppear(perform: initializeDrafts)
+        .onChange(of: baseURLString) { _, _ in refreshSuggestedConnectionName() }
+        .onChange(of: customProtocol) { _, _ in refreshSuggestedConnectionName() }
     }
 
     private var setupHero: some View {
@@ -1976,7 +1986,11 @@ struct AIConnectionSetupView: View {
     private func initializeDrafts() {
         guard connectionName.isEmpty else { return }
         baseURLString = option.baseURLString
-        connectionName = defaultDraftConnectionName(endpoint: option.baseURLString, fallback: option.connectionName)
+        setSuggestedConnectionName(
+            endpoint: option.baseURLString,
+            fallback: option.connectionName,
+            protocolName: optionProtocolNameComponent
+        )
         model = option.model
         selectedModel = option.selectedModel
         selectedModelIDs = Set(option.modelOptionsFallback)
@@ -1999,26 +2013,26 @@ struct AIConnectionSetupView: View {
     private func applyXiaomiMiMoConnectionMode() {
         guard isXiaomiMiMoOption else { return }
         baseURLString = xiaomiMiMoConnectionMode.openAIEndpoint
-        connectionName = defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
+        setSuggestedConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: AIConnectionCustomProtocol.openAICompatible.connectionNameComponent)
     }
 
     private func applySelectedProviderPreset() {
         let preset = activeProviderPreset
         if preset.id != "custom" {
             baseURLString = preset.endpoint
-            connectionName = defaultDraftConnectionName(endpoint: preset.endpoint, fallback: preset.title)
+            customProtocol = preset.protocolKind
+            setSuggestedConnectionName(endpoint: preset.endpoint, fallback: preset.title, protocolName: preset.protocolKind.connectionNameComponent)
             model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
             selectedModelIDs = Set(preset.availableModels)
-            customProtocol = preset.protocolKind
         } else {
             baseURLString = ""
-            connectionName = option.connectionName
             model = ""
             selectedModel = ""
             selectedModelIDs = []
             customProtocol = .openAICompatible
             shouldFetchModelsList = true
+            setSuggestedConnectionName(endpoint: "", fallback: option.connectionName, protocolName: customProtocol.connectionNameComponent)
         }
     }
 
@@ -2054,11 +2068,41 @@ struct AIConnectionSetupView: View {
     private func submittedConnectionNameForSubmit() -> String {
         let trimmedName = connectionName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedName.isEmpty { return trimmedName }
-        return defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
+        return defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: currentProtocolNameComponent)
     }
 
-    private func defaultDraftConnectionName(endpoint: String, fallback: String) -> String {
-        AppLLMEndpointDisplayName.defaultConnectionName(from: endpoint, fallback: fallback)
+    private var optionProtocolNameComponent: String {
+        switch option.providerMode {
+        case .openAIResponses: "OpenAI Responses"
+        case .openAICompatible: "OpenAI"
+        case .anthropicMessages: "Anthropic"
+        }
+    }
+
+    private var currentProtocolNameComponent: String {
+        if option.id == "china-provider" || option.id == "other-provider" {
+            return customProtocol.connectionNameComponent
+        }
+        return optionProtocolNameComponent
+    }
+
+    private func refreshSuggestedConnectionName() {
+        let suggested = defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: currentProtocolNameComponent)
+        let current = connectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty || current == lastSuggestedConnectionName {
+            connectionName = suggested
+        }
+        lastSuggestedConnectionName = suggested
+    }
+
+    private func setSuggestedConnectionName(endpoint: String, fallback: String, protocolName: String) {
+        let suggested = defaultDraftConnectionName(endpoint: endpoint, fallback: fallback, protocolName: protocolName)
+        connectionName = suggested
+        lastSuggestedConnectionName = suggested
+    }
+
+    private func defaultDraftConnectionName(endpoint: String, fallback: String, protocolName: String) -> String {
+        AppLLMEndpointDisplayName.defaultConnectionName(from: endpoint, fallback: fallback, protocolName: protocolName)
     }
 
     private func effectiveModelListForSubmit() -> String {
