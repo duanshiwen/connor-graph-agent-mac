@@ -59,11 +59,7 @@ public struct MemoryOSContextBuilder: Sendable {
         expansions: [String: [MemoryOSL4ExpansionHit]] = [:],
         generatedAt: Date = Date()
     ) -> MemoryOSContextPackage {
-        let sortedHits = hits.sorted { lhs, rhs in
-            if lhs.score != rhs.score { return lhs.score > rhs.score }
-            if lhs.layer.rawValue != rhs.layer.rawValue { return lhs.layer.rawValue < rhs.layer.rawValue }
-            return lhs.recordID < rhs.recordID
-        }
+        let sortedHits = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
 
         var diagnostics: [MemoryOSContextDiagnostic] = []
         var blocks = makeBlocks(from: sortedHits, request: request)
@@ -340,7 +336,7 @@ public struct MemoryOSContextBuilder: Sendable {
 
     /// Render only L1/L2 operational memory. These sentences represent recent or mutable state.
     public func buildRecentContextStrings(hits: [MemoryOSRetrievalHit]) -> [String] {
-        deduplicatedStrings(hits.sorted { $0.score > $1.score }.compactMap { hit in
+        deduplicatedStrings(hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore).compactMap { hit in
             switch hit.layer {
             case .l1:
                 return appendUpdatedAtSuffix("Recent capture \(hit.title): \(hit.matchedText)", updatedAt: hit.metadata["updated_at"])
@@ -359,7 +355,7 @@ public struct MemoryOSContextBuilder: Sendable {
         expansions: [String: [MemoryOSL4ExpansionHit]],
         extraEntityNames: [String: String] = [:]
     ) -> [String] {
-        let sortedHits = hits.sorted { $0.score > $1.score }
+        let sortedHits = hits.sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
         var entityIDToName = extraEntityNames
         for hit in sortedHits where hit.layer == .l4 && hit.metadata["entity_type"] != nil {
             entityIDToName[hit.entityRefs.first ?? hit.recordID] = hit.title

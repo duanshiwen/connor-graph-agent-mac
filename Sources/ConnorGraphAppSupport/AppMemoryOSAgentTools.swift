@@ -187,8 +187,8 @@ public struct MemoryOSSearchTool: AgentTool {
             throw AgentToolError.invalidArguments("query is required")
         }
         let layers = parseLayers(arguments.array("layers"))
-        let limit = max(1, min(arguments.int("limit") ?? 10, 50))
-        let depth = max(0, min(arguments.int("depth") ?? 0, 5))
+        let limit = max(10, arguments.int("limit") ?? 10)
+        let depth = max(1, min(arguments.int("depth") ?? 1, 6))
         let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: queryText, layers: layers, limit: limit, depth: depth))
         let rows = hits.map { hit -> [String: Any] in
             [
