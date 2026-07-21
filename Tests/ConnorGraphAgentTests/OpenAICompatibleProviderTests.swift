@@ -219,6 +219,48 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(function["description"] as? String == "Search graph memory")
 }
 
+@Test func openAICompatibleCalendarWriteIncludesRequiredOperationGuidance() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://api.xiaomimimo.com/v1")!,
+            apiKey: "mimo-secret",
+            model: "mimo-v2.5-pro",
+            apiKeyHeaderKind: .apiKey
+        ),
+        httpClient: client
+    )
+    let calendarWrite = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+    let tool = AgentToolDefinition(
+        name: calendarWrite.name,
+        description: calendarWrite.description,
+        inputSchema: calendarWrite.inputSchema,
+        inputExamples: calendarWrite.inputExamples
+    )
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Create an event")],
+        tools: [tool]
+    ))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    let function = try #require(tools.first?["function"] as? [String: Any])
+    let description = try #require(function["description"] as? String)
+    let parameters = try #require(function["parameters"] as? [String: Any])
+    #expect(description.contains("Every call must include operation"))
+    #expect(description.contains("{\"operation\":\"create_event\""))
+    #expect(parameters["required"] as? [String] == ["operation"])
+}
+
 @Test func openAICompatibleProviderCanUseAPIKeyHeaderInsteadOfBearer() async throws {
     let body = """
     {
