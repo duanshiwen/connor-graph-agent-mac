@@ -779,7 +779,10 @@ private struct AgentChatConversationView: View {
                         hasOlderItems: hasOlderMessages,
                         isLoadingOlderItems: isLoadingOlderMessages,
                         onTopReached: {
-                            loadOlderMessagesIfNeeded(firstVisibleItemID: chatItems.first?.id, dataSetID: chatDataSetID)
+                            loadOlderMessagesIfNeeded(
+                                firstVisibleItemID: AgentChatTimelineAdapter().prependAnchorItemID(in: chatItems),
+                                dataSetID: chatDataSetID
+                            )
                         }
                     ) { chatItem in
                         if let item = chatItem.timelineItem {
