@@ -261,7 +261,7 @@ struct SettingsMailSection: View {
             Divider()
             SettingsValueRow(title: "HTML 正文", value: "不执行 JavaScript，不主动加载远程资源")
             Divider()
-            SettingsValueRow(title: "发送保护", value: "发送邮件需要权限审批")
+            SettingsValueRow(title: "发送权限", value: "受当前会话权限模式控制；执行模式直接放行")
             Divider()
             SettingsValueRow(title: "本地治理", value: "邮件索引和正文缓存保存在本地")
         }

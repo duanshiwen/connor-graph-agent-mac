@@ -251,15 +251,7 @@ public actor MCPClientPool: MCPToolRouting {
             )
             switch decision.outcome {
             case .approved:
-                // Commercial MCP governance requires explicit, per-run approval for sensitive MCP tools.
-                throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
-                    id: decision.requestID,
-                    runID: context.runID,
-                    sessionID: context.sessionID,
-                    capability: policy.permissionCapability,
-                    toolName: descriptor.name,
-                    payloadJSON: payloadJSON
-                ))
+                break
             case .needsApproval:
                 throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
                     id: decision.requestID,

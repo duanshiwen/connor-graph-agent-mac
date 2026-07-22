@@ -263,7 +263,7 @@ struct MailAgentToolsTests {
         #expect(required == ["draftID"])
         #expect(draftIDDescription.contains("Exact MailDraft.id"))
         #expect(draftIDDescription.contains("mail_create_draft"))
-        #expect(draftIDDescription.contains("native Compose approval card"))
+        #expect(draftIDDescription.contains("current session permission policy"))
         #expect(draftIDDescription.contains("Do not ask the user"))
     }
 
