@@ -59,6 +59,7 @@
 		9A17D0B10000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B00000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift */; };
 		C1A020010000000000000001 /* Sources/ConnorGraphAgentMac/KimiConnectionModePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A020000000000000000001 /* Sources/ConnorGraphAgentMac/KimiConnectionModePreset.swift */; };
 		C1A020010000000000000002 /* Sources/ConnorGraphAgentMac/SkillImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A020000000000000000002 /* Sources/ConnorGraphAgentMac/SkillImportWizardView.swift */; };
+		C1A020010000000000000003 /* Sources/ConnorGraphAgentMac/AIConnectionSubscriptionPlanPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A020000000000000000003 /* Sources/ConnorGraphAgentMac/AIConnectionSubscriptionPlanPreset.swift */; };
 		A00000000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */; };
 		A00000000000000000000003 /* ConnorGraphCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000004 /* ConnorGraphCore */; };
 		A00000000000000000000005 /* ConnorGraphMemory in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000006 /* ConnorGraphMemory */; };
@@ -240,6 +241,7 @@
 		9A17D0B00000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift; sourceTree = "<group>"; };
 		C1A020000000000000000001 /* Sources/ConnorGraphAgentMac/KimiConnectionModePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/KimiConnectionModePreset.swift; sourceTree = "<group>"; };
 		C1A020000000000000000002 /* Sources/ConnorGraphAgentMac/SkillImportWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SkillImportWizardView.swift; sourceTree = "<group>"; };
+		C1A020000000000000000003 /* Sources/ConnorGraphAgentMac/AIConnectionSubscriptionPlanPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AIConnectionSubscriptionPlanPreset.swift; sourceTree = "<group>"; };
 		A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* ConnorGraphAgentMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = ConnorGraphAgentMacApp.app; path = "康纳同学.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0000000000000000000002D /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentChatView.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
@@ -520,6 +522,7 @@
 				9A17D0B00000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift */,
 				C1A020000000000000000001 /* Sources/ConnorGraphAgentMac/KimiConnectionModePreset.swift */,
 				C1A020000000000000000002 /* Sources/ConnorGraphAgentMac/SkillImportWizardView.swift */,
+				C1A020000000000000000003 /* Sources/ConnorGraphAgentMac/AIConnectionSubscriptionPlanPreset.swift */,
 				6D47A40000000000000AAA1 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift */,
 				9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */,
 				A00000000000000000000014 /* Products */,
@@ -830,6 +833,7 @@
 				9A17D0B10000000000001A /* Sources/ConnorGraphAgentMac/XiaomiMiMoConnectionModePreset.swift in Sources */,
 				C1A020010000000000000001 /* Sources/ConnorGraphAgentMac/KimiConnectionModePreset.swift in Sources */,
 				C1A020010000000000000002 /* Sources/ConnorGraphAgentMac/SkillImportWizardView.swift in Sources */,
+				C1A020010000000000000003 /* Sources/ConnorGraphAgentMac/AIConnectionSubscriptionPlanPreset.swift in Sources */,
 				6D47A40000000000000AAA2 /* Sources/ConnorGraphAgentMac/WelcomeLLMView.swift in Sources */,
 				9A17D0B100000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift in Sources */,
 				AA5A70000000000000000101 /* Sources/ConnorGraphAgentMac/AgentAttachmentContextPlanBuilder.swift in Sources */,
@@ -1004,7 +1008,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.20;
+				MARKETING_VERSION = 1.0.21;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;
@@ -1042,7 +1046,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.20;
+				MARKETING_VERSION = 1.0.21;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;
