@@ -16,7 +16,7 @@ public struct MailRuntimeSendApproval: Codable, Sendable, Equatable {
 
     public init(draft: MailDraft, from: String) {
         self.draftID = draft.id
-        self.title = "Send email approval"
+        self.title = "Send email authorization"
         self.from = from
         self.to = draft.to.map(\.email)
         self.cc = draft.cc.map(\.email)
@@ -24,7 +24,7 @@ public struct MailRuntimeSendApproval: Codable, Sendable, Equatable {
         self.subject = draft.subject
         self.bodyPreview = String(draft.body.prefix(500))
         self.attachmentCount = draft.attachmentIDs.count
-        self.riskSummary = "Email sending is always approval-gated."
+        self.riskSummary = "Email sending follows the current session permission mode."
         self.envelopeHash = draft.envelopeHash()
     }
 }

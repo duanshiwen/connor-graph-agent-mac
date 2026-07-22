@@ -60,6 +60,9 @@ public actor AgentPolicyEngine: Sendable {
     }
 
     private func outcome(for capability: AgentPermissionCapability) -> AgentPermissionOutcome {
+        if permissionMode == .trustedWrite || permissionMode == .allowAll {
+            return .approved
+        }
         if capability == .mutateContacts
             || capability == .mutateCalendar
             || capability == .mutatePersonality
@@ -87,12 +90,7 @@ public actor AgentPolicyEngine: Sendable {
                 return .needsApproval
             }
         case .trustedWrite:
-            switch capability {
-            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .interactBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .mutateMailState, .createMailDraft, .importMailAttachment, .readContacts, .readCalendar, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
-                return .approved
-            case .mutatePersonality, .invalidateGraphStatement, .deleteGraphObject, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML:
-                return .needsApproval
-            }
+            return .approved
         }
     }
 

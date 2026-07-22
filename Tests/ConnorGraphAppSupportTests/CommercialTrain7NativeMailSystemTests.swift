@@ -6,7 +6,7 @@ import ConnorGraphAppSupport
 
 @Suite("Commercial Train 7 Native Mail System Tests")
 struct CommercialTrain7NativeMailSystemTests {
-    @Test func permissionPolicyAllowsBuiltInReadsButRequiresSendApproval() async {
+    @Test func permissionPolicyAllowsBuiltInReadsAndAutoApprovesAllowAllMutations() async {
         let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
         let readMail = await readOnly.evaluate(capability: .readMail, runID: "run", sessionID: "session", toolName: "mail_list_accounts")
         let readBody = await readOnly.evaluate(capability: .readMailBody, runID: "run", sessionID: "session", toolName: "mail_get_message")
@@ -15,8 +15,8 @@ struct CommercialTrain7NativeMailSystemTests {
 
         #expect(readMail.outcome == .approved)
         #expect(readBody.outcome == .approved)
-        #expect(send.outcome == .needsApproval)
-        #expect(contactWrite.outcome == .needsApproval)
+        #expect(send.outcome == .approved)
+        #expect(contactWrite.outcome == .approved)
     }
 
     @Test func fixtureRuntimeReadsWithoutMutatingReadStateAndAuditsBodyRead() async throws {
@@ -327,7 +327,7 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(MailBodyOnDemandFetchPlanner.imapUID(for: archiveDetail) == nil)
     }
 
-    @Test func agentToolRegistryExposesNativeMailToolsAndBlocksSendWithoutApproval() async throws {
+    @Test func agentToolRegistryUsesSessionPolicyForSending() async throws {
         let runtime = MailRuntime.fixture()
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: runtime)
@@ -336,14 +336,28 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(registry.definitions.map(\.name).contains("mail_send_draft"))
         #expect(registry.permission(named: "mail_send_draft") == .sendMail)
 
-        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "send", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll))
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "send", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .askToWrite))
         let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"missing\",\"approved\":false}")
         do {
             _ = try await registry.execute(call, context: context)
-            Issue.record("sendMail should require approval before execution")
+            Issue.record("Ask mode should require approval before execution")
         } catch AgentToolError.permissionNeedsApproval(let request) {
             #expect(request.capability == .sendMail)
         }
+
+        let draft = try await runtime.createDraft(
+            accountID: MailAccountID(rawValue: "fixture-account"),
+            identityID: MailIdentityID(rawValue: "fixture-identity"),
+            to: [MailAddress(email: "bob@example.com")],
+            subject: "Execute mode",
+            body: "Send immediately"
+        )
+        let executeContext = AgentToolExecutionContext(runID: "run-execute", sessionID: "session-execute", groupID: "group", userPrompt: "send", toolCallID: "call-execute", policyEngine: AgentPolicyEngine(permissionMode: .trustedWrite))
+        let executeCall = AgentToolCall(id: "call-execute", runID: "run-execute", sessionID: "session-execute", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"\(draft.id.rawValue)\"}")
+
+        let result = try await registry.execute(executeCall, context: executeContext)
+        #expect(result.error == nil)
+        #expect(result.contentText.contains("Sent authorized draft"))
     }
 
     @Test func draftLifecycleSeparatesCreateFromSend() async throws {

@@ -49,7 +49,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("`personality_get_current`"))
     #expect(prompt.contains("`personality_propose_update`"))
     #expect(prompt.contains("`personality_commit_proposal`"))
-    #expect(prompt.contains("native approval UI"))
+    #expect(prompt.contains("In Ask mode, the native approval UI lets the user review the change"))
+    #expect(prompt.contains("In Execute mode, the permission policy authorizes it immediately"))
     #expect(prompt.contains("explicit sexual content"))
     #expect(prompt.contains("Legitimate medical, legal, news, safety, or educational discussion remains allowed"))
 }
@@ -238,14 +239,16 @@ import ConnorGraphAgent
     #expect(prompt.contains("recurring or contains organizer/attendee scheduling semantics"))
 }
 
-@Test func defaultSystemPromptDocumentsOutboundMailApprovalWorkflow() {
+@Test func defaultSystemPromptDocumentsOutboundMailPermissionWorkflow() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Outbound mail approval workflow"))
+    #expect(prompt.contains("Outbound mail permission workflow"))
     #expect(prompt.contains("MailDraft.id"))
     #expect(prompt.contains("mail_send_draft"))
+    #expect(prompt.contains("In Ask mode, this presents the native Compose approval card"))
+    #expect(prompt.contains("In Execute mode, the permission policy authorizes sending immediately"))
     #expect(prompt.contains("native Compose approval card"))
-    #expect(prompt.contains("Do not replace this native approval flow"))
+    #expect(prompt.contains("Do not replace the tool workflow with a natural-language \"please confirm\" message"))
     #expect(prompt.contains("never ask the user to provide or find a draft ID"))
     #expect(prompt.contains("omit accountID and identityID to use the Settings default send account"))
     #expect(prompt.contains("never invent default as a literal mail account ID"))

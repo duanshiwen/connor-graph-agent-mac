@@ -52,7 +52,7 @@ public extension AgentMailRuntime {
     }
 
     func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
-        MailSendApprovalBridge(draftID: draftID, title: "Send email approval", from: "unknown", to: [], cc: [], bcc: [], subject: "", bodyPreview: "", attachmentCount: 0, riskSummary: "Email sending is always approval-gated.", envelopeHash: "")
+        MailSendApprovalBridge(draftID: draftID, title: "Send email authorization", from: "unknown", to: [], cc: [], bcc: [], subject: "", bodyPreview: "", attachmentCount: 0, riskSummary: "Email sending follows the current session permission mode.", envelopeHash: "")
     }
 }
 
@@ -484,7 +484,7 @@ public struct MailCreateDraftTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To request the native Compose approval card for sending, call mail_send_draft with draftID=\"\(draftID)\". Do not ask the user to provide the draft ID.",
+            contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it through the current session permission policy, call mail_send_draft with draftID=\"\(draftID)\". Ask mode presents the native Compose approval card; Execute mode sends immediately. Do not ask the user to provide the draft ID.",
             contentJSON: try MailJSON.encode(draft)
         )
     }
@@ -493,9 +493,9 @@ public struct MailCreateDraftTool: AgentTool {
 public struct MailSendDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_send_draft" }
-    public var description: String { "Request native Compose approval to send an existing mail draft. Use the exact MailDraft.id returned by mail_create_draft; this tool is never auto-approved and must not be replaced with a natural-language confirmation." }
+    public var description: String { "Send an existing mail draft through the current session permission policy. Ask mode presents native Compose approval; Execute mode sends immediately. Use the exact MailDraft.id returned by mail_create_draft and do not replace this tool with a natural-language confirmation." }
     public var permission: AgentPermissionCapability { .sendMail }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Exact MailDraft.id returned by mail_create_draft. Do not ask the user to provide this ID; pass the ID from the prior tool result to trigger the native Compose approval card.")], required: ["draftID"]) }
+    public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Exact MailDraft.id returned by mail_create_draft. Do not ask the user to provide this ID; pass the ID from the prior tool result to send through the current session permission policy.")], required: ["draftID"]) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         guard let args = try? AgentToolArguments(json: call.argumentsJSON), let draftID = args.string("draftID"), let payload = try? await runtime.sendApprovalBridgePayload(draftID: MailDraftID(rawValue: draftID)) else {
@@ -505,9 +505,9 @@ public struct MailSendDraftTool: AgentTool {
     }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
-        let isHumanApproved = context.approvedCapabilities.contains(.sendMail)
-        let receipt = try await runtime.sendDraft(draftID: MailDraftID(rawValue: draftID), approved: isHumanApproved, runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Sent approved draft \(draftID)", contentJSON: try MailJSON.encode(receipt))
+        let isAuthorized = context.approvedCapabilities.contains(.sendMail)
+        let receipt = try await runtime.sendDraft(draftID: MailDraftID(rawValue: draftID), approved: isAuthorized, runID: context.runID, sessionID: context.sessionID)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Sent authorized draft \(draftID)", contentJSON: try MailJSON.encode(receipt))
     }
 }
 

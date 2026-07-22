@@ -23,6 +23,20 @@ private struct EchoTool: AgentTool {
     }
 }
 
+private struct ApprovalAwareTool: AgentTool {
+    let name = "approval_aware"
+    let description = "Verifies that a policy-approved capability reaches tool execution."
+    let permission: AgentPermissionCapability = .sendMail
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard context.approvedCapabilities.contains(permission) else {
+            throw AgentToolError.permissionDenied("Approved capability was not propagated")
+        }
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "approved")
+    }
+}
+
 @Test func browserPermissionsSeparateReadingNavigationInteractionAndCommit() async {
     let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
     #expect(await readOnly.evaluate(capability: .readBrowserPage, runID: "run", sessionID: "session").outcome == .approved)
@@ -34,12 +48,28 @@ private struct EchoTool: AgentTool {
 
     let trusted = AgentPolicyEngine(permissionMode: .trustedWrite)
     #expect(await trusted.evaluate(capability: .interactBrowser, runID: "run", sessionID: "session").outcome == .approved)
-    #expect(await trusted.evaluate(capability: .commitBrowserAction, runID: "run", sessionID: "session").outcome == .needsApproval)
-    #expect(await trusted.evaluate(capability: .transferBrowserFile, runID: "run", sessionID: "session").outcome == .needsApproval)
+    #expect(await trusted.evaluate(capability: .commitBrowserAction, runID: "run", sessionID: "session").outcome == .approved)
+    #expect(await trusted.evaluate(capability: .transferBrowserFile, runID: "run", sessionID: "session").outcome == .approved)
 }
 
-@Test func personalityMutationAlwaysRequiresApprovalEvenInAllowAllMode() async {
-    for mode in AgentPermissionMode.allCases {
+@Test func executeAndAllowAllModesApproveEverySensitiveCapability() async {
+    let capabilities: [AgentPermissionCapability] = [
+        .mutatePersonality, .mutateContacts, .mutateCalendar, .sendMail,
+        .commitBrowserAction, .transferBrowserFile, .deleteWorkspaceFile,
+        .runNetworkShellCommand, .runDestructiveShellCommand
+    ]
+    for mode in [AgentPermissionMode.trustedWrite, .allowAll] {
+        for capability in capabilities {
+            let decision = await AgentPolicyEngine(permissionMode: mode).evaluate(
+                capability: capability,
+                runID: "run-execute",
+                sessionID: "session-execute"
+            )
+            #expect(decision.outcome == .approved)
+        }
+    }
+
+    for mode in [AgentPermissionMode.readOnly, .askToWrite] {
         let decision = await AgentPolicyEngine(permissionMode: mode).evaluate(
             capability: .mutatePersonality,
             runID: "run-personality",
@@ -48,6 +78,26 @@ private struct EchoTool: AgentTool {
         )
         #expect(decision.outcome == .needsApproval)
     }
+}
+
+@Test func executeModePropagatesAutomaticApprovalIntoToolContext() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(ApprovalAwareTool())
+    let context = AgentToolExecutionContext(
+        runID: "run-execute",
+        sessionID: "session-execute",
+        groupID: "default",
+        userPrompt: "send",
+        toolCallID: "call-execute",
+        policyEngine: AgentPolicyEngine(permissionMode: .trustedWrite)
+    )
+
+    let result = try await registry.execute(
+        AgentToolCall(id: "call-execute", name: "approval_aware", argumentsJSON: "{}"),
+        context: context
+    )
+
+    #expect(result.contentText == "approved")
 }
 
 @Test func toolRegistryExecutesRegisteredToolAndWritesAuditDecision() async throws {

@@ -6,7 +6,7 @@ import ConnorGraphAppSupport
 
 @Suite("Native RSS System Tests")
 struct NativeRSSSystemTests {
-    @Test func permissionPolicyAllowsReadsAndProtectsMutations() async {
+    @Test func permissionPolicyRestrictsReadOnlyMutationsAndExecutesTrustedMutations() async {
         let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
         let read = await readOnly.evaluate(capability: .readRSS, runID: "run", sessionID: "session", toolName: "rss_list_items")
         let content = await readOnly.evaluate(capability: .readRSSContent, runID: "run", sessionID: "session", toolName: "rss_get_item")
@@ -16,7 +16,7 @@ struct NativeRSSSystemTests {
         #expect(read.outcome == .approved)
         #expect(content.outcome == .approved)
         #expect(mutate.outcome == .denied)
-        #expect(manage.outcome == .needsApproval)
+        #expect(manage.outcome == .approved)
     }
 
     @Test func fixtureRuntimeReadsContentAndMutatesStateExplicitly() async throws {
