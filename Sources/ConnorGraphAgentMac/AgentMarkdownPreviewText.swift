@@ -1,4 +1,5 @@
 import SwiftUI
+@preconcurrency import AppKit
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
@@ -31,6 +32,20 @@ struct AgentMarkdownPreviewText: View {
     private final class RenderCache: @unchecked Sendable {
         static let shared = RenderCache()
         private let documentCache = AgentMarkdownCompiledDocumentCache(limit: 600)
+        private let inlineCache: NSCache<NSString, AttributedStringBox> = {
+            let cache = NSCache<NSString, AttributedStringBox>()
+            cache.countLimit = 1_200
+            cache.totalCostLimit = 8 * 1_024 * 1_024
+            return cache
+        }()
+
+        private final class AttributedStringBox: NSObject {
+            let value: AttributedString
+
+            init(_ value: AttributedString) {
+                self.value = value
+            }
+        }
 
         func document(
             _ markdown: String,
@@ -57,6 +72,25 @@ struct AgentMarkdownPreviewText: View {
                 }
             )
         }
+
+        func inlineRendered(_ markdown: String, attributed: AttributedString? = nil) -> AttributedString {
+            let cacheKey = markdown as NSString
+            if let cached = inlineCache.object(forKey: cacheKey) {
+                return cached.value
+            }
+
+            let parsed = attributed ?? (try? AttributedString(
+                markdown: markdown,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            )) ?? AttributedString(markdown)
+            let rendered = parsed.withLinkCursor()
+            inlineCache.setObject(
+                AttributedStringBox(rendered),
+                forKey: cacheKey,
+                cost: max(markdown.utf8.count, 1)
+            )
+            return rendered
+        }
     }
 
     private var documentLoadID: String {
@@ -73,13 +107,7 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private var lightweightInlineRendered: AttributedString {
-        if let attributed = try? AttributedString(
-            markdown: markdown,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(markdown)
+        RenderCache.shared.inlineRendered(markdown)
     }
 
     private var renderStrategy: AgentMarkdownPreviewRenderStrategy {
@@ -164,42 +192,42 @@ struct AgentMarkdownPreviewText: View {
     @ViewBuilder
     private func view(for block: AgentMarkdownCompiledBlock) -> some View {
         switch block.content {
-        case .heading(let level, _, let inline):
-            Text(inline)
+        case .heading(let level, let text, let inline):
+            Text(RenderCache.shared.inlineRendered(text, attributed: inline))
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        case .paragraph(_, let inline):
-            Text(inline)
+        case .paragraph(let text, let inline):
+            Text(RenderCache.shared.inlineRendered(text, attributed: inline))
                 .font(font)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        case .unorderedItem(_, let inline):
+        case .unorderedItem(let text, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("•")
                     .font(font)
                     .frame(width: 12, alignment: .trailing)
-                Text(inline)
+                Text(RenderCache.shared.inlineRendered(text, attributed: inline))
                     .font(font)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 4)
-        case .orderedItem(let number, _, let inline):
+        case .orderedItem(let number, let text, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(number).")
                     .font(font)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 22, alignment: .trailing)
-                Text(inline)
+                Text(RenderCache.shared.inlineRendered(text, attributed: inline))
                     .font(font)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 2)
-        case .quote(_, let inline):
-            Text(inline)
+        case .quote(let text, let inline):
+            Text(RenderCache.shared.inlineRendered(text, attributed: inline))
                 .font(font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -210,13 +238,13 @@ struct AgentMarkdownPreviewText: View {
                     .fill(Color.secondary.opacity(0.28))
                     .frame(width: 3)
                 }
-        case .taskItem(let isCompleted, _, let inline):
+        case .taskItem(let isCompleted, let text, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .tertiary)
                     .frame(width: 14, alignment: .center)
-                Text(inline)
+                Text(RenderCache.shared.inlineRendered(text, attributed: inline))
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .primary)
                     .strikethrough(isCompleted, color: .secondary)
@@ -347,15 +375,23 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private func renderTableCellInline(_ text: String) -> AttributedString {
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(text)
+        RenderCache.shared.inlineRendered(text)
     }
 
+}
+
+private extension AttributedString {
+    func withLinkCursor() -> AttributedString {
+        guard runs.contains(where: { $0.link != nil }) else { return self }
+
+        let result = NSMutableAttributedString(self)
+        let fullRange = NSRange(location: 0, length: result.length)
+        result.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+            guard value != nil else { return }
+            result.addAttribute(.cursor, value: NSCursor.pointingHand, range: range)
+        }
+        return AttributedString(result)
+    }
 }
 
 extension Array {
