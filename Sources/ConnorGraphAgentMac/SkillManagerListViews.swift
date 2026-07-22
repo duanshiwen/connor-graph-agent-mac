@@ -5,10 +5,17 @@ import ConnorGraphAppSupport
 
 struct CraftSkillListPane: View {
     @Bindable var model: SkillRuntimeFeatureModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
-            SkillListHeader(onAdd: model.presentAddDialog)
+            SkillListHeader(
+                onAdd: model.presentAddDialog,
+                onImport: {
+                    model.prepareSkillImport()
+                    openWindow(id: AppMenuPresentation.skillImportWindowID)
+                }
+            )
 
             if model.presentation.cards.isEmpty {
                 SkillListEmptyState()
@@ -29,9 +36,17 @@ struct CraftSkillListPane: View {
 
 private struct SkillListHeader: View {
     var onAdd: () -> Void
+    var onImport: () -> Void
 
     var body: some View {
         AppListPaneHeader(title: "技能") {
+            Button(action: onImport) {
+                Image(systemName: "square.and.arrow.down")
+            }
+            .buttonStyle(.appIcon)
+            .help("导入技能")
+            .accessibilityLabel("导入技能")
+
             Button(action: onAdd) {
                 Image(systemName: "plus")
             }

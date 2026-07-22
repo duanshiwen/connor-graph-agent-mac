@@ -11,6 +11,7 @@ struct AppMenuPresentationTests {
         #expect(AppMenuPresentation.newNoteTitle == "新建笔记")
         #expect(AppMenuPresentation.importNotesTitle == "导入笔记…")
         #expect(AppMenuPresentation.importCenterTitle == "导入中心…")
+        #expect(AppMenuPresentation.importSkillsTitle == "导入技能…")
     }
 
     @Test("Uses stable singleton import window identifiers")
@@ -18,5 +19,6 @@ struct AppMenuPresentationTests {
         #expect(AppMenuPresentation.noteImportWizardWindowID == "note-import-wizard")
         #expect(AppMenuPresentation.noteImportCenterWindowID == "note-import-center")
         #expect(AppMenuPresentation.noteImportWizardWindowID != AppMenuPresentation.noteImportCenterWindowID)
+        #expect(AppMenuPresentation.skillImportWindowID == "skill-import")
     }
 }

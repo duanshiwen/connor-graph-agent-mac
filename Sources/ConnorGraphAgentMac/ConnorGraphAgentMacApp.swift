@@ -18,8 +18,10 @@ enum AppMenuPresentation {
     static let newNoteTitle = "新建笔记"
     static let importNotesTitle = "导入笔记…"
     static let importCenterTitle = "导入中心…"
+    static let importSkillsTitle = "导入技能…"
     static let noteImportWizardWindowID = "note-import-wizard"
     static let noteImportCenterWindowID = "note-import-center"
+    static let skillImportWindowID = "skill-import"
     static let knowledgePublicationProgressWindowID = "knowledge-publication-progress"
 }
 
@@ -146,6 +148,12 @@ struct ConnorGraphAgentMacApp: App {
         }
         .defaultSize(width: 900, height: 620)
 
+        Window("导入技能", id: AppMenuPresentation.skillImportWindowID) {
+            SkillImportWizardView(model: root.graph.skills)
+                .appFormTheme()
+        }
+        .defaultSize(width: 820, height: 640)
+
         Window("知识库发布进度", id: AppMenuPresentation.knowledgePublicationProgressWindowID) {
             KnowledgePublicationProgressView(
                 store: root.graph.knowledgeCreator,
@@ -179,6 +187,11 @@ private struct NoteImportFileCommands: Commands {
                 openWindow(id: AppMenuPresentation.noteImportWizardWindowID)
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
+
+            Button(AppMenuPresentation.importSkillsTitle) {
+                root.graph.skills.prepareSkillImport()
+                openWindow(id: AppMenuPresentation.skillImportWindowID)
+            }
 
             Button(AppMenuPresentation.importCenterTitle) {
                 openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
