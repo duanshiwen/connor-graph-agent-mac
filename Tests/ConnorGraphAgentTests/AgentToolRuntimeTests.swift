@@ -69,15 +69,20 @@ private struct ApprovalAwareTool: AgentTool {
         }
     }
 
-    for mode in [AgentPermissionMode.readOnly, .askToWrite] {
-        let decision = await AgentPolicyEngine(permissionMode: mode).evaluate(
-            capability: .mutatePersonality,
-            runID: "run-personality",
-            sessionID: "session-personality",
-            toolName: "personality_commit_proposal"
-        )
-        #expect(decision.outcome == .needsApproval)
-    }
+    let askDecision = await AgentPolicyEngine(permissionMode: .askToWrite).evaluate(
+        capability: .mutatePersonality,
+        runID: "run-personality",
+        sessionID: "session-personality",
+        toolName: "personality_commit_proposal"
+    )
+    #expect(askDecision.outcome == .approved)
+
+    let readOnlyDecision = await AgentPolicyEngine(permissionMode: .readOnly).evaluate(
+        capability: .mutatePersonality,
+        runID: "run-personality-read-only",
+        sessionID: "session-personality"
+    )
+    #expect(readOnlyDecision.outcome == .denied)
 }
 
 @Test func executeModePropagatesAutomaticApprovalIntoToolContext() async throws {

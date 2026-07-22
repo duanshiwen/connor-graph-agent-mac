@@ -59,7 +59,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     """)
 }
 
-@Test func personalityProposalRequiresNativeApprovalBeforeCommit() async throws {
+@Test func personalityProposalCommitsWithoutSecondApproval() async throws {
     let state = PersonalityTestState()
     var registry = AgentToolRegistry()
     registry.registerConnorPersonalityTools(runtime: personalityRuntime(state), provider: personalityProvider)
@@ -78,19 +78,9 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
         argumentsJSON: "{\"proposal_id\":\"\(proposalID)\"}"
     )
 
-    do {
-        _ = try await registry.execute(commitCall, context: personalityContext())
-        Issue.record("人格提交不应在未审批时执行")
-    } catch AgentToolError.permissionNeedsApproval(let request) {
-        #expect(request.capability == .mutatePersonality)
-        #expect(request.payloadJSON.contains("温和可靠"))
-        #expect(request.payloadJSON.contains("温和但更加直接"))
-    }
-    #expect(await state.read().revision == 2)
-
     let committed = try await registry.execute(
         commitCall,
-        context: personalityContext(approved: [.mutatePersonality])
+        context: personalityContext()
     )
     #expect(committed.contentText.contains("版本 3"))
     #expect(await state.read().snapshotSummary == "温和但更加直接")
