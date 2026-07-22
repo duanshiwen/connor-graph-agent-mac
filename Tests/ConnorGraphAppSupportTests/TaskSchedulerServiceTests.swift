@@ -217,4 +217,48 @@ struct TaskSchedulerServiceTests {
         #expect(failed.lifecycle.failureCount == 1)
         #expect(failed.lifecycle.lastErrorMessage == "boom")
     }
+
+    @Test func schedulerCancellationReschedulesRecurringTaskButStopsOneTimeTask() {
+        let scheduler = TaskSchedulerService()
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+        let finishedAt = Date(timeIntervalSince1970: 1_100)
+        let recurring = ConnorTaskDefinition(
+            id: "user.recurring",
+            name: "Recurring",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .createSessionAndSendMessage(message: "Recurring"),
+            lifecycle: ConnorTaskLifecycle(status: .running),
+            metadata: ConnorTaskMetadata()
+        )
+        let oneTime = ConnorTaskDefinition(
+            id: "user.once.cancelled",
+            name: "Once",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: startedAt, recurrence: .once),
+            target: .createSessionAndSendMessage(message: "Once"),
+            lifecycle: ConnorTaskLifecycle(status: .running),
+            metadata: ConnorTaskMetadata()
+        )
+
+        let rescheduled = scheduler.markRunCancelled(
+            task: recurring,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            errorMessage: "cancelled"
+        )
+        let stopped = scheduler.markRunCancelled(
+            task: oneTime,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            errorMessage: "cancelled"
+        )
+
+        #expect(rescheduled.lifecycle.status == .active)
+        #expect(rescheduled.lifecycle.nextRunAt == finishedAt.addingTimeInterval(600))
+        #expect(rescheduled.lifecycle.failureCount == 0)
+        #expect(stopped.lifecycle.status == .stopped)
+        #expect(stopped.lifecycle.nextRunAt == nil)
+        #expect(stopped.lifecycle.failureCount == 0)
+    }
 }

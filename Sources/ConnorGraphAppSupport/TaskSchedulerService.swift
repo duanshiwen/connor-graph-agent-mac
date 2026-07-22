@@ -71,6 +71,18 @@ public struct TaskSchedulerService: Sendable {
         return updated
     }
 
+    public func markRunCancelled(task: ConnorTaskDefinition, startedAt: Date, finishedAt: Date = Date(), errorMessage: String) -> ConnorTaskDefinition {
+        var updated = task
+        let isRecurring = recurrence(for: task) != .once
+        updated.lifecycle.status = isRecurring ? .active : .stopped
+        updated.lifecycle.lastRunAt = startedAt
+        updated.lifecycle.lastFinishedAt = finishedAt
+        updated.lifecycle.nextRunAt = isRecurring ? computeNextRunAt(task: task, after: finishedAt) : nil
+        updated.lifecycle.lastErrorMessage = errorMessage
+        updated.updatedAt = finishedAt
+        return updated
+    }
+
     private func effectiveDueDate(for task: ConnorTaskDefinition, now: Date) -> Date? {
         let scheduled = nextDueDate(for: task)
         guard let missed = missedRecurringDueDate(for: task, now: now) else { return scheduled }

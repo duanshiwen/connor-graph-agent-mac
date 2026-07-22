@@ -167,6 +167,105 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(reloaded.lifecycle.nextRunAt == expectedNextRun)
     }
 
+    @Test func cancelledRecurringRunRecordsCancellationAndRemainsScheduled() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let now = Date(timeIntervalSince1970: 2_000)
+        try saveSystemDefaultsAsNotDue(repository: repository, now: now)
+        let task = ConnorTaskDefinition(
+            id: "user.daily.cancelled",
+            name: "Cancelled daily task",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: Date(timeIntervalSince1970: 1_000), recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "Daily check-in"),
+            lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: Date(timeIntervalSince1970: 1_000)),
+            metadata: ConnorTaskMetadata(),
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        try repository.saveTask(task)
+        let runner = TaskTargetRunner(
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in "rss" },
+            sessionMessenger: { _ in throw TaskTargetRunnerError.runCancelled("cancelled by user") }
+        )
+        let service = TaskSchedulerRunnerService(repository: repository, runner: runner)
+
+        let outcomes = try await service.runDueTasks(now: now)
+        let reloaded = try #require(try repository.loadTask(id: task.id))
+        let history = try repository.loadRunHistory(taskID: task.id, limit: 10)
+
+        #expect(outcomes.count == 1)
+        #expect(outcomes.first?.succeeded == false)
+        #expect(reloaded.lifecycle.status == .active)
+        #expect(reloaded.lifecycle.nextRunAt == Date(timeIntervalSince1970: 87_400))
+        #expect(reloaded.lifecycle.failureCount == 0)
+        #expect(history.map(\.status) == [.cancelled, .running])
+    }
+
+    @Test func serviceRecoversInterruptedRunsWithoutRepeatingThemImmediately() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+        let now = Date(timeIntervalSince1970: 2_000)
+        try saveSystemDefaultsAsNotDue(repository: repository, now: now)
+        let recurring = ConnorTaskDefinition(
+            id: "user.interrupted.recurring",
+            name: "Interrupted recurring task",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .createSessionAndSendMessage(message: "Recurring"),
+            lifecycle: ConnorTaskLifecycle(status: .running, lastRunAt: startedAt),
+            metadata: ConnorTaskMetadata(),
+            createdAt: startedAt,
+            updatedAt: startedAt
+        )
+        let oneTime = ConnorTaskDefinition(
+            id: "user.interrupted.once",
+            name: "Interrupted one-time task",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: startedAt, recurrence: .once),
+            target: .createSessionAndSendMessage(message: "Once"),
+            lifecycle: ConnorTaskLifecycle(status: .running, lastRunAt: startedAt),
+            metadata: ConnorTaskMetadata(),
+            createdAt: startedAt,
+            updatedAt: startedAt
+        )
+        try repository.saveTask(recurring)
+        try repository.saveTask(oneTime)
+        for task in [recurring, oneTime] {
+            try repository.appendRunRecord(ConnorTaskRunRecord(
+                id: "\(task.id)-run-running",
+                taskID: task.id,
+                status: .running,
+                startedAt: startedAt,
+                outputSummary: "Task started",
+                externalRunID: "\(task.id)-run"
+            ))
+        }
+        let calls = SessionMessageCallCounter()
+        let runner = TaskTargetRunner(
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in "rss" },
+            sessionMessenger: calls.send
+        )
+        let service = TaskSchedulerRunnerService(repository: repository, runner: runner)
+
+        let outcomes = try await service.runDueTasks(now: now)
+        let reloadedRecurring = try #require(try repository.loadTask(id: recurring.id))
+        let reloadedOneTime = try #require(try repository.loadTask(id: oneTime.id))
+
+        #expect(outcomes.isEmpty)
+        #expect(await calls.count == 0)
+        #expect(reloadedRecurring.lifecycle.status == .active)
+        #expect(reloadedRecurring.lifecycle.nextRunAt == now.addingTimeInterval(600))
+        #expect(reloadedOneTime.lifecycle.status == .stopped)
+        #expect(try repository.loadRunHistory(taskID: recurring.id, limit: 2).map(\.status) == [.cancelled, .running])
+        #expect(try repository.loadRunHistory(taskID: oneTime.id, limit: 2).map(\.status) == [.cancelled, .running])
+    }
+
     private func saveSystemDefaultsAsNotDue(repository: AppTaskManagementRepository, now: Date) throws {
         for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
             let interval = defaultTask.trigger.intervalSeconds ?? 600
