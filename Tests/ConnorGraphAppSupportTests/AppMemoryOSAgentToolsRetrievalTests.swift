@@ -3,7 +3,48 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
-import ConnorGraphAppSupport
+@testable import ConnorGraphAppSupport
+
+@Test func memoryOSKnowledgeContextSortsByOccurredAtOnlyForCompleteDateRange() {
+    let olderOccurrence = MemoryOSContextToolRecord(
+        recordID: "recently-updated",
+        layer: "L3",
+        text: "Recently updated",
+        occurredAt: "2026-07-20T00:00:00Z",
+        updatedAt: "2026-07-23T00:00:00Z",
+        confidence: nil,
+        depth: 0,
+        evidenceRefs: [],
+        status: "active",
+        retrievalScore: 0.8,
+        path: []
+    )
+    let newerOccurrence = MemoryOSContextToolRecord(
+        recordID: "recently-occurred",
+        layer: "L4",
+        text: "Recently occurred",
+        occurredAt: "2026-07-22T00:00:00Z",
+        updatedAt: "2026-07-21T00:00:00Z",
+        confidence: nil,
+        depth: 0,
+        evidenceRefs: [],
+        status: "active",
+        retrievalScore: 0.8,
+        path: []
+    )
+    let records = [olderOccurrence, newerOccurrence]
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    let end = start.addingTimeInterval(86_400)
+
+    let completeRange = MemoryOSRetrievalQuery(text: "knowledge", layers: [.l3, .l4], startDate: start, endDate: end)
+    #expect(MemoryOSLayeredContextSupport.sortedKnowledgeRecords(records, by: completeRange).map(\.recordID) == ["recently-occurred", "recently-updated"])
+
+    let noRange = MemoryOSRetrievalQuery(text: "knowledge", layers: [.l3, .l4])
+    #expect(MemoryOSLayeredContextSupport.sortedKnowledgeRecords(records, by: noRange).map(\.recordID) == ["recently-updated", "recently-occurred"])
+
+    let partialRange = MemoryOSRetrievalQuery(text: "knowledge", layers: [.l3, .l4], startDate: start)
+    #expect(MemoryOSLayeredContextSupport.sortedKnowledgeRecords(records, by: partialRange).map(\.recordID) == ["recently-updated", "recently-occurred"])
+}
 
 @Test func memoryOSSearchToolReturnsLayerAwareHits() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
