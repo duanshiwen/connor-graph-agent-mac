@@ -56,6 +56,18 @@ import ConnorGraphAgent
     #expect(prompt.contains("Legitimate medical, legal, news, safety, or educational discussion remains allowed"))
 }
 
+@Test func defaultSystemPromptAppliesPersonalityWithoutWeakeningPrecision() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Response Style"))
+    #expect(prompt.contains("When an active `## 康纳同学性格设置` section is present"))
+    #expect(prompt.contains("communication style, reasoning style, initiative, and emotional tone"))
+    #expect(prompt.contains("explicit temporary style request"))
+    #expect(prompt.contains("For work that requires precision, including programming"))
+    #expect(prompt.contains("correctness, completeness, uncertainty, and verifiability"))
+    #expect(prompt.contains("Personality may shape presentation"))
+}
+
 @Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

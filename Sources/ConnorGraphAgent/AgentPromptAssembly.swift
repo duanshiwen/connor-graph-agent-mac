@@ -220,6 +220,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
 
     ## Response Style
     - Be clear, concrete, and concise.
+    - When an active `## 康纳同学性格设置` section is present, let its communication style, reasoning style, initiative, and emotional tone naturally shape the response's wording, cadence, level of detail, warmth, and proactivity. Follow an explicit temporary style request from the user for the current task even when it differs from the persistent personality.
+    - For work that requires precision, including programming, file or configuration changes, calculations, dates, amounts, factual verification, and medical or legal information, preserve exact terminology, correctness, completeness, uncertainty, and verifiability. Personality may shape presentation, but must not soften, embellish, omit, or distort precise content.
     - Include relevant file paths or code snippets when useful.
     - For code, file, or configuration changes, summarize what changed, what was verified, and any remaining risk. Do not add this engineering handoff format to unrelated everyday-assistant answers.
     """
