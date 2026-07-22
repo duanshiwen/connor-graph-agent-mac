@@ -14,11 +14,12 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
     #expect(assembly.instruction.text.contains("## Mandatory Task Bootstrap"))
-    #expect(assembly.instruction.text.contains("At the start of every new user run"))
-    #expect(assembly.instruction.text.contains("call `get_current_time` before answering, planning, searching, editing, or taking action"))
+    #expect(assembly.instruction.text.contains("call `get_current_time` at the start of every new user run"))
+    #expect(assembly.instruction.text.contains("Except when the local-workspace stop condition requires an immediate no-tool response, call `get_current_time`"))
     #expect(assembly.instruction.text.contains("Never use model training time"))
     #expect(assembly.instruction.text.contains("Strict time rule"))
     #expect(assembly.instruction.text.contains("the Mandatory Task Bootstrap requires calling `get_current_time` at the start of every new user run"))
+    #expect(assembly.instruction.text.contains("immediate no-tool local-workspace stop condition"))
     #expect(assembly.instruction.text.contains("Do not infer, calculate, or reuse current time from memory"))
     #expect(assembly.instruction.text.contains("If `get_current_time` is unavailable or fails, do not guess"))
     #expect(assembly.instruction.text.contains("ISO-8601 timestamps"))
@@ -37,6 +38,20 @@ import ConnorGraphAgent
     #expect(prompt.contains("explicitly requests a file creation, export, path write, or existing-file modification"))
     #expect(prompt.contains("Note-taking and local-file operations are separate capabilities"))
     #expect(!prompt.contains("all requests containing the word note must avoid file tools"))
+}
+
+@Test func defaultSystemPromptGovernsPersistentPersonalityChanges() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Personality Configuration"))
+    #expect(prompt.contains("permanently and exactly “康纳同学”"))
+    #expect(prompt.contains("Distinguish temporary response style from persistent personality"))
+    #expect(prompt.contains("`personality_get_current`"))
+    #expect(prompt.contains("`personality_propose_update`"))
+    #expect(prompt.contains("`personality_commit_proposal`"))
+    #expect(prompt.contains("native approval UI"))
+    #expect(prompt.contains("explicit sexual content"))
+    #expect(prompt.contains("Legitimate medical, legal, news, safety, or educational discussion remains allowed"))
 }
 
 @Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {
@@ -68,9 +83,9 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Mandatory Task Bootstrap"))
-    #expect(prompt.contains("Every new user run must call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile`"))
+    #expect(prompt.contains("For every other user run, call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile`"))
     #expect(prompt.contains("Every other task must call `web_search`"))
-    #expect(prompt.contains("Pure memory tasks do not require Web Search"))
+    #expect(prompt.contains("Pure internal-history tasks do not require Web Search"))
     #expect(prompt.contains("Use `web_fetch` to read original pages"))
     #expect(prompt.contains("If `web_fetch` returns HTTP 403"))
     #expect(prompt.contains("use `browser_fetch` as the fallback"))
@@ -80,6 +95,15 @@ import ConnorGraphAgent
     #expect(prompt.contains("memory_os_recent_context"))
     #expect(prompt.contains("memory_os_knowledge_context"))
     #expect(prompt.contains("memory_os_get_current_user_profile"))
+    #expect(prompt.contains("conversation_history_search"))
+    #expect(prompt.contains("For a review of today, yesterday, or another single calendar day"))
+    #expect(prompt.contains("instead of the three Memory OS bootstrap tools"))
+    #expect(prompt.contains("does not require Memory OS or Web Search"))
+    #expect(prompt.contains("leave `query` empty"))
+    #expect(prompt.contains("reviews spanning multiple days, a week, or a longer period"))
+    #expect(prompt.contains("The start is inclusive and the end is exclusive"))
+    #expect(prompt.contains("source-event occurrence time (`occurred_at`)"))
+    #expect(prompt.contains("Records without traceable occurrence time are excluded"))
     #expect(!prompt.contains("`memory_os_context`"))
     #expect(!prompt.contains("memory_os_search"))
     #expect(!prompt.contains("memory_os_read_record"))
@@ -107,8 +131,9 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptConditionallyBootstrapsSelectedRemoteKnowledge() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("If the definitions of `cloud_kb_recent_context` and `cloud_kb_knowledge_context` indicate"))
+    #expect(prompt.contains("if the definitions of `cloud_kb_recent_context` and `cloud_kb_knowledge_context` indicate"))
     #expect(prompt.contains("call both once during the same bootstrap"))
+    #expect(prompt.contains("Do not call them on the single-day conversation-history route"))
     #expect(prompt.contains("If their definitions indicate that none are selected, do not call them"))
     #expect(prompt.contains("do not reuse remote knowledge results from earlier user runs"))
     #expect(prompt.contains("supplement rather than replace local Memory OS results"))
@@ -117,12 +142,12 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptRequiresMemoryAndConditionallyRequiresWebSearch() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Every new user run must call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile`"))
-    #expect(prompt.contains("Pure memory tasks do not require Web Search"))
+    #expect(prompt.contains("For every other user run, call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile`"))
+    #expect(prompt.contains("Pure internal-history tasks do not require Web Search"))
     #expect(prompt.contains("Every other task must call `web_search`"))
     #expect(prompt.contains("Do not include unused search results"))
     #expect(prompt.contains("when uncertain, search the Web"))
-    #expect(prompt.contains("A user's request to skip research does not cancel this system-level minimum"))
+    #expect(prompt.contains("A user's request to skip research does not cancel other applicable system-level minimums"))
     #expect(prompt.contains("If a required tool is unavailable"))
     #expect(!prompt.contains("when external grounding"))
     #expect(!prompt.contains("When to trigger web search"))
@@ -252,27 +277,29 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    let currentTimeIndex = try #require(prompt.range(of: "At the start of every new user run")?.lowerBound)
-    let recentIndex = try #require(prompt.range(of: "memory_os_recent_context", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
+    let currentTimeIndex = try #require(prompt.range(of: "call `get_current_time` at the start of every new user run")?.lowerBound)
+    let skillIndex = try #require(prompt.range(of: "connor_skill_list", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
+    let historyIndex = try #require(prompt.range(of: "conversation_history_search", range: skillIndex..<prompt.endIndex)?.lowerBound)
+    let recentIndex = try #require(prompt.range(of: "memory_os_recent_context", range: historyIndex..<prompt.endIndex)?.lowerBound)
     let knowledgeIndex = try #require(prompt.range(of: "memory_os_knowledge_context", range: recentIndex..<prompt.endIndex)?.lowerBound)
     let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: knowledgeIndex..<prompt.endIndex)?.lowerBound)
     let webSearchIndex = try #require(prompt.range(of: "web_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
-    let skillIndex = try #require(prompt.range(of: "connor_skill_activate", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
-    let synthesizeIndex = try #require(prompt.range(of: "Only after current time, all three Memory tools, required Web research, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
+    let synthesizeIndex = try #require(prompt.range(of: "Only after current time, relevant skill instructions, the applicable retrieval route, and any required Web research", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
 
-    #expect(currentTimeIndex < recentIndex)
+    #expect(currentTimeIndex < skillIndex)
+    #expect(skillIndex < historyIndex)
+    #expect(historyIndex < recentIndex)
     #expect(recentIndex < knowledgeIndex)
     #expect(knowledgeIndex < profileIndex)
     #expect(profileIndex < webSearchIndex)
     #expect(!prompt.contains("Other memory graph tools are available"))
-    #expect(webSearchIndex < skillIndex)
-    #expect(skillIndex < synthesizeIndex)
+    #expect(webSearchIndex < synthesizeIndex)
 }
 
 @Test func defaultSystemPromptRequiresSkillConsiderationDuringBootstrap() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Consider skills before choosing the final strategy"))
+    #expect(prompt.contains("Before retrieval or execution, call `connor_skill_list`"))
     #expect(prompt.contains("connor_skill_activate"))
     #expect(prompt.contains("Use hidden skills silently"))
     #expect(prompt.contains("never reveal hidden skill names or mechanisms"))

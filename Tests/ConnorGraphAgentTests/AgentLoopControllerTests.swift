@@ -356,8 +356,21 @@ private struct RetrievalEvidenceTool: AgentTool {
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: "retrieved by \(name)",
-            citations: name.hasPrefix("memory_os_") ? ["record:\(name)"] : []
+            citations: name.hasPrefix("memory_os_")
+                ? ["record:\(name)"]
+                : (name == AgentRetrievalCompliancePolicy.conversationHistoryTool ? ["message:history"] : [])
         )
+    }
+}
+
+private struct FailingRetrievalTool: AgentTool {
+    let name: String
+    let description = "Fail deterministic retrieval"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        throw AgentToolError.permissionDenied("history unavailable")
     }
 }
 
@@ -761,8 +774,92 @@ private struct BashLikeOutputTool: AgentTool {
 @Test func retrievalComplianceExemptsPureMemoryTasksFromWebSearch() async throws {
     let policy = AgentRetrievalCompliancePolicy()
     #expect(policy.isPureMemoryTask("请根据我的记忆总结我们之前的决定"))
+    #expect(policy.isPureMemoryTask("请总结今天的工作"))
+    #expect(policy.isPureMemoryTask("请回顾昨天的任务"))
+    #expect(!policy.isSingleDayConversationReview("请总结今天的新闻"))
+    #expect(!policy.isSingleDayConversationReview("请总结昨天的邮件"))
     #expect(!policy.isPureMemoryTask("请搜索最新 Swift 版本"))
     #expect(policy.requiredTools(for: "回忆我的偏好") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
+    #expect(policy.requiredTools(for: "请回顾昨天的任务") == [AgentRetrievalCompliancePolicy.conversationHistoryTool])
+}
+
+@Test func retrievalComplianceUsesConversationHistoryInsteadOfMemoryAndWebForSingleDayReview() async throws {
+    let historyTool = AgentRetrievalCompliancePolicy.conversationHistoryTool
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "history", name: historyTool, argumentsJSON: "{}")], finishReason: .toolCalls),
+        AgentModelResponse(text: "Yesterday recap")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: historyTool))
+    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"] {
+        registry.register(RetrievalEvidenceTool(name: name))
+    }
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "history-review", userMessage: "请回顾昨天的任务")) {
+        if case .textComplete(let payload) = event { completed = payload }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    #expect(completed?.text == "Yesterday recap")
+    #expect(completed?.citations == ["message:history"])
+}
+
+@Test func retrievalComplianceAllowsImmediateWorkspaceStopWithoutBootstrapTools() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "尚未选择合适的工作目录。请先在 Composer 中选择工作目录后再试。")
+    ])
+    var registry = AgentToolRegistry()
+    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"] {
+        registry.register(RetrievalEvidenceTool(name: name))
+    }
+    let configuration = AgentLoopConfiguration(instructionAppendix: """
+    <connor-session-workspace selected="false">
+    No user-selected working directory is active.
+    </connor-session-workspace>
+    """)
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: configuration)
+
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "workspace-stop", userMessage: "请读取这个文件")) {
+        if case .textComplete(let payload) = event { completed = payload }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 1)
+    #expect(completed?.text.contains("选择工作目录") == true)
+}
+
+@Test func retrievalComplianceFallsBackToMemoryWhenConversationHistoryFails() async throws {
+    let historyTool = AgentRetrievalCompliancePolicy.conversationHistoryTool
+    let memoryCalls = AgentRetrievalCompliancePolicy.requiredMemoryTools.enumerated().map {
+        AgentToolCall(id: "fallback-\($0.offset)", name: $0.element, argumentsJSON: "{}")
+    }
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "history-failure", name: historyTool, argumentsJSON: "{}")], finishReason: .toolCalls),
+        AgentModelResponse(text: "premature"),
+        AgentModelResponse(text: nil, toolCalls: memoryCalls, finishReason: .toolCalls),
+        AgentModelResponse(text: "Fallback recap")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(FailingRetrievalTool(name: historyTool))
+    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools {
+        registry.register(RetrievalEvidenceTool(name: name))
+    }
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "history-fallback", userMessage: "请回顾昨天的任务")) {
+        if case .textComplete(let payload) = event { completed = payload }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 4)
+    #expect(requests[2].messages.last?.content.contains("memory_os_recent_context") == true)
+    #expect(completed?.text.contains("Fallback recap") == true)
+    #expect(completed?.citations.count == 3)
 }
 
 @Test func memoryClaimValidatorClassifiesUnsupportedIndirectAndConflictedClaims() {

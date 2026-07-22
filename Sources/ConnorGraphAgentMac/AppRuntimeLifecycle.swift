@@ -157,7 +157,7 @@ final class AppRuntimeLifecycle {
     private var newSessionPreparationTasks: [String: Task<Void, Never>] = [:]
     private var sessionRuntimePreparationTask: Task<Void, Never>?
     private var workspaceStatePersistenceTask: Task<Void, Never>?
-    private var pendingRemoteKnowledgeRuntimeRebuild = false
+    private var pendingNativeSessionRuntimeRebuild = false
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -788,7 +788,42 @@ final class AppRuntimeLifecycle {
                         throw BrowserAutomationRuntimeError.invalidRequest("Browser runtime is unavailable")
                     }
                     return try await self.browserFeatureModel.performBrowserControl(request)
-                }
+                },
+                personalityRuntime: ConnorPersonalityRuntime(
+                    snapshot: { [weak self] in
+                        try await MainActor.run {
+                            guard let self else { throw ConnorPersonalityError.unavailable }
+                            return ConnorPersonalitySnapshot(
+                                personality: self.userPreferencesModel.connorPersonality,
+                                revision: self.userPreferencesModel.connorPersonalityRevision
+                            )
+                        }
+                    },
+                    commit: { [weak self] proposal in
+                        try await MainActor.run {
+                            guard let self else { throw ConnorPersonalityError.unavailable }
+                            let previousPersonality = self.userPreferencesModel.connorPersonality
+                            let previousRevision = self.userPreferencesModel.connorPersonalityRevision
+                            try self.userPreferencesModel.applyApprovedPersonality(
+                                proposal.after,
+                                expectedRevision: proposal.expectedRevision
+                            )
+                            do {
+                                try self.runtimeSettingsCoordinator.saveImmediately(snapshot: self.runtimeSettingsSnapshot())
+                            } catch {
+                                self.userPreferencesModel.restorePersonalityAfterFailedCommit(
+                                    previousPersonality,
+                                    revision: previousRevision
+                                )
+                                throw error
+                            }
+                            return ConnorPersonalitySnapshot(
+                                personality: self.userPreferencesModel.connorPersonality,
+                                revision: self.userPreferencesModel.connorPersonalityRevision
+                            )
+                        }
+                    }
+                )
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
                 guard let self else { throw CancellationError() }
@@ -835,12 +870,17 @@ final class AppRuntimeLifecycle {
         knowledgeMarketplaceStore.onLibraryChanged = { [weak self] in
             guard let self else { return }
             if self.chatFeatureModel.run.isSubmitting {
-                self.pendingRemoteKnowledgeRuntimeRebuild = true
+                self.pendingNativeSessionRuntimeRebuild = true
                 return
             }
             self.rebuildNativeSessionManagerForActiveSession()
         }
         userPreferencesModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        userPreferencesModel.personalityGenerator = { [weak self] request in
+            guard let self else { throw ConnorPersonalityError.unavailable }
+            let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
+            return try await ConnorPersonalityGenerator().generate(from: request, provider: provider)
+        }
         workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
         }
@@ -1143,8 +1183,8 @@ final class AppRuntimeLifecycle {
                 enabled: self.appSettingsModel.keepScreenAwake,
                 hasActiveRun: self.chatRunCoordinator.isActive
             )
-            if !self.chatRunCoordinator.isActive, self.pendingRemoteKnowledgeRuntimeRebuild {
-                self.pendingRemoteKnowledgeRuntimeRebuild = false
+            if !self.chatRunCoordinator.isActive, self.pendingNativeSessionRuntimeRebuild {
+                self.pendingNativeSessionRuntimeRebuild = false
                 self.rebuildNativeSessionManagerForActiveSession()
             }
         }
@@ -1435,7 +1475,7 @@ final class AppRuntimeLifecycle {
             },
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
-                return await self.performTaskSessionMessage(request)
+                return try await self.performTaskSessionMessage(request)
             },
             memoryOSPipeline: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline") }
@@ -1506,27 +1546,47 @@ final class AppRuntimeLifecycle {
         )
     }
 
-    private func performTaskSessionMessage(_ request: TaskSessionMessageRequest) async -> String {
+    private func performTaskSessionMessage(_ request: TaskSessionMessageRequest) async throws -> String {
         if request.createNewSession {
-            guard let chatSessionRepository else { return "Session repository unavailable" }
-            do {
-                let session = try chatSessionRepository.createSession(title: request.title ?? "定时任务会话")
-                reloadChatSessions()
-                chatSessionCoordinator.adoptDirectSelection(session.id)
-                chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
-                _ = await submitChat(prompt: request.message, clearComposer: false)
-                return "created session \(session.id) and sent task message"
-            } catch {
-                return "failed to create task session: \(error)"
+            guard let chatSessionRepository else {
+                throw TaskTargetRunnerError.submissionFailed("Session repository unavailable")
             }
+            let session: AgentSession
+            do {
+                session = try chatSessionRepository.createSession(title: request.title ?? "定时任务会话")
+            } catch {
+                throw TaskTargetRunnerError.submissionFailed("Failed to create task session: \(error)")
+            }
+            reloadChatSessions()
+            chatSessionCoordinator.adoptDirectSelection(session.id)
+            chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
+            try await submitScheduledTaskMessage(request.message)
+            return "created session \(session.id) and sent task message"
         }
-        guard let sessionID = request.sessionID else { return "Missing sessionID" }
+        guard let sessionID = request.sessionID else {
+            throw TaskTargetRunnerError.missingSessionID(request.runID ?? "scheduled task")
+        }
         chatSessionCoordinator.adoptDirectSelection(sessionID)
         if let session = try? chatSessionRepository?.loadSession(id: sessionID) {
             chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
         }
-        _ = await submitChat(prompt: request.message, clearComposer: false)
+        try await submitScheduledTaskMessage(request.message)
         return "sent task message to session \(sessionID)"
+    }
+
+    private func submitScheduledTaskMessage(_ message: String) async throws {
+        var wasCancelled = false
+        let response = await submitChat(
+            prompt: message,
+            clearComposer: false,
+            onCancellation: { wasCancelled = true }
+        )
+        if wasCancelled {
+            throw TaskTargetRunnerError.runCancelled("The scheduled task run was cancelled by the user")
+        }
+        guard response != nil else {
+            throw TaskTargetRunnerError.submissionFailed("The scheduled task message could not be submitted")
+        }
     }
 
     func handleRSSFollowRequest(_ request: RSSFollowRequest) {
@@ -1919,6 +1979,7 @@ final class AppRuntimeLifecycle {
         if chatFeatureModel.run.submittingSessionIDs.isEmpty {
             rebuildNativeSessionManagerForActiveSession()
         } else {
+            pendingNativeSessionRuntimeRebuild = true
             chatRunCoordinator.mutateManager { $0.permissionMode = settings.loop.permissionMode }
         }
         shellFeatureModel.clearAllSettingsMessages()
@@ -2693,7 +2754,7 @@ final class AppRuntimeLifecycle {
             },
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
-                return await self.performTaskSessionMessage(request)
+                return try await self.performTaskSessionMessage(request)
             }
         )
         Task { @MainActor in
@@ -2962,7 +3023,8 @@ final class AppRuntimeLifecycle {
         clearComposer: Bool = false,
         displayPrompt rawDisplayPrompt: String? = nil,
         attachments explicitAttachments: [AgentMessageAttachmentRef]? = nil,
-        personReferences: [PersonReference] = []
+        personReferences: [PersonReference] = [],
+        onCancellation: (() -> Void)? = nil
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3103,8 +3165,15 @@ final class AppRuntimeLifecycle {
             chatSessionCoordinator.synchronize(recoveredSession)
             chatApprovalCoordinator.reload()
             chatRunCoordinator.clearPendingCancellation(sessionID: submittingSessionID)
+            let wasCancelled: Bool
             if case NativeSessionManagerError.runCancelled = error {
+                wasCancelled = true
+            } else {
+                wasCancelled = error is CancellationError
+            }
+            if wasCancelled {
                 errorMessage = nil
+                onCancellation?()
             } else {
                 let errorDescription = String(describing: error)
                 errorMessage = errorDescription
