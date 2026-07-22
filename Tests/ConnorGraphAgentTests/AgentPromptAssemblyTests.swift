@@ -49,10 +49,23 @@ import ConnorGraphAgent
     #expect(prompt.contains("`personality_get_current`"))
     #expect(prompt.contains("`personality_propose_update`"))
     #expect(prompt.contains("`personality_commit_proposal`"))
-    #expect(prompt.contains("In Ask mode, the native approval UI lets the user review the change"))
-    #expect(prompt.contains("In Execute mode, the permission policy authorizes it immediately"))
+    #expect(prompt.contains("immediately call `personality_commit_proposal`"))
+    #expect(prompt.contains("do not ask for conversational confirmation or trigger a second native approval step"))
+    #expect(prompt.contains("session is read-only"))
     #expect(prompt.contains("explicit sexual content"))
     #expect(prompt.contains("Legitimate medical, legal, news, safety, or educational discussion remains allowed"))
+}
+
+@Test func defaultSystemPromptAppliesPersonalityWithoutWeakeningPrecision() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Response Style"))
+    #expect(prompt.contains("When an active `## 康纳同学性格设置` section is present"))
+    #expect(prompt.contains("communication style, reasoning style, initiative, and emotional tone"))
+    #expect(prompt.contains("explicit temporary style request"))
+    #expect(prompt.contains("For work that requires precision, including programming"))
+    #expect(prompt.contains("correctness, completeness, uncertainty, and verifiability"))
+    #expect(prompt.contains("Personality may shape presentation"))
 }
 
 @Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {
@@ -109,6 +122,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("The start is inclusive and the end is exclusive"))
     #expect(prompt.contains("source-event occurrence time (`occurred_at`)"))
     #expect(prompt.contains("Records without traceable occurrence time are excluded"))
+    #expect(prompt.contains("when both timestamps are provided, results are ordered by `occurred_at` descending"))
+    #expect(prompt.contains("otherwise they are ordered by `updated_at` descending"))
     #expect(!prompt.contains("`memory_os_context`"))
     #expect(!prompt.contains("memory_os_search"))
     #expect(!prompt.contains("memory_os_read_record"))

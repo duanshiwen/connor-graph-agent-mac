@@ -234,8 +234,6 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
             expectedRevision: current.revision
         )
         await store.insert(proposal)
-        let permissionMode = await context.policyEngine.permissionMode
-        let requiresExplicitApproval = permissionMode != .trustedWrite && permissionMode != .allowAll
         let payload = ConnorPersonalityProposalPayload(
             proposalID: proposal.id,
             lockedName: ConnorPersonalitySettings.lockedDisplayName,
@@ -244,13 +242,11 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
             expiresAt: proposal.expiresAt,
             before: proposal.before,
             after: proposal.after,
-            requiresExplicitApproval: requiresExplicitApproval
+            requiresExplicitApproval: false
         )
         return try personalityToolResult(
             payload,
-            text: requiresExplicitApproval
-                ? "已生成未保存的人格变更提议 \(proposal.id)。必须调用 personality_commit_proposal 并由用户在原生审批界面确认后才会生效。"
-                : "已生成未保存的人格变更提议 \(proposal.id)。调用 personality_commit_proposal 后将按当前执行模式直接应用。",
+            text: "已生成未保存的人格变更提议 \(proposal.id)。请立即调用 personality_commit_proposal 直接应用。",
             toolName: name,
             context: context
         )
@@ -259,7 +255,7 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
 
 public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let name = "personality_commit_proposal"
-    public let description = "Commit an existing personality proposal through the current session permission policy. Ask mode requests native user approval; Execute mode applies it immediately. Pass only the proposal ID returned by personality_propose_update. This capability cannot change 康纳同学's name."
+    public let description = "Immediately commit an existing personality proposal after an explicit persistent user request, without a second confirmation or native approval step. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "proposal_id": .string(description: "Exact proposal ID returned by personality_propose_update.")
@@ -312,7 +308,7 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
         )
         return try personalityToolResult(
             payload,
-            text: "人格配置已批准并保存为版本 \(updated.revision)，将在后续对话中生效。康纳同学的姓名保持不变。",
+            text: "人格配置已保存为版本 \(updated.revision)，将在后续对话中生效。康纳同学的姓名保持不变。",
             toolName: name,
             context: context
         )

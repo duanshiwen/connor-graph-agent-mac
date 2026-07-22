@@ -65,7 +65,6 @@ public actor AgentPolicyEngine: Sendable {
         }
         if capability == .mutateContacts
             || capability == .mutateCalendar
-            || capability == .mutatePersonality
             || capability == .sendMail
             || capability == .commitBrowserAction
             || capability == .transferBrowserFile
@@ -84,9 +83,9 @@ public actor AgentPolicyEngine: Sendable {
             }
         case .askToWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML:
+            case .readGraph, .readSession, .mutatePersonality, .modelCall, .proposeGraphWrite, .externalNetwork, .readBrowserPage, .navigateBrowser, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .createMailDraft, .readContacts, .readCalendar, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML:
                 return .approved
-            case .mutateSessionStatus, .mutatePersonality, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML:
+            case .mutateSessionStatus, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .interactBrowser, .commitBrowserAction, .transferBrowserFile, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .importMailAttachment, .mutateContacts, .mutateCalendar, .mutateRSSState, .manageRSSSources, .importRSSOPML:
                 return .needsApproval
             }
         case .trustedWrite:
