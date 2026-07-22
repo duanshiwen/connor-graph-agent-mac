@@ -716,7 +716,6 @@ private struct SkillInstructionsPreview: View {
                     } else {
                         Text(presentation.collapsedText)
                             .font(AgentChatTypography.monoMeta)
-                            .lineLimit(18)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -755,22 +754,37 @@ private struct SkillInstructionsPreview: View {
 
 struct SkillInstructionsPresentation: Sendable, Equatable {
     static let previewCharacterLimit = 1_800
+    static let previewLineLimit = 18
 
     var fullText: String
     var collapsedText: String
     var isCollapsible: Bool
 
-    init(instructions: String, previewCharacterLimit: Int = Self.previewCharacterLimit) {
+    init(
+        instructions: String,
+        previewCharacterLimit: Int = Self.previewCharacterLimit,
+        previewLineLimit: Int = Self.previewLineLimit
+    ) {
         let normalized = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         fullText = normalized.isEmpty ? "No instructions found." : normalized
-        let limit = max(0, previewCharacterLimit)
-        isCollapsible = fullText.count > limit
-        collapsedText = isCollapsible ? "\(fullText.prefix(limit))\n\n…" : fullText
+
+        var preview = String(fullText.prefix(max(0, previewCharacterLimit)))
+        let lines = preview.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.count > max(0, previewLineLimit) {
+            preview = lines.prefix(max(0, previewLineLimit)).joined(separator: "\n")
+        }
+
+        isCollapsible = preview != fullText
+        collapsedText = isCollapsible ? "\(preview)\n\n…" : fullText
     }
 }
 
 private struct SkillInstructionsTextView: NSViewRepresentable {
     var text: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -780,10 +794,12 @@ private struct SkillInstructionsTextView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
-        let textView = NSTextView()
+        let textView = NSTextView(usingTextLayoutManager: true)
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = false
         textView.drawsBackground = false
         textView.textColor = .labelColor
         textView.font = .monospacedSystemFont(
@@ -796,16 +812,75 @@ private struct SkillInstructionsTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.autoresizingMask = [.width]
-        textView.string = text
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
         scrollView.documentView = textView
+        context.coordinator.loadIfNeeded(text, into: textView)
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView,
-              textView.string != text else { return }
-        textView.string = text
-        textView.scrollToBeginningOfDocument(nil)
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        context.coordinator.loadIfNeeded(text, into: textView)
+    }
+
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        coordinator.cancelLoading()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private static let chunkCharacterCount = 32_768
+
+        private var requestedText: String?
+        private var loadTask: Task<Void, Never>?
+
+        func loadIfNeeded(_ text: String, into textView: NSTextView) {
+            guard requestedText != text else { return }
+            requestedText = text
+            loadTask?.cancel()
+            textView.textStorage?.setAttributedString(NSAttributedString())
+            textView.scrollToBeginningOfDocument(nil)
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: NSFont.preferredFont(forTextStyle: .subheadline).pointSize,
+                    weight: .regular
+                ),
+                .foregroundColor: NSColor.labelColor
+            ]
+            loadTask = Task { @MainActor [weak textView] in
+                var startIndex = text.startIndex
+                while startIndex < text.endIndex {
+                    guard !Task.isCancelled,
+                          let textStorage = textView?.textStorage else { return }
+                    let endIndex = text.index(
+                        startIndex,
+                        offsetBy: Self.chunkCharacterCount,
+                        limitedBy: text.endIndex
+                    ) ?? text.endIndex
+                    textStorage.append(NSAttributedString(
+                        string: String(text[startIndex..<endIndex]),
+                        attributes: attributes
+                    ))
+                    startIndex = endIndex
+                    if startIndex < text.endIndex {
+                        await Task.yield()
+                    }
+                }
+            }
+        }
+
+        func cancelLoading() {
+            loadTask?.cancel()
+            loadTask = nil
+        }
     }
 }
 

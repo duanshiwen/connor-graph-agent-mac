@@ -46,6 +46,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("## Personality Configuration"))
     #expect(prompt.contains("permanently and exactly “康纳同学”"))
     #expect(prompt.contains("Distinguish temporary response style from persistent personality"))
+    #expect(prompt.contains("Evaluate personality intent from the latest actual user message independently on every run"))
+    #expect(prompt.contains("你是男生还是女生？"))
+    #expect(prompt.contains("is read-only"))
     #expect(prompt.contains("`personality_get_current`"))
     #expect(prompt.contains("`personality_propose_update`"))
     #expect(prompt.contains("`personality_commit_proposal`"))
@@ -61,7 +64,7 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("## Response Style"))
     #expect(prompt.contains("When an active `## 康纳同学性格设置` section is present"))
-    #expect(prompt.contains("communication style, reasoning style, initiative, and emotional tone"))
+    #expect(prompt.contains("gender self-presentation, communication style, reasoning style, initiative, and emotional tone"))
     #expect(prompt.contains("explicit temporary style request"))
     #expect(prompt.contains("For work that requires precision, including programming"))
     #expect(prompt.contains("correctness, completeness, uncertainty, and verifiability"))
