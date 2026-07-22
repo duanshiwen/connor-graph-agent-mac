@@ -131,10 +131,18 @@ final class UserPreferencesFeatureModel {
     var city = "" { didSet { changed() } }
     var country = "" { didSet { changed() } }
     var notes = "" { didSet { changed() } }
+    private(set) var connorPersonality = ConnorPersonalitySettings.empty
+    var personalityRequest = ""
+    private(set) var personalityDraft: ConnorPersonalitySettings?
+    private(set) var isGeneratingPersonality = false
+    private(set) var personalityErrorMessage: String?
     private(set) var locationStatusMessage: String?
 
     @ObservationIgnored private var locationCoordinator: UserLocationCoordinator?
     @ObservationIgnored var onChanged: () -> Void = {}
+    @ObservationIgnored var personalityGenerator: @MainActor (String) async throws -> ConnorPersonalitySettings = { _ in
+        throw ConnorPersonalityError.unavailable
+    }
     @ObservationIgnored private var isApplying = false
 
     func apply(_ preferences: AgentRuntimePreferenceSettings) {
@@ -149,6 +157,9 @@ final class UserPreferencesFeatureModel {
         city = preferences.city
         country = preferences.country
         notes = preferences.notes
+        connorPersonality = preferences.connorPersonality
+        personalityDraft = nil
+        personalityErrorMessage = nil
     }
 
     func apply(to settings: inout AgentRuntimeSettings) {
@@ -160,6 +171,7 @@ final class UserPreferencesFeatureModel {
         settings.preferences.city = city.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.country = country.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.preferences.connorPersonality = connorPersonality
     }
 
     func fillEmptyFieldsFromSystem() -> Bool {
@@ -188,6 +200,45 @@ final class UserPreferencesFeatureModel {
     func setBirthDateFromPicker(_ date: Date) { birthDatePickerDate = date; birthDate = Self.birthDateFormatter.string(from: date); onChanged() }
     func clearBirthDate() { birthDate = ""; onChanged() }
     func refreshSystemDefaults() { _ = fillEmptyFieldsFromSystem(); onChanged() }
+
+    func generatePersonalityDraft() async {
+        guard !isGeneratingPersonality else { return }
+        let request = personalityRequest.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty else {
+            personalityErrorMessage = ConnorPersonalityError.emptyRequest.localizedDescription
+            return
+        }
+        isGeneratingPersonality = true
+        personalityErrorMessage = nil
+        defer { isGeneratingPersonality = false }
+        do {
+            personalityDraft = try await personalityGenerator(request)
+        } catch {
+            personalityDraft = nil
+            personalityErrorMessage = error.localizedDescription
+        }
+    }
+
+    func confirmPersonalityDraft() {
+        guard let personalityDraft else { return }
+        connorPersonality = personalityDraft
+        self.personalityDraft = nil
+        personalityErrorMessage = nil
+        onChanged()
+    }
+
+    func cancelPersonalityDraft() {
+        personalityDraft = nil
+        personalityErrorMessage = nil
+    }
+
+    func resetPersonality() {
+        guard !connorPersonality.isEmpty else { return }
+        connorPersonality = .empty
+        personalityDraft = nil
+        personalityErrorMessage = nil
+        onChanged()
+    }
 
     func requestLocation() {
         locationStatusMessage = "正在请求位置权限…"

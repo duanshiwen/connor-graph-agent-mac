@@ -841,6 +841,11 @@ final class AppRuntimeLifecycle {
             self.rebuildNativeSessionManagerForActiveSession()
         }
         userPreferencesModel.onChanged = { [weak self] in self?.scheduleRuntimeSettingsAutosave() }
+        userPreferencesModel.personalityGenerator = { [weak self] request in
+            guard let self else { throw ConnorPersonalityError.unavailable }
+            let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
+            return try await ConnorPersonalityGenerator().generate(from: request, provider: provider)
+        }
         workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
         }

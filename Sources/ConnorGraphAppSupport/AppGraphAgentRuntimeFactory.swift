@@ -324,6 +324,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
             userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
+            connorPersonalityPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
             workspacePromptSection(resolvedWorkspace),
             generatedImageInstruction
         ]
@@ -607,6 +608,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     private func userBasicInfoPromptSection() -> String {
         UserBasicInfoPromptBuilder(preferences: loadRuntimeSettings().preferences).promptSection
+    }
+
+    private func connorPersonalityPromptSection() -> String {
+        ConnorPersonalityPromptBuilder(personality: loadRuntimeSettings().preferences.connorPersonality).promptSection
     }
 
     private func workspacePromptSection(_ workspace: ResolvedProjectWorkspace) -> String {

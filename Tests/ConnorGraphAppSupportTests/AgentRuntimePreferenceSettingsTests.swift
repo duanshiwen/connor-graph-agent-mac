@@ -54,6 +54,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.birthDate.isEmpty)
         #expect(preferences.notes.isEmpty)
         #expect(preferences.defaultSearchEngine == .bing)
+        #expect(preferences.connorPersonality.isEmpty)
     }
 
     @Test func decodesLegacyPreferencesWithoutDefaultSearchEngineAsBing() throws {
@@ -71,6 +72,72 @@ struct AgentRuntimePreferenceSettingsTests {
         let preferences = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
 
         #expect(preferences.defaultSearchEngine == .bing)
+        #expect(preferences.connorPersonality.isEmpty)
+    }
+
+    @Test func personalitySettingsRoundTripAndNormalizeGeneratedValues() throws {
+        let personality = try ConnorPersonalitySettings(
+            summary: "  温和但直接，重视事实。  ",
+            traits: ["可靠", "", "可靠", "有耐心"],
+            communicationStyle: "  先给结论， 再说明依据。 ",
+            boundaries: ["不为了迎合用户而编造事实"]
+        ).validated()
+        let preferences = AgentRuntimePreferenceSettings(connorPersonality: personality)
+
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
+
+        #expect(decoded.connorPersonality.summary == "温和但直接，重视事实。")
+        #expect(decoded.connorPersonality.traits == ["可靠", "有耐心"])
+        #expect(decoded.connorPersonality.communicationStyle == "先给结论， 再说明依据。")
+    }
+
+    @Test func personalityGeneratorRejectsIdentityAndUnknownFields() throws {
+        let json = """
+        {
+          "summary": "沉稳",
+          "traits": ["可靠"],
+          "communicationStyle": "简洁",
+          "reasoningStyle": "严谨",
+          "initiativeStyle": "主动",
+          "emotionalTone": "温和",
+          "boundaries": [],
+          "name": "别的名字"
+        }
+        """
+
+        #expect(throws: ConnorPersonalityError.unexpectedField("name")) {
+            try ConnorPersonalityGenerator().decode(json)
+        }
+    }
+
+    @Test func personalityPromptLocksNameAndGuidesConversationStyle() throws {
+        let personality = ConnorPersonalitySettings(
+            summary: "温和、直接并关注行动",
+            traits: ["可靠", "坦诚"],
+            communicationStyle: "先给结论，再给依据"
+        )
+
+        let prompt = ConnorPersonalityPromptBuilder(personality: personality).promptSection
+
+        #expect(prompt.contains("## 康纳同学性格设置"))
+        #expect(prompt.contains("姓名固定为“康纳同学”"))
+        #expect(prompt.contains("持续以以下人格与用户对话"))
+        #expect(prompt.contains("用户最新明确任务"))
+        #expect(prompt.contains("- 沟通方式：先给结论，再给依据"))
+    }
+
+    @Test func emptyPersonalityDoesNotAddRuntimePrompt() {
+        #expect(ConnorPersonalityPromptBuilder(personality: .empty).promptSection.isEmpty)
+    }
+
+    @Test func personalityGenerationPromptIsDedicatedAndLocksIdentity() {
+        let prompt = ConnorPersonalityGenerationPrompt.systemInstruction
+
+        #expect(prompt.contains("性格配置生成器"))
+        #expect(prompt.contains("必须始终严格保持为“康纳同学”"))
+        #expect(prompt.contains("只输出一个 JSON 对象"))
+        #expect(prompt.contains("不能压过用户当前明确任务"))
     }
 
     @Test func decodesExplicitDefaultSearchEngine() throws {
