@@ -209,9 +209,9 @@ struct ChatSessionRuntimeCoordinatorTests {
         let personality = AgentPendingApproval(requestID: "personality", runID: "run", sessionID: "session", capability: .mutatePersonality)
 
         coordinator.install([readable, destructive, personality])
-        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["delete", "personality"])
+        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
         coordinator.permissionMode = { .allowAll }
-        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["personality"])
+        #expect(coordinator.activeApprovals(sessionID: "session").isEmpty)
 
         coordinator.shutdown()
         coordinator.install([])

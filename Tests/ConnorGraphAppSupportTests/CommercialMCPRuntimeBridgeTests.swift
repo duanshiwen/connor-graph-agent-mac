@@ -87,7 +87,7 @@ import ConnorGraphStore
     #expect(audit.map(\.eventKind).contains(.toolFinished))
 }
 
-@Test func appGraphAgentRuntimeFactoryRequiresExplicitMCPToolConfirmation() async throws {
+@Test func appGraphAgentRuntimeFactoryAllowsGovernedMCPToolInAllowAllMode() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorCommercialMCPRuntimeBridgeConfirmation-", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -137,19 +137,18 @@ import ConnorGraphStore
     let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
     let controller = factory.makeAgentLoopController(permissionMode: AgentPermissionMode.allowAll)
 
-    await #expect(throws: AgentToolError.self) {
-        try await controller.toolRegistry.execute(
-            AgentToolCall(name: "mcp__fixture__delete_issue", argumentsJSON: #"{}"#),
-            context: AgentToolExecutionContext(
-                runID: "run-mcp-confirmation",
-                sessionID: "session-mcp-confirmation",
-                groupID: "default",
-                userPrompt: "call destructive fixture mcp",
-                toolCallID: "tool-call-mcp-confirmation",
-                policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
-            )
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "mcp__fixture__delete_issue", argumentsJSON: #"{}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-mcp-confirmation",
+            sessionID: "session-mcp-confirmation",
+            groupID: "default",
+            userPrompt: "call destructive fixture mcp",
+            toolCallID: "tool-call-mcp-confirmation",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
         )
-    }
+    )
+    #expect(result.error == nil)
 }
 
 private func makeRuntimeBridgeMCPFixtureServer(in directory: URL) throws -> URL {

@@ -448,6 +448,7 @@ public struct AgentToolRegistry: Sendable {
             throw AgentToolError.unknownTool(call.name)
         }
         try await tool.preflight(call: call, context: context)
+        var executionContext = context
         if !context.approvedCapabilities.contains(tool.permission) {
             let approvalPayloadJSON = await tool.approvalPayloadJSON(for: call, context: context)
             let decision = await context.policyEngine.evaluate(
@@ -459,7 +460,7 @@ public struct AgentToolRegistry: Sendable {
             )
             switch decision.outcome {
             case .approved:
-                break
+                executionContext = context.approving(tool.permission)
             case .needsApproval:
                 throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
                     id: decision.requestID,
@@ -474,7 +475,7 @@ public struct AgentToolRegistry: Sendable {
             }
         }
         let arguments = try AgentToolArguments(json: call.argumentsJSON)
-        var result = try await tool.execute(arguments: arguments, context: context)
+        var result = try await tool.execute(arguments: arguments, context: executionContext)
         result.runID = context.runID
         result.sessionID = context.sessionID
         return result

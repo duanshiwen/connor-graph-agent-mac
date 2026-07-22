@@ -138,7 +138,7 @@ struct SettingsCalendarSection: View {
                 SettingsValueRow(title: "已添加源", value: "\(model.accounts.count) 个")
                 SettingsValueRow(title: "日历", value: "\(model.collections.count) 个")
                 SettingsValueRow(title: "当前事件", value: "\(model.presentation.eventCount) 个")
-                Text("本机日历可通过 EventKit 安全修改；标准 CalDAV、iCloud、Fastmail 与 Nextcloud 可在账户行显式开启修改。ICS/Webcal 始终只读。每次真实写入仍需审批，并使用版本冲突保护。")
+                Text("本机日历可通过 EventKit 安全修改；标准 CalDAV、iCloud、Fastmail 与 Nextcloud 可在账户行显式开启修改。ICS/Webcal 始终只读。真实写入受当前会话权限模式控制，并始终使用版本冲突保护。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -2610,11 +2610,11 @@ struct SettingsPermissionsSection: View {
                 Divider()
                 PermissionBoundaryRow(systemImage: "network", title: "网络访问默认不单独审批", message: "在“询问”和“执行”模式下，普通网络访问默认允许；只读模式会限制外部网络访问。")
                 Divider()
-                PermissionBoundaryRow(systemImage: "terminal", title: "命令行操作按风险级别处理", message: "安全读取可直接执行，高风险或破坏性操作需要确认。")
+                PermissionBoundaryRow(systemImage: "terminal", title: "命令行操作按权限模式处理", message: "询问模式下高风险权限需要确认；执行模式不会因权限请求停下，但工作目录范围和本地命令硬性安全策略仍然有效。")
             }
 
             SettingsGroup(title: "安全边界") {
-                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "不会开放不受限制的权限模式。需要高风险操作时，康纳同学会先请求确认。")
+                PermissionBoundaryRow(systemImage: "exclamationmark.triangle", title: "执行模式不请求审批", message: "执行模式会自动允许所有 Connor 工具权限请求，包括删除、发送和外部提交。工作目录约束、操作系统授权、只读数据源、命令硬性安全策略和版本冲突保护仍然有效。")
                 Divider()
                 PermissionBoundaryRow(systemImage: "folder", title: "工作目录按会话设置", message: "主目录和其他工作目录在会话顶部设置，不在全局权限页管理。")
                 Divider()
@@ -2625,7 +2625,7 @@ struct SettingsPermissionsSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     PermissionPolicyDetailRow(title: "只读", message: "允许读取会话和文件、搜索本地内容、进行模型调用和本地计算；拒绝写入、删除、外部网络和高风险命令。")
                     PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用和外部网络默认允许；文件写入、编辑、删除、记忆写入、高成本模型调用和高风险命令需要确认。")
-                    PermissionPolicyDetailRow(title: "执行", message: "文件写入、编辑和常规命令可自动执行；删除文件、删除记忆、高风险命令和高成本模型调用仍需要确认。")
+                    PermissionPolicyDetailRow(title: "执行", message: "所有 Connor 工具权限请求都自动批准，不显示人工审批；删除、发送、外部提交和网络权限也会直接放行，非权限类硬性约束仍然有效。")
                 }
                 .padding(.top, SettingsListLayout.spaceS)
             } label: {
@@ -2769,7 +2769,7 @@ struct PermissionModeSummaryRow: View {
         case .askToWrite:
             return "适合日常协作。读取和普通工具可直接运行，写入、删除和高风险操作会先询问。"
         case .trustedWrite:
-            return "适合你明确要让 Connor 连续执行修改时使用。普通写入和 workspace shell 可自动通过，删除和危险操作仍需审批。"
+            return "适合你明确授权 Connor 连续自主执行时使用。所有工具权限请求都会自动通过，包括删除、发送和外部提交；非权限类硬性约束仍然有效。"
         case .allowAll:
             return "内部保留模式，不在产品界面中开放。"
         }
