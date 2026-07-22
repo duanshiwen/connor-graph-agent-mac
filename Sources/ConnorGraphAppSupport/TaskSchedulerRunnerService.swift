@@ -60,7 +60,7 @@ public struct TaskSchedulerRunnerService: Sendable {
                     runID: runID,
                     startedAt: startedAt,
                     finishedAt: now,
-                    message: "Scheduled task runner was cancelled"
+                    message: "定时任务运行已取消。"
                 )
                 throw CancellationError()
             } catch {
@@ -95,7 +95,7 @@ public struct TaskSchedulerRunnerService: Sendable {
                 runID: runID,
                 startedAt: startedAt,
                 finishedAt: now,
-                message: "Previous process ended before the scheduled run reached a terminal state"
+                message: "上次进程在定时任务完成前已结束。"
             ))
         }
         return outcomes
@@ -121,7 +121,7 @@ public struct TaskSchedulerRunnerService: Sendable {
             status: .cancelled,
             startedAt: startedAt,
             finishedAt: finishedAt,
-            outputSummary: "Task cancelled",
+            outputSummary: "任务已取消",
             errorMessage: message,
             externalRunID: runID
         ))
@@ -129,7 +129,7 @@ public struct TaskSchedulerRunnerService: Sendable {
             taskID: task.id,
             runID: runID,
             succeeded: false,
-            summary: "Task cancelled",
+            summary: "任务已取消",
             errorMessage: message
         )
     }
