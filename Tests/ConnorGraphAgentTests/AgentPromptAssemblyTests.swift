@@ -49,8 +49,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("`personality_get_current`"))
     #expect(prompt.contains("`personality_propose_update`"))
     #expect(prompt.contains("`personality_commit_proposal`"))
-    #expect(prompt.contains("In Ask mode, the native approval UI lets the user review the change"))
-    #expect(prompt.contains("In Execute mode, the permission policy authorizes it immediately"))
+    #expect(prompt.contains("immediately call `personality_commit_proposal`"))
+    #expect(prompt.contains("do not ask for conversational confirmation or trigger a second native approval step"))
+    #expect(prompt.contains("session is read-only"))
     #expect(prompt.contains("explicit sexual content"))
     #expect(prompt.contains("Legitimate medical, legal, news, safety, or educational discussion remains allowed"))
 }
