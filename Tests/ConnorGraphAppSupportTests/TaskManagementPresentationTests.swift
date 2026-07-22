@@ -27,14 +27,15 @@ struct TaskManagementPresentationTests {
         #expect(presentation.summary.reviewControlCount == 0)
     }
 
-    @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
+    @Test func systemTaskCardDisablesDeleteAndShowsLocalizedTarget() throws {
         let task = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
         let presentation = TaskManagementUIPresentation.build(tasks: [task], runHistory: [])
         let card = try #require(presentation.cards.first)
 
         #expect(card.originBadge == "系统")
         #expect(card.triggerLabel == "定时")
-        #expect(card.targetLabel == "source.runtime:calendar.refresh")
+        #expect(card.statusLabel == "已启用")
+        #expect(card.targetLabel == "刷新日历账户")
         #expect(card.canStop == false)
         #expect(card.canRestore == false)
         #expect(card.canDelete == false)
@@ -60,10 +61,37 @@ struct TaskManagementPresentationTests {
         #expect(card.originBadge == "用户")
         #expect(card.canDelete)
         #expect(card.canStop)
-        #expect(card.statusLabel == "failed")
+        #expect(card.statusLabel == "失败")
         #expect(card.lastErrorLabel == "external runtime failed")
         #expect(card.rationaleLabel == "Daily summary")
         #expect(card.severity == .error)
+    }
+
+    @Test func presentationLocalizesKnownSystemTextAndTaskTargets() throws {
+        let task = ConnorTaskDefinition(
+            id: "system.rss.refresh",
+            name: "检查 RSS",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled),
+            target: ConnorTaskTarget(
+                targetKind: "source.runtime",
+                targetID: "rss",
+                operationName: "refresh",
+                parameters: ["sourceKind": "rss"]
+            ),
+            lifecycle: ConnorTaskLifecycle(
+                status: .stopped,
+                lastErrorMessage: "Previous process ended before the scheduled run reached a terminal state"
+            ),
+            metadata: ConnorTaskMetadata(rationale: "Materialized from RSS source fetch policy.")
+        )
+
+        let card = try #require(TaskManagementUIPresentation.build(tasks: [task], runHistory: []).cards.first)
+
+        #expect(card.statusLabel == "已暂停")
+        #expect(card.targetLabel == "刷新 RSS 订阅源")
+        #expect(card.lastErrorLabel == "上次进程在定时任务完成前已结束。")
+        #expect(card.rationaleLabel == "根据 RSS 订阅源刷新策略自动创建。")
     }
 
     private func makeProtectedCalendarRefreshTask(accountID: String) -> ConnorTaskDefinition {

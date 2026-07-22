@@ -1445,7 +1445,7 @@ private struct AddTaskAutomationSheet: View {
         case .scheduled:
             "任务运行时仍会走 Connor 的会话、审计和工具权限机制。建议把消息写成清晰的目标，而不是隐藏复杂策略。"
         case .eventTriggered:
-            "当前支持 session.status.changed 事件。任务只在状态命中时发送消息，不直接修改会话内容或绕过审批。"
+            "当前支持“会话状态已变更”事件。任务只在状态命中时发送消息，不直接修改会话内容或绕过审批。"
         }
     }
 
@@ -2680,9 +2680,10 @@ private struct TaskAutomationHero: View {
 
     private var statusColor: Color {
         switch card.statusLabel {
-        case "active": .green
-        case "stopped": .orange
-        case "failed": .red
+        case "已启用", "已完成": .green
+        case "已暂停": .orange
+        case "失败": .red
+        case "运行中": .blue
         default: .secondary
         }
     }

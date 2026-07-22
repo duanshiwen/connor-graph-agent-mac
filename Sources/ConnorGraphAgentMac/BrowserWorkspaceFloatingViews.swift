@@ -537,26 +537,35 @@ struct BrowserVerticalTabGroupHeader: View {
     var isActive: Bool
 
     var body: some View {
+        let accent = BrowserVerticalTabAccent.color(for: title)
         HStack(spacing: 6) {
             Image(systemName: isActive ? "bubble.left.fill" : "bubble.left")
                 .font(BrowserFloatingTypography.tabIcon)
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                .foregroundStyle(Color.white.opacity(0.94))
                 .frame(width: 20, height: 20)
 
             if isExpanded {
                 Text(title)
-                    .font(isActive ? BrowserFloatingTypography.listTitleSelected : BrowserFloatingTypography.listTitle)
-                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .font(BrowserFloatingTypography.listTitleSelected)
+                    .foregroundStyle(.white)
                     .lineLimit(1)
-                Spacer(minLength: 0)
                 Text("\(count)")
                     .font(BrowserFloatingTypography.tabTitle)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.white.opacity(0.76))
                     .monospacedDigit()
             }
         }
-        .padding(.horizontal, isExpanded ? 6 : 8)
-        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+        .padding(.horizontal, isExpanded ? 8 : 6)
+        .frame(minHeight: 32, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(accent.opacity(isActive ? 1 : 0.88))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Color.white.opacity(isActive ? 0.18 : 0.08), lineWidth: 1)
+        }
+        .shadow(color: accent.opacity(isActive ? 0.2 : 0), radius: 3, x: 0, y: 1)
         .help(title)
         .accessibilityLabel("会话：\(title)，\(count) 个标签页")
     }
@@ -569,6 +578,7 @@ struct BrowserVerticalTabRow: View {
     var isPrivate: Bool
     var onSelect: () -> Void
     var onClose: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -590,7 +600,7 @@ struct BrowserVerticalTabRow: View {
             if isExpanded {
                 Text(item.displayTitle)
                     .font(isSelected ? BrowserFloatingTypography.listTitleSelected : BrowserFloatingTypography.listTitle)
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .foregroundStyle(isSelected ? .primary : Color.secondary.opacity(0.92))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -600,29 +610,48 @@ struct BrowserVerticalTabRow: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary.opacity(0.72))
+                .foregroundStyle(.secondary.opacity(isSelected || isHovering ? 0.9 : 0))
                 .help("关闭标签页")
             }
         }
-        .padding(.horizontal, isExpanded ? 7 : 9)
-        .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
-        .background(tabBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(alignment: .leading) {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1, style: .continuous)
-                    .fill(Color.accentColor)
-                    .frame(width: 2, height: 18)
-                    .padding(.leading, 1)
-            }
+        .padding(.horizontal, 9)
+        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
+        .background(tabBackground, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(tabBorder, lineWidth: 1)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .shadow(color: isSelected ? Color.black.opacity(0.11) : .clear, radius: 3, x: 0, y: 1)
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .onTapGesture(perform: onSelect)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
         .help("\(item.sessionTitle)\n\(item.displayTitle)\n\(item.displayURL)")
         .accessibilityLabel("\(item.displayTitle)，会话：\(item.sessionTitle)")
     }
 
     private var tabBackground: Color {
-        isSelected ? Color(nsColor: .controlBackgroundColor) : Color.clear
+        if isSelected { return Color(nsColor: .controlBackgroundColor) }
+        return isHovering ? Color.secondary.opacity(0.08) : Color.clear
+    }
+
+    private var tabBorder: Color {
+        isSelected ? Color(nsColor: .separatorColor).opacity(0.32) : Color.clear
+    }
+}
+
+enum BrowserVerticalTabAccent {
+    private static let palette: [Color] = [
+        Color(red: 0.16, green: 0.43, blue: 0.92),
+        Color(red: 0.84, green: 0.08, blue: 0.55),
+        Color(red: 0.05, green: 0.55, blue: 0.49),
+        Color(red: 0.65, green: 0.26, blue: 0.82),
+        Color(red: 0.84, green: 0.38, blue: 0.12)
+    ]
+
+    static func color(for title: String) -> Color {
+        let index = title.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % palette.count }
+        return palette[index]
     }
 }
 

@@ -122,7 +122,7 @@ final class TaskAutomationFeatureModel {
 
     func stopTask(_ id: String) {
         do {
-            _ = try taskRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
+            _ = try taskRepository?.stopTask(id: id, reason: "已从任务管理界面暂停")
             reload()
         } catch {
             onEvent?(.operationFailed(String(describing: error)))
@@ -140,7 +140,7 @@ final class TaskAutomationFeatureModel {
 
     func deleteTask(_ id: String) {
         do {
-            _ = try taskRepository?.deleteTask(id: id, reason: "Deleted from Task Management UI")
+            _ = try taskRepository?.deleteTask(id: id, reason: "已从任务管理界面删除")
             reload()
         } catch {
             onEvent?(.operationFailed(String(describing: error)))
