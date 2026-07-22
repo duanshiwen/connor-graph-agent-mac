@@ -125,6 +125,26 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(expandedResponse.records.allSatisfy { $0.depth == 0 && $0.status == "active" })
     }
 
+    @Test func backgroundContextToolSupportsEmptyQueryTimeRange() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let start = Date(timeIntervalSince1970: 10_000)
+        let end = start.addingTimeInterval(1_000)
+        try store.upsert(node: MemoryOSNode(id: "range-project", stableKey: "range-project", nodeType: "project", name: "Range Project"))
+        try store.upsert(statement: MemoryOSStatement(id: "range-inside", subjectID: "range-project", predicate: "status", text: "Background period record", confidence: 0.9, validAt: start.addingTimeInterval(100), committedAt: start.addingTimeInterval(100)))
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        let result = try executor.execute(
+            .init(id: "range", name: "memory_os_recent_context", argumentsJSON: """
+            {"query":"","startDate":"\(ISO8601DateFormatter().string(from: start))","endDate":"\(ISO8601DateFormatter().string(from: end))"}
+            """),
+            context: .init(runID: "range-run", iteration: 1)
+        )
+        let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(result.contentJSON.utf8))
+        #expect(response.query.isEmpty)
+        #expect(response.records.contains { $0.recordID == "range-inside" })
+    }
+
     @Test func l2UpdateToolAcceptsStatementStringShorthandInBackgroundExecutor() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()

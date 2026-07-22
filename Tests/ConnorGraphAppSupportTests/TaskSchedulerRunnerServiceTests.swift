@@ -156,9 +156,11 @@ struct TaskSchedulerRunnerServiceTests {
         )
 
         let outcomes = try await service.runDueTasks(now: now)
+        let repeatedOutcomes = try await service.runDueTasks(now: now)
         let reloaded = try #require(try repository.loadTask(id: task.id))
 
         #expect(outcomes.map(\.taskID) == [task.id])
+        #expect(repeatedOutcomes.isEmpty)
         #expect(await calls.count == 1)
         #expect(await calls.messages == ["Daily check-in"])
         #expect(reloaded.lifecycle.status == .active)

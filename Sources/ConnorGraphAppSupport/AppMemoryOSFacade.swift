@@ -252,7 +252,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func searchMemoryOS(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
-        if let searchKernel {
+        if let searchKernel, query.startDate == nil, query.endDate == nil, !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let response = try searchKernel.search(MemoryOSSearchKernelRequest(
                 query: query.text,
                 layers: query.layers.map(MemoryOSSearchKernelLayer.init(retrievalLayer:)),

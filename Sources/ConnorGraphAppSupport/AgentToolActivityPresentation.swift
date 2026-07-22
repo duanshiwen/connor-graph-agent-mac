@@ -52,7 +52,7 @@ public enum AgentToolDisplayNameResolver {
         "rss_list_items": "查看 RSS 文章", "rss_search_items": "搜索 RSS 文章", "rss_get_item": "读取 RSS 文章",
         "rss_set_read_state": "更新 RSS 阅读状态", "rss_set_star_state": "更新 RSS 收藏状态", "rss_set_hidden_state": "更新 RSS 隐藏状态",
         "rss_import_opml": "导入 RSS 订阅", "rss_export_opml": "导出 RSS 订阅", "rss_create_evidence_candidate": "保存 RSS 证据",
-        "memory_os_recent_context": "查询近期记忆", "memory_os_knowledge_context": "查询长期记忆", "memory_os_search": "搜索记忆",
+        "memory_os_recent_context": "查询近期记忆", "memory_os_knowledge_context": "查询长期记忆", "memory_os_search": "搜索记忆", "conversation_history_search": "查询聊天记录",
         "memory_os_get_current_user_profile": "读取用户偏好", "memory_os_update_current_user_profile": "更新用户偏好",
         "memory_os_l2_find_entities": "查找近期记忆实体", "memory_os_l2_find_statements": "查找近期记忆事实", "memory_os_l2_update_entities": "更新近期记忆实体",
         "memory_os_l3_expand_belief": "展开长期记忆", "memory_os_l3_list_domains": "查看记忆领域", "memory_os_l3_update_beliefs": "更新长期记忆",
