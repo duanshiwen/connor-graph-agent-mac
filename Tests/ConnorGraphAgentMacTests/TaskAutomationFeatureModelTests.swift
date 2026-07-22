@@ -69,11 +69,11 @@ struct TaskAutomationFeatureModelTests {
 
         model.stopTask(taskID)
         #expect(try fixture.repository.loadTask(id: taskID)?.lifecycle.status == .stopped)
-        #expect(model.presentation.cards.first(where: { $0.id == taskID })?.statusLabel == "stopped")
+        #expect(model.presentation.cards.first(where: { $0.id == taskID })?.statusLabel == "已暂停")
 
         model.restoreTask(taskID)
         #expect(try fixture.repository.loadTask(id: taskID)?.lifecycle.status == .active)
-        #expect(model.presentation.cards.first(where: { $0.id == taskID })?.statusLabel == "active")
+        #expect(model.presentation.cards.first(where: { $0.id == taskID })?.statusLabel == "已启用")
 
         model.deleteTask(taskID)
         #expect(try fixture.repository.loadTask(id: taskID)?.lifecycle.status == .deleted)

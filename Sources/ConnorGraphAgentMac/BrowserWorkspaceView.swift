@@ -494,7 +494,7 @@ struct BrowserWorkspaceView: View {
                             .padding(.top, 8)
                     } else {
                         ForEach(groups) { group in
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: 5) {
                                 BrowserVerticalTabGroupHeader(
                                     title: group.sessionTitle,
                                     count: group.tabs.count,
@@ -502,16 +502,27 @@ struct BrowserWorkspaceView: View {
                                     isActive: group.sessionID == activeSessionID
                                 )
 
-                                ForEach(group.tabs) { item in
-                                    BrowserVerticalTabRow(
-                                        item: item,
-                                        isExpanded: isExpanded,
-                                        isSelected: item.reference.sessionID == activeSessionID
-                                            && item.reference.tabID == activeSelectedTabID,
-                                        isPrivate: privateTabIDs.contains(item.reference.tabID),
-                                        onSelect: { selectGlobalTab(item.reference) },
-                                        onClose: { closeGlobalTab(item.reference) }
-                                    )
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(group.tabs) { item in
+                                        BrowserVerticalTabRow(
+                                            item: item,
+                                            isExpanded: isExpanded,
+                                            isSelected: item.reference.sessionID == activeSessionID
+                                                && item.reference.tabID == activeSelectedTabID,
+                                            isPrivate: privateTabIDs.contains(item.reference.tabID),
+                                            onSelect: { selectGlobalTab(item.reference) },
+                                            onClose: { closeGlobalTab(item.reference) }
+                                        )
+                                    }
+                                }
+                                .padding(.leading, isExpanded ? 9 : 0)
+                                .overlay(alignment: .leading) {
+                                    if isExpanded {
+                                        Capsule(style: .continuous)
+                                            .fill(BrowserVerticalTabAccent.color(for: group.sessionTitle))
+                                            .frame(width: 3)
+                                            .padding(.vertical, 3)
+                                    }
                                 }
                             }
                         }
@@ -524,6 +535,11 @@ struct BrowserWorkspaceView: View {
         .frame(width: isExpanded ? 248 : 44)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.28))
+                .frame(width: 1)
+        }
         .clipped()
         .shadow(
             color: isExpanded && !model.isVerticalTabSidebarPinned ? Color.black.opacity(0.16) : Color.clear,

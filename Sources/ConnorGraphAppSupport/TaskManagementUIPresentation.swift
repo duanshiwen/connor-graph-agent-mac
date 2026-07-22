@@ -144,12 +144,12 @@ private extension TaskManagementUICard {
             title: task.name,
             originBadge: task.origin.uiBadge,
             triggerLabel: task.trigger.kind.uiLabel,
-            statusLabel: task.lifecycle.status.rawValue,
-            targetLabel: "\(task.target.targetKind):\(task.target.targetID).\(task.target.operationName)",
+            statusLabel: task.lifecycle.status.uiLabel,
+            targetLabel: task.target.uiLabel,
             nextRunLabel: task.lifecycle.nextRunAt?.taskManagementLocalDateTimeLabel ?? "",
             lastRunLabel: latestRun?.startedAt.taskManagementLocalDateTimeLabel ?? task.lifecycle.lastRunAt?.taskManagementLocalDateTimeLabel ?? "",
-            lastErrorLabel: latestRun?.errorMessage ?? task.lifecycle.lastErrorMessage ?? "",
-            rationaleLabel: task.metadata.rationale ?? "",
+            lastErrorLabel: (latestRun?.errorMessage ?? task.lifecycle.lastErrorMessage ?? "").localizedTaskManagementSystemText,
+            rationaleLabel: (task.metadata.rationale ?? "").localizedTaskManagementSystemText,
             canStop: !protected && task.lifecycle.status != .stopped && task.lifecycle.status != .deleted,
             canRestore: !protected && task.lifecycle.status == .stopped,
             canDelete: !protected,
@@ -191,6 +191,17 @@ private extension ConnorTaskTriggerKind {
 }
 
 private extension ConnorTaskLifecycleStatus {
+    var uiLabel: String {
+        switch self {
+        case .active: "已启用"
+        case .stopped: "已暂停"
+        case .running: "运行中"
+        case .succeeded: "已完成"
+        case .failed: "失败"
+        case .deleted: "已删除"
+        }
+    }
+
     func taskUISeverity(latestRun: ConnorTaskRunRecord?) -> AgentEventPresentationSeverity {
         if latestRun?.status == .failed { return .error }
         return switch self {
@@ -199,6 +210,49 @@ private extension ConnorTaskLifecycleStatus {
         case .stopped: .warning
         case .failed: .error
         case .deleted: .warning
+        }
+    }
+}
+
+private extension ConnorTaskTarget {
+    var uiLabel: String {
+        switch (targetKind, operationName) {
+        case ("source.runtime", "refresh"):
+            switch parameters["sourceKind"] ?? targetID {
+            case "rss": "刷新 RSS 订阅源"
+            case "mail": "刷新邮件账户"
+            case "calendar": "刷新日历账户"
+            default: "刷新数据源"
+            }
+        case ("memory_os.pipeline", "plan_l1_unified_projection_jobs"):
+            "规划 Memory OS L1 知识提升"
+        case ("session.ai", "createSessionAndSendMessage"):
+            "新建会话并发送消息"
+        case ("session.ai", "sendMessage"):
+            targetID.isEmpty ? "向当前会话发送消息" : "向指定会话发送消息"
+        case ("session.background-runtime", _):
+            "执行会话后台任务"
+        default:
+            targetID.isEmpty ? "执行自定义任务" : "自定义目标：\(targetID)"
+        }
+    }
+}
+
+private extension String {
+    var localizedTaskManagementSystemText: String {
+        switch self {
+        case "Materialized from RSS source fetch policy.":
+            "根据 RSS 订阅源刷新策略自动创建。"
+        case "Materialized from configured mail account.":
+            "根据已配置的邮件账户自动创建。"
+        case "Materialized from configured calendar account.":
+            "根据已配置的日历账户自动创建。"
+        case "Scheduled task runner was cancelled":
+            "定时任务运行已取消。"
+        case "Previous process ended before the scheduled run reached a terminal state":
+            "上次进程在定时任务完成前已结束。"
+        default:
+            self
         }
     }
 }
