@@ -162,6 +162,20 @@ import ConnorGraphAgent
     #expect(prompt.contains("Do not repeat it on every internal model turn"))
 }
 
+@Test func defaultSystemPromptChecksUpcomingCalendarWithoutDistractingFromCurrentWork() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("check the user's calendar from that current time through the next 24 hours"))
+    #expect(prompt.contains("`timeFilterMode: intervalOverlapsRange`"))
+    #expect(prompt.contains("do not classify from title keywords alone"))
+    #expect(prompt.contains("Events related to the current task may inform execution but must not trigger a separate reminder"))
+    #expect(prompt.contains("before reminding, confirm its current details with `calendar_read`"))
+    #expect(prompt.contains("do not repeat an unchanged event already surfaced in the current conversation"))
+    #expect(prompt.contains("If relevance or actionability is uncertain, do not interrupt"))
+    #expect(prompt.contains("If no event qualifies, say nothing about the calendar"))
+    #expect(prompt.contains("continue the unrelated task without claiming the schedule is clear"))
+}
+
 @Test func defaultSystemPromptExcludesProjectsFromCurrentUserProfilePurpose() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
