@@ -408,6 +408,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var birthDate: String
     public var notes: String
     public var defaultSearchEngine: DefaultSearchEngine
+    public var connorPersonality: ConnorPersonalitySettings
 
     public init(
         displayName: String = "",
@@ -418,7 +419,8 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         genderIdentity: String = "",
         birthDate: String = "",
         notes: String = "",
-        defaultSearchEngine: DefaultSearchEngine = .default
+        defaultSearchEngine: DefaultSearchEngine = .default,
+        connorPersonality: ConnorPersonalitySettings = .empty
     ) {
         self.displayName = displayName
         self.timezone = timezone
@@ -429,6 +431,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.birthDate = birthDate
         self.notes = notes
         self.defaultSearchEngine = defaultSearchEngine
+        self.connorPersonality = connorPersonality
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -441,6 +444,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         case birthDate
         case notes
         case defaultSearchEngine
+        case connorPersonality
     }
 
     public init(from decoder: Decoder) throws {
@@ -454,6 +458,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.birthDate = try container.decodeIfPresent(String.self, forKey: .birthDate) ?? ""
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         self.defaultSearchEngine = try container.decodeIfPresent(DefaultSearchEngine.self, forKey: .defaultSearchEngine) ?? .default
+        self.connorPersonality = try container.decodeIfPresent(ConnorPersonalitySettings.self, forKey: .connorPersonality) ?? .empty
     }
 }
 
