@@ -186,7 +186,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
         var registry = AgentToolRegistry()
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
-        registry.registerSessionStatusTools(repository: AppChatSessionRepository(store: store, storagePaths: storagePaths), governanceConfig: governanceConfig)
+        let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
+        registry.registerSessionStatusTools(repository: sessionRepository, governanceConfig: governanceConfig)
+        registry.registerConversationHistoryTools(repository: sessionRepository)
         registry.register(GraphSearchTool(searchService: searchService))
         let memoryOSFacade = makeMemoryOSFacade()
         if let memoryOSFacade {

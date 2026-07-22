@@ -80,6 +80,47 @@ import ConnorGraphAppSupport
     #expect(payload.records.contains { $0.text.contains("Annie received the product invitation") })
 }
 
+@Test func memoryOSContextToolsSupportEmptyQueryTimeRangeRetrieval() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let rangeStart = Date(timeIntervalSince1970: 20_000)
+    let rangeEnd = Date(timeIntervalSince1970: 30_000)
+    let node = MemoryOSNode(id: "time-range-node", stableKey: "time-range-node", nodeType: "project", name: "Time Range")
+    try store.upsert(node: node)
+    try store.upsert(statement: MemoryOSStatement(id: "inside-range", subjectID: node.id, predicate: "status", text: "Included period record", confidence: 0.9, validAt: rangeStart.addingTimeInterval(100), committedAt: rangeStart.addingTimeInterval(100)))
+    try store.upsert(statement: MemoryOSStatement(id: "outside-range", subjectID: node.id, predicate: "status", text: "Excluded period record", confidence: 0.9, validAt: rangeStart.addingTimeInterval(-100), committedAt: rangeStart.addingTimeInterval(-100)))
+    let arguments = try AgentToolArguments(json: """
+    {"query":"","startDate":"\(iso8601(rangeStart))","endDate":"\(iso8601(rangeEnd))"}
+    """)
+
+    let result = try await MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store)).execute(arguments: arguments, context: memoryOSToolContext())
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
+
+    #expect(payload.query.isEmpty)
+    #expect(payload.records.contains { $0.recordID == "inside-range" })
+    #expect(!payload.records.contains { $0.recordID == "outside-range" })
+
+    let focusedResult = try await MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store)).execute(
+        arguments: try AgentToolArguments(json: """
+        {"query":"period","startDate":"\(iso8601(rangeStart))","endDate":"\(iso8601(rangeEnd))"}
+        """),
+        context: memoryOSToolContext()
+    )
+    let focusedPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(focusedResult.contentJSON).utf8))
+    #expect(focusedPayload.records.contains { $0.recordID == "inside-range" })
+    #expect(!focusedPayload.records.contains { $0.recordID == "outside-range" })
+}
+
+@Test func memoryOSContextToolsRequireTimeBoundsWhenQueryIsEmpty() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
+
+    await #expect(throws: AgentToolError.self) {
+        try await tool.execute(arguments: AgentToolArguments(json: #"{"query":""}"#), context: memoryOSToolContext())
+    }
+}
+
 @Test func memoryOSRecentContextLimitExpansionReturnsOnlyIncrementalRecords() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()

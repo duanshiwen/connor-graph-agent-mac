@@ -100,7 +100,12 @@ public struct TaskSchedulerService: Sendable {
             let expected = anchor.addingTimeInterval(seconds)
             return expected <= now ? expected : nil
         case .daily, .weekly, .monthly:
-            return latestAnchoredRunAt(task: task, onOrBefore: now)
+            guard let latest = latestAnchoredRunAt(task: task, onOrBefore: now) else { return nil }
+            let lastHandledAt = [task.lifecycle.lastRunAt, task.lifecycle.lastFinishedAt]
+                .compactMap { $0 }
+                .max()
+            if let lastHandledAt, latest <= lastHandledAt { return nil }
+            return latest
         case .once:
             return nil
         }

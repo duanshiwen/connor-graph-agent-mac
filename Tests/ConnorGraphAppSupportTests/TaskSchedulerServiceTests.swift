@@ -101,6 +101,7 @@ struct TaskSchedulerServiceTests {
         let succeeded = scheduler.markRunSucceeded(task: running, startedAt: now, finishedAt: now)
         #expect(succeeded.lifecycle.status == .active)
         #expect(succeeded.lifecycle.nextRunAt == expectedNextRun)
+        #expect(scheduler.dueTasks([succeeded], now: now).isEmpty)
     }
 
     @Test func calendarRecurringTasksComputeNextRunFromOriginalAnchor() throws {

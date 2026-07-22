@@ -43,6 +43,9 @@ struct MemoryOSBackgroundToolContractTests {
         #expect(readRecord.inputSchemaJSON.contains("layer"))
         #expect(readRecord.inputSchemaJSON.contains("recordID"))
         #expect(readRecord.usagePolicy.contains("summary-level context is insufficient"))
+        let recent = try #require(tools.first { $0.name == "memory_os_recent_context" })
+        #expect(recent.inputSchemaJSON.contains("startDate"))
+        #expect(recent.inputSchemaJSON.contains("empty means all records in range"))
     }
 }
 
