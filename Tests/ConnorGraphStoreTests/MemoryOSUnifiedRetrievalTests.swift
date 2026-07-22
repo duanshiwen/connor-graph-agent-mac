@@ -29,6 +29,40 @@ import ConnorGraphStore
     #expect(unspecified.temporalStatus == .active)
 }
 
+@Test func memoryOSTimeRangeUsesSourceEventOccurrenceAcrossDerivedLayers() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let start = Date(timeIntervalSince1970: 20_000)
+    let end = start.addingTimeInterval(1_000)
+    let insideObject = MemoryOSProvenanceObject(id: "occurred-inside", sourceType: .chatMessage, title: "Inside event", content: "Work happened inside the period", occurredAt: start.addingTimeInterval(100), ingestedAt: end.addingTimeInterval(100))
+    let outsideObject = MemoryOSProvenanceObject(id: "occurred-outside", sourceType: .chatMessage, title: "Outside event", content: "Work happened before the period", occurredAt: start.addingTimeInterval(-100), ingestedAt: start.addingTimeInterval(200))
+    try store.upsert(provenance: insideObject)
+    try store.upsert(provenance: outsideObject)
+    try store.upsert(span: MemoryOSProvenanceSpan(id: "occurred-inside-span", provenanceObjectID: insideObject.id, text: insideObject.content))
+    try store.upsert(span: MemoryOSProvenanceSpan(id: "occurred-outside-span", provenanceObjectID: outsideObject.id, text: outsideObject.content))
+    try store.upsert(node: MemoryOSNode(id: "occurrence-node", stableKey: "occurrence-node", nodeType: "project", name: "Occurrence"))
+    try store.upsert(statement: MemoryOSStatement(id: "inside-statement", subjectID: "occurrence-node", predicate: "status", text: "Inside derived statement", validAt: end.addingTimeInterval(100), committedAt: end.addingTimeInterval(100), evidenceSpanIDs: ["occurred-inside-span"]))
+    try store.upsert(statement: MemoryOSStatement(id: "outside-statement", subjectID: "occurrence-node", predicate: "status", text: "Outside derived statement", validAt: start.addingTimeInterval(200), committedAt: start.addingTimeInterval(200), evidenceSpanIDs: ["occurred-outside-span"]))
+    try store.upsert(belief: MemoryOSBelief(id: "inside-belief", statement: "Inside reusable knowledge", domain: "testing", createdAt: end.addingTimeInterval(100), updatedAt: end.addingTimeInterval(100)))
+    try store.execute("INSERT INTO memory_l3_belief_evidence(belief_id, statement_id, strength) VALUES ('inside-belief', 'inside-statement', 1.0);")
+    try store.upsert(entity: MemoryOSEntity(id: "inside-entity", stableKey: "inside-entity", entityType: "concept", name: "Inside Entity", createdAt: end.addingTimeInterval(100), updatedAt: end.addingTimeInterval(100)))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "inside-entity-statement", entityID: "inside-entity", predicate: .relatedTo, text: "Inside entity evidence", validAt: end.addingTimeInterval(100), committedAt: end.addingTimeInterval(100), evidenceSpanIDs: ["occurred-inside-span"]))
+
+    let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(
+        MemoryOSRetrievalQuery(text: "", layers: [.l0, .l2, .l3, .l4], limit: 20, startDate: start, endDate: end)
+    )
+
+    let ids = Set(hits.map(\.recordID))
+    #expect(ids.contains(insideObject.id))
+    #expect(ids.contains("inside-statement"))
+    #expect(ids.contains("inside-belief"))
+    #expect(ids.contains("inside-entity"))
+    #expect(ids.contains("inside-entity-statement"))
+    #expect(!ids.contains(outsideObject.id))
+    #expect(!ids.contains("outside-statement"))
+    #expect(hits.allSatisfy { $0.effectiveOccurredAt == iso8601(insideObject.occurredAt) })
+}
+
 @Test func memoryOSUnifiedRetrievalSearchesAcrossAllLayersAndRanksHits() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
     try store.migrate()

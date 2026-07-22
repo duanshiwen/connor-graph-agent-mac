@@ -572,6 +572,7 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(names.contains("memory_os_recent_context"))
     #expect(names.contains("memory_os_knowledge_context"))
     #expect(names.contains("memory_os_get_current_user_profile"))
+    #expect(names.contains("conversation_history_search"))
     #expect(names.contains("web_search"))
     #expect(names.contains("web_fetch"))
     #expect(names.contains("browser_fetch"))

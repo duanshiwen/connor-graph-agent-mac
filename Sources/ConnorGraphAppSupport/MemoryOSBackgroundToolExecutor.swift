@@ -124,32 +124,27 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         let args = try Arguments(json: call.argumentsJSON)
         switch call.name {
         case "memory_os_recent_context", "memory_os_knowledge_context":
-            let rawQuery = try args.requiredString("query")
-            let terms = rawQuery.split { $0 == ";" || $0 == "\u{FF1B}" }.map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            guard !terms.isEmpty else {
-                throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("query contained no valid search terms")
-            }
             let isRecent = call.name == "memory_os_recent_context"
             let requestedLimit = max(contextToolConfiguration.minimumResultLimit, args.int("limit") ?? contextToolConfiguration.defaultResultLimit)
             let depth = isRecent ? 1 : max(1, min(args.int("depth") ?? 1, contextToolConfiguration.maxDepth))
-            let query = terms.joined(separator: " ")
             let layers: [MemoryOSRetrievalLayer] = isRecent ? [.l1, .l2] : [.l3, .l4]
-            let hits = try facade.searchMemoryOS(.init(text: query, layers: layers, limit: requestedLimit + 1, depth: depth))
+            let query = try Self.retrievalQuery(args: args, layers: layers, limit: requestedLimit + 1, depth: depth)
+            let hits = try facade.searchMemoryOS(query)
             var candidates = hits.map(MemoryOSLayeredContextSupport.record)
             if !isRecent {
-                for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
+                for hit in hits where !query.text.isEmpty && hit.layer == .l4 && hit.canExpandDepth {
                     let entity = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
                     candidates += MemoryOSLayeredContextSupport.records(
                         from: try facade.expandMemoryOSL4(entityName: entity, depth: depth, limit: requestedLimit + 1)
                     )
                 }
-                candidates.sort(by: Self.contextRecordPrecedes)
+                candidates = MemoryOSLayeredContextSupport.filtered(candidates, by: query)
+                candidates.sort { Self.contextRecordPrecedes($0, $1, byOccurrence: query.startDate != nil || query.endDate != nil) }
             }
-            let queryKey = "\(query.lowercased())|\(layers.map(\.rawValue).joined(separator: ","))|\(depth)"
             let response = try contextCursorStore.response(
                 runID: context.runID,
-                queryKey: queryKey,
-                query: query,
+                queryKey: MemoryOSLayeredContextSupport.queryKey(for: query),
+                query: query.text,
                 requestedLimit: requestedLimit,
                 candidates: candidates,
                 maxResponseCharacters: contextToolConfiguration.maxResponseCharacters
@@ -169,17 +164,17 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             )
 
         case "memory_os_search":
-            let query = try args.requiredString("query")
             let layers = args.stringArray("layers") ?? ["L2", "L3", "L4"]
             let limit = args.int("limit") ?? 20
             let retrievalLayers = layers.compactMap { MemoryOSRetrievalLayer(rawValue: $0.uppercased()) }
-            let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: query, layers: retrievalLayers.isEmpty ? [.l2, .l3, .l4] : retrievalLayers, limit: limit))
+            let query = try Self.retrievalQuery(args: args, layers: retrievalLayers.isEmpty ? [.l2, .l3, .l4] : retrievalLayers, limit: limit, depth: 1)
+            let hits = try facade.searchMemoryOS(query)
             let json = facade.store.json(hits)
             let readableText: String
             if hits.isEmpty {
-                readableText = "Returned 0 Memory OS hits for \"\(query)\"."
+                readableText = "Returned 0 Memory OS hits for \"\(query.text)\"."
             } else {
-                let header = "Returned \(hits.count) Memory OS hits for \"\(query)\"."
+                let header = "Returned \(hits.count) Memory OS hits for \"\(query.text)\"."
                 let body = hits.enumerated().map { i, hit -> String in
                     var parts = ["\(i + 1). [\(hit.layer.rawValue)] \(hit.title)"]
                     if !hit.summary.isEmpty { parts.append("   Summary: \(hit.summary)") }
@@ -314,8 +309,10 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
     }
 
-    private static func contextRecordPrecedes(_ lhs: MemoryOSContextToolRecord, _ rhs: MemoryOSContextToolRecord) -> Bool {
-        switch (lhs.updatedAt, rhs.updatedAt) {
+    private static func contextRecordPrecedes(_ lhs: MemoryOSContextToolRecord, _ rhs: MemoryOSContextToolRecord, byOccurrence: Bool) -> Bool {
+        let leftTime = byOccurrence ? lhs.occurredAt : lhs.updatedAt
+        let rightTime = byOccurrence ? rhs.occurredAt : rhs.updatedAt
+        switch (leftTime, rightTime) {
         case let (left?, right?) where left != right: return left > right
         case (_?, nil): return true
         case (nil, _?): return false
@@ -323,6 +320,25 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
         if lhs.retrievalScore != rhs.retrievalScore { return lhs.retrievalScore > rhs.retrievalScore }
         return lhs.recordID < rhs.recordID
+    }
+
+    private static func retrievalQuery(
+        args: Arguments,
+        layers: [MemoryOSRetrievalLayer],
+        limit: Int,
+        depth: Int
+    ) throws -> MemoryOSRetrievalQuery {
+        let rawQuery = args.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let query = MemorySearchQueryParser.parse(rawQuery).terms.joined(separator: " ")
+        let startDate = try args.iso8601Date("startDate")
+        let endDate = try args.iso8601Date("endDate")
+        if query.isEmpty && (startDate == nil || endDate == nil) {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("query may be empty only when both startDate and endDate are provided")
+        }
+        if let startDate, let endDate, startDate >= endDate {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("startDate must be earlier than endDate")
+        }
+        return MemoryOSRetrievalQuery(text: query, layers: layers, limit: limit, depth: depth, startDate: startDate, endDate: endDate)
     }
 
     private static func buildCurrentUserFactJSON(statement: String, factType: String, predicate: GraphPredicate, anchor: MemoryOSEntity, now: Date) throws -> String {
@@ -413,6 +429,16 @@ private struct Arguments {
         if let value = values[key] as? NSNumber { return value.intValue }
         if let value = values[key] as? String { return Int(value) }
         return nil
+    }
+
+    func iso8601Date(_ key: String) throws -> Date? {
+        guard let raw = string(key)?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("\(key) must be an ISO-8601 timestamp")
+        }
+        return date
     }
 
     func stringArray(_ key: String) -> [String]? {

@@ -25,8 +25,15 @@ final class RuntimeSettingsPersistenceCoordinator {
 
     func save(snapshot: AgentRuntimeSettings) {
         guard !isShutdown else { return }
-        do { try repository?.save(snapshot); cachedSettings = snapshot; onEvent?(.saved(snapshot)) }
+        do { try saveImmediately(snapshot: snapshot) }
         catch { onEvent?(.failed(String(describing: error))) }
+    }
+
+    func saveImmediately(snapshot: AgentRuntimeSettings) throws {
+        guard !isShutdown else { return }
+        try repository?.save(snapshot)
+        cachedSettings = snapshot
+        onEvent?(.saved(snapshot))
     }
 
     func installLoadedSnapshot(_ settings: AgentRuntimeSettings) {

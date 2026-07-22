@@ -41,6 +41,62 @@ struct SettingsFeatureModelsTests {
         #expect(settings.preferences.birthDate == "1990-01-02")
     }
 
+    @Test func personalityGenerationRequiresConfirmationBeforeSaving() async {
+        let model = UserPreferencesFeatureModel()
+        let generated = ConnorPersonalitySettings(summary: "冷静、直接", traits: ["严谨"])
+        var changes = 0
+        model.onChanged = { changes += 1 }
+        model.personalityGenerator = { _ in generated }
+        model.personalityRequest = "希望更冷静严谨"
+
+        await model.generatePersonalityDraft()
+
+        #expect(model.personalityDraft == generated)
+        #expect(model.connorPersonality.isEmpty)
+        #expect(changes == 0)
+
+        model.confirmPersonalityDraft()
+        #expect(model.connorPersonality == generated)
+        #expect(model.connorPersonalityRevision == 1)
+        #expect(model.personalityDraft == nil)
+        #expect(changes == 1)
+
+        var settings = AgentRuntimeSettings.default
+        model.apply(to: &settings)
+        #expect(settings.preferences.connorPersonality == generated)
+    }
+
+    @Test func cancelAndFailedGenerationDoNotChangeSavedPersonality() async {
+        let saved = ConnorPersonalitySettings(summary: "温和可靠")
+        let model = UserPreferencesFeatureModel()
+        model.apply(AgentRuntimePreferenceSettings(connorPersonality: saved))
+        model.personalityGenerator = { _ in throw ConnorPersonalityError.invalidJSON }
+        model.personalityRequest = "换一种风格"
+
+        await model.generatePersonalityDraft()
+
+        #expect(model.connorPersonality == saved)
+        #expect(model.personalityDraft == nil)
+        #expect(model.personalityErrorMessage != nil)
+        model.cancelPersonalityDraft()
+        #expect(model.connorPersonality == saved)
+    }
+
+    @Test func resetPersonalityTriggersPersistenceChange() {
+        let model = UserPreferencesFeatureModel()
+        model.apply(AgentRuntimePreferenceSettings(
+            connorPersonality: ConnorPersonalitySettings(summary: "积极主动")
+        ))
+        var changes = 0
+        model.onChanged = { changes += 1 }
+
+        model.resetPersonality()
+
+        #expect(model.connorPersonality.isEmpty)
+        #expect(model.connorPersonalityRevision == 1)
+        #expect(changes == 1)
+    }
+
     @Test func workspaceMutationsEmitImmutableSnapshotValues() {
         let model = WorkspaceSettingsFeatureModel()
         var savedRoots: [WorkspaceRootDraft] = []

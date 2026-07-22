@@ -38,6 +38,18 @@ private struct EchoTool: AgentTool {
     #expect(await trusted.evaluate(capability: .transferBrowserFile, runID: "run", sessionID: "session").outcome == .needsApproval)
 }
 
+@Test func personalityMutationAlwaysRequiresApprovalEvenInAllowAllMode() async {
+    for mode in AgentPermissionMode.allCases {
+        let decision = await AgentPolicyEngine(permissionMode: mode).evaluate(
+            capability: .mutatePersonality,
+            runID: "run-personality",
+            sessionID: "session-personality",
+            toolName: "personality_commit_proposal"
+        )
+        #expect(decision.outcome == .needsApproval)
+    }
+}
+
 @Test func toolRegistryExecutesRegisteredToolAndWritesAuditDecision() async throws {
     var registry = AgentToolRegistry()
     registry.register(EchoTool())

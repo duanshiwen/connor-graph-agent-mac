@@ -249,6 +249,7 @@ struct SettingsShortcutsSection: View {
 
 struct SettingsPreferencesSection: View {
     @Bindable var model: UserPreferencesFeatureModel
+    @State private var showsPersonalityResetConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -317,11 +318,145 @@ struct SettingsPreferencesSection: View {
                         .controlSize(.regular)
                 }
             }
+            SettingsGroup(title: "康纳同学的性格") {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("姓名")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text("姓名是固定身份，不会被性格描述或 AI 分析结果更改。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Label(ConnorPersonalitySettings.lockedDisplayName, systemImage: "lock.fill")
+                            .font(SettingsListTypography.rowTitleSelected)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("描述你希望的性格")
+                            .font(SettingsListTypography.rowTitleSelected)
+                        TextEditor(text: $model.personalityRequest)
+                            .font(SettingsListTypography.rowTitle)
+                            .frame(minHeight: 110)
+                            .appFormTextEditor()
+                            .disabled(model.isGeneratingPersonality)
+                        HStack {
+                            if model.isGeneratingPersonality {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("正在分析并补充…")
+                                    .font(SettingsListTypography.rowCaption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                Task { await model.generatePersonalityDraft() }
+                            } label: {
+                                Label(model.personalityDraft == nil ? "AI 分析" : "重新生成", systemImage: "sparkles")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.isGeneratingPersonality || model.personalityRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+
+                    if let error = model.personalityErrorMessage {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.red)
+                    }
+
+                    if let draft = model.personalityDraft {
+                        Divider()
+                        ConnorPersonalityPreview(
+                            title: "待应用的 AI 分析结果",
+                            personality: draft
+                        )
+                        HStack {
+                            Spacer()
+                            Button("取消") { model.cancelPersonalityDraft() }
+                                .buttonStyle(.bordered)
+                            Button {
+                                model.confirmPersonalityDraft()
+                            } label: {
+                                Label("应用性格", systemImage: "checkmark")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+
+                    if !model.connorPersonality.isEmpty {
+                        Divider()
+                        ConnorPersonalityPreview(
+                            title: "当前已生效",
+                            personality: model.connorPersonality
+                        )
+                        HStack {
+                            Spacer()
+                            Button(role: .destructive) {
+                                showsPersonalityResetConfirmation = true
+                            } label: {
+                                Label("恢复默认性格", systemImage: "arrow.counterclockwise")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+                .confirmationDialog(
+                    "恢复默认性格？",
+                    isPresented: $showsPersonalityResetConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("恢复默认性格", role: .destructive) { model.resetPersonality() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("已保存的自定义性格会被清除，康纳同学将恢复默认对话风格。")
+                }
+            }
             SettingsGroup(title: "备注") {
                 TextEditor(text: $model.notes)
                     .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
                     .appFormTextEditor()
+            }
+        }
+    }
+}
+
+private struct ConnorPersonalityPreview: View {
+    let title: String
+    let personality: ConnorPersonalitySettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(SettingsListTypography.rowTitleSelected)
+            personalityRow("总体人格", personality.summary)
+            personalityRow("核心特征", personality.traits.joined(separator: "、"))
+            personalityRow("沟通方式", personality.communicationStyle)
+            personalityRow("思考方式", personality.reasoningStyle)
+            personalityRow("主动性", personality.initiativeStyle)
+            personalityRow("情绪基调", personality.emotionalTone)
+            personalityRow("行为边界", personality.boundaries.joined(separator: "；"))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func personalityRow(_ label: String, _ value: String) -> some View {
+        if !value.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(label)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 64, alignment: .leading)
+                Text(value)
+                    .font(SettingsListTypography.rowTitle)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
