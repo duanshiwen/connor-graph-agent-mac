@@ -27,16 +27,30 @@ final class SkillRuntimeFeatureModel {
     var isSubmittingEditRequest = false
     var editDialogMessage: String?
     var pendingDeletionCard: SkillManagerCard?
+    var importCandidates: [ExternalSkillImportCandidate] = []
+    var selectedImportCandidateIDs: Set<String> = []
+    var importWarnings: [String] = []
+    var importDialogMessage: String?
+    var isImporting = false
+    var importSearchText = ""
+    var importSourceFilter: ExternalSkillLibrarySource?
+    var customImportRoots: [ExternalSkillLibraryRoot] = []
 
     @ObservationIgnored private let repository: AppSkillRuntimeRepository?
     @ObservationIgnored private let storagePaths: AppStoragePaths?
+    @ObservationIgnored private let externalSkillImporter: ExternalSkillLibraryImporter
     @ObservationIgnored var onAddRequest: AddRequestHandler?
     @ObservationIgnored var onEditRequest: EditRequestHandler?
     @ObservationIgnored var onEvent: ((Event) -> Void)?
 
-    init(repository: AppSkillRuntimeRepository?, storagePaths: AppStoragePaths?) {
+    init(
+        repository: AppSkillRuntimeRepository?,
+        storagePaths: AppStoragePaths?,
+        externalSkillImporter: ExternalSkillLibraryImporter = ExternalSkillLibraryImporter()
+    ) {
         self.repository = repository
         self.storagePaths = storagePaths
+        self.externalSkillImporter = externalSkillImporter
         if storagePaths == nil {
             presentation = Self.emptyPresentation(warnings: ["Storage paths are not initialized."])
         }
@@ -169,6 +183,85 @@ final class SkillRuntimeFeatureModel {
         pendingDeletionCard = nil
     }
 
+    func prepareSkillImport() {
+        importDialogMessage = nil
+        isImporting = false
+        refreshImportCandidates()
+    }
+
+    func resetSkillImport() {
+        guard !isImporting else { return }
+        selectedImportCandidateIDs = []
+        importDialogMessage = nil
+        importSearchText = ""
+        importSourceFilter = nil
+    }
+
+    func setImportCandidateSelected(_ id: String, isSelected: Bool) {
+        guard importCandidates.contains(where: { $0.id == id && !$0.isAlreadyImported }) else { return }
+        if isSelected {
+            selectedImportCandidateIDs.insert(id)
+        } else {
+            selectedImportCandidateIDs.remove(id)
+        }
+    }
+
+    func selectAllVisibleImportCandidates() {
+        selectedImportCandidateIDs.formUnion(filteredImportCandidates.lazy.filter { !$0.isAlreadyImported }.map(\.id))
+    }
+
+    func deselectAllImportCandidates() {
+        selectedImportCandidateIDs = []
+    }
+
+    func addCustomImportRoot(_ directoryURL: URL) {
+        let normalized = directoryURL.standardizedFileURL
+        guard !customImportRoots.contains(where: { $0.directoryURL.standardizedFileURL == normalized }) else { return }
+        customImportRoots.append(ExternalSkillLibraryRoot(source: .custom, directoryURL: normalized))
+        refreshImportCandidates()
+    }
+
+    var filteredImportCandidates: [ExternalSkillImportCandidate] {
+        let query = importSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return importCandidates.filter { candidate in
+            let matchesSource = importSourceFilter == nil || candidate.source == importSourceFilter
+            let matchesQuery = query.isEmpty
+                || candidate.name.localizedCaseInsensitiveContains(query)
+                || candidate.description.localizedCaseInsensitiveContains(query)
+                || candidate.slug.localizedCaseInsensitiveContains(query)
+            return matchesSource && matchesQuery
+        }
+    }
+
+    var discoveredImportSources: [ExternalSkillLibrarySource] {
+        Array(Set(importCandidates.map(\.source))).sorted { $0.title < $1.title }
+    }
+
+    func submitSkillImport() async {
+        guard let storagePaths, !isImporting else { return }
+        let selected = importCandidates.filter { selectedImportCandidateIDs.contains($0.id) && !$0.isAlreadyImported }
+        guard !selected.isEmpty else { return }
+        isImporting = true
+        importDialogMessage = "正在导入 \(selected.count) 个技能…"
+        do {
+            let importer = externalSkillImporter
+            let destination = storagePaths.skillsDirectory
+            let result = try await Task.detached {
+                try importer.importSkills(selected, destinationDirectory: destination)
+            }.value
+            reload()
+            refreshImportCandidates()
+            let skipped = result.skippedIDs.count
+            importDialogMessage = skipped == 0
+                ? "已导入 \(result.importedIDs.count) 个技能。"
+                : "已导入 \(result.importedIDs.count) 个技能，跳过 \(skipped) 个同名技能。"
+        } catch {
+            importDialogMessage = "导入失败：\(error.localizedDescription)"
+            onEvent?(.operationFailed(error.localizedDescription))
+        }
+        isImporting = false
+    }
+
     func confirmDelete() {
         guard let card = pendingDeletionCard else { return }
         do {
@@ -208,6 +301,22 @@ final class SkillRuntimeFeatureModel {
         }
         let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
         return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
+    }
+
+    private func refreshImportCandidates() {
+        guard let storagePaths else {
+            importCandidates = []
+            selectedImportCandidateIDs = []
+            importWarnings = ["Storage paths are not initialized."]
+            return
+        }
+        let discovery = externalSkillImporter.discover(
+            destinationDirectory: storagePaths.skillsDirectory,
+            additionalRoots: customImportRoots
+        )
+        importCandidates = discovery.candidates
+        importWarnings = discovery.warnings
+        selectedImportCandidateIDs = Set(discovery.candidates.lazy.filter { !$0.isAlreadyImported }.map(\.id))
     }
 
     private static func emptyPresentation(warnings: [String] = []) -> SkillManagerPresentation {

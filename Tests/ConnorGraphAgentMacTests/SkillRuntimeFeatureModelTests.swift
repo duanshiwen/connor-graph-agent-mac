@@ -117,6 +117,40 @@ struct SkillRuntimeFeatureModelTests {
         #expect(model.editDialogMessage == "会话系统尚未初始化。")
     }
 
+    @Test func discoversSelectsAndImportsExternalSkillsIntoUserLibrary() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let externalRoot = fixture.root.appendingPathComponent("external-skills", isDirectory: true)
+        let externalSkill = externalRoot.appendingPathComponent("external-review", isDirectory: true)
+        try FileManager.default.createDirectory(at: externalSkill, withIntermediateDirectories: true)
+        try """
+        ---
+        name: External Review
+        description: Imported from another agent
+        ---
+        Review the current change.
+        """.write(to: externalSkill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        let importer = ExternalSkillLibraryImporter(roots: [
+            ExternalSkillLibraryRoot(source: .claudeCode, directoryURL: externalRoot)
+        ])
+        let model = SkillRuntimeFeatureModel(
+            repository: fixture.repository,
+            storagePaths: fixture.paths,
+            externalSkillImporter: importer
+        )
+
+        model.prepareSkillImport()
+        #expect(model.importCandidates.map(\.slug) == ["external-review"])
+        #expect(model.selectedImportCandidateIDs == Set(model.importCandidates.map(\.id)))
+
+        await model.submitSkillImport()
+
+        #expect(FileManager.default.fileExists(atPath: fixture.paths.skillsDirectory.appendingPathComponent("external-review/SKILL.md").path))
+        #expect(model.presentation.cards.map(\.id) == ["external-review"])
+        #expect(model.importDialogMessage == "已导入 1 个技能。")
+        #expect(model.selectedImportCandidateIDs.isEmpty)
+    }
+
     private func makeFixture() throws -> (root: URL, paths: AppStoragePaths, repository: AppSkillRuntimeRepository) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("connor-skill-runtime-model-\(UUID().uuidString)", isDirectory: true)
