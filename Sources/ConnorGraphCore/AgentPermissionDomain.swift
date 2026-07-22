@@ -4,6 +4,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case readGraph
     case readSession
     case mutateSessionStatus
+    case mutatePersonality
     case proposeGraphWrite
     case commitGraphWrite
     case invalidateGraphStatement

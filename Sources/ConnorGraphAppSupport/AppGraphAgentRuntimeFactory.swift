@@ -51,6 +51,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
+    public var personalityRuntime: ConnorPersonalityRuntime?
     public var memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
     private let sharedCache: AppGraphAgentRuntimeSharedCache
@@ -71,6 +72,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
+        personalityRuntime: ConnorPersonalityRuntime? = nil,
         memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration = .init(),
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
     ) {
@@ -89,6 +91,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
+        self.personalityRuntime = personalityRuntime
         self.memoryOSContextToolConfiguration = memoryOSContextToolConfiguration
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
         self.sharedCache = AppGraphAgentRuntimeSharedCache()
@@ -189,6 +192,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
         registry.registerSessionStatusTools(repository: sessionRepository, governanceConfig: governanceConfig)
         registry.registerConversationHistoryTools(repository: sessionRepository)
+        if let personalityRuntime {
+            registry.registerConnorPersonalityTools(runtime: personalityRuntime, provider: modelProvider)
+        }
         registry.register(GraphSearchTool(searchService: searchService))
         let memoryOSFacade = makeMemoryOSFacade()
         if let memoryOSFacade {

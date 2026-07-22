@@ -55,6 +55,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.notes.isEmpty)
         #expect(preferences.defaultSearchEngine == .bing)
         #expect(preferences.connorPersonality.isEmpty)
+        #expect(preferences.connorPersonalityRevision == 0)
     }
 
     @Test func decodesLegacyPreferencesWithoutDefaultSearchEngineAsBing() throws {
@@ -82,7 +83,7 @@ struct AgentRuntimePreferenceSettingsTests {
             communicationStyle: "  先给结论， 再说明依据。 ",
             boundaries: ["不为了迎合用户而编造事实"]
         ).validated()
-        let preferences = AgentRuntimePreferenceSettings(connorPersonality: personality)
+        let preferences = AgentRuntimePreferenceSettings(connorPersonality: personality, connorPersonalityRevision: 4)
 
         let data = try JSONEncoder().encode(preferences)
         let decoded = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
@@ -90,6 +91,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(decoded.connorPersonality.summary == "温和但直接，重视事实。")
         #expect(decoded.connorPersonality.traits == ["可靠", "有耐心"])
         #expect(decoded.connorPersonality.communicationStyle == "先给结论， 再说明依据。")
+        #expect(decoded.connorPersonalityRevision == 4)
     }
 
     @Test func personalityGeneratorRejectsIdentityAndUnknownFields() throws {
