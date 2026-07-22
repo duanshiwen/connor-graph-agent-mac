@@ -46,7 +46,7 @@ import ConnorGraphAppSupport
         id: "topic-session",
         title: "Topics",
         messages: [
-            AgentMessage(id: "release-message", role: .user, content: "Release planning", createdAt: start.addingTimeInterval(60)),
+            AgentMessage(id: "release-message", role: .user, content: "Release planning task", createdAt: start.addingTimeInterval(60)),
             AgentMessage(id: "design-message", role: .assistant, content: "Design review", createdAt: start.addingTimeInterval(120))
         ],
         createdAt: start,
@@ -55,7 +55,7 @@ import ConnorGraphAppSupport
 
     let result = try await ConversationHistorySearchTool(repository: AppChatSessionRepository(store: store)).execute(
         arguments: AgentToolArguments(json: """
-        {"query":"release","startDate":"\(iso8601ConversationHistory(start))","endDate":"\(iso8601ConversationHistory(end))"}
+        {"query":"release task","startDate":"\(iso8601ConversationHistory(start))","endDate":"\(iso8601ConversationHistory(end))"}
         """),
         context: conversationHistoryToolContext()
     )

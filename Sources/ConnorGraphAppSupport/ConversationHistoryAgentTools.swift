@@ -23,7 +23,7 @@ public struct ConversationHistorySearchResponse: Codable, Sendable, Equatable {
 
 public struct ConversationHistorySearchTool: AgentTool {
     public let name = "conversation_history_search"
-    public let description = "Read user requests and Connor assistant replies across all conversations within an ISO-8601 time range. Use this before Memory OS when reviewing yesterday or another single recent day. Leave query empty to return all messages in the period; provide query to filter by topic. startDate is inclusive and endDate is exclusive."
+    public let description = "Read user requests and Connor assistant replies across all conversations within an ISO-8601 message-occurrence time range. Use this instead of Memory OS for reviews of today, yesterday, or another single calendar day. Leave query empty to return all messages in the period; provide focused terms to require every term in a message. startDate is inclusive and endDate is exclusive."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Optional topic filter. Leave empty to return all user and assistant messages in the time range."),
@@ -44,13 +44,14 @@ public struct ConversationHistorySearchTool: AgentTool {
         guard startDate < endDate else { throw AgentToolError.invalidArguments("startDate must be earlier than endDate") }
         let query = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let limit = max(1, arguments.int("limit") ?? 200)
-        let normalizedQuery = query.lowercased()
+        let queryTerms = Self.queryTerms(query)
 
         let candidates = try repository.loadRecentSessions(limit: Int.max).flatMap { session in
             session.messages.compactMap { message -> ConversationHistoryMessage? in
                 guard message.role == .user || message.role == .assistant else { return nil }
                 guard message.createdAt >= startDate && message.createdAt < endDate else { return nil }
-                if !normalizedQuery.isEmpty && !message.content.lowercased().contains(normalizedQuery) { return nil }
+                let normalizedContent = message.content.lowercased()
+                if !queryTerms.isEmpty && !queryTerms.allSatisfy(normalizedContent.contains) { return nil }
                 return ConversationHistoryMessage(
                     messageID: message.id,
                     sessionID: session.id,
@@ -96,6 +97,13 @@ public struct ConversationHistorySearchTool: AgentTool {
             throw AgentToolError.invalidArguments("\(name) must be an ISO-8601 timestamp")
         }
         return date
+    }
+
+    private static func queryTerms(_ query: String) -> [String] {
+        let parsed = MemorySearchQueryParser.parse(query).terms.map { $0.lowercased() }
+        if !parsed.isEmpty { return parsed }
+        let fallback = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return fallback.isEmpty ? [] : [fallback]
     }
 }
 

@@ -87,8 +87,14 @@ import ConnorGraphAppSupport
     let rangeEnd = Date(timeIntervalSince1970: 30_000)
     let node = MemoryOSNode(id: "time-range-node", stableKey: "time-range-node", nodeType: "project", name: "Time Range")
     try store.upsert(node: node)
-    try store.upsert(statement: MemoryOSStatement(id: "inside-range", subjectID: node.id, predicate: "status", text: "Included period record", confidence: 0.9, validAt: rangeStart.addingTimeInterval(100), committedAt: rangeStart.addingTimeInterval(100)))
-    try store.upsert(statement: MemoryOSStatement(id: "outside-range", subjectID: node.id, predicate: "status", text: "Excluded period record", confidence: 0.9, validAt: rangeStart.addingTimeInterval(-100), committedAt: rangeStart.addingTimeInterval(-100)))
+    let insideObject = MemoryOSProvenanceObject(id: "inside-object", sourceType: .chatMessage, title: "Inside", content: "Included period record", occurredAt: rangeStart.addingTimeInterval(100), ingestedAt: rangeEnd.addingTimeInterval(100))
+    let outsideObject = MemoryOSProvenanceObject(id: "outside-object", sourceType: .chatMessage, title: "Outside", content: "Excluded period record", occurredAt: rangeStart.addingTimeInterval(-100), ingestedAt: rangeStart.addingTimeInterval(200))
+    try store.upsert(provenance: insideObject)
+    try store.upsert(provenance: outsideObject)
+    try store.upsert(span: MemoryOSProvenanceSpan(id: "inside-span", provenanceObjectID: insideObject.id, text: insideObject.content))
+    try store.upsert(span: MemoryOSProvenanceSpan(id: "outside-span", provenanceObjectID: outsideObject.id, text: outsideObject.content))
+    try store.upsert(statement: MemoryOSStatement(id: "inside-range", subjectID: node.id, predicate: "status", text: "Included period record", confidence: 0.9, validAt: rangeEnd.addingTimeInterval(100), committedAt: rangeEnd.addingTimeInterval(100), evidenceSpanIDs: ["inside-span"]))
+    try store.upsert(statement: MemoryOSStatement(id: "outside-range", subjectID: node.id, predicate: "status", text: "Excluded period record", confidence: 0.9, validAt: rangeStart.addingTimeInterval(200), committedAt: rangeStart.addingTimeInterval(200), evidenceSpanIDs: ["outside-span"]))
     let arguments = try AgentToolArguments(json: """
     {"query":"","startDate":"\(iso8601(rangeStart))","endDate":"\(iso8601(rangeEnd))"}
     """)
@@ -97,7 +103,7 @@ import ConnorGraphAppSupport
     let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
 
     #expect(payload.query.isEmpty)
-    #expect(payload.records.contains { $0.recordID == "inside-range" })
+    #expect(payload.records.contains { $0.recordID == "inside-range" && $0.occurredAt == iso8601(insideObject.occurredAt) })
     #expect(!payload.records.contains { $0.recordID == "outside-range" })
 
     let focusedResult = try await MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store)).execute(
