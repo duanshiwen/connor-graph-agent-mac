@@ -178,12 +178,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 ))
                 var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
                 var messages = modelRequest.messages
+                let retrievalPolicy = AgentRetrievalCompliancePolicy()
+                let systemContext = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n")
                 var retrievalCompliance = AgentRetrievalComplianceState(
                     prompt: request.userMessage,
-                    definitions: toolRegistry.definitions
+                    definitions: toolRegistry.definitions,
+                    skipRequiredRetrieval: retrievalPolicy.shouldStopForUnavailableWorkspace(prompt: request.userMessage, systemContext: systemContext),
+                    policy: retrievalPolicy
                 )
                 var memoryCitations: [String] = []
-                let isPureMemoryTask = AgentRetrievalCompliancePolicy().isPureMemoryTask(request.userMessage)
+                let isPureMemoryTask = retrievalPolicy.isPureMemoryTask(request.userMessage)
                 var memoryEvidencePayloads: [String] = []
                 var didRequestClaimCorrection = false
                 if let diagnostics = modelRequest.promptDiagnostics {
@@ -354,7 +358,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         for batchResult in batchResults {
                             retrievalCompliance.record(batchResult.result)
-                            if AgentRetrievalCompliancePolicy.requiredMemoryTools.contains(batchResult.call.name),
+                            let retrievalEvidenceTools = Set(AgentRetrievalCompliancePolicy.requiredMemoryTools + [AgentRetrievalCompliancePolicy.conversationHistoryTool])
+                            if retrievalEvidenceTools.contains(batchResult.call.name),
                                batchResult.result.error == nil {
                                 memoryEvidencePayloads.append(batchResult.result.contentJSON ?? batchResult.result.contentText)
                                 for citation in batchResult.result.citations where !memoryCitations.contains(citation) {

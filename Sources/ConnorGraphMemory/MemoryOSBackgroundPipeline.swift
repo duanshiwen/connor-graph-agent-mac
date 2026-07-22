@@ -615,18 +615,18 @@ public enum MemoryOSBackgroundToolCatalog {
     private static func recentContextTool() -> MemoryOSBackgroundToolDescriptor {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_recent_context",
-            description: "Search L1/L2 operational memory by optional topic and/or ISO-8601 time range.",
+            description: "Search L1/L2 operational memory by optional topic and/or ISO-8601 source-event occurrence time range.",
             inputSchemaJSON: "{\"query\":\"optional string; empty means all records in range\",\"startDate\":\"optional inclusive ISO-8601\",\"endDate\":\"optional exclusive ISO-8601\",\"limit\":\"integer >= configured minimum\"}",
-            usagePolicy: "Use before L2 writes to detect existing operational facts and refinements. When query is empty, provide both time bounds. Prefer newer active records for current state while preserving history; raise limit when hasMore/partial indicates incomplete evidence."
+            usagePolicy: "Use before L2 writes to detect existing operational facts and refinements. Time ranges use traceable occurred_at and exclude records without source-event time. When query is empty, provide both time bounds. Prefer newer active records for current state while preserving history; raise limit when hasMore/partial indicates incomplete evidence."
         )
     }
 
     private static func knowledgeContextTool() -> MemoryOSBackgroundToolDescriptor {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_knowledge_context",
-            description: "Search L3/L4 reusable knowledge by optional topic and/or ISO-8601 time range, with configurable limit and graph depth.",
+            description: "Search L3/L4 reusable knowledge by optional topic and/or ISO-8601 source-event occurrence time range, with configurable limit and graph depth.",
             inputSchemaJSON: "{\"query\":\"optional string; empty means all records in range\",\"startDate\":\"optional inclusive ISO-8601\",\"endDate\":\"optional exclusive ISO-8601\",\"limit\":\"integer >= configured minimum\",\"depth\":\"integer 1...configured maxDepth\"}",
-            usagePolicy: "Use before L3/L4 writes for novelty, identity, and durable relationship checks. When query is empty, provide both time bounds. Start at depth 1; depth >= 2 is indirect. Raise limit for more records and depth only for deeper paths."
+            usagePolicy: "Use before L3/L4 writes for novelty, identity, and durable relationship checks. Time ranges use traceable occurred_at and exclude records without source-event time. When query is empty, provide both time bounds. Start at depth 1; depth >= 2 is indirect. Raise limit for more records and depth only for deeper paths."
         )
     }
 

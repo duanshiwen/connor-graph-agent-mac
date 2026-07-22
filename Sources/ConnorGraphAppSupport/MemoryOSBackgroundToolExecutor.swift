@@ -139,7 +139,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                     )
                 }
                 candidates = MemoryOSLayeredContextSupport.filtered(candidates, by: query)
-                candidates.sort(by: Self.contextRecordPrecedes)
+                candidates.sort { Self.contextRecordPrecedes($0, $1, byOccurrence: query.startDate != nil || query.endDate != nil) }
             }
             let response = try contextCursorStore.response(
                 runID: context.runID,
@@ -309,8 +309,10 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
     }
 
-    private static func contextRecordPrecedes(_ lhs: MemoryOSContextToolRecord, _ rhs: MemoryOSContextToolRecord) -> Bool {
-        switch (lhs.updatedAt, rhs.updatedAt) {
+    private static func contextRecordPrecedes(_ lhs: MemoryOSContextToolRecord, _ rhs: MemoryOSContextToolRecord, byOccurrence: Bool) -> Bool {
+        let leftTime = byOccurrence ? lhs.occurredAt : lhs.updatedAt
+        let rightTime = byOccurrence ? rhs.occurredAt : rhs.updatedAt
+        switch (leftTime, rightTime) {
         case let (left?, right?) where left != right: return left > right
         case (_?, nil): return true
         case (nil, _?): return false

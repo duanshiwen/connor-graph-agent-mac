@@ -43,6 +43,7 @@ public struct MemoryOSContextToolRecord: Codable, Sendable, Equatable, Identifia
     public var recordID: String
     public var layer: String
     public var text: String
+    public var occurredAt: String?
     public var updatedAt: String?
     public var confidence: Double?
     public var depth: Int
@@ -55,6 +56,7 @@ public struct MemoryOSContextToolRecord: Codable, Sendable, Equatable, Identifia
         case recordID = "record_id"
         case layer
         case text
+        case occurredAt = "occurred_at"
         case updatedAt = "updated_at"
         case confidence
         case depth

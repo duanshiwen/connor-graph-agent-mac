@@ -56,6 +56,12 @@ public struct MemoryOSRetrievalHit: Sendable, Codable, Equatable, Identifiable {
         return value
     }
 
+    public var effectiveOccurredAt: String? {
+        let value = metadata["occurred_at"]
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return value
+    }
+
     public var temporalStatus: MemoryOSRecordTemporalStatus {
         MemoryOSRecordTemporalStatus(rawValue: metadata["status"] ?? "") ?? .active
     }
@@ -124,14 +130,26 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             if layers.contains(.l3) { hits += try searchL3(trimmed, query: query) }
             if layers.contains(.l4) { hits += try searchL4(trimmed, query: query) }
         }
+        let isTimeRangeQuery = query.startDate != nil || query.endDate != nil
         return Array(hits
             .filter { $0.score >= minimumRelevanceScore }
-            .sorted(by: Self.isOrderedBefore)
+            .sorted { isTimeRangeQuery ? Self.isOccurrenceOrderedBefore($0, $1) : Self.isOrderedBefore($0, $1) }
             .prefix(max(0, query.limit)))
     }
 
     public static func isOrderedBefore(_ lhs: MemoryOSRetrievalHit, _ rhs: MemoryOSRetrievalHit) -> Bool {
         switch (lhs.effectiveUpdatedAt, rhs.effectiveUpdatedAt) {
+        case let (left?, right?) where left != right: return left > right
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: break
+        }
+        if lhs.score != rhs.score { return lhs.score > rhs.score }
+        return lhs.recordID < rhs.recordID
+    }
+
+    public static func isOccurrenceOrderedBefore(_ lhs: MemoryOSRetrievalHit, _ rhs: MemoryOSRetrievalHit) -> Bool {
+        switch (lhs.effectiveOccurredAt, rhs.effectiveOccurredAt) {
         case let (left?, right?) where left != right: return left > right
         case (_?, nil): return true
         case (nil, _?): return false
@@ -239,7 +257,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         SELECT f.object_id, f.title, f.content, bm25(memory_l0_provenance_fts) AS rank, COALESCE(o.ingested_at, ''), COALESCE(o.occurred_at, ''), COALESCE(o.status, 'active')
         FROM memory_l0_provenance_fts f
         LEFT JOIN memory_l0_provenance_objects o ON o.id = f.object_id
-        WHERE memory_l0_provenance_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate("COALESCE(o.ingested_at, o.occurred_at)", query: query))
+        WHERE memory_l0_provenance_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate("o.occurred_at", query: query))
         ORDER BY rank
         LIMIT \(query.limit)
         """).map { row in
@@ -278,28 +296,30 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     }
 
     private func searchL2(_ text: String, query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
-        try store.query(sql: """
-        SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.subject_id, bm25(memory_l2_statements_fts) AS rank, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, ''), s.confidence, s.metadata_json
+        let occurredAt = statementOccurredAtExpression(alias: "s")
+        return try store.query(sql: """
+        SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.subject_id, bm25(memory_l2_statements_fts) AS rank, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, ''), s.confidence, s.metadata_json, \(occurredAt)
         FROM memory_l2_statements_fts f
         JOIN memory_l2_statements s ON s.id = f.statement_id
-        WHERE memory_l2_statements_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate("COALESCE(s.committed_at, s.valid_at)", query: query))
+        WHERE memory_l2_statements_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate(occurredAt, query: query))
         ORDER BY rank
         LIMIT \(query.limit)
         """).map { row in
             let evidence = (try? store.decode([String].self, row[3])) ?? []
             var metadata = (try? store.decode([String: String].self, row[9])) ?? [:]
             let effective = firstNonEmpty(row[6], row[7])
-            metadata.merge(["committed_at": row[6], "valid_at": row[7], "confidence": row[8], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
+            metadata.merge(["committed_at": row[6], "valid_at": row[7], "confidence": row[8], "occurred_at": row[10], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
             return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]], metadata: metadata)
         }
     }
 
     private func searchL3(_ text: String, query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
-        try store.query(sql: """
-        SELECT f.belief_id, b.statement, b.domain, b.related_object_names, b.created_at, b.updated_at, bm25(memory_l3_beliefs_fts) AS rank
+        let occurredAt = beliefOccurredAtExpression(alias: "b")
+        return try store.query(sql: """
+        SELECT f.belief_id, b.statement, b.domain, b.related_object_names, b.created_at, b.updated_at, bm25(memory_l3_beliefs_fts) AS rank, \(occurredAt)
         FROM memory_l3_beliefs_fts f
         JOIN memory_l3_beliefs b ON b.id = f.belief_id
-        WHERE memory_l3_beliefs_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate("COALESCE(b.updated_at, b.created_at)", query: query))
+        WHERE memory_l3_beliefs_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate(occurredAt, query: query))
         ORDER BY rank
         LIMIT \(query.limit)
         """).map { row in
@@ -315,6 +335,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
                     "domain": row[2],
                     "related_object_names": row[3],
                     "created_at": row[4],
+                    "occurred_at": row[7],
                     "updated_at": firstNonEmpty(row[5], row[4]),
                     "effective_updated_at": firstNonEmpty(row[5], row[4]),
                     "status": MemoryOSRecordTemporalStatus.active.rawValue
@@ -324,32 +345,34 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     }
 
     private func searchL4(_ text: String, query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
+        let entityOccurredAt = entityOccurredAtExpression(alias: "e")
         var hits = try store.query(sql: """
-        SELECT f.entity_id, f.entity_type, f.name, f.summary, bm25(memory_l4_entities_fts) AS rank, COALESCE(e.updated_at, ''), COALESCE(e.created_at, ''), COALESCE(e.valid_from, ''), e.confidence, e.metadata_json
+        SELECT f.entity_id, f.entity_type, f.name, f.summary, bm25(memory_l4_entities_fts) AS rank, COALESCE(e.updated_at, ''), COALESCE(e.created_at, ''), COALESCE(e.valid_from, ''), e.confidence, e.metadata_json, \(entityOccurredAt)
         FROM memory_l4_entities_fts f
         LEFT JOIN memory_l4_entities e ON e.id = f.entity_id
-        WHERE memory_l4_entities_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate("COALESCE(e.updated_at, e.created_at, e.valid_from)", query: query))
+        WHERE memory_l4_entities_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate(entityOccurredAt, query: query))
         ORDER BY rank
         LIMIT \(query.limit)
         """).map { row in
             var metadata = (try? store.decode([String: String].self, row[9])) ?? [:]
             let effective = firstNonEmpty(row[5], row[6], row[7])
-            metadata.merge(["entity_type": row[1], "updated_at": effective, "effective_updated_at": effective, "created_at": row[6], "valid_from": row[7], "confidence": row[8], "status": normalizedStatus(metadata["status"])]) { _, new in new }
+            metadata.merge(["entity_type": row[1], "occurred_at": row[10], "updated_at": effective, "effective_updated_at": effective, "created_at": row[6], "valid_from": row[7], "confidence": row[8], "status": normalizedStatus(metadata["status"])]) { _, new in new }
             return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[2], summary: row[3], matchedText: row[2] + " " + row[3], score: score(fromFTSRank: row[4]), entityRefs: [row[0]], canExpandDepth: true, metadata: metadata)
         }
         if hits.count < query.limit {
+            let statementOccurredAt = statementOccurredAtExpression(alias: "s")
             hits += try store.query(sql: """
-            SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, bm25(memory_l4_statements_fts) AS rank, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, ''), s.confidence, s.metadata_json
+            SELECT f.statement_id, f.predicate, f.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, bm25(memory_l4_statements_fts) AS rank, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, ''), s.confidence, s.metadata_json, \(statementOccurredAt)
             FROM memory_l4_statements_fts f
             JOIN memory_l4_entity_statements s ON s.id = f.statement_id
-            WHERE memory_l4_statements_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate("COALESCE(s.committed_at, s.valid_at)", query: query))
+            WHERE memory_l4_statements_fts MATCH \(store.quote(ftsQuery(text)))\(timePredicate(statementOccurredAt, query: query))
             ORDER BY rank
             LIMIT \(query.limit - hits.count)
             """).map { row in
                 let evidence = (try? store.decode([String].self, row[3])) ?? []
                 var metadata = (try? store.decode([String: String].self, row[10])) ?? [:]
                 let effective = firstNonEmpty(row[7], row[8])
-                metadata.merge(["committed_at": row[7], "valid_at": row[8], "confidence": row[9], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
+                metadata.merge(["committed_at": row[7], "valid_at": row[8], "confidence": row[9], "occurred_at": row[11], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
                 return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true, metadata: metadata)
             }
         }
@@ -362,8 +385,8 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             hits += try store.query(sql: """
             SELECT id, title, content, COALESCE(ingested_at, ''), COALESCE(occurred_at, ''), COALESCE(status, 'active')
             FROM memory_l0_provenance_objects
-            WHERE 1 = 1\(timePredicate("COALESCE(ingested_at, occurred_at)", query: query))
-            ORDER BY COALESCE(ingested_at, occurred_at) DESC
+            WHERE 1 = 1\(timePredicate("occurred_at", query: query))
+            ORDER BY occurred_at DESC
             LIMIT \(query.limit)
             """).map { row in
                 let effective = firstNonEmpty(row[3], row[4])
@@ -385,30 +408,32 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             }
         }
         if layers.contains(.l2) {
+            let occurredAt = statementOccurredAtExpression(alias: "s")
             hits += try store.query(sql: """
-            SELECT id, predicate, text, evidence_span_ids_json, subject_id, COALESCE(committed_at, ''), COALESCE(valid_at, ''), confidence, metadata_json
-            FROM memory_l2_statements
-            WHERE 1 = 1\(timePredicate("COALESCE(committed_at, valid_at)", query: query))
-            ORDER BY COALESCE(committed_at, valid_at) DESC
+            SELECT s.id, s.predicate, s.text, s.evidence_span_ids_json, s.subject_id, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, ''), s.confidence, s.metadata_json, \(occurredAt)
+            FROM memory_l2_statements s
+            WHERE 1 = 1\(timePredicate(occurredAt, query: query))
+            ORDER BY \(occurredAt) DESC
             LIMIT \(query.limit)
             """).map { row in
                 let evidence = (try? store.decode([String].self, row[3])) ?? []
                 var metadata = (try? store.decode([String: String].self, row[8])) ?? [:]
                 let effective = firstNonEmpty(row[5], row[6])
-                metadata.merge(["committed_at": row[5], "valid_at": row[6], "confidence": row[7], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
+                metadata.merge(["committed_at": row[5], "valid_at": row[6], "confidence": row[7], "occurred_at": row[9], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
                 return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: 1, evidenceRefs: evidence, entityRefs: [row[4]], metadata: metadata)
             }
         }
         if layers.contains(.l3) {
+            let occurredAt = beliefOccurredAtExpression(alias: "b")
             hits += try store.query(sql: """
-            SELECT id, statement, domain, related_object_names, created_at, updated_at
-            FROM memory_l3_beliefs
-            WHERE 1 = 1\(timePredicate("COALESCE(updated_at, created_at)", query: query))
-            ORDER BY COALESCE(updated_at, created_at) DESC
+            SELECT b.id, b.statement, b.domain, b.related_object_names, b.created_at, b.updated_at, \(occurredAt)
+            FROM memory_l3_beliefs b
+            WHERE 1 = 1\(timePredicate(occurredAt, query: query))
+            ORDER BY \(occurredAt) DESC
             LIMIT \(query.limit)
             """).map { row in
                 let effective = firstNonEmpty(row[5], row[4])
-                return MemoryOSRetrievalHit(layer: .l3, recordID: row[0], title: row[1], summary: row[1], matchedText: row[1], score: 1, metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": effective, "effective_updated_at": effective, "status": MemoryOSRecordTemporalStatus.active.rawValue])
+                return MemoryOSRetrievalHit(layer: .l3, recordID: row[0], title: row[1], summary: row[1], matchedText: row[1], score: 1, metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "occurred_at": row[6], "updated_at": effective, "effective_updated_at": effective, "status": MemoryOSRecordTemporalStatus.active.rawValue])
             }
         }
         if layers.contains(.l4) {
@@ -418,30 +443,32 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     }
 
     private func browseL4(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
+        let entityOccurredAt = entityOccurredAtExpression(alias: "e")
         var hits = try store.query(sql: """
-        SELECT id, entity_type, name, summary, COALESCE(updated_at, ''), COALESCE(created_at, ''), COALESCE(valid_from, ''), confidence, metadata_json
-        FROM memory_l4_entities
-        WHERE 1 = 1\(timePredicate("COALESCE(updated_at, created_at, valid_from)", query: query))
-        ORDER BY COALESCE(updated_at, created_at, valid_from) DESC
+        SELECT e.id, e.entity_type, e.name, e.summary, COALESCE(e.updated_at, ''), COALESCE(e.created_at, ''), COALESCE(e.valid_from, ''), e.confidence, e.metadata_json, \(entityOccurredAt)
+        FROM memory_l4_entities e
+        WHERE 1 = 1\(timePredicate(entityOccurredAt, query: query))
+        ORDER BY \(entityOccurredAt) DESC
         LIMIT \(query.limit)
         """).map { row in
             var metadata = (try? store.decode([String: String].self, row[8])) ?? [:]
             let effective = firstNonEmpty(row[4], row[5], row[6])
-            metadata.merge(["entity_type": row[1], "updated_at": effective, "effective_updated_at": effective, "created_at": row[5], "valid_from": row[6], "confidence": row[7], "status": normalizedStatus(metadata["status"])]) { _, new in new }
+            metadata.merge(["entity_type": row[1], "occurred_at": row[9], "updated_at": effective, "effective_updated_at": effective, "created_at": row[5], "valid_from": row[6], "confidence": row[7], "status": normalizedStatus(metadata["status"])]) { _, new in new }
             return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[2], summary: row[3], matchedText: row[2] + " " + row[3], score: 1, entityRefs: [row[0]], canExpandDepth: true, metadata: metadata)
         }
         if hits.count < query.limit {
+            let statementOccurredAt = statementOccurredAtExpression(alias: "s")
             hits += try store.query(sql: """
-            SELECT id, predicate, text, evidence_span_ids_json, entity_id, object_entity_id, COALESCE(committed_at, ''), COALESCE(valid_at, ''), confidence, metadata_json
-            FROM memory_l4_entity_statements
-            WHERE 1 = 1\(timePredicate("COALESCE(committed_at, valid_at)", query: query))
-            ORDER BY COALESCE(committed_at, valid_at) DESC
+            SELECT s.id, s.predicate, s.text, s.evidence_span_ids_json, s.entity_id, s.object_entity_id, COALESCE(s.committed_at, ''), COALESCE(s.valid_at, ''), s.confidence, s.metadata_json, \(statementOccurredAt)
+            FROM memory_l4_entity_statements s
+            WHERE 1 = 1\(timePredicate(statementOccurredAt, query: query))
+            ORDER BY \(statementOccurredAt) DESC
             LIMIT \(query.limit - hits.count)
             """).map { row in
                 let evidence = (try? store.decode([String].self, row[3])) ?? []
                 var metadata = (try? store.decode([String: String].self, row[9])) ?? [:]
                 let effective = firstNonEmpty(row[6], row[7])
-                metadata.merge(["committed_at": row[6], "valid_at": row[7], "confidence": row[8], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
+                metadata.merge(["committed_at": row[6], "valid_at": row[7], "confidence": row[8], "occurred_at": row[10], "updated_at": effective, "effective_updated_at": effective, "status": normalizedStatus(metadata["status"])]) { _, new in new }
                 return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: 1, evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true, metadata: metadata)
             }
         }
@@ -453,6 +480,44 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         if let startDate = query.startDate { clauses.append("\(expression) >= \(store.quote(iso8601(startDate)))") }
         if let endDate = query.endDate { clauses.append("\(expression) < \(store.quote(iso8601(endDate)))") }
         return clauses.isEmpty ? "" : " AND " + clauses.joined(separator: " AND ")
+    }
+
+    private func statementOccurredAtExpression(alias: String) -> String {
+        """
+        COALESCE(
+          (SELECT MAX(o.occurred_at)
+           FROM json_each(\(alias).evidence_span_ids_json) evidence
+           JOIN memory_l0_provenance_spans span ON span.id = evidence.value
+           JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id),
+          NULLIF(json_extract(\(alias).metadata_json, '$.occurred_at'), '')
+        )
+        """
+    }
+
+    private func beliefOccurredAtExpression(alias: String) -> String {
+        """
+        (SELECT MAX(o.occurred_at)
+         FROM memory_l3_belief_evidence belief_evidence
+         JOIN memory_l2_statements source_statement ON source_statement.id = belief_evidence.statement_id
+         JOIN json_each(source_statement.evidence_span_ids_json) evidence
+         JOIN memory_l0_provenance_spans span ON span.id = evidence.value
+         JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id
+         WHERE belief_evidence.belief_id = \(alias).id)
+        """
+    }
+
+    private func entityOccurredAtExpression(alias: String) -> String {
+        """
+        COALESCE(
+          (SELECT MAX(o.occurred_at)
+           FROM memory_l4_entity_statements source_statement
+           JOIN json_each(source_statement.evidence_span_ids_json) evidence
+           JOIN memory_l0_provenance_spans span ON span.id = evidence.value
+           JOIN memory_l0_provenance_objects o ON o.id = span.provenance_object_id
+           WHERE source_statement.entity_id = \(alias).id OR source_statement.object_entity_id = \(alias).id),
+          NULLIF(json_extract(\(alias).metadata_json, '$.occurred_at'), '')
+        )
+        """
     }
 
     private func iso8601(_ date: Date) -> String {
