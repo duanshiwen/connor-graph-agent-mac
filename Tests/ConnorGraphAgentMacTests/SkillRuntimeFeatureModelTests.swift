@@ -26,6 +26,17 @@ struct SkillRuntimeFeatureModelTests {
         #expect(!presentation.isCollapsible)
     }
 
+    @Test func multilineInstructionPresentationAlwaysOffersFullTextWhenPreviewIsTruncated() {
+        let source = (1...20).map { "Step \($0)" }.joined(separator: "\n")
+
+        let presentation = SkillInstructionsPresentation(instructions: source)
+
+        #expect(source.count < SkillInstructionsPresentation.previewCharacterLimit)
+        #expect(presentation.isCollapsible)
+        #expect(presentation.fullText == source)
+        #expect(presentation.collapsedText == (1...18).map { "Step \($0)" }.joined(separator: "\n") + "\n\n…")
+    }
+
     @Test func reloadBuildsDefinitionsAndCommercialPresentation() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -122,13 +133,14 @@ struct SkillRuntimeFeatureModelTests {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let externalRoot = fixture.root.appendingPathComponent("external-skills", isDirectory: true)
         let externalSkill = externalRoot.appendingPathComponent("external-review", isDirectory: true)
+        let importedInstructions = (1...20).map { "Review step \($0)." }.joined(separator: "\n")
         try FileManager.default.createDirectory(at: externalSkill, withIntermediateDirectories: true)
         try """
         ---
         name: External Review
         description: Imported from another agent
         ---
-        Review the current change.
+        \(importedInstructions)
         """.write(to: externalSkill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
         let importer = ExternalSkillLibraryImporter(roots: [
             ExternalSkillLibraryRoot(source: .claudeCode, directoryURL: externalRoot)
@@ -147,6 +159,9 @@ struct SkillRuntimeFeatureModelTests {
 
         #expect(FileManager.default.fileExists(atPath: fixture.paths.skillsDirectory.appendingPathComponent("external-review/SKILL.md").path))
         #expect(model.presentation.cards.map(\.id) == ["external-review"])
+        let importedCard = try #require(model.presentation.cards.first)
+        #expect(importedCard.instructions == importedInstructions)
+        #expect(SkillInstructionsPresentation(instructions: importedCard.instructions).isCollapsible)
         #expect(model.importDialogMessage == "已导入 1 个技能。")
         #expect(model.selectedImportCandidateIDs.isEmpty)
     }
