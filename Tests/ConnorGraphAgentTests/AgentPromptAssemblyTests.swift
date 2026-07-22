@@ -110,6 +110,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("The start is inclusive and the end is exclusive"))
     #expect(prompt.contains("source-event occurrence time (`occurred_at`)"))
     #expect(prompt.contains("Records without traceable occurrence time are excluded"))
+    #expect(prompt.contains("when both timestamps are provided, results are ordered by `occurred_at` descending"))
+    #expect(prompt.contains("otherwise they are ordered by `updated_at` descending"))
     #expect(!prompt.contains("`memory_os_context`"))
     #expect(!prompt.contains("memory_os_search"))
     #expect(!prompt.contains("memory_os_read_record"))
