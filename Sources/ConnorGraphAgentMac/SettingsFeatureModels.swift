@@ -132,6 +132,7 @@ final class UserPreferencesFeatureModel {
     var country = "" { didSet { changed() } }
     var notes = "" { didSet { changed() } }
     private(set) var connorPersonality = ConnorPersonalitySettings.empty
+    private(set) var connorPersonalityRevision = 0
     var personalityRequest = ""
     private(set) var personalityDraft: ConnorPersonalitySettings?
     private(set) var isGeneratingPersonality = false
@@ -158,6 +159,7 @@ final class UserPreferencesFeatureModel {
         country = preferences.country
         notes = preferences.notes
         connorPersonality = preferences.connorPersonality
+        connorPersonalityRevision = preferences.connorPersonalityRevision
         personalityDraft = nil
         personalityErrorMessage = nil
     }
@@ -172,6 +174,7 @@ final class UserPreferencesFeatureModel {
         settings.preferences.country = country.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.connorPersonality = connorPersonality
+        settings.preferences.connorPersonalityRevision = connorPersonalityRevision
     }
 
     func fillEmptyFieldsFromSystem() -> Bool {
@@ -222,6 +225,7 @@ final class UserPreferencesFeatureModel {
     func confirmPersonalityDraft() {
         guard let personalityDraft else { return }
         connorPersonality = personalityDraft
+        connorPersonalityRevision += 1
         self.personalityDraft = nil
         personalityErrorMessage = nil
         onChanged()
@@ -235,8 +239,26 @@ final class UserPreferencesFeatureModel {
     func resetPersonality() {
         guard !connorPersonality.isEmpty else { return }
         connorPersonality = .empty
+        connorPersonalityRevision += 1
         personalityDraft = nil
         personalityErrorMessage = nil
+        onChanged()
+    }
+
+    func applyApprovedPersonality(_ personality: ConnorPersonalitySettings, expectedRevision: Int) throws {
+        guard expectedRevision == connorPersonalityRevision else {
+            throw ConnorPersonalityProposalError.revisionConflict(expected: expectedRevision, actual: connorPersonalityRevision)
+        }
+        connorPersonality = personality
+        connorPersonalityRevision += 1
+        personalityDraft = nil
+        personalityErrorMessage = nil
+        onChanged()
+    }
+
+    func restorePersonalityAfterFailedCommit(_ personality: ConnorPersonalitySettings, revision: Int) {
+        connorPersonality = personality
+        connorPersonalityRevision = revision
         onChanged()
     }
 

@@ -206,13 +206,16 @@ struct ChatSessionRuntimeCoordinatorTests {
         coordinator.permissionMode = { .trustedWrite }
         let readable = AgentPendingApproval(requestID: "read", runID: "run", sessionID: "session", capability: .readSession)
         let destructive = AgentPendingApproval(requestID: "delete", runID: "run", sessionID: "session", capability: .deleteGraphObject)
+        let personality = AgentPendingApproval(requestID: "personality", runID: "run", sessionID: "session", capability: .mutatePersonality)
 
-        coordinator.install([readable, destructive])
-        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["delete"])
+        coordinator.install([readable, destructive, personality])
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["delete", "personality"])
+        coordinator.permissionMode = { .allowAll }
+        #expect(coordinator.activeApprovals(sessionID: "session").map(\.requestID) == ["personality"])
 
         coordinator.shutdown()
         coordinator.install([])
-        #expect(model.pendingApprovals.count == 2)
+        #expect(model.pendingApprovals.count == 3)
     }
 
     @Test func sessionCoordinatorShutdownClearsLoadingAndRejectsNewSelection() throws {

@@ -157,7 +157,7 @@ final class AppRuntimeLifecycle {
     private var newSessionPreparationTasks: [String: Task<Void, Never>] = [:]
     private var sessionRuntimePreparationTask: Task<Void, Never>?
     private var workspaceStatePersistenceTask: Task<Void, Never>?
-    private var pendingRemoteKnowledgeRuntimeRebuild = false
+    private var pendingNativeSessionRuntimeRebuild = false
 
     private var activeChatSession: AgentSession { chatRunCoordinator.activeSession }
 
@@ -788,7 +788,42 @@ final class AppRuntimeLifecycle {
                         throw BrowserAutomationRuntimeError.invalidRequest("Browser runtime is unavailable")
                     }
                     return try await self.browserFeatureModel.performBrowserControl(request)
-                }
+                },
+                personalityRuntime: ConnorPersonalityRuntime(
+                    snapshot: { [weak self] in
+                        try await MainActor.run {
+                            guard let self else { throw ConnorPersonalityError.unavailable }
+                            return ConnorPersonalitySnapshot(
+                                personality: self.userPreferencesModel.connorPersonality,
+                                revision: self.userPreferencesModel.connorPersonalityRevision
+                            )
+                        }
+                    },
+                    commit: { [weak self] proposal in
+                        try await MainActor.run {
+                            guard let self else { throw ConnorPersonalityError.unavailable }
+                            let previousPersonality = self.userPreferencesModel.connorPersonality
+                            let previousRevision = self.userPreferencesModel.connorPersonalityRevision
+                            try self.userPreferencesModel.applyApprovedPersonality(
+                                proposal.after,
+                                expectedRevision: proposal.expectedRevision
+                            )
+                            do {
+                                try self.runtimeSettingsCoordinator.saveImmediately(snapshot: self.runtimeSettingsSnapshot())
+                            } catch {
+                                self.userPreferencesModel.restorePersonalityAfterFailedCommit(
+                                    previousPersonality,
+                                    revision: previousRevision
+                                )
+                                throw error
+                            }
+                            return ConnorPersonalitySnapshot(
+                                personality: self.userPreferencesModel.connorPersonality,
+                                revision: self.userPreferencesModel.connorPersonalityRevision
+                            )
+                        }
+                    }
+                )
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
                 guard let self else { throw CancellationError() }
@@ -835,7 +870,7 @@ final class AppRuntimeLifecycle {
         knowledgeMarketplaceStore.onLibraryChanged = { [weak self] in
             guard let self else { return }
             if self.chatFeatureModel.run.isSubmitting {
-                self.pendingRemoteKnowledgeRuntimeRebuild = true
+                self.pendingNativeSessionRuntimeRebuild = true
                 return
             }
             self.rebuildNativeSessionManagerForActiveSession()
@@ -1148,8 +1183,8 @@ final class AppRuntimeLifecycle {
                 enabled: self.appSettingsModel.keepScreenAwake,
                 hasActiveRun: self.chatRunCoordinator.isActive
             )
-            if !self.chatRunCoordinator.isActive, self.pendingRemoteKnowledgeRuntimeRebuild {
-                self.pendingRemoteKnowledgeRuntimeRebuild = false
+            if !self.chatRunCoordinator.isActive, self.pendingNativeSessionRuntimeRebuild {
+                self.pendingNativeSessionRuntimeRebuild = false
                 self.rebuildNativeSessionManagerForActiveSession()
             }
         }
@@ -1924,6 +1959,7 @@ final class AppRuntimeLifecycle {
         if chatFeatureModel.run.submittingSessionIDs.isEmpty {
             rebuildNativeSessionManagerForActiveSession()
         } else {
+            pendingNativeSessionRuntimeRebuild = true
             chatRunCoordinator.mutateManager { $0.permissionMode = settings.loop.permissionMode }
         }
         shellFeatureModel.clearAllSettingsMessages()

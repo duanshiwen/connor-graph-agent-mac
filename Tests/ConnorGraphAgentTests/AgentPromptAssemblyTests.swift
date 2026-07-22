@@ -14,8 +14,8 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
     #expect(assembly.instruction.text.contains("## Mandatory Task Bootstrap"))
-    #expect(assembly.instruction.text.contains("At the start of every new user run"))
-    #expect(assembly.instruction.text.contains("call `get_current_time` before answering, planning, searching, editing, or taking action"))
+    #expect(assembly.instruction.text.contains("call `get_current_time` at the start of every new user run"))
+    #expect(assembly.instruction.text.contains("Except when the local-workspace stop condition requires an immediate no-tool response, call `get_current_time`"))
     #expect(assembly.instruction.text.contains("Never use model training time"))
     #expect(assembly.instruction.text.contains("Strict time rule"))
     #expect(assembly.instruction.text.contains("the Mandatory Task Bootstrap requires calling `get_current_time` at the start of every new user run"))
@@ -38,6 +38,20 @@ import ConnorGraphAgent
     #expect(prompt.contains("explicitly requests a file creation, export, path write, or existing-file modification"))
     #expect(prompt.contains("Note-taking and local-file operations are separate capabilities"))
     #expect(!prompt.contains("all requests containing the word note must avoid file tools"))
+}
+
+@Test func defaultSystemPromptGovernsPersistentPersonalityChanges() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Personality Configuration"))
+    #expect(prompt.contains("permanently and exactly “康纳同学”"))
+    #expect(prompt.contains("Distinguish temporary response style from persistent personality"))
+    #expect(prompt.contains("`personality_get_current`"))
+    #expect(prompt.contains("`personality_propose_update`"))
+    #expect(prompt.contains("`personality_commit_proposal`"))
+    #expect(prompt.contains("native approval UI"))
+    #expect(prompt.contains("explicit sexual content"))
+    #expect(prompt.contains("Legitimate medical, legal, news, safety, or educational discussion remains allowed"))
 }
 
 @Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {

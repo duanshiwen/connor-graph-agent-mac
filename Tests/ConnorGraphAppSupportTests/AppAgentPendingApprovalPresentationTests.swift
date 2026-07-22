@@ -122,6 +122,31 @@ import ConnorGraphCore
     #expect(row.allowsAlwaysAllow == false)
 }
 
+@Test func appPendingApprovalPresentationShowsPersonalityDiffAndDisablesAlwaysAllow() {
+    let approval = AgentPendingApproval(
+        requestID: "request-personality",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .mutatePersonality,
+        toolName: "personality_commit_proposal",
+        payloadJSON: """
+        {
+          "title": "更新康纳同学性格",
+          "beforeSummary": "温和可靠",
+          "afterSummary": "温和但更加直接"
+        }
+        """
+    )
+
+    let row = AppAgentPendingApprovalPresentation(approval)
+
+    #expect(row.title == "更新康纳同学性格")
+    #expect(row.detail.contains("固定姓名：康纳同学"))
+    #expect(row.detail.contains("温和可靠 → 温和但更加直接"))
+    #expect(row.capabilityLabel == "修改康纳同学性格")
+    #expect(row.allowsAlwaysAllow == false)
+}
+
 @Test func appPendingApprovalPresentationMapsResolvedStatusesForNativeUI() {
     let statuses: [AgentPendingApprovalStatus] = [.pending, .approved, .denied, .cancelled]
 

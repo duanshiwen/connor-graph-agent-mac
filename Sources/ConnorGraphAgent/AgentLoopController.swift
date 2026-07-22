@@ -743,7 +743,7 @@ private extension AgentPermissionCapability {
         switch self {
         case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
             return true
-        case .mutateSessionStatus, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
+        case .mutateSessionStatus, .mutatePersonality, .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
              .externalNetwork, .readBrowserPage, .navigateBrowser, .interactBrowser, .commitBrowserAction, .transferBrowserFile,
              .modelCall, .costlyModelCall,
              .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile,

@@ -41,6 +41,10 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
             self.title = calendar.title
             self.detail = calendar.detail
             self.allowsAlwaysAllow = false
+        } else if approval.toolName == "personality_commit_proposal", let personality = Self.personalityPayload(approval.payloadJSON) {
+            self.title = personality.title
+            self.detail = personality.detail
+            self.allowsAlwaysAllow = false
         } else {
             self.title = "请求执行：\(toolDisplayName)"
             self.detail = "权限：\(capabilityLabel) · \(capabilityDescription) · 请求：\(approval.requestID) · 参数：\(Self.compactJSON(approval.payloadJSON))"
@@ -67,6 +71,18 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         return (title, fields.joined(separator: " · "))
     }
 
+    private static func personalityPayload(_ json: String) -> (title: String, detail: String)? {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let title = object["title"] as? String ?? "更新康纳同学性格"
+        let before = (object["beforeSummary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let after = (object["afterSummary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let beforeText = before.isEmpty ? "默认性格" : before
+        let afterText = after.isEmpty ? "默认性格" : after
+        return (title, "固定姓名：康纳同学 · \(beforeText) → \(afterText)")
+    }
+
     private static func statusLabel(_ status: AgentPendingApprovalStatus) -> String {
         switch status {
         case .pending: "等待审批"
@@ -81,6 +97,7 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
         case .readGraph: "读取知识图谱"
         case .readSession: "读取会话"
         case .mutateSessionStatus: "修改会话状态"
+        case .mutatePersonality: "修改康纳同学性格"
         case .proposeGraphWrite: "提议写入知识图谱"
         case .commitGraphWrite: "写入知识图谱"
         case .invalidateGraphStatement: "作废图谱信息"

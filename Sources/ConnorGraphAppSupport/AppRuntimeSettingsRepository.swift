@@ -409,6 +409,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var notes: String
     public var defaultSearchEngine: DefaultSearchEngine
     public var connorPersonality: ConnorPersonalitySettings
+    public var connorPersonalityRevision: Int
 
     public init(
         displayName: String = "",
@@ -420,7 +421,8 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         birthDate: String = "",
         notes: String = "",
         defaultSearchEngine: DefaultSearchEngine = .default,
-        connorPersonality: ConnorPersonalitySettings = .empty
+        connorPersonality: ConnorPersonalitySettings = .empty,
+        connorPersonalityRevision: Int = 0
     ) {
         self.displayName = displayName
         self.timezone = timezone
@@ -432,6 +434,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.notes = notes
         self.defaultSearchEngine = defaultSearchEngine
         self.connorPersonality = connorPersonality
+        self.connorPersonalityRevision = max(0, connorPersonalityRevision)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -445,6 +448,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         case notes
         case defaultSearchEngine
         case connorPersonality
+        case connorPersonalityRevision
     }
 
     public init(from decoder: Decoder) throws {
@@ -459,6 +463,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         self.defaultSearchEngine = try container.decodeIfPresent(DefaultSearchEngine.self, forKey: .defaultSearchEngine) ?? .default
         self.connorPersonality = try container.decodeIfPresent(ConnorPersonalitySettings.self, forKey: .connorPersonality) ?? .empty
+        self.connorPersonalityRevision = max(0, try container.decodeIfPresent(Int.self, forKey: .connorPersonalityRevision) ?? 0)
     }
 }
 
