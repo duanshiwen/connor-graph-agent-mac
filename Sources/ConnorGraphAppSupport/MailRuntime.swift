@@ -334,7 +334,7 @@ public struct MailRuntime: Sendable {
             let sentMailbox = try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
             await appendRemoteSentMessageIfPossible(account: account, password: password, draft: draft, receipt: receipt, rawMessage: composed.rawMessage, sentMailbox: sentMailbox, runID: runID, sessionID: sessionID)
             try captureOutboundMemoryEvidence(draft: draft, identity: identity, receipt: receipt, runID: runID, sessionID: sessionID)
-            try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
+            try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent authorized draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
             return receipt
         } catch {
             _ = try? await draftStore.updateStatus(id: draftID, status: .failed, lastSendError: String(describing: error))

@@ -151,7 +151,7 @@ struct AgentChatPermissionRequestCard: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
-                .help("将当前 Agent 会话权限提升为执行，并批准这个请求")
+                .help("将当前 Agent 会话切换为执行；批准此请求，并自动放行之后的所有权限请求")
             }
 
             Button(role: .destructive) {
@@ -164,7 +164,7 @@ struct AgentChatPermissionRequestCard: View {
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
-            Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会记住当前会话的权限模式" : (mailApproval.isMailSendRequest ? "可放大审阅；发送邮件需要逐次确认" : "可放大审阅；此操作需要逐次审批"))
+            Text(approvalPresentation.allowsAlwaysAllow ? "始终允许会将当前会话切换为执行，后续权限请求直接放行" : (mailApproval.isMailSendRequest ? "可放大审阅；询问模式下发送邮件需要逐次确认" : "可放大审阅；询问模式下此操作需要逐次审批"))
                 .font(AgentChatTypography.meta)
                 .foregroundStyle(.secondary)
         }

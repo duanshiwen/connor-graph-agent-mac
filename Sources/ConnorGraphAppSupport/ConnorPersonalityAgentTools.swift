@@ -234,6 +234,8 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
             expectedRevision: current.revision
         )
         await store.insert(proposal)
+        let permissionMode = await context.policyEngine.permissionMode
+        let requiresExplicitApproval = permissionMode != .trustedWrite && permissionMode != .allowAll
         let payload = ConnorPersonalityProposalPayload(
             proposalID: proposal.id,
             lockedName: ConnorPersonalitySettings.lockedDisplayName,
@@ -242,11 +244,13 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
             expiresAt: proposal.expiresAt,
             before: proposal.before,
             after: proposal.after,
-            requiresExplicitApproval: true
+            requiresExplicitApproval: requiresExplicitApproval
         )
         return try personalityToolResult(
             payload,
-            text: "已生成未保存的人格变更提议 \(proposal.id)。必须调用 personality_commit_proposal 并由用户在原生审批界面确认后才会生效。",
+            text: requiresExplicitApproval
+                ? "已生成未保存的人格变更提议 \(proposal.id)。必须调用 personality_commit_proposal 并由用户在原生审批界面确认后才会生效。"
+                : "已生成未保存的人格变更提议 \(proposal.id)。调用 personality_commit_proposal 后将按当前执行模式直接应用。",
             toolName: name,
             context: context
         )
@@ -255,7 +259,7 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
 
 public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let name = "personality_commit_proposal"
-    public let description = "Request native user approval to commit an existing personality proposal. Pass only the proposal ID returned by personality_propose_update. This capability is always approval-gated and cannot change 康纳同学's name."
+    public let description = "Commit an existing personality proposal through the current session permission policy. Ask mode requests native user approval; Execute mode applies it immediately. Pass only the proposal ID returned by personality_propose_update. This capability cannot change 康纳同学's name."
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "proposal_id": .string(description: "Exact proposal ID returned by personality_propose_update.")

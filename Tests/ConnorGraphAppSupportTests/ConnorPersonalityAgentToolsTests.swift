@@ -37,7 +37,7 @@ private func personalityContext(approved: Set<AgentPermissionCapability> = []) -
         groupID: "default",
         userPrompt: "以后说话更直接",
         toolCallID: UUID().uuidString,
-        policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
+        policyEngine: AgentPolicyEngine(permissionMode: .askToWrite),
         approvedCapabilities: approved
     )
 }
