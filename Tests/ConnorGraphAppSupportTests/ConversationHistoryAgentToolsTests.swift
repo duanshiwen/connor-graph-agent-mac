@@ -63,6 +63,34 @@ import ConnorGraphAppSupport
     #expect(response.messages.map(\.messageID) == ["release-message"])
 }
 
+@Test func conversationHistorySearchReportsMoreMessagesBeyondLimit() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryConversationHistoryDatabaseURL().path)
+    try store.migrate()
+    let start = Date(timeIntervalSince1970: 70_000)
+    let end = start.addingTimeInterval(3_600)
+    try store.upsertSession(AgentSession(
+        id: "limited-session",
+        title: "Limited recap",
+        messages: [
+            AgentMessage(id: "first-message", role: .user, content: "First task", createdAt: start.addingTimeInterval(60)),
+            AgentMessage(id: "second-message", role: .assistant, content: "Second task", createdAt: start.addingTimeInterval(120))
+        ],
+        createdAt: start,
+        updatedAt: start.addingTimeInterval(120)
+    ))
+
+    let result = try await ConversationHistorySearchTool(repository: AppChatSessionRepository(store: store)).execute(
+        arguments: AgentToolArguments(json: """
+        {"query":"","startDate":"\(iso8601ConversationHistory(start))","endDate":"\(iso8601ConversationHistory(end))","limit":1}
+        """),
+        context: conversationHistoryToolContext()
+    )
+    let response = try conversationHistoryDecoder().decode(ConversationHistorySearchResponse.self, from: Data(try #require(result.contentJSON).utf8))
+
+    #expect(response.messages.map(\.messageID) == ["first-message"])
+    #expect(response.hasMore)
+}
+
 private func conversationHistoryToolContext() -> AgentToolExecutionContext {
     AgentToolExecutionContext(
         runID: "conversation-history-run",
