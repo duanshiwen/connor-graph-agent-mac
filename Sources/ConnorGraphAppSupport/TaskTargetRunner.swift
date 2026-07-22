@@ -51,12 +51,16 @@ public enum TaskTargetRunnerError: Error, Sendable, Equatable, CustomStringConve
     case unsupportedTarget(String)
     case missingMessage(String)
     case missingSessionID(String)
+    case runCancelled(String)
+    case submissionFailed(String)
 
     public var description: String {
         switch self {
         case .unsupportedTarget(let value): "unsupportedTarget: \(value)"
         case .missingMessage(let taskID): "missingMessage: \(taskID)"
         case .missingSessionID(let taskID): "missingSessionID: \(taskID)"
+        case .runCancelled(let detail): "runCancelled: \(detail)"
+        case .submissionFailed(let detail): "submissionFailed: \(detail)"
         }
     }
 }

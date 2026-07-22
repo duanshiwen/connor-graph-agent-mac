@@ -204,10 +204,12 @@ public struct AppTaskManagementRepository: Sendable {
             task.lifecycle.failureCount += 1
             task.lifecycle.lastErrorMessage = record.errorMessage
         case .cancelled:
-            task.lifecycle.status = .stopped
-            task.lifecycle.lastRunAt = record.startedAt
-            task.lifecycle.lastFinishedAt = record.finishedAt
-            task.lifecycle.lastErrorMessage = record.errorMessage
+            task = TaskSchedulerService().markRunCancelled(
+                task: task,
+                startedAt: record.startedAt,
+                finishedAt: record.finishedAt ?? Date(),
+                errorMessage: record.errorMessage ?? "Task run was cancelled"
+            )
         }
         try saveTask(task)
         return task
