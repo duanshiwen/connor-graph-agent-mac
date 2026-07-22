@@ -1,4 +1,5 @@
 import SwiftUI
+@preconcurrency import AppKit
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 
@@ -77,7 +78,7 @@ struct AgentMarkdownPreviewText: View {
             markdown: markdown,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
-            return attributed
+            return attributed.withLinkCursor()
         }
         return AttributedString(markdown)
     }
@@ -165,12 +166,12 @@ struct AgentMarkdownPreviewText: View {
     private func view(for block: AgentMarkdownCompiledBlock) -> some View {
         switch block.content {
         case .heading(let level, _, let inline):
-            Text(inline)
+            Text(inline.withLinkCursor())
                 .font(headingFont(level))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .paragraph(_, let inline):
-            Text(inline)
+            Text(inline.withLinkCursor())
                 .font(font)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -179,7 +180,7 @@ struct AgentMarkdownPreviewText: View {
                 Text("•")
                     .font(font)
                     .frame(width: 12, alignment: .trailing)
-                Text(inline)
+                Text(inline.withLinkCursor())
                     .font(font)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,14 +193,14 @@ struct AgentMarkdownPreviewText: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 22, alignment: .trailing)
-                Text(inline)
+                Text(inline.withLinkCursor())
                     .font(font)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 2)
         case .quote(_, let inline):
-            Text(inline)
+            Text(inline.withLinkCursor())
                 .font(font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -216,7 +217,7 @@ struct AgentMarkdownPreviewText: View {
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .tertiary)
                     .frame(width: 14, alignment: .center)
-                Text(inline)
+                Text(inline.withLinkCursor())
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .primary)
                     .strikethrough(isCompleted, color: .secondary)
@@ -351,11 +352,23 @@ struct AgentMarkdownPreviewText: View {
             markdown: text,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
-            return attributed
+            return attributed.withLinkCursor()
         }
         return AttributedString(text)
     }
 
+}
+
+private extension AttributedString {
+    func withLinkCursor() -> AttributedString {
+        let result = NSMutableAttributedString(self)
+        let fullRange = NSRange(location: 0, length: result.length)
+        result.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+            guard value != nil else { return }
+            result.addAttribute(.cursor, value: NSCursor.pointingHand, range: range)
+        }
+        return AttributedString(result)
+    }
 }
 
 extension Array {
