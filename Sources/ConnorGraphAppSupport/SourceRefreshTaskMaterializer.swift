@@ -92,7 +92,7 @@ public struct SourceRefreshTaskMaterializer: Sendable {
             ),
             lifecycle: ConnorTaskLifecycle(status: .active),
             metadata: ConnorTaskMetadata(
-                rationale: "Materialized from RSS source fetch policy.",
+                rationale: "根据 RSS 订阅源刷新策略自动创建。",
                 tags: ["system", "protected", "rss", "source-instance"],
                 scope: .global,
                 isRecoverable: false,
@@ -212,7 +212,7 @@ public struct MailRefreshTaskMaterializer: Sendable {
             ),
             lifecycle: ConnorTaskLifecycle(status: .active),
             metadata: ConnorTaskMetadata(
-                rationale: "Materialized from configured mail account.",
+                rationale: "根据已配置的邮件账户自动创建。",
                 tags: ["system", "protected", "mail", "source-instance"],
                 scope: .global,
                 isRecoverable: false,
@@ -332,7 +332,7 @@ public struct CalendarRefreshTaskMaterializer: Sendable {
             ),
             lifecycle: ConnorTaskLifecycle(status: .active),
             metadata: ConnorTaskMetadata(
-                rationale: "Materialized from configured calendar account.",
+                rationale: "根据已配置的日历账户自动创建。",
                 tags: ["system", "protected", "calendar", "source-instance"],
                 scope: .global,
                 isRecoverable: false,

@@ -885,7 +885,7 @@ struct AutomationRuntimePanelView: View {
             title: "任务与自动化",
             subtitle: "三类任务：系统任务、用户任务、AI 任务。系统任务受保护；用户和 AI 任务暂时只支持会话状态触发消息，以及按时间/周期新建会话并发送消息。",
             metrics: [
-                ("Total", "\(presentation.summary.totalTaskCount)"),
+                ("总计", "\(presentation.summary.totalTaskCount)"),
                 ("系统", "\(presentation.summary.systemTaskCount)"),
                 ("用户", "\(presentation.summary.userTaskCount)"),
                 ("AI", "\(presentation.summary.aiTaskCount)"),
