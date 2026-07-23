@@ -421,7 +421,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         birthDate: String = "",
         notes: String = "",
         defaultSearchEngine: DefaultSearchEngine = .default,
-        connorPersonality: ConnorPersonalitySettings = .empty,
+        connorPersonality: ConnorPersonalitySettings = .balancedDefault,
         connorPersonalityRevision: Int = 0
     ) {
         self.displayName = displayName
@@ -462,7 +462,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.birthDate = try container.decodeIfPresent(String.self, forKey: .birthDate) ?? ""
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         self.defaultSearchEngine = try container.decodeIfPresent(DefaultSearchEngine.self, forKey: .defaultSearchEngine) ?? .default
-        self.connorPersonality = try container.decodeIfPresent(ConnorPersonalitySettings.self, forKey: .connorPersonality) ?? .empty
+        self.connorPersonality = try container.decodeIfPresent(ConnorPersonalitySettings.self, forKey: .connorPersonality) ?? .balancedDefault
         self.connorPersonalityRevision = max(0, try container.decodeIfPresent(Int.self, forKey: .connorPersonalityRevision) ?? 0)
     }
 }

@@ -52,7 +52,7 @@ struct SettingsFeatureModelsTests {
         await model.generatePersonalityDraft()
 
         #expect(model.personalityDraft == generated)
-        #expect(model.connorPersonality.isEmpty)
+        #expect(model.connorPersonality == .balancedDefault)
         #expect(changes == 0)
 
         model.confirmPersonalityDraft()
@@ -92,7 +92,7 @@ struct SettingsFeatureModelsTests {
 
         model.resetPersonality()
 
-        #expect(model.connorPersonality.isEmpty)
+        #expect(model.connorPersonality == .balancedDefault)
         #expect(model.connorPersonalityRevision == 1)
         #expect(changes == 1)
     }

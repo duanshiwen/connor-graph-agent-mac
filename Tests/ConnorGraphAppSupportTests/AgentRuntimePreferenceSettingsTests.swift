@@ -42,7 +42,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(!input.sessionSpeechTranscriptionEnabled)
     }
 
-    @Test func defaultsAreEmptyUntilSystemOrUserFillsThem() {
+    @Test func defaultsUseBalancedConnorPersonalityUntilUserCustomizesIt() {
         let preferences = AgentRuntimePreferenceSettings()
 
         #expect(preferences.displayName.isEmpty)
@@ -54,7 +54,8 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.birthDate.isEmpty)
         #expect(preferences.notes.isEmpty)
         #expect(preferences.defaultSearchEngine == .bing)
-        #expect(preferences.connorPersonality.isEmpty)
+        #expect(preferences.connorPersonality == .balancedDefault)
+        #expect(preferences.connorPersonality.gender == "中性")
         #expect(preferences.connorPersonalityRevision == 0)
     }
 
@@ -73,7 +74,7 @@ struct AgentRuntimePreferenceSettingsTests {
         let preferences = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
 
         #expect(preferences.defaultSearchEngine == .bing)
-        #expect(preferences.connorPersonality.isEmpty)
+        #expect(preferences.connorPersonality == .balancedDefault)
     }
 
     @Test func personalitySettingsRoundTripAndNormalizeGeneratedValues() throws {
