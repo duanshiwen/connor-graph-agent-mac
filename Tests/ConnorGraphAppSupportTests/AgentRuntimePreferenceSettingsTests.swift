@@ -61,8 +61,17 @@ struct AgentRuntimePreferenceSettingsTests {
     }
 
     @Test func connorSpeechSettingsRoundTripAndLegacyDecode() throws {
+        let voiceProfile = ConnorVoiceProfile(
+            summary: "清澈、克制的青年声音",
+            timbre: "中低音，轻微胸腔共鸣"
+        )
         let preferences = AgentRuntimePreferenceSettings(
-            connorSpeech: ConnorSpeechSettings(voiceGender: .female, automaticallyReadsReplies: true)
+            connorSpeech: ConnorSpeechSettings(
+                voiceGender: .female,
+                voiceProfile: voiceProfile,
+                voiceRevision: 3,
+                automaticallyReadsReplies: true
+            )
         )
 
         let data = try JSONEncoder().encode(preferences)
@@ -70,8 +79,29 @@ struct AgentRuntimePreferenceSettingsTests {
         let legacy = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: Data("{}".utf8))
 
         #expect(decoded.connorSpeech.voiceGender == .female)
+        #expect(decoded.connorSpeech.voiceProfile == voiceProfile)
+        #expect(decoded.connorSpeech.voiceRevision == 3)
         #expect(decoded.connorSpeech.automaticallyReadsReplies)
         #expect(legacy.connorSpeech == .default)
+
+        let legacySpeech = try JSONDecoder().decode(
+            ConnorSpeechSettings.self,
+            from: Data(#"{"voiceGender":"female","automaticallyReadsReplies":true}"#.utf8)
+        )
+        #expect(legacySpeech.voiceGender == .female)
+        #expect(legacySpeech.voiceProfile == nil)
+        #expect(legacySpeech.voiceRevision == 0)
+        #expect(legacySpeech.automaticallyReadsReplies)
+    }
+
+    @Test func voiceProfileGeneratorRejectsUnexpectedFieldsAndNormalizesValues() throws {
+        let profile = try ConnorVoiceProfileGenerator().decode(#"{"summary":"  清澈而沉稳  ","ageRange":"二十多岁","timbre":"中低音","speakingStyle":"停顿自然","pace":"适中","accent":"普通话","emotionalTone":"温和"}"#)
+
+        #expect(profile.summary == "清澈而沉稳")
+        #expect(profile.timbre == "中低音")
+        #expect(throws: ConnorVoiceProfileError.unexpectedField("name")) {
+            try ConnorVoiceProfileGenerator().decode(#"{"summary":"沉稳","name":"某位演员"}"#)
+        }
     }
 
     @Test func decodesLegacyPreferencesWithoutDefaultSearchEngineAsBing() throws {

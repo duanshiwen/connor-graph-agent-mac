@@ -77,6 +77,39 @@ struct XiaomiMiMOSpeechSynthesisServiceTests {
         #expect(await recorder.request?.headers["api-key"] == "secret")
     }
 
+    @Test func customVoiceProfileOverridesPersonalityDerivedVoiceDescription() async throws {
+        let wav = Data("RIFF-custom-wave".utf8)
+        let responseBody = try JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["audio": ["data": wav.base64EncodedString()]]]]
+        ])
+        let recorder = MiMOSpeechRequestRecorder()
+        var service = XiaomiMiMOSpeechSynthesisService(client: MiMOSpeechHTTPClient(
+            response: AgentHTTPResponse(statusCode: 200, body: responseBody),
+            recorder: recorder
+        ))
+
+        _ = try await service.synthesize(
+            markdown: "你好",
+            personality: .balancedDefault,
+            voiceGender: .male,
+            voiceProfile: ConnorVoiceProfile(
+                summary: "清澈、克制的青年声音",
+                timbre: "偏低音，带轻微胸腔共鸣",
+                pace: "稍慢"
+            ),
+            configuration: configuration()
+        )
+
+        let request = try #require(await recorder.request)
+        let body = try #require(JSONSerialization.jsonObject(with: request.body) as? [String: Any])
+        let messages = try #require(body["messages"] as? [[String: String]])
+        let prompt = try #require(messages.first?["content"])
+        #expect(prompt.contains("青年男性"))
+        #expect(prompt.contains("轻微胸腔共鸣"))
+        #expect(prompt.contains("语速节奏：稍慢"))
+        #expect(!prompt.contains("平衡、理性且温和"))
+    }
+
     @Test func rejectsEmptySpokenTextBeforeCallingProvider() async {
         let recorder = MiMOSpeechRequestRecorder()
         var service = XiaomiMiMOSpeechSynthesisService(client: MiMOSpeechHTTPClient(
