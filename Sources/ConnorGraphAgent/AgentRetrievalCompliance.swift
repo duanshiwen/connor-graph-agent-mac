@@ -1,7 +1,6 @@
 import Foundation
 
 public struct AgentRetrievalCompliancePolicy: Sendable, Equatable {
-    public static let conversationHistoryTool = "conversation_history_search"
     public static let mandatoryBootstrapTools = ["get_current_time", "calendar_search_events", "connor_skill_list"]
     public static let webEvidenceTools = ["web_search", "web_fetch", "browser_fetch"]
     public static let requiredMemoryTools = [
@@ -22,31 +21,8 @@ public struct AgentRetrievalCompliancePolicy: Sendable, Equatable {
         return localFileSignals.contains(where: normalized.contains)
     }
 
-    public func isSingleDayConversationReview(_ prompt: String) -> Bool {
-        let normalized = prompt.lowercased()
-        let reviewSignals = [
-            "总结", "回顾", "复盘", "梳理", "做了什么", "聊了什么", "聊天记录", "对话记录",
-            "review", "recap", "summarize", "summary", "what did i do", "what we discussed"
-        ]
-        let singleDaySignals = [
-            "今天", "昨天", "前天", "最近一天", "当天", "某一天", "单日",
-            "today", "yesterday", "day before yesterday", "single day"
-        ]
-        let nonConversationSourceSignals = [
-            "新闻", "天气", "邮件", "邮箱", "日程", "日历", "会议纪要", "rss", "浏览记录", "网页历史",
-            "news", "weather", "email", "mailbox", "calendar", "meeting minutes", "browser history"
-        ]
-        let hasExplicitDate = normalized.range(of: #"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"#, options: .regularExpression) != nil
-            || normalized.range(of: #"\b\d{1,2}[-/.]\d{1,2}\b"#, options: .regularExpression) != nil
-            || normalized.range(of: #"\d{1,2}月\d{1,2}[日号]"#, options: .regularExpression) != nil
-        return reviewSignals.contains(where: normalized.contains)
-            && (singleDaySignals.contains(where: normalized.contains) || hasExplicitDate)
-            && !nonConversationSourceSignals.contains(where: normalized.contains)
-    }
-
     public func isPureMemoryTask(_ prompt: String) -> Bool {
-        (isSingleDayConversationReview(prompt) || hasExplicitMemoryIntent(prompt))
-            && !requiresWebResearch(prompt)
+        hasExplicitMemoryIntent(prompt) && !requiresWebResearch(prompt)
     }
 
     public func requiresMemoryRetrieval(_ prompt: String) -> Bool {
@@ -58,7 +34,8 @@ public struct AgentRetrievalCompliancePolicy: Sendable, Equatable {
         let memorySignals = [
             "memory os", "memory_os", "记忆", "回忆", "我之前", "我们之前",
             "我的偏好", "我的习惯", "我的历史", "此前决定", "过去提到",
-            "工作总结", "任务总结", "工作回顾", "任务回顾", "本周工作", "这周工作"
+            "工作总结", "任务总结", "工作回顾", "任务回顾", "本周工作", "这周工作",
+            "总结今天", "总结昨天", "回顾今天", "回顾昨天"
         ]
         return memorySignals.contains(where: normalized.contains)
     }
@@ -90,9 +67,6 @@ public struct AgentRetrievalCompliancePolicy: Sendable, Equatable {
 
     public func requiredTools(for prompt: String) -> [String] {
         var tools = Self.requiredMemoryTools
-        if isSingleDayConversationReview(prompt) {
-            tools.append(Self.conversationHistoryTool)
-        }
         if requiresWebResearch(prompt) {
             tools.append("web_search")
         }
