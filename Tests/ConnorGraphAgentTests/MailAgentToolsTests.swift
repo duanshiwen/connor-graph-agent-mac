@@ -24,18 +24,18 @@ struct MailAgentToolsTests {
         #expect(recentTool.permission == .readMailBody)
         #expect(searchTool.permission == .readMailBody)
 
-        guard case .object(let recentProperties, _) = recentTool.inputSchema,
+        guard case .closedObject(let recentProperties, _) = recentTool.inputSchema,
               case .integer(let recentLimitDescription) = recentProperties["bodyPreviewMaxChars"],
-              case .string(let recentDirectionDescription) = recentProperties["direction"] else {
+              case .stringEnumeration(let recentDirections, let recentDirectionDescription) = recentProperties["direction"] else {
             Issue.record("Expected recent body preview schema")
             return
         }
         #expect(recentLimitDescription.contains("2000"))
         #expect(recentLimitDescription.contains("1200"))
-        #expect(recentDirectionDescription.contains("received"))
-        #expect(recentDirectionDescription.contains("sent"))
+        #expect(recentDirections == ["all", "received", "sent"])
+        #expect(recentDirectionDescription.contains("direction"))
 
-        guard case .object(let searchProperties, let searchRequired) = searchTool.inputSchema,
+        guard case .closedObject(let searchProperties, let searchRequired) = searchTool.inputSchema,
               case .integer(let searchLimitDescription) = searchProperties["bodyPreviewMaxChars"],
               case .string(let queryDescription) = searchProperties["query"] else {
             Issue.record("Expected search body preview schema")
@@ -48,23 +48,22 @@ struct MailAgentToolsTests {
 
     @Test func recentMessagesToolSchemaDocumentsAccountDirectionAndLimit() {
         let tool = MailListRecentMessagesTool(runtime: RecordingMailRuntime())
-        guard case .object(let properties, let required) = tool.inputSchema else {
+        guard case .closedObject(let properties, let required) = tool.inputSchema else {
             Issue.record("Expected recent messages object schema")
             return
         }
 
         #expect(required.isEmpty)
         guard case .string(let accountDescription) = properties["accountID"],
-              case .string(let directionDescription) = properties["direction"],
+              case .stringEnumeration(let directions, let directionDescription) = properties["direction"],
               case .integer(let limitDescription) = properties["limit"] else {
             Issue.record("Expected accountID, direction, and limit schema entries")
             return
         }
 
         #expect(accountDescription.contains("mail_list_accounts"))
-        #expect(directionDescription.contains("all"))
-        #expect(directionDescription.contains("received"))
-        #expect(directionDescription.contains("sent"))
+        #expect(directions == ["all", "received", "sent"])
+        #expect(directionDescription.contains("direction"))
         #expect(limitDescription.contains("Maximum"))
     }
 
@@ -98,6 +97,18 @@ struct MailAgentToolsTests {
         #expect(await runtime.lastPreviewMaxChars == 200)
         #expect(result.contentText.contains("mail_get_message"))
         #expect(result.contentJSON?.contains("Preview body") == true)
+    }
+
+    @Test func searchMessagesRejectsInvalidISO8601Bounds() async throws {
+        let tool = MailSearchMessagesTool(runtime: RecordingMailRuntime())
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "search mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
+
+        await #expect(throws: AgentToolError.invalidArguments("startDate must be a valid ISO-8601 timestamp")) {
+            try await tool.execute(
+                arguments: try AgentToolArguments(json: "{\"query\":\"invoice\",\"startDate\":\"not-a-date\"}"),
+                context: context
+            )
+        }
     }
 
     @Test func recentMessagesToolPassesDefaultAllAccountsAllDirections() async throws {
@@ -254,7 +265,7 @@ struct MailAgentToolsTests {
 
     @Test func sendDraftSchemaExplainsDraftIDComesFromCreateDraftAndTriggersComposeApproval() {
         let tool = MailSendDraftTool(runtime: RecordingMailRuntime())
-        guard case .object(let properties, let required) = tool.inputSchema,
+        guard case .closedObject(let properties, let required) = tool.inputSchema,
               case .string(let draftIDDescription) = properties["draftID"] else {
             Issue.record("Expected mail_send_draft draftID schema")
             return
@@ -309,7 +320,7 @@ struct MailAgentToolsTests {
 
     @Test func getMessageSchemaExplainsExactMessageIDContract() {
         let tool = MailGetMessageTool(runtime: RecordingMailRuntime())
-        guard case .object(let properties, _) = tool.inputSchema,
+        guard case .closedObject(let properties, _) = tool.inputSchema,
               case .string(let description) = properties["messageID"] else {
             Issue.record("Expected mail_get_message messageID string schema")
             return

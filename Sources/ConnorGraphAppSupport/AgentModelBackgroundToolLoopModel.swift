@@ -76,36 +76,48 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
 
     private static func agentInputSchema(fromMemoryOSToolSchemaJSON json: String) -> AgentToolInputSchema {
         guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let schema = schemaValue(from: object)
         else {
-            return .object(properties: [:], required: [])
+            return .closedObject(properties: [:], required: [])
         }
-        var properties: [String: AgentToolInputSchema] = [:]
-        for (key, value) in object {
-            properties[key] = schemaValue(from: value)
-        }
-        return .object(properties: properties, required: properties.keys.sorted())
+        return schema
     }
 
-    private static func schemaValue(from value: Any) -> AgentToolInputSchema {
-        if let string = value as? String {
-            let normalized = string.lowercased()
-            if normalized.contains("number") { return .number(description: string) }
-            if normalized.contains("integer") || normalized.contains("int") { return .integer(description: string) }
-            if normalized.contains("boolean") || normalized.contains("bool") { return .boolean(description: string) }
-            if normalized.contains("array") { return .array(items: .string(description: "array item"), description: string) }
-            return .string(description: string)
-        }
-        if let array = value as? [Any] {
-            let description = array.compactMap { $0 as? String }.joined(separator: ",")
-            return .array(items: .string(description: description.isEmpty ? "array item" : description), description: description.isEmpty ? "array" : description)
-        }
-        if let dictionary = value as? [String: Any] {
+    private static func schemaValue(from object: [String: Any]) -> AgentToolInputSchema? {
+        let description = object["description"] as? String ?? ""
+        let type = object["type"] as? String
+        let isNullable = (object["type"] as? [String])?.contains("null") == true
+        let concreteType = type ?? (object["type"] as? [String])?.first(where: { $0 != "null" })
+        let schema: AgentToolInputSchema?
+        switch concreteType {
+        case "string":
+            if let values = object["enum"] as? [String] {
+                schema = .stringEnumeration(values: values, description: description)
+            } else {
+                schema = .string(description: description)
+            }
+        case "integer": schema = .integer(description: description)
+        case "number": schema = .number(description: description)
+        case "boolean": schema = .boolean(description: description)
+        case "array":
+            guard let items = object["items"] as? [String: Any], let itemSchema = schemaValue(from: items) else { return nil }
+            schema = .array(items: itemSchema, description: description)
+        case "object":
+            let rawProperties = object["properties"] as? [String: Any] ?? [:]
             var properties: [String: AgentToolInputSchema] = [:]
-            for (key, value) in dictionary { properties[key] = schemaValue(from: value) }
-            return .object(properties: properties, required: properties.keys.sorted())
+            for (key, value) in rawProperties {
+                guard let child = value as? [String: Any], let childSchema = schemaValue(from: child) else { return nil }
+                properties[key] = childSchema
+            }
+            let required = object["required"] as? [String] ?? []
+            schema = object["additionalProperties"] as? Bool == false
+                ? .closedObject(properties: properties, required: required)
+                : .object(properties: properties, required: required)
+        default: return nil
         }
-        return .string(description: String(describing: value))
+        guard let schema else { return nil }
+        return isNullable ? .nullable(schema) : schema
     }
 
     private func runBlocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {

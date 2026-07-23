@@ -233,6 +233,14 @@ public struct AgentToolArguments: Sendable, Equatable {
         if case .array(let value) = values[key] { return value }
         return nil
     }
+
+    public func iso8601Date(_ key: String) throws -> Date? {
+        guard let value = string(key) else { return nil }
+        guard let date = ISO8601DateFormatter().date(from: value) else {
+            throw AgentToolError.invalidArguments("\(key) must be a valid ISO-8601 timestamp")
+        }
+        return date
+    }
 }
 
 public extension SendableJSONValue {

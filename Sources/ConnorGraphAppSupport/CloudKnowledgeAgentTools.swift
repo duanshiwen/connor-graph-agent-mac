@@ -143,7 +143,7 @@ public struct CloudKnowledgeAgentTool: AgentTool {
 public extension AgentToolRegistry {
     mutating func registerCloudKnowledgePublicationTools(executor: CloudKnowledgeToolExecutor, includeValidation: Bool = true) {
         let searchSchema = AgentToolInputSchema.closedObject(properties: ["query": .string(description: "Semantic query for existing committed and staged knowledge."), "limit": .integer(description: "Maximum results, 1 through 100.")], required: ["query", "limit"])
-        let candidatePayloadSchema = AgentToolInputSchema.object(properties: [
+        let candidatePayloadSchema = AgentToolInputSchema.closedObject(properties: [
             "kind": .string(description: "Required for create_new. Canonical durable kind, for example reusable_knowledge, entity, or relation."),
             "stable_key": .string(description: "Required for create_new. Deterministic lowercase kebab-case identity key derived from the knowledge, never a UUID."),
             "valid_from": .string(description: "Required for create_new, revise_existing, and record_temporal_change. ISO-8601 timestamp."),
@@ -152,13 +152,13 @@ public extension AgentToolRegistry {
             "source_identity_id": .string(description: "Optional existing source identity returned by search."),
             "predicate": .string(description: "Optional relation predicate."),
             "target_identity_id": .string(description: "Optional existing relation target identity returned by search."),
-            "payload": .object(properties: [
+            "payload": .closedObject(properties: [
                 "title": .string(description: "Short derived title."),
                 "summary": .string(description: "Concise derived summary."),
                 "text": .string(description: "Reusable knowledge text summarized from the conversation.")
             ], required: [])
         ], required: [])
-        let writeSchema = AgentToolInputSchema.object(properties: [
+        let writeSchema = AgentToolInputSchema.closedObject(properties: [
             "search_context_id": .string(description: "Relevant search context returned by a preceding cloud search."),
             "decision": .stringEnumeration(values: CloudKnowledgeDecision.allCases.map(\.rawValue), description: "Required post-search decision."),
             "semantic_terms": .array(items: .string(description: "Term covered by the search."), description: "Semantic terms for trace validation."),

@@ -12,7 +12,7 @@ public struct ConnorPersonalitySnapshot: Codable, Sendable, Equatable {
     }
 }
 
-public enum ConnorPersonalityUpdateMode: String, Codable, Sendable, Equatable {
+public enum ConnorPersonalityUpdateMode: String, Codable, Sendable, Equatable, CaseIterable {
     case merge
     case replace
     case reset
@@ -181,7 +181,7 @@ public struct ConnorPersonalityGetCurrentTool: AgentTool {
     public let name = "personality_get_current"
     public let description = "Read the current confirmed personality for 康纳同学 and its revision. The fixed name cannot be changed. Call this before proposing a persistent personality update."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [:], required: [])
     private let runtime: ConnorPersonalityRuntime
 
     public init(runtime: ConnorPersonalityRuntime) { self.runtime = runtime }
@@ -201,9 +201,9 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
     public let name = "personality_propose_update"
     public let description = "Generate a governed personality-change proposal for 康纳同学. This never saves settings. Use only when the latest user message explicitly requests a persistent change. Questions about current attributes, including gender, are read-only and must never call this tool. Temporary tone requests should be followed only for the current response. Name changes are forbidden."
     public let permission: AgentPermissionCapability = .modelCall
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "request": .string(description: "User's persistent personality request. Required for merge and replace; omit for reset."),
-        "mode": .string(description: "One of merge, replace, or reset."),
+        "mode": .stringEnumeration(values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue), description: "Update mode."),
         "expected_revision": .integer(description: "Exact revision returned by personality_get_current.")
     ], required: ["mode", "expected_revision"])
 
@@ -278,7 +278,7 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let name = "personality_commit_proposal"
     public let description = "Immediately commit an existing personality proposal only when the latest user message explicitly requests a persistent change, without a second confirmation or native approval step. Never commit in response to a question about current attributes, including gender, even if an older proposal ID appears in conversation history. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
     public let permission: AgentPermissionCapability = .mutatePersonality
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "proposal_id": .string(description: "Exact proposal ID returned by personality_propose_update.")
     ], required: ["proposal_id"])
 

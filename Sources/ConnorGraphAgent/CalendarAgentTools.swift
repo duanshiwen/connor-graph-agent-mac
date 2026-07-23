@@ -118,13 +118,13 @@ public struct CalendarSearchEventsTool: AgentTool {
     public var description: String { "Search Connor-owned calendar events as candidate results; use calendar_read with operation get_event for selected event detail reads that should become Memory OS evidence." }
     public var permission: AgentPermissionCapability { .readCalendar }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "query": .string(description: "Search query; leave empty to search by time range only"),
             "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp"),
             "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp"),
-            "timePreset": .string(description: "Optional time preset such as today, tomorrow, last7Days, last30Days, thisWeek, next7Days"),
-            "timeFilterMode": .string(description: "Optional mode such as intervalOverlapsRange or startsInRange"),
-            "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance"),
+            "timePreset": .stringEnumeration(values: NativeSearchTimePreset.allCases.map(\.rawValue), description: "Optional relative time range."),
+            "timeFilterMode": .stringEnumeration(values: NativeSearchTemporalFilterMode.allCases.map(\.rawValue), description: "Optional temporal matching mode."),
+            "timeSort": .stringEnumeration(values: NativeSearchTemporalSort.allCases.map(\.rawValue), description: "Optional temporal result ordering."),
             "limit": .integer(description: "Maximum event details to return")
         ], required: [])
     }
@@ -135,11 +135,10 @@ public struct CalendarSearchEventsTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let formatter = ISO8601DateFormatter()
         let events = try await runtime.searchEvents(
             query: arguments.string("query") ?? "",
-            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
-            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            startDate: try arguments.iso8601Date("startDate"),
+            endDate: try arguments.iso8601Date("endDate"),
             timePreset: arguments.string("timePreset"),
             timeFilterMode: arguments.string("timeFilterMode"),
             timeSort: arguments.string("timeSort"),

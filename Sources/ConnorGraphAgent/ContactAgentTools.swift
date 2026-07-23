@@ -156,7 +156,7 @@ public struct ContactSearchTool: AgentTool {
     public var name: String { "contact_search" }
     public var description: String { "Search governed contact records." }
     public var permission: AgentPermissionCapability { .readContacts }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Contact query")], required: ["query"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["query": .string(description: "Contact query")], required: ["query"]) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let records = try await runtime.search(query: arguments.string("query") ?? "")
@@ -170,7 +170,7 @@ public struct ContactCreateDraftTool: AgentTool {
     public var name: String { "contact_create_draft" }
     public var description: String { "Create a contact mutation draft; does not write system Contacts." }
     public var permission: AgentPermissionCapability { .readContacts }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["email": .string(description: "Email"), "name": .string(description: "Display name")], required: ["email"] ) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["email": .string(description: "Email"), "name": .string(description: "Display name")], required: ["email"] ) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
@@ -185,7 +185,7 @@ public struct ContactCommitDraftTool: AgentTool {
     public var name: String { "contact_commit_draft" }
     public var description: String { "Commit a contact mutation draft after approval." }
     public var permission: AgentPermissionCapability { .mutateContacts }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Draft ID"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Draft ID"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
@@ -249,8 +249,8 @@ public struct ContactsReadTool: AgentTool {
     public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts. For get_person, prefer the exact person_id from the prompt's Referenced People section; do not guess IDs from display names." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
-            "operation": .string(description: "list_people | search_people | get_person | resolve_person | list_contacts | search_contacts | get_contact | resolve_contact"),
+        .closedObject(properties: [
+            "operation": .stringEnumeration(values: ["list_people", "search_people", "get_person", "resolve_person", "list_contacts", "search_contacts", "get_contact", "resolve_contact"], description: "Read operation."),
             "query": .string(description: "Person/contact query; use this for plain names that were not already resolved in Referenced People"),
             "id": .string(description: "Exact Person/contact ID. For people mentioned through Composer, use person_id from Referenced People; do not infer this from display_name")
         ], required: ["operation"])
@@ -285,11 +285,11 @@ public struct ContactsReadTool: AgentTool {
 public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
-    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. Legacy create_contact remains supported. For update/delete/merge, use exact person_id values from Referenced People or prior contacts_read results; never guess IDs from display names." }
+    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. For update/delete/merge, use exact person_id values from Referenced People or prior contacts_read results; never guess IDs from display names." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
-            "operation": .string(description: "create_person | update_person | delete_person | merge_people | create_contact"),
+        .closedObject(properties: [
+            "operation": .stringEnumeration(values: ["create_person", "update_person", "delete_person", "merge_people"], description: "Write operation."),
             "id": .string(description: "Exact Person ID, preferably person_id from Referenced People or contacts_read; never inferred from display name"),
             "sourceID": .string(description: "Exact merge source person ID from Referenced People or contacts_read"),
             "targetID": .string(description: "Exact merge target person ID from Referenced People or contacts_read"),
@@ -307,7 +307,7 @@ public struct ContactsWriteTool: AgentTool {
         let approved = arguments.bool("approved") ?? false
         switch operation {
         case "create_person":
-            let name = arguments.string("name") ?? arguments.string("displayName")
+            let name = arguments.string("name")
             guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AgentToolError.invalidArguments("name is required") }
             let email = arguments.string("email")
             let profile = PersonProfile(
@@ -324,7 +324,7 @@ public struct ContactsWriteTool: AgentTool {
             let existing = try await runtime.getPerson(id: ContactID(rawValue: id))
             guard let existing else { throw AgentToolError.invalidArguments("Unknown person") }
             var draft = PersonProfileDraft(profile: existing)
-            if let name = arguments.string("name") ?? arguments.string("displayName") { draft.displayName = name }
+            if let name = arguments.string("name") { draft.displayName = name }
             if let organization = arguments.string("organization") { draft.organizationName = organization }
             if let jobTitle = arguments.string("jobTitle") { draft.jobTitle = jobTitle }
             if let notes = arguments.string("notes") { draft.notes = notes }
@@ -339,12 +339,6 @@ public struct ContactsWriteTool: AgentTool {
             guard let sourceID = arguments.string("sourceID"), let targetID = arguments.string("targetID") else { throw AgentToolError.invalidArguments("sourceID and targetID are required") }
             let merged = try await runtime.mergePeople(sourceID: ContactID(rawValue: sourceID), targetID: ContactID(rawValue: targetID), approved: approved)
             return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Merged person \(sourceID) into \(targetID)", contentJSON: try ContactJSON.encode(merged))
-        case "create_contact":
-            guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
-            let record = ContactRecord(id: ContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
-            let draft = try await runtime.createDraft(record: record)
-            let committed = try await runtime.commitDraft(id: draft.id, approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created approved contact \(committed.record.id.rawValue)", contentJSON: try ContactJSON.encode(committed))
         default:
             throw AgentToolError.invalidArguments("Unsupported contacts_write operation: \(operation)")
         }

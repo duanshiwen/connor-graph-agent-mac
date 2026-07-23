@@ -6,7 +6,7 @@ public struct GraphSearchTool: AgentTool {
     public let name = "graph_search"
     public let description = "Search the local temporal knowledge graph across entities, statements, and episodes."
     public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Search query."),
         "limit": .integer(description: "Maximum number of hits to return."),
         "includeEntities": .boolean(description: "Whether to include graph entities."),
