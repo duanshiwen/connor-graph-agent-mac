@@ -174,6 +174,7 @@ public struct NativeSessionManager: Sendable {
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
+            currentUserMessageID: userMessage.id,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
             permissionMode: permissionMode,
