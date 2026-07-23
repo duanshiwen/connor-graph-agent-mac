@@ -80,10 +80,11 @@ struct AssistantMessageExportFormatterTests {
 
     @Test("speech action stays subtle and reflects loading and playback state")
     func speechActionReflectsPlaybackState() {
-        let idle = ConnorSpeechActionPresentation(isAvailable: true, phase: .idle, messageID: "reply")
-        let loading = ConnorSpeechActionPresentation(isAvailable: true, phase: .loading(messageID: "reply"), messageID: "reply")
-        let playing = ConnorSpeechActionPresentation(isAvailable: true, phase: .playing(messageID: "reply"), messageID: "reply")
-        let unavailable = ConnorSpeechActionPresentation(isAvailable: false, phase: .idle, messageID: "reply")
+        let idle = ConnorSpeechActionPresentation(isConfigured: true, isAvailable: true, phase: .idle, messageID: "reply")
+        let loading = ConnorSpeechActionPresentation(isConfigured: true, isAvailable: true, phase: .loading(messageID: "reply"), messageID: "reply")
+        let playing = ConnorSpeechActionPresentation(isConfigured: true, isAvailable: true, phase: .playing(messageID: "reply"), messageID: "reply")
+        let needsPaidKey = ConnorSpeechActionPresentation(isConfigured: true, isAvailable: false, phase: .idle, messageID: "reply")
+        let unavailable = ConnorSpeechActionPresentation(isConfigured: false, isAvailable: false, phase: .idle, messageID: "reply")
 
         #expect(idle.title == "朗读")
         #expect(idle.systemImage == "speaker.wave.2")
@@ -91,6 +92,9 @@ struct AssistantMessageExportFormatterTests {
         #expect(loading.isLoading)
         #expect(playing.title == "停止")
         #expect(playing.systemImage == "stop.fill")
+        #expect(needsPaidKey.isVisible)
+        #expect(!needsPaidKey.isEnabled)
+        #expect(needsPaidKey.help.contains("API Key"))
         #expect(!unavailable.isVisible)
     }
 

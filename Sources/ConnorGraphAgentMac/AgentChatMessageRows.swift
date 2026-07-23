@@ -132,7 +132,12 @@ struct AgentChatMessageRow: View {
     var onSaveImageAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
-    var speechPresentation = ConnorSpeechActionPresentation(isAvailable: false, phase: .idle, messageID: "")
+    var speechPresentation = ConnorSpeechActionPresentation(
+        isConfigured: false,
+        isAvailable: false,
+        phase: .idle,
+        messageID: ""
+    )
     var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
@@ -352,6 +357,7 @@ private struct AgentAssistantMessageActionsView: View {
                     accessibilityLabel: speechPresentation.accessibilityLabel,
                     help: speechPresentation.help,
                     showsProgress: speechPresentation.isLoading,
+                    isEnabled: speechPresentation.isEnabled,
                     action: onToggleSpeech
                 )
             }
@@ -381,6 +387,7 @@ private struct AgentAssistantMessageActionsView: View {
         accessibilityLabel: String,
         help: String,
         showsProgress: Bool = false,
+        isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -402,7 +409,8 @@ private struct AgentAssistantMessageActionsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(isEnabled ? .tertiary : .quaternary)
+        .disabled(!isEnabled)
         .accessibilityLabel(accessibilityLabel)
         .help(help)
     }

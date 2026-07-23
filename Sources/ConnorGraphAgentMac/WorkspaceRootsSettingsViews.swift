@@ -446,7 +446,9 @@ struct SettingsPreferencesSection: View {
                                 .font(SettingsListTypography.rowTitleSelected)
                             Text(aiConnections.isXiaomiMiMOSpeechAvailable
                                  ? "康纳同学完成回复后自动播放语音。"
-                                 : "需要先启用带有效 API Key 的 Xiaomi MiMo 按量付费连接。")
+                                 : aiConnections.hasXiaomiMiMOConnection
+                                    ? "已检测到 MiMo；请检查此连接是否已保存有效的 API Key。"
+                                    : "需要先添加带有效 API Key 的 Xiaomi MiMo 连接，按量付费与 Token Plan 均可。")
                                 .font(SettingsListTypography.rowCaption)
                                 .foregroundStyle(.secondary)
                         }
