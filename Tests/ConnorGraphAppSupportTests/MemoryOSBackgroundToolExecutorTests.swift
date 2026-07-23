@@ -174,9 +174,7 @@ struct MemoryOSBackgroundToolExecutorTests {
         try store.migrate()
         let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
 
-        #expect(throws: MemoryOSBackgroundToolExecutionError.invalidArguments(
-            "Unsupported argument(s) for memory_os_recent_context: limit"
-        )) {
+        #expect(throws: MemoryOSBackgroundToolExecutionError.invalidArguments("$.limit is not supported")) {
             try executor.execute(
                 .init(id: "removed-limit", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","limit":10}"#),
                 context: .init(runID: "removed-limit-run", iteration: 1)
@@ -184,7 +182,7 @@ struct MemoryOSBackgroundToolExecutorTests {
         }
     }
 
-    @Test func l2UpdateToolAcceptsStatementStringShorthandInBackgroundExecutor() throws {
+    @Test func l2UpdateToolAcceptsStructuredStatementsInBackgroundExecutor() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()
         let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
@@ -193,7 +191,7 @@ struct MemoryOSBackgroundToolExecutorTests {
             MemoryOSBackgroundToolCall(
                 id: "call-l2-1",
                 name: "memory_os_l2_update_entities",
-                argumentsJSON: #"{"entities":[{"name":"段福强","type":"person_object","statements":["段福强的英文名是 Oisin。","段福强是段诗闻的弟弟。"]}]}"#
+                argumentsJSON: #"{"entities":[{"name":"段福强","type":"person","statements":[{"text":"段福强的英文名是 Oisin。"},{"text":"段福强是段诗闻的弟弟。"}]}]}"#
             ),
             context: MemoryOSBackgroundToolExecutionContext(runID: "run-l2-1", iteration: 1)
         )

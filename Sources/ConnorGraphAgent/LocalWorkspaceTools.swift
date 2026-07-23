@@ -7,7 +7,7 @@ public struct LocalReadFileTool: AgentTool {
     public let name = "Read"
     public let description = "Read a text file from the configured local workspace. Supports 1-based line offset and limit. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "file_path": .string(description: "Path to a file inside the workspace."),
         "offset": .integer(description: "Optional 1-based line number to start reading from."),
         "limit": .integer(description: "Optional maximum number of lines to return.")
@@ -51,7 +51,7 @@ public struct LocalListDirectoryTool: AgentTool {
     public let name = "LS"
     public let description = "List directory contents inside the configured local workspace. Directories end with '/'."
     public let permission: AgentPermissionCapability = .listWorkspaceFiles
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "path": .string(description: "Directory path inside the workspace. Defaults to '.'.")
     ], required: [])
 
@@ -82,7 +82,7 @@ public struct LocalGlobTool: AgentTool {
     public let name = "Glob"
     public let description = "Find files matching a glob pattern inside the configured local workspace."
     public let permission: AgentPermissionCapability = .listWorkspaceFiles
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "pattern": .string(description: "Glob pattern, for example '**/*.swift'."),
         "path": .string(description: "Directory to search from. Defaults to '.'.")
     ], required: ["pattern"])
@@ -113,7 +113,7 @@ public struct LocalGrepTool: AgentTool {
     public let name = "Grep"
     public let description = "Search text files inside the configured local workspace using literal or regular expression patterns."
     public let permission: AgentPermissionCapability = .searchWorkspaceFiles
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "pattern": .string(description: "Text or regex pattern to search for."),
         "path": .string(description: "Directory to search from. Defaults to '.'."),
         "glob": .string(description: "Optional file glob filter, for example '*.swift'."),
@@ -189,7 +189,7 @@ public struct LocalBashTool: AgentTool {
     public let name = "Bash"
     public let description = "Execute a non-interactive shell command in the configured local workspace with policy classification, timeout, stdout/stderr capture, and output truncation."
     public let permission: AgentPermissionCapability = .runReadOnlyShellCommand
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "command": .string(description: "Shell command to execute."),
         "timeout_seconds": .integer(description: "Optional timeout in seconds. Defaults to 30, max 120."),
         "working_directory": .string(description: "Optional workspace-relative directory to run in.")
@@ -263,7 +263,7 @@ public struct LocalWriteFileTool: AgentTool {
     public let name = "Write"
     public let description = "Create or overwrite a text file inside the configured local workspace. Protected paths are denied."
     public let permission: AgentPermissionCapability = .writeWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "file_path": .string(description: "Path to write inside the workspace."),
         "content": .string(description: "Complete file content to write.")
     ], required: ["file_path", "content"])
@@ -296,7 +296,7 @@ public struct LocalEditFileTool: AgentTool {
     public let name = "Edit"
     public let description = "Replace a unique old_text occurrence in a text file inside the configured local workspace. Fails if old_text is missing or not unique."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "file_path": .string(description: "Path to edit inside the workspace."),
         "old_text": .string(description: "Exact text to replace. Must occur exactly once."),
         "new_text": .string(description: "Replacement text.")
@@ -331,10 +331,10 @@ public struct LocalMultiEditTool: AgentTool {
     public let name = "MultiEdit"
     public let description = "Apply multiple exact text replacements atomically to one workspace file. Every old_text must occur exactly once in the original file."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "file_path": .string(description: "Path to edit inside the workspace."),
         "edits": .array(
-            items: .object(properties: [
+            items: .closedObject(properties: [
                 "old_text": .string(description: "Exact text to replace. Must occur exactly once in the original file."),
                 "new_text": .string(description: "Replacement text.")
             ], required: ["old_text", "new_text"]),

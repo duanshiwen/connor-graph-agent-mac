@@ -10,7 +10,7 @@ public struct SkillActivateTool: AgentTool {
     public let name = "connor_skill_activate"
     public let description = "Load the full instructions for an installed skill by slug. Call this when the user's request maps to a skill domain listed in the available skills catalog. Returns the complete skill workflow and guidance."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "slug": .string(description: "The skill slug from the available skills catalog, for example analyze-pdf or code-review.")
     ], required: ["slug"])
 
@@ -76,7 +76,7 @@ public struct SkillListTool: AgentTool {
     public let name = "connor_skill_list"
     public let description = "List all installed skills available for this session. Returns slug, name, description, and tags for each skill. Call this at the start of each conversation to check for available skills."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [:], required: [])
 
     private let packages: [SkillPackage]
 

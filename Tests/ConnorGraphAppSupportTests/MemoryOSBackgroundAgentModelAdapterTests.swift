@@ -48,7 +48,7 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
                 MemoryOSBackgroundToolDescriptor(
                     name: "memory_os_search",
                     description: "Search Memory OS.",
-                    inputSchemaJSON: "{\"query\":\"string\",\"limit\":\"number\"}",
+                    inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Search query.\"},\"limit\":{\"type\":\"integer\",\"description\":\"Maximum hits.\"}},\"required\":[\"query\"],\"additionalProperties\":false}",
                     usagePolicy: "Use before emitting knowledge."
                 )
             ]

@@ -6,7 +6,7 @@ public struct SessionGetStatusTool: AgentTool {
     public let name = "session_get_status"
     public let description = "Read the governance status for the current Connor session or a specific session."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "session_id": .string(description: "Optional session ID. Omit to read the current session status.")
     ], required: [])
 
@@ -35,7 +35,7 @@ public struct SessionSetStatusTool: AgentTool {
     public let name = "session_set_status"
     public let description = "Set the governance status for the current Connor session or a specific session. Call `session_list_statuses` first to get the available status IDs."
     public let permission: AgentPermissionCapability = .mutateSessionStatus
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "session_id": .string(description: "Optional session ID. Omit to update the current session."),
         "status": .string(description: "Required status id. Must be one of the ids returned by session_list_statuses."),
         "reason": .string(description: "Optional human-readable reason for the status change.")
@@ -97,7 +97,7 @@ public struct SessionListStatusesTool: AgentTool {
     public let name = "session_list_statuses"
     public let description = "List all user-defined session statuses available for this Connor installation. Returns status id and display name."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [:], required: [])
 
     private let governanceConfig: AppSessionGovernanceConfig
 

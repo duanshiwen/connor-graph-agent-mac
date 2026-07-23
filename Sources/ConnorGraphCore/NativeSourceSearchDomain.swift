@@ -19,7 +19,7 @@ public enum NativeSearchTimeKind: String, Codable, Sendable, Equatable, Hashable
     case unknown
 }
 
-public enum NativeSearchTemporalFilterMode: String, Codable, Sendable, Equatable, Hashable {
+public enum NativeSearchTemporalFilterMode: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
     case pointWithinRange
     case intervalOverlapsRange
     case startsWithinRange
@@ -28,7 +28,7 @@ public enum NativeSearchTemporalFilterMode: String, Codable, Sendable, Equatable
     case indexedWithinRange
 }
 
-public enum NativeSearchTemporalSort: String, Codable, Sendable, Equatable, Hashable {
+public enum NativeSearchTemporalSort: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
     case relevanceThenTimeDesc
     case relevanceThenTimeAsc
     case timeDescThenRelevance

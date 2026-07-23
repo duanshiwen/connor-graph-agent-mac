@@ -6,8 +6,8 @@ public struct TimeAnalyzeRangesTool: AgentTool {
     public var description: String { "Analyze time ranges: signed start-to-start differences and pairwise overlaps." }
     public var permission: AgentPermissionCapability { .computeScientific }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
-            "ranges": .array(items: .object(properties: [
+        .closedObject(properties: [
+            "ranges": .array(items: .closedObject(properties: [
                 "id": .string(description: "Range ID"),
                 "start": .string(description: "ISO-8601 start timestamp"),
                 "end": .string(description: "ISO-8601 end timestamp")

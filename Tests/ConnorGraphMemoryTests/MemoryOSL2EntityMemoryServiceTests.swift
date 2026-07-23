@@ -40,7 +40,7 @@ import ConnorGraphMemory
     #expect(result.matches[0].statements == [MemoryOSL2StatementMemoryView(text: "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。", relation: "RELATED_TO", connectedEntity: "《迟到的青春期》马尼拉一个月阶段")])
 }
 
-@Test func l2EntityMemoryDecodesStatementStringShorthand() throws {
+@Test func l2EntityMemoryDecodesStructuredStatements() throws {
     let json = #"""
     {
       "entities": [
@@ -50,7 +50,7 @@ import ConnorGraphMemory
           "aliases": "Oisin",
           "summary": "段诗闻的弟弟。",
           "statements": [
-            "段福强's English name is Oisin."
+            {"text": "段福强's English name is Oisin."}
           ]
         }
       ]
@@ -133,20 +133,21 @@ import ConnorGraphMemory
     #expect(stored[0].statements[0].metadata["l2_fact_type"] == "implementation")
 }
 
-@Test func l2EntityMemoryFallsBackToRelatedToForInvalidRelation() throws {
+@Test func l2EntityMemoryRejectsInvalidRelationWithoutPartialWrite() throws {
     let repository = InMemoryMemoryOSL2EntityMemoryRepository()
     let service = MemoryOSL2EntityMemoryService(repository: repository)
 
-    _ = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
-        MemoryOSL2EntityUpdate(
-            name: "Connor",
-            statements: [
-                MemoryOSL2StatementUpdate(text: "Connor has a misspelled relation.", relation: "RELATE_TO", factType: "other")
-            ]
-        )
-    ]))
+    #expect(throws: MemoryOSL2EntityMemoryValidationError.self) {
+        try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+            MemoryOSL2EntityUpdate(
+                name: "Connor",
+                statements: [
+                    MemoryOSL2StatementUpdate(text: "Connor has a misspelled relation.", relation: "RELATE_TO", factType: "other")
+                ]
+            )
+        ]))
+    }
 
     let stored = try repository.findEntities(matchingNames: ["Connor"])
-    #expect(stored.count == 1)
-    #expect(stored[0].statements[0].relation == "RELATED_TO")
+    #expect(stored.isEmpty)
 }
