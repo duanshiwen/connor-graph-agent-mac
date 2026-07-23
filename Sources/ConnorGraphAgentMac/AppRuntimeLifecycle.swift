@@ -119,6 +119,7 @@ final class AppRuntimeLifecycle {
     let appSettingsModel: AppSettingsFeatureModel
     let inputSettingsModel: InputSettingsFeatureModel
     let userPreferencesModel: UserPreferencesFeatureModel
+    let connorSpeechPlaybackCoordinator: ConnorSpeechPlaybackCoordinator
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
     var memoryOSSearchHealthSummary: String?
@@ -523,6 +524,9 @@ final class AppRuntimeLifecycle {
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
         self.userPreferencesModel = UserPreferencesFeatureModel()
+        self.connorSpeechPlaybackCoordinator = ConnorSpeechPlaybackCoordinator(
+            settingsRepository: llmSettingsRepository
+        )
         self.workspaceSettingsModel = WorkspaceSettingsFeatureModel()
         self.permissionSettingsModel = PermissionSettingsFeatureModel()
         self.runtimeSettingsCoordinator = RuntimeSettingsPersistenceCoordinator(
@@ -690,6 +694,7 @@ final class AppRuntimeLifecycle {
         self.fallbackChatSessionStorage = initialSession
         aiConnectionsModel.onRuntimeSettingsChanged = { [weak self] rebuildRuntime in
             guard let self else { return }
+            self.connorSpeechPlaybackCoordinator.stopIfUnavailable()
             if rebuildRuntime {
                 self.rebuildNativeSessionManagerForActiveSession()
             } else {
@@ -698,6 +703,16 @@ final class AppRuntimeLifecycle {
         }
         aiConnectionsModel.onConnectionSetup = { [weak self] connection in
             self?.aiConnectionsRuntimeCoordinator.syncActiveSession(to: connection)
+        }
+        connorSpeechPlaybackCoordinator.isAvailable = { [weak self] in
+            self?.aiConnectionsModel.isXiaomiMiMOSpeechAvailable ?? false
+        }
+        connorSpeechPlaybackCoordinator.reportError = { [weak self] message in
+            self?.chatComposerCoordinator.showToast(
+                title: "朗读失败",
+                message: message,
+                systemImage: "speaker.slash"
+            )
         }
         governanceModel.sessionsProvider = { [weak self] in
             guard let self else { return [] }
@@ -1420,6 +1435,7 @@ final class AppRuntimeLifecycle {
         contactsFeatureModel.shutdown()
         mailFeatureModel.shutdown()
         browserFeatureModel.shutdown()
+        connorSpeechPlaybackCoordinator.shutdown()
     }
 
     private func applyPromotedGraphSnapshot(_ snapshot: GraphStoreSnapshot) {
@@ -3139,6 +3155,16 @@ final class AppRuntimeLifecycle {
             let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
                 .last(where: { $0.role == AgentRole.assistant })
+            if let latestAssistantMessage {
+                connorSpeechPlaybackCoordinator.automaticallyRead(
+                    messageID: latestAssistantMessage.id,
+                    markdown: latestAssistantMessage.content,
+                    personality: userPreferencesModel.connorPersonality,
+                    personalityRevision: userPreferencesModel.connorPersonalityRevision,
+                    voiceGender: userPreferencesModel.connorVoiceGender,
+                    enabled: userPreferencesModel.automaticallyReadsReplies
+                )
+            }
             noteSessionUpdate(
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,
@@ -3410,11 +3436,13 @@ extension AppRuntimeLifecycle {
                 browser: browser,
                 appSettings: model.appSettingsModel,
                 inputSettings: model.inputSettingsModel,
+                userPreferences: model.userPreferencesModel,
                 workspaceSettings: model.workspaceSettingsModel,
                 skills: model.skillRuntimeModel,
                 contacts: model.contactsFeatureModel,
                 governance: model.governanceModel,
                 aiConnections: aiConnections,
+                speechPlayback: model.connorSpeechPlaybackCoordinator,
                 knowledgeMarketplace: model.knowledgeMarketplaceStore,
                 sources: model.sourceRuntimeModel,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },

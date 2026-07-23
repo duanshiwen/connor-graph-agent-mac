@@ -41,6 +41,24 @@ struct SettingsFeatureModelsTests {
         #expect(settings.preferences.birthDate == "1990-01-02")
     }
 
+    @Test func speechPreferencesRoundTripThroughSettings() {
+        let model = UserPreferencesFeatureModel()
+        model.apply(AgentRuntimePreferenceSettings(
+            connorSpeech: ConnorSpeechSettings(
+                voiceGender: .female,
+                automaticallyReadsReplies: true
+            )
+        ))
+
+        #expect(model.connorVoiceGender == .female)
+        #expect(model.automaticallyReadsReplies)
+
+        var settings = AgentRuntimeSettings.default
+        model.apply(to: &settings)
+        #expect(settings.preferences.connorSpeech.voiceGender == .female)
+        #expect(settings.preferences.connorSpeech.automaticallyReadsReplies)
+    }
+
     @Test func personalityGenerationRequiresConfirmationBeforeSaving() async {
         let model = UserPreferencesFeatureModel()
         let generated = ConnorPersonalitySettings(summary: "冷静、直接", traits: ["严谨"])
