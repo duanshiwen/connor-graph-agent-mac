@@ -168,7 +168,7 @@ import ConnorGraphStore
     }
 }
 
-@Test func memoryOSRecentContextLimitExpansionReturnsOnlyIncrementalRecords() async throws {
+@Test func memoryOSRecentContextReturnsSequentialCompletePages() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 13_000)
@@ -177,38 +177,43 @@ import ConnorGraphStore
         try store.upsert(node: MemoryOSNode(id: nodeID, stableKey: nodeID, nodeType: "project", name: "Incremental Project \(index)"))
         try store.upsert(statement: MemoryOSStatement(id: "incremental-statement-\(index)", subjectID: nodeID, predicate: "status", text: "Incremental memory result \(index).", confidence: 0.9, validAt: now.addingTimeInterval(Double(index)), committedAt: now.addingTimeInterval(Double(index)), evidenceSpanIDs: []))
     }
-    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store), configuration: .init(pageSize: 10))
     let context = memoryOSToolContext()
 
-    let first = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Incremental memory","limit":10}"#), context: context)
-    let expanded = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Incremental memory","limit":30}"#), context: context)
+    let first = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Incremental memory"}"#), context: context)
+    let second = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Incremental memory","page":2}"#), context: context)
     let firstPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(first.contentJSON).utf8))
-    let expandedPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(expanded.contentJSON).utf8))
+    let secondPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(second.contentJSON).utf8))
 
-    #expect(firstPayload.requestedLimit == 10)
-    #expect(firstPayload.returnedCount == 10)
-    #expect(expandedPayload.requestedLimit == 30)
-    #expect(expandedPayload.returnedCount == 20)
-    #expect(expandedPayload.cumulativeReturnedCount == 30)
-    #expect(Set(firstPayload.records.map(\.recordID)).isDisjoint(with: Set(expandedPayload.records.map(\.recordID))))
-    #expect(firstPayload.hasMore == true)
-    #expect(!firstPayload.partial && !expandedPayload.partial)
+    #expect(firstPayload.page == 1)
+    #expect(firstPayload.pageSize == 10)
+    #expect(firstPayload.returnedItems == 10)
+    #expect(firstPayload.totalItems == 35)
+    #expect(firstPayload.totalPages == 4)
+    #expect(firstPayload.hasNextPage)
+    #expect(firstPayload.nextPage == 2)
+    #expect(secondPayload.page == 2)
+    #expect(secondPayload.nextPage == 3)
+    #expect(Set(firstPayload.records.map(\.recordID)).isDisjoint(with: Set(secondPayload.records.map(\.recordID))))
 }
 
-@Test func memoryOSContextToolsClampLimitAndDepthFromConfiguration() async throws {
+@Test func memoryOSContextToolsUseConfiguredPageSizeAndClampDepth() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
-    let config = MemoryOSContextToolConfiguration(minimumResultLimit: 12, defaultResultLimit: 15, maxDepth: 4)
+    let config = MemoryOSContextToolConfiguration(pageSize: 30, maxDepth: 4)
     let tool = MemoryOSKnowledgeContextTool(facade: AppMemoryOSFacade(store: store), configuration: config)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"missing memory","limit":1,"depth":99}"#), context: memoryOSToolContext())
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"missing memory","depth":99}"#), context: memoryOSToolContext())
     let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
-    #expect(payload.requestedLimit == 12)
-    #expect(payload.returnedCount == 0)
-    #expect(payload.hasMore == nil)
-    #expect(!payload.partial)
+    #expect(payload.page == 1)
+    #expect(payload.pageSize == 30)
+    #expect(payload.returnedItems == 0)
+    #expect(payload.totalItems == 0)
+    #expect(payload.totalPages == 0)
+    #expect(!payload.hasNextPage)
+    #expect(payload.nextPage == nil)
 }
 
-@Test func memoryOSContextCapacityDropsWholeRecordsAndMarksPartial() async throws {
+@Test func memoryOSContextCapacityNeverDropsAnOversizedRecord() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
     let node = MemoryOSNode(id: "capacity-node", stableKey: "capacity-node", nodeType: "project", name: "Capacity")
@@ -220,10 +225,105 @@ import ConnorGraphStore
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Capacity complete record"}"#), context: memoryOSToolContext())
     let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
 
+    #expect(payload.pageSize == 1)
+    #expect(payload.returnedItems == 1)
+    #expect(payload.totalItems == 1)
+    #expect(payload.records.first?.recordID == "capacity-record")
+    #expect(result.contentText.contains("complete-record-content"))
+}
+
+@Test func memoryOSContextAutomaticallyShrinksPageSizeWithoutLosingRecords() throws {
+    let records = (0..<85).map { index in
+        MemoryOSContextToolRecord(
+            recordID: "adaptive-\(index)",
+            layer: "L2",
+            text: "Adaptive pagination record \(index) " + String(repeating: "content ", count: 45),
+            occurredAt: nil,
+            updatedAt: nil,
+            confidence: 0.9,
+            depth: 0,
+            evidenceRefs: [],
+            status: "active",
+            retrievalScore: 1,
+            path: []
+        )
+    }
+    let configuration = MemoryOSContextToolConfiguration(pageSize: 40, maxResponseCharacters: 5_000)
+    let first = try MemoryOSLayeredContextSupport.response(query: "Adaptive pagination", page: 1, candidates: records, configuration: configuration)
+
+    #expect(first.success)
+    #expect(first.pageSize < 40)
+    #expect(first.pageSize >= 1)
+    #expect(first.totalItems == 85)
+    #expect(first.totalPages > 1)
+    #expect(first.nextPage == 2)
+
+    var collected = Set(first.records.map(\.recordID))
+    if first.totalPages >= 2 {
+        for page in 2...first.totalPages {
+            let response = try MemoryOSLayeredContextSupport.response(query: "Adaptive pagination", page: page, candidates: records, configuration: configuration)
+            #expect(response.success)
+            #expect(response.pageSize == first.pageSize)
+            collected.formUnion(response.records.map(\.recordID))
+            if page == first.totalPages {
+                #expect(!response.hasNextPage)
+                #expect(response.nextPage == nil)
+            } else {
+                #expect(response.nextPage == page + 1)
+            }
+        }
+    }
+    #expect(collected == Set(records.map(\.recordID)))
+}
+
+@Test func memoryOSContextRejectsInvalidPage() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
+
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"memory","page":0}"#), context: memoryOSToolContext())
+    let contentJSON = try #require(result.contentJSON)
+    let data = Data(contentJSON.utf8)
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: data)
+    let jsonObject = try JSONSerialization.jsonObject(with: data)
+    let json = try #require(jsonObject as? [String: Any])
+
+    #expect(payload.success == false)
+    #expect(payload.reason.contains("page must be at least 1"))
+    #expect(result.error == payload.reason)
+    #expect(json["records"] is NSNull)
+}
+
+@Test func memoryOSContextRejectsPageBeyondTotalPagesWithoutFallingBack() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    try store.upsert(node: MemoryOSNode(id: "page-node", stableKey: "page-node", nodeType: "project", name: "Page Test"))
+    try store.upsert(statement: MemoryOSStatement(id: "page-record", subjectID: "page-node", predicate: "status", text: "Page Test memory", confidence: 0.9, evidenceSpanIDs: []))
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
+
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Page Test","page":2}"#), context: memoryOSToolContext())
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
+
+    #expect(payload.success == false)
+    #expect(payload.page == 2)
+    #expect(payload.totalPages == 1)
     #expect(payload.records.isEmpty)
-    #expect(payload.partial)
-    #expect(payload.hasMore == true)
-    #expect(!result.contentText.contains("complete-record-content"))
+    #expect(payload.reason.contains("Request a page from 1 through 1"))
+}
+
+@Test func memoryOSContextRejectsNonIntegerPageWithoutFallingBack() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
+
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"memory","page":"two"}"#), context: memoryOSToolContext())
+    let contentJSON = try #require(result.contentJSON)
+    let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(contentJSON.utf8))
+
+    #expect(!payload.success)
+    #expect(payload.page == 0)
+    #expect(payload.reason.contains("page must be an integer"))
+    #expect(result.error == payload.reason)
 }
 
 @Test func memoryOSGetCurrentUserProfileToolAggregatesCurrentUserHitsWithoutNameCoupling() async throws {

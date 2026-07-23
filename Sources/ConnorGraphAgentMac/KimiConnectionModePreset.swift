@@ -62,4 +62,18 @@ enum KimiConnectionModePreset: String, CaseIterable, Identifiable, Equatable {
         case .codingPlan: "Kimi Coding Plan"
         }
     }
+
+    var purchaseURLString: String? {
+        switch self {
+        case .payAsYouGo: nil
+        case .codingPlan: "https://www.kimi.com/membership/pricing?from=kfc_docs_overview"
+        }
+    }
+
+    var managementURLString: String? {
+        switch self {
+        case .payAsYouGo: nil
+        case .codingPlan: "https://www.kimi.com/code/console"
+        }
+    }
 }

@@ -263,6 +263,11 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
     }
 
+    /// Context pagination needs the complete local result set so its totals remain exact.
+    public func searchMemoryOSContext(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
+        try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
+    }
+
     public func findMemoryOSL2Entities(_ request: MemoryOSL2FindEntitiesRequest) throws -> MemoryOSL2FindEntitiesResult {
         try MemoryOSL2EntityMemoryService(repository: SQLiteMemoryOSL2EntityMemoryRepository(store: store)).findEntities(request)
     }

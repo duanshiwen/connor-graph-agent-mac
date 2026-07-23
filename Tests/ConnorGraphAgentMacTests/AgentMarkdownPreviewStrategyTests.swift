@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Testing
 @testable import ConnorGraphAgentMac
 
@@ -65,5 +66,29 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(preview.contains("loadTask.cancel()"))
         #expect(preview.contains("guard !Task.isCancelled, document.source == markdown else { return }"))
         #expect(preview.contains("persistentCacheContext.store.loadBlocks"))
+    }
+
+    @Test @MainActor func markdownLinksUseTheNativePointingHandCursorAttribute() throws {
+        let attributed = try AttributedString(
+            markdown: "Before [Connor](https://example.com) after",
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )
+
+        let rendered = AgentMarkdownLinkText.renderedAttributedString(
+            attributed,
+            baseFont: .systemFont(ofSize: 14),
+            baseColor: .labelColor,
+            strikethrough: false
+        )
+        let fullRange = NSRange(location: 0, length: rendered.length)
+        var linkRanges = 0
+
+        rendered.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+            guard value != nil else { return }
+            linkRanges += 1
+            #expect(rendered.attribute(.cursor, at: range.location, effectiveRange: nil) as? NSCursor === NSCursor.pointingHand)
+        }
+
+        #expect(linkRanges == 1)
     }
 }

@@ -21,5 +21,7 @@ struct KimiConnectionModePresetTests {
         #expect(preset.defaultModel == "kimi-for-coding")
         #expect(preset.availableModels == ["kimi-for-coding", "kimi-for-coding-highspeed", "k3"])
         #expect(preset.keyPlaceholder == "Kimi Code API Key")
+        #expect(preset.purchaseURLString == "https://www.kimi.com/membership/pricing?from=kfc_docs_overview")
+        #expect(preset.managementURLString == "https://www.kimi.com/code/console")
     }
 }

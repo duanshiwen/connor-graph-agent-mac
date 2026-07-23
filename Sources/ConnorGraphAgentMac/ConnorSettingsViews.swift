@@ -762,6 +762,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
     var authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey
     var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
     var hidesEndpoint: Bool = false
+    var subscriptionPlan: AIConnectionSubscriptionPlanPreset?
     /// Models in this list default to vision support enabled (explicitVisionSupport = true) when selected.
     var defaultVisionModels: [String] = []
 
@@ -787,16 +788,16 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey, defaultVisionModels: ["mimo-v2.5", "mimo-v2-omni"]),
-        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen3-coder-plus", "qwen3-vl-plus", "qwen3-vl-flash", "qwen3-omni-flash", "qwen3-asr-flash", "qwen3-tts-flash", "qwen-image-plus", "qwen-image-edit"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-seed-1-6-vision", "doubao-seed-1-6-embedding", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: KimiConnectionModePreset.payAsYouGo.openAIEndpoint, defaultModel: KimiConnectionModePreset.payAsYouGo.defaultModel, supportedModels: KimiConnectionModePreset.payAsYouGo.availableModels, keyPlaceholder: KimiConnectionModePreset.payAsYouGo.keyPlaceholder, protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-5.2", supportedModels: ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6", "glm-4.5-air", "glm-4.5-airx", "glm-4-long", "glm-4-flashx-250414", "glm-4-flash-250414", "glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flashx", "glm-4.1v-thinking-flash", "glm-4v-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, defaultVisionModels: ["glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flashx", "glm-4.1v-thinking-flash", "glm-4v-flash"]),
-        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M3", supportedModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "M2-her", "MiniMax-M1", "MiniMax-Text-01", "MiniMax-VL-01", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step3.7-flash", supportedModels: ["step3.7-flash", "step3.5-flash", "step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey, subscriptionPlan: .init(title: "MiMo Token Plan", subtitle: XiaomiMiMoConnectionModePreset.tokenPlan.subtitle, endpoint: XiaomiMiMoConnectionModePreset.tokenPlan.openAIEndpoint, defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5"], keyPlaceholder: XiaomiMiMoConnectionModePreset.tokenPlan.keyPlaceholder, purchaseURLString: XiaomiMiMoConnectionModePreset.tokenPlan.purchaseURLString!, managementURLString: XiaomiMiMoConnectionModePreset.tokenPlan.managementURLString!, restrictionNotice: XiaomiMiMoConnectionModePreset.tokenPlan.restrictionNotice), defaultVisionModels: ["mimo-v2.5", "mimo-v2-omni"]),
+        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen3-coder-plus", "qwen3-vl-plus", "qwen3-vl-flash", "qwen3-omni-flash", "qwen3-asr-flash", "qwen3-tts-flash", "qwen-image-plus", "qwen-image-edit"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "百炼 Coding Plan", subtitle: "适用于百炼 Coding Plan 专属 Key（sk-sp-...）和套餐额度。", endpoint: "https://coding.dashscope.aliyuncs.com/v1", defaultModel: "qwen3.5-plus", supportedModels: ["qwen3.5-plus", "qwen3-coder-plus"], keyPlaceholder: "sk-sp-...", purchaseURLString: "https://common-buy.aliyun.com/coding-plan", managementURLString: "https://bailian.console.aliyun.com/cn-beijing/?tab=plan#/efm/subscription/coding-plan", restrictionNotice: "套餐仅限官方支持的 AI 编程工具使用，不可用于自动化脚本、自定义应用后端或非交互式批量调用。")),
+        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-seed-1-6-vision", "doubao-seed-1-6-embedding", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "方舟 Coding Plan", subtitle: "使用方舟 Coding Plan 专属地址和套餐 API Key。", endpoint: "https://ark.cn-beijing.volces.com/api/coding/v3", defaultModel: "ark-code-latest", supportedModels: ["ark-code-latest", "doubao-seed-2.0-code", "doubao-seed-2.0-pro", "doubao-seed-2.0-lite", "MiniMax-M3", "Kimi-K2.7-Code", "glm-5.2", "deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "Paste your ARK_API_KEY...", purchaseURLString: "https://www.volcengine.com/activity/codingplan", managementURLString: "https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe", restrictionNotice: "套餐仅限个人 AI 编程工具使用，不可作为普通 API 调用；非编程工具调用可能导致订阅停用或账号封禁。")),
+        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: KimiConnectionModePreset.payAsYouGo.openAIEndpoint, defaultModel: KimiConnectionModePreset.payAsYouGo.defaultModel, supportedModels: KimiConnectionModePreset.payAsYouGo.availableModels, keyPlaceholder: KimiConnectionModePreset.payAsYouGo.keyPlaceholder, protocolKind: .openAICompatible, subscriptionPlan: .init(title: "Kimi Code Plan", subtitle: KimiConnectionModePreset.codingPlan.subtitle, endpoint: KimiConnectionModePreset.codingPlan.openAIEndpoint, defaultModel: KimiConnectionModePreset.codingPlan.defaultModel, supportedModels: KimiConnectionModePreset.codingPlan.availableModels, keyPlaceholder: KimiConnectionModePreset.codingPlan.keyPlaceholder, purchaseURLString: KimiConnectionModePreset.codingPlan.purchaseURLString!, managementURLString: KimiConnectionModePreset.codingPlan.managementURLString!, restrictionNotice: nil)),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-5.2", supportedModels: ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6", "glm-4.5-air", "glm-4.5-airx", "glm-4-long", "glm-4-flashx-250414", "glm-4-flash-250414", "glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flashx", "glm-4.1v-thinking-flash", "glm-4v-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "GLM Coding Plan", subtitle: "适用于智谱 Coding Plan 个人套餐 API Key。", endpoint: "https://open.bigmodel.cn/api/coding/paas/v4", defaultModel: "glm-5.2", supportedModels: ["glm-5.2", "glm-5-turbo", "glm-4.7"], keyPlaceholder: "Paste your Coding Plan key...", purchaseURLString: "https://bigmodel.cn/coding-plan/personal/overview", managementURLString: "https://bigmodel.cn/coding-plan/personal/overview", restrictionNotice: "套餐额度仅在官方指定的 AI 编程工具或产品环境中生效。"), defaultVisionModels: ["glm-5v-turbo", "glm-4.6v", "glm-4.6v-flash", "glm-4.1v-thinking-flashx", "glm-4.1v-thinking-flash", "glm-4v-flash"]),
+        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M3", supportedModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "M2-her", "MiniMax-M1", "MiniMax-Text-01", "MiniMax-VL-01", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "MiniMax Token Plan", subtitle: "适用于 MiniMax Token Plan 专属 Key（sk-cp-...）。", endpoint: "https://api.minimaxi.com/v1", defaultModel: "MiniMax-M3", supportedModels: ["MiniMax-M3"], keyPlaceholder: "sk-cp-...", purchaseURLString: "https://platform.minimaxi.com/subscribe/coding-plan", managementURLString: "https://platform.minimaxi.com/user-center/payment/token-plan", restrictionNotice: nil)),
+        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step3.7-flash", supportedModels: ["step3.7-flash", "step3.5-flash", "step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "Step Plan · Token Plan", subtitle: "使用 Step Plan 的 Credit 月池和专属 OpenAI 兼容地址。", endpoint: "https://api.stepfun.com/step_plan/v1", defaultModel: "step-3.7-flash", supportedModels: ["step-3.7-flash"], keyPlaceholder: "Paste your Step API Key...", purchaseURLString: "https://platform.stepfun.com/step-plan", managementURLString: "https://platform.stepfun.com/interface-key", restrictionNotice: nil)),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible, subscriptionPlan: .init(title: "Z.AI GLM Coding Plan", subtitle: "适用于 Z.AI 国际站 Coding Plan API Key。", endpoint: "https://api.z.ai/api/coding/paas/v4", defaultModel: "glm-5.2", supportedModels: ["glm-5.2", "glm-5-turbo", "glm-4.7"], keyPlaceholder: "Paste your Coding Plan key...", purchaseURLString: "https://z.ai/subscribe", managementURLString: "https://z.ai/manage-apikey/apikey-list", restrictionNotice: "套餐仅限 Z.AI 官方支持的 AI 编程工具和产品环境使用。")),
         AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-5", keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
         AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-sonnet-4.5", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .bearer),
@@ -1025,7 +1026,7 @@ struct AIConnectionSetupView: View {
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
     @State private var shouldFetchModelsList = true
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
-    @State private var kimiConnectionMode: KimiConnectionModePreset = .payAsYouGo
+    @State private var providerUsageMode: AIConnectionUsageMode = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
     @State private var visionSupportOverride: Bool? = nil // nil = auto-detect, true = force enable, false = force disable
     @State private var lastSuggestedConnectionName = ""
@@ -1359,8 +1360,8 @@ struct AIConnectionSetupView: View {
                 xiaomiMiMoConnectionModeCard
             }
 
-            if isKimiOption {
-                kimiConnectionModeCard
+            if activeProviderPreset.subscriptionPlan != nil && (option.id == "china-provider" || option.id == "other-provider") {
+                providerSubscriptionPlanCard
             }
 
             primaryAPIKeyEntryCard(placeholder: apiKeyPlaceholderForCurrentPreset)
@@ -1482,11 +1483,23 @@ struct AIConnectionSetupView: View {
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+
+                if xiaomiMiMoConnectionMode == .tokenPlan,
+                   let purchaseURLString = xiaomiMiMoConnectionMode.purchaseURLString,
+                   let managementURLString = xiaomiMiMoConnectionMode.managementURLString {
+                    subscriptionPlanActionButtons(
+                        purchaseURLString: purchaseURLString,
+                        managementURLString: managementURLString
+                    )
+                    if let notice = xiaomiMiMoConnectionMode.restrictionNotice {
+                        subscriptionPlanRestrictionNotice(notice)
+                    }
+                }
             }
         }
     }
 
-    private var kimiConnectionModeCard: some View {
+    private var providerSubscriptionPlanCard: some View {
         aiConnectionCard {
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
                 HStack(spacing: SettingsListLayout.spaceS) {
@@ -1496,26 +1509,74 @@ struct AIConnectionSetupView: View {
                         .font(SettingsListTypography.header)
                 }
 
-                Picker("使用方式", selection: $kimiConnectionMode) {
-                    ForEach(KimiConnectionModePreset.allCases) { mode in
+                Picker("使用方式", selection: $providerUsageMode) {
+                    ForEach(AIConnectionUsageMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .controlSize(AppButtonLayout.controlSize)
-                .onChange(of: kimiConnectionMode) { _, _ in applyKimiConnectionMode() }
+                .onChange(of: providerUsageMode) { _, _ in applySelectedProviderUsageMode() }
 
-                Text(kimiConnectionMode.subtitle)
+                Text(providerUsageSubtitle)
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("当前接口地址：\(kimiConnectionMode.openAIEndpoint)")
+                Text("当前接口地址：\(baseURLString)")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+
+                if providerUsageMode == .subscriptionPlan, let plan = activeProviderPreset.subscriptionPlan {
+                    subscriptionPlanActionButtons(
+                        purchaseURLString: plan.purchaseURLString,
+                        managementURLString: plan.managementURLString
+                    )
+                    if let notice = plan.restrictionNotice {
+                        subscriptionPlanRestrictionNotice(notice)
+                    }
+                }
             }
         }
+    }
+
+    private var providerUsageSubtitle: String {
+        guard providerUsageMode == .subscriptionPlan, let plan = activeProviderPreset.subscriptionPlan else {
+            return "使用服务商普通 API Key，按实际调用量计费。"
+        }
+        return plan.subtitle
+    }
+
+    private func subscriptionPlanActionButtons(purchaseURLString: String, managementURLString: String) -> some View {
+        HStack(spacing: SettingsListLayout.spaceS) {
+            Button {
+                guard let url = URL(string: purchaseURLString) else { return }
+                openURL(url)
+            } label: {
+                Label("查看官方套餐", systemImage: "cart")
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                guard let url = URL(string: managementURLString) else { return }
+                openURL(url)
+            } label: {
+                Label("管理套餐与 Key", systemImage: "key")
+            }
+            .buttonStyle(.bordered)
+        }
+        .controlSize(.small)
+    }
+
+    private func subscriptionPlanRestrictionNotice(_ notice: String) -> some View {
+        Label(notice, systemImage: "exclamationmark.triangle")
+            .font(SettingsListTypography.rowCaption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(SettingsListLayout.spaceM)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
     }
 
     private func primaryAPIKeyEntryCard(placeholder: String) -> some View {
@@ -1825,7 +1886,9 @@ struct AIConnectionSetupView: View {
 
     private var apiKeyPlaceholderForCurrentPreset: String {
         if isXiaomiMiMoOption { return xiaomiMiMoConnectionMode.keyPlaceholder }
-        if isKimiOption { return kimiConnectionMode.keyPlaceholder }
+        if providerUsageMode == .subscriptionPlan, let plan = activeProviderPreset.subscriptionPlan {
+            return plan.keyPlaceholder
+        }
         if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.keyPlaceholder }
         if option.providerMode == .anthropicMessages { return "sk-ant-..." }
         return "sk-..."
@@ -2055,9 +2118,6 @@ struct AIConnectionSetupView: View {
         if isXiaomiMiMoOption {
             applyXiaomiMiMoConnectionMode()
         }
-        if isKimiOption {
-            applyKimiConnectionMode()
-        }
         if option.id == "claude-pro-max" {
         }
     }
@@ -2068,33 +2128,18 @@ struct AIConnectionSetupView: View {
         setSuggestedConnectionName(endpoint: baseURLString, fallback: option.connectionName, protocolName: AIConnectionCustomProtocol.openAICompatible.connectionNameComponent)
     }
 
-    private func applyKimiConnectionMode() {
-        guard isKimiOption else { return }
-        baseURLString = kimiConnectionMode.openAIEndpoint
-        customProtocol = .openAICompatible
-        model = kimiConnectionMode.availableModels.joined(separator: ",")
-        selectedModel = kimiConnectionMode.defaultModel
-        selectedModelIDs = Set(kimiConnectionMode.availableModels)
-        setSuggestedConnectionName(
-            endpoint: baseURLString,
-            fallback: kimiConnectionMode.connectionName,
-            protocolName: AIConnectionCustomProtocol.openAICompatible.connectionNameComponent
-        )
-    }
-
     private func applySelectedProviderPreset() {
         let preset = activeProviderPreset
         if preset.id != "custom" {
+            providerUsageMode = .payAsYouGo
             baseURLString = preset.endpoint
             customProtocol = preset.protocolKind
             setSuggestedConnectionName(endpoint: preset.endpoint, fallback: preset.title, protocolName: preset.protocolKind.connectionNameComponent)
             model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
             selectedModelIDs = Set(preset.availableModels)
-            if preset.id == "moonshot" {
-                applyKimiConnectionMode()
-            }
         } else {
+            providerUsageMode = .payAsYouGo
             baseURLString = ""
             model = ""
             selectedModel = ""
@@ -2103,6 +2148,37 @@ struct AIConnectionSetupView: View {
             shouldFetchModelsList = true
             setSuggestedConnectionName(endpoint: "", fallback: option.connectionName, protocolName: customProtocol.connectionNameComponent)
         }
+    }
+
+    private func applySelectedProviderUsageMode() {
+        let preset = activeProviderPreset
+        let endpoint: String
+        let availableModels: [String]
+        let defaultModel: String
+        let fallbackName: String
+
+        if providerUsageMode == .subscriptionPlan, let plan = preset.subscriptionPlan {
+            endpoint = plan.endpoint
+            availableModels = plan.availableModels
+            defaultModel = plan.defaultModel
+            fallbackName = plan.title
+        } else {
+            endpoint = preset.endpoint
+            availableModels = preset.availableModels
+            defaultModel = preset.defaultModel
+            fallbackName = preset.title
+        }
+
+        baseURLString = endpoint
+        customProtocol = .openAICompatible
+        model = availableModels.joined(separator: ",")
+        selectedModel = defaultModel
+        selectedModelIDs = Set(availableModels)
+        setSuggestedConnectionName(
+            endpoint: endpoint,
+            fallback: fallbackName,
+            protocolName: AIConnectionCustomProtocol.openAICompatible.connectionNameComponent
+        )
     }
 
     private func updateSelectedModels(modelID: String, isSelected: Bool, availableModels: [String]) {
@@ -2240,13 +2316,9 @@ struct AIConnectionSetupView: View {
         option.id == "xiaomi-mimo"
     }
 
-    private var isKimiOption: Bool {
-        (option.id == "china-provider" || option.id == "other-provider") && selectedProviderPresetID == "moonshot"
-    }
-
     private func currentPresetModelOptions() -> [String] {
-        if isKimiOption {
-            return kimiConnectionMode.availableModels
+        if providerUsageMode == .subscriptionPlan, let plan = activeProviderPreset.subscriptionPlan {
+            return plan.availableModels
         }
         if option.id == "deepseek" || option.id == "xiaomi-mimo" {
             return option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels

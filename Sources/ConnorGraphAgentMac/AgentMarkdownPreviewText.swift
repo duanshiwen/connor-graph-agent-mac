@@ -83,13 +83,12 @@ struct AgentMarkdownPreviewText: View {
                 markdown: markdown,
                 options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
             )) ?? AttributedString(markdown)
-            let rendered = parsed.withLinkCursor()
             inlineCache.setObject(
-                AttributedStringBox(rendered),
+                AttributedStringBox(parsed),
                 forKey: cacheKey,
                 cost: max(markdown.utf8.count, 1)
             )
-            return rendered
+            return parsed
         }
     }
 
@@ -123,8 +122,11 @@ struct AgentMarkdownPreviewText: View {
         Group {
             switch renderStrategy {
             case .inlineOnly:
-                Text(lightweightInlineRendered)
-                    .font(monospacedFallback ? monospacedBodyFont : font)
+                inlineText(
+                    lightweightInlineRendered,
+                    font: monospacedFallback ? monospacedBodyFont : font,
+                    nativeFont: monospacedFallback ? monospacedBodyNSFont : bodyNSFont
+                )
                     .lineLimit(lineLimit)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -136,8 +138,7 @@ struct AgentMarkdownPreviewText: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             case .deferredPreview:
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(lightweightInlineRendered)
-                        .font(font)
+                    inlineText(lightweightInlineRendered, font: font, nativeFont: bodyNSFont)
                         .lineLimit(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("内容较长，已先显示轻量预览以保持界面响应。")
@@ -193,13 +194,15 @@ struct AgentMarkdownPreviewText: View {
     private func view(for block: AgentMarkdownCompiledBlock) -> some View {
         switch block.content {
         case .heading(let level, let text, let inline):
-            Text(RenderCache.shared.inlineRendered(text, attributed: inline))
-                .font(headingFont(level))
+            inlineText(
+                RenderCache.shared.inlineRendered(text, attributed: inline),
+                font: headingFont(level),
+                nativeFont: headingNSFont(level)
+            )
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .paragraph(let text, let inline):
-            Text(RenderCache.shared.inlineRendered(text, attributed: inline))
-                .font(font)
+            inlineText(RenderCache.shared.inlineRendered(text, attributed: inline), font: font, nativeFont: bodyNSFont)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .unorderedItem(let text, let inline):
@@ -207,8 +210,7 @@ struct AgentMarkdownPreviewText: View {
                 Text("•")
                     .font(font)
                     .frame(width: 12, alignment: .trailing)
-                Text(RenderCache.shared.inlineRendered(text, attributed: inline))
-                    .font(font)
+                inlineText(RenderCache.shared.inlineRendered(text, attributed: inline), font: font, nativeFont: bodyNSFont)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -220,15 +222,18 @@ struct AgentMarkdownPreviewText: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 22, alignment: .trailing)
-                Text(RenderCache.shared.inlineRendered(text, attributed: inline))
-                    .font(font)
+                inlineText(RenderCache.shared.inlineRendered(text, attributed: inline), font: font, nativeFont: bodyNSFont)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 2)
         case .quote(let text, let inline):
-            Text(RenderCache.shared.inlineRendered(text, attributed: inline))
-                .font(font)
+            inlineText(
+                RenderCache.shared.inlineRendered(text, attributed: inline),
+                font: font,
+                nativeFont: bodyNSFont,
+                nativeColor: .secondaryLabelColor
+            )
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 11)
@@ -244,8 +249,13 @@ struct AgentMarkdownPreviewText: View {
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .tertiary)
                     .frame(width: 14, alignment: .center)
-                Text(RenderCache.shared.inlineRendered(text, attributed: inline))
-                    .font(font)
+                inlineText(
+                    RenderCache.shared.inlineRendered(text, attributed: inline),
+                    font: font,
+                    nativeFont: bodyNSFont,
+                    nativeColor: isCompleted ? .secondaryLabelColor : .labelColor,
+                    strikethrough: isCompleted
+                )
                     .foregroundStyle(isCompleted ? .secondary : .primary)
                     .strikethrough(isCompleted, color: .secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -312,8 +322,11 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private func tableCell(_ text: String, isHeader: Bool, alignment: Alignment) -> some View {
-        Text(renderTableCellInline(text))
-            .font(isHeader ? font.weight(.semibold) : font)
+        inlineText(
+            renderTableCellInline(text),
+            font: isHeader ? font.weight(.semibold) : font,
+            nativeFont: isHeader ? NSFontManager.shared.convert(bodyNSFont, toHaveTrait: .boldFontMask) : bodyNSFont
+        )
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
             .frame(minWidth: 92, maxWidth: .infinity, alignment: alignment)
@@ -359,6 +372,27 @@ struct AgentMarkdownPreviewText: View {
         return .system(size: max(10, bodyPointSize + semanticSize - systemBodySize), weight: .semibold)
     }
 
+    private func headingNSFont(_ level: Int) -> NSFont {
+        let size: CGFloat
+        if let bodyPointSize {
+            let systemBodySize = NSFont.preferredFont(forTextStyle: .body).pointSize
+            let semanticSize: CGFloat
+            switch level {
+            case 1: semanticSize = NSFont.preferredFont(forTextStyle: .title3).pointSize
+            case 2: semanticSize = NSFont.preferredFont(forTextStyle: .headline).pointSize
+            default: semanticSize = NSFont.preferredFont(forTextStyle: .callout).pointSize
+            }
+            size = max(10, bodyPointSize + semanticSize - systemBodySize)
+        } else {
+            switch level {
+            case 1: size = NSFont.preferredFont(forTextStyle: .title3).pointSize
+            case 2: size = NSFont.preferredFont(forTextStyle: .headline).pointSize
+            default: size = NSFont.preferredFont(forTextStyle: .callout).pointSize
+            }
+        }
+        return NSFont.systemFont(ofSize: size, weight: .semibold)
+    }
+
     private var secondaryFont: Font {
         guard let bodyPointSize else { return AgentChatTypography.meta }
         return .system(size: max(10, bodyPointSize - 1))
@@ -367,6 +401,14 @@ struct AgentMarkdownPreviewText: View {
     private var monospacedBodyFont: Font {
         guard let bodyPointSize else { return AgentChatTypography.monoMeta }
         return .system(size: max(10, bodyPointSize - 1), design: .monospaced)
+    }
+
+    private var bodyNSFont: NSFont {
+        .systemFont(ofSize: bodyPointSize ?? NSFont.preferredFont(forTextStyle: .body).pointSize)
+    }
+
+    private var monospacedBodyNSFont: NSFont {
+        .monospacedSystemFont(ofSize: bodyPointSize.map { max(10, $0 - 1) } ?? NSFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
     }
 
     private var monospacedLabelFont: Font {
@@ -378,19 +420,154 @@ struct AgentMarkdownPreviewText: View {
         RenderCache.shared.inlineRendered(text)
     }
 
+    @ViewBuilder
+    private func inlineText(
+        _ attributed: AttributedString,
+        font: Font,
+        nativeFont: NSFont,
+        nativeColor: NSColor = .labelColor,
+        strikethrough: Bool = false
+    ) -> some View {
+        if attributed.runs.contains(where: { $0.link != nil }) {
+            AgentMarkdownLinkText(
+                attributed: attributed,
+                baseFont: nativeFont,
+                baseColor: nativeColor,
+                strikethrough: strikethrough
+            )
+        } else {
+            Text(attributed).font(font)
+        }
+    }
+
 }
 
-private extension AttributedString {
-    func withLinkCursor() -> AttributedString {
-        guard runs.contains(where: { $0.link != nil }) else { return self }
+struct AgentMarkdownLinkText: NSViewRepresentable {
+    var attributed: AttributedString
+    var baseFont: NSFont
+    var baseColor: NSColor
+    var strikethrough: Bool
 
-        let result = NSMutableAttributedString(self)
-        let fullRange = NSRange(location: 0, length: result.length)
-        result.enumerateAttribute(.link, in: fullRange) { value, range, _ in
-            guard value != nil else { return }
-            result.addAttribute(.cursor, value: NSCursor.pointingHand, range: range)
+    @Environment(\.openURL) private var openURL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(openURL: openURL)
+    }
+
+    func makeNSView(context: Context) -> LinkTextView {
+        let textView = LinkTextView()
+        textView.delegate = context.coordinator
+        return textView
+    }
+
+    func updateNSView(_ textView: LinkTextView, context: Context) {
+        context.coordinator.openURL = openURL
+        let rendered = Self.renderedAttributedString(
+            attributed,
+            baseFont: baseFont,
+            baseColor: baseColor,
+            strikethrough: strikethrough
+        )
+        if !textView.attributedString().isEqual(to: rendered) {
+            textView.textStorage?.setAttributedString(rendered)
+            textView.window?.invalidateCursorRects(for: textView)
         }
-        return AttributedString(result)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: LinkTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0,
+              let textContainer = nsView.textContainer,
+              let layoutManager = nsView.layoutManager else { return nil }
+        textContainer.containerSize = CGSize(width: width, height: .greatestFiniteMagnitude)
+        layoutManager.ensureLayout(for: textContainer)
+        let height = ceil(layoutManager.usedRect(for: textContainer).height)
+        return CGSize(width: width, height: max(height, baseFont.ascender - baseFont.descender))
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var openURL: OpenURLAction
+
+        init(openURL: OpenURLAction) {
+            self.openURL = openURL
+        }
+
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            let url: URL?
+            switch link {
+            case let value as URL: url = value
+            case let value as String: url = URL(string: value)
+            default: url = nil
+            }
+            guard let url else { return false }
+            openURL(url)
+            return true
+        }
+    }
+
+    final class LinkTextView: NSTextView {
+        init() {
+            let storage = NSTextStorage()
+            let layoutManager = NSLayoutManager()
+            let container = NSTextContainer(size: .zero)
+            storage.addLayoutManager(layoutManager)
+            layoutManager.addTextContainer(container)
+            super.init(frame: .zero, textContainer: container)
+
+            drawsBackground = false
+            isEditable = false
+            isSelectable = true
+            isRichText = true
+            isHorizontallyResizable = false
+            isVerticallyResizable = true
+            textContainerInset = .zero
+            container.lineFragmentPadding = 0
+            container.widthTracksTextView = true
+            linkTextAttributes = [
+                .foregroundColor: NSColor.linkColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ]
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { nil }
+    }
+
+    static func renderedAttributedString(
+        _ attributed: AttributedString,
+        baseFont: NSFont,
+        baseColor: NSColor,
+        strikethrough: Bool
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for run in attributed.runs {
+            let text = String(attributed[run.range].characters)
+            var font = baseFont
+            if let intent = run.inlinePresentationIntent {
+                var traits: NSFontTraitMask = []
+                if intent.contains(.stronglyEmphasized) { traits.insert(.boldFontMask) }
+                if intent.contains(.emphasized) { traits.insert(.italicFontMask) }
+                if !traits.isEmpty { font = NSFontManager.shared.convert(font, toHaveTrait: traits) }
+                if intent.contains(.code) {
+                    font = .monospacedSystemFont(ofSize: baseFont.pointSize, weight: .regular)
+                }
+            }
+
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: baseColor
+            ]
+            if let link = run.link {
+                attributes[.link] = link
+                attributes[.cursor] = NSCursor.pointingHand
+                attributes[.foregroundColor] = NSColor.linkColor
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            if strikethrough || run.inlinePresentationIntent?.contains(.strikethrough) == true {
+                attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+            }
+            result.append(NSAttributedString(string: text, attributes: attributes))
+        }
+        return result
     }
 }
 
