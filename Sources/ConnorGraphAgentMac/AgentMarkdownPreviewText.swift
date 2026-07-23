@@ -442,7 +442,7 @@ struct AgentMarkdownPreviewText: View {
 
 }
 
-private struct AgentMarkdownLinkText: NSViewRepresentable {
+struct AgentMarkdownLinkText: NSViewRepresentable {
     var attributed: AttributedString
     var baseFont: NSFont
     var baseColor: NSColor
@@ -530,32 +530,9 @@ private struct AgentMarkdownLinkText: NSViewRepresentable {
 
         @available(*, unavailable)
         required init?(coder: NSCoder) { nil }
-
-        override func resetCursorRects() {
-            super.resetCursorRects()
-            guard let textStorage, let layoutManager, let textContainer else { return }
-            layoutManager.ensureLayout(for: textContainer)
-            let origin = textContainerOrigin
-            let fullRange = NSRange(location: 0, length: textStorage.length)
-            textStorage.enumerateAttribute(.link, in: fullRange) { value, characterRange, _ in
-                guard value != nil else { return }
-                let glyphRange = layoutManager.glyphRange(forCharacterRange: characterRange, actualCharacterRange: nil)
-                layoutManager.enumerateEnclosingRects(
-                    forGlyphRange: glyphRange,
-                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                    in: textContainer
-                ) { rect, _ in
-                    let cursorRect = rect
-                        .offsetBy(dx: origin.x, dy: origin.y)
-                        .intersection(self.visibleRect)
-                    guard !cursorRect.isNull, !cursorRect.isEmpty else { return }
-                    self.addCursorRect(cursorRect, cursor: .pointingHand)
-                }
-            }
-        }
     }
 
-    private static func renderedAttributedString(
+    static func renderedAttributedString(
         _ attributed: AttributedString,
         baseFont: NSFont,
         baseColor: NSColor,
@@ -581,6 +558,7 @@ private struct AgentMarkdownLinkText: NSViewRepresentable {
             ]
             if let link = run.link {
                 attributes[.link] = link
+                attributes[.cursor] = NSCursor.pointingHand
                 attributes[.foregroundColor] = NSColor.linkColor
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }
