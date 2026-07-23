@@ -558,7 +558,7 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
         store: store,
         settingsRepository: settings,
         storagePaths: storagePaths,
-        memoryOSContextToolConfiguration: .init(minimumResultLimit: 17, defaultResultLimit: 17, maxDepth: 3)
+        memoryOSContextToolConfiguration: .init(pageSize: 17, maxDepth: 3)
     )
 
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
@@ -611,7 +611,8 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
         MemoryOSContextToolResponse.self,
         from: Data(try #require(result.contentJSON).utf8)
     )
-    #expect(response.requestedLimit == 17)
+    #expect(response.page == 1)
+    #expect(response.pageSize == 17)
     // memory_os_trace_evidence was removed - verify it's gone
     #expect(!names.contains("memory_os_trace_evidence"))
     #expect(!names.contains("graph_ingest_episode"))

@@ -76,17 +76,18 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(knowledge.contentText.contains("durable semantics"))
         #expect(!knowledge.contentText.contains("currently active"))
         let recentResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(recent.contentJSON.utf8))
-        #expect(recentResponse.requestedLimit == 10)
+        #expect(recentResponse.page == 1)
+        #expect(recentResponse.pageSize == 40)
         #expect(recentResponse.records.contains { $0.recordID == "status" && $0.layer == "L2" })
         #expect(recent.citations.contains("status"))
-        #expect(recentResponse.hasMore == nil)
-        #expect(recentResponse.partial == false)
+        #expect(recentResponse.hasNextPage == false)
+        #expect(recentResponse.nextPage == nil)
         #expect(throws: MemoryOSBackgroundToolExecutionError.self) {
             try executor.execute(MemoryOSBackgroundToolCall(id: "legacy", name: "memory_os_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
         }
     }
 
-    @Test func contextLimitExpansionReturnsOnlyNewStructuredRecordsWithinRun() throws {
+    @Test func contextPaginationReturnsSequentialStructuredRecords() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()
         let now = Date(timeIntervalSince1970: 3_000)
@@ -102,27 +103,29 @@ struct MemoryOSBackgroundToolExecutorTests {
         }
         let executor = MemoryOSBackgroundToolExecutor(
             facade: AppMemoryOSFacade(store: store),
-            contextToolConfiguration: .init(minimumResultLimit: 2, defaultResultLimit: 2, maxDepth: 4)
+            contextToolConfiguration: .init(pageSize: 2, maxDepth: 4)
         )
         let context = MemoryOSBackgroundToolExecutionContext(runID: "incremental-run", iteration: 1)
 
         let first = try executor.execute(
-            .init(id: "first", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Incremental protocol","limit":2}"#),
+            .init(id: "first", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Incremental protocol"}"#),
             context: context
         )
-        let expanded = try executor.execute(
-            .init(id: "expanded", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Incremental protocol","limit":5}"#),
+        let second = try executor.execute(
+            .init(id: "second", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Incremental protocol","page":2}"#),
             context: context
         )
         let firstResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(first.contentJSON.utf8))
-        let expandedResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(expanded.contentJSON.utf8))
+        let secondResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(second.contentJSON.utf8))
 
-        #expect(firstResponse.returnedCount == 2)
-        #expect(firstResponse.cumulativeReturnedCount == 2)
-        #expect(expandedResponse.returnedCount == 3)
-        #expect(expandedResponse.cumulativeReturnedCount == 5)
-        #expect(Set(firstResponse.records.map(\.recordID)).isDisjoint(with: expandedResponse.records.map(\.recordID)))
-        #expect(expandedResponse.records.allSatisfy { $0.depth == 0 && $0.status == "active" })
+        #expect(firstResponse.returnedItems == 2)
+        #expect(firstResponse.totalItems == 6)
+        #expect(firstResponse.totalPages == 3)
+        #expect(firstResponse.nextPage == 2)
+        #expect(secondResponse.page == 2)
+        #expect(secondResponse.nextPage == 3)
+        #expect(Set(firstResponse.records.map(\.recordID)).isDisjoint(with: secondResponse.records.map(\.recordID)))
+        #expect(secondResponse.records.allSatisfy { $0.depth == 0 && $0.status == "active" })
     }
 
     @Test func backgroundContextToolSupportsEmptyQueryTimeRange() throws {
@@ -146,6 +149,24 @@ struct MemoryOSBackgroundToolExecutorTests {
         let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(result.contentJSON.utf8))
         #expect(response.query.isEmpty)
         #expect(response.records.contains { $0.recordID == "range-inside" && $0.occurredAt == ISO8601DateFormatter().string(from: object.occurredAt) })
+    }
+
+    @Test func backgroundContextToolReturnsStructuredInvalidPageError() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        let result = try executor.execute(
+            .init(id: "invalid-page", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","page":0}"#),
+            context: .init(runID: "invalid-page-run", iteration: 1)
+        )
+        let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(result.contentJSON.utf8))
+        let json = try #require(JSONSerialization.jsonObject(with: Data(result.contentJSON.utf8)) as? [String: Any])
+
+        #expect(!response.success)
+        #expect(result.error == response.reason)
+        #expect(response.reason.contains("page must be at least 1"))
+        #expect(json["records"] is NSNull)
     }
 
     @Test func l2UpdateToolAcceptsStatementStringShorthandInBackgroundExecutor() throws {
