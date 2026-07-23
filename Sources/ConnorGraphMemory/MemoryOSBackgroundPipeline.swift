@@ -615,7 +615,7 @@ public enum MemoryOSBackgroundToolCatalog {
     }
 
     private static func recentContextTool() -> MemoryOSBackgroundToolDescriptor {
-        MemoryOSBackgroundToolDescriptor(
+        return MemoryOSBackgroundToolDescriptor(
             name: "memory_os_recent_context",
             description: "Search L1/L2 operational memory by optional topic and/or ISO-8601 source-event occurrence time range.",
             inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Optional topic filter; empty means all records in the supplied range.\"},\"startDate\":{\"type\":\"string\",\"description\":\"Optional inclusive ISO-8601 timestamp.\"},\"endDate\":{\"type\":\"string\",\"description\":\"Optional exclusive ISO-8601 timestamp.\"},\"page\":{\"type\":\"integer\",\"description\":\"Optional 1-based page number; defaults to 1.\"}},\"required\":[],\"additionalProperties\":false}",
@@ -624,7 +624,7 @@ public enum MemoryOSBackgroundToolCatalog {
     }
 
     private static func knowledgeContextTool() -> MemoryOSBackgroundToolDescriptor {
-        MemoryOSBackgroundToolDescriptor(
+        return MemoryOSBackgroundToolDescriptor(
             name: "memory_os_knowledge_context",
             description: "Search L3/L4 reusable knowledge by optional topic and/or ISO-8601 source-event occurrence time range, with explicit pagination and graph depth.",
             inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Optional topic filter; empty means all records in the supplied range.\"},\"startDate\":{\"type\":\"string\",\"description\":\"Optional inclusive ISO-8601 timestamp.\"},\"endDate\":{\"type\":\"string\",\"description\":\"Optional exclusive ISO-8601 timestamp.\"},\"page\":{\"type\":\"integer\",\"description\":\"Optional 1-based page number; defaults to 1.\"},\"depth\":{\"type\":\"integer\",\"description\":\"Optional graph depth from 1 through the configured maximum; defaults to 1.\"}},\"required\":[],\"additionalProperties\":false}",
@@ -633,7 +633,7 @@ public enum MemoryOSBackgroundToolCatalog {
     }
 
     private static func expandL4Tool(usage: String) -> MemoryOSBackgroundToolDescriptor {
-        MemoryOSBackgroundToolDescriptor(
+        return MemoryOSBackgroundToolDescriptor(
             name: "memory_os_expand_l4",
             description: "Expand a Memory OS L4 stable entity or concept by depth-limited graph traversal. Accepts entity name (not ID) — internally resolves to the matching L4 entity.",
             inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"entityName\":{\"type\":\"string\",\"description\":\"L4 entity name to expand.\"},\"depth\":{\"type\":\"integer\",\"description\":\"Optional traversal depth; defaults to 5 and is capped at 10.\"},\"limit\":{\"type\":\"integer\",\"description\":\"Optional maximum hits; defaults to 200.\"}},\"required\":[\"entityName\"],\"additionalProperties\":false}",
@@ -660,19 +660,23 @@ public enum MemoryOSBackgroundToolCatalog {
     }
 
     private static func l2UpdateEntitiesTool() -> MemoryOSBackgroundToolDescriptor {
-        MemoryOSBackgroundToolDescriptor(
+        let entityTypes = jsonArray(MemoryOSEntityType.allCases.map(\.rawValue))
+        let relations = jsonArray(GraphPredicate.allCases.map(\.rawValue))
+        return MemoryOSBackgroundToolDescriptor(
             name: "memory_os_l2_update_entities",
             description: "Write L2 entity-centered working memory. Upserts entities by name and appends statements.",
-            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"entities\":{\"type\":\"array\",\"description\":\"Entities to update.\",\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Entity name.\"},\"type\":{\"type\":\"string\",\"description\":\"Optional entity type.\"},\"aliases\":{\"type\":\"string\",\"description\":\"Optional separated aliases.\"},\"summary\":{\"type\":\"string\",\"description\":\"Optional summary.\"},\"statements\":{\"type\":\"array\",\"description\":\"Optional entity statements.\",\"items\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"Statement text.\"},\"relation\":{\"type\":\"string\",\"description\":\"Optional GraphPredicate raw value.\"},\"factType\":{\"type\":\"string\",\"description\":\"Optional L2 fact type.\"}},\"required\":[\"text\"],\"additionalProperties\":false}}},\"required\":[\"name\"],\"additionalProperties\":false}}},\"required\":[\"entities\"],\"additionalProperties\":false}",
+            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"entities\":{\"type\":\"array\",\"description\":\"Entities to update.\",\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Entity name.\"},\"type\":{\"type\":\"string\",\"enum\":\(entityTypes),\"description\":\"Optional entity type.\"},\"aliases\":{\"type\":\"string\",\"description\":\"Optional separated aliases.\"},\"summary\":{\"type\":\"string\",\"description\":\"Optional summary.\"},\"statements\":{\"type\":\"array\",\"description\":\"Optional entity statements.\",\"items\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"Statement text.\"},\"relation\":{\"type\":\"string\",\"enum\":\(relations),\"description\":\"Optional GraphPredicate raw value.\"},\"factType\":{\"type\":\"string\",\"description\":\"Optional L2 fact type.\"}},\"required\":[\"text\"],\"additionalProperties\":false}}},\"required\":[\"name\"],\"additionalProperties\":false}}},\"required\":[\"entities\"],\"additionalProperties\":false}",
             usagePolicy: "Use for general L2 entity writes (non-current-user). Search memory_os_recent_context first to check for existing operational entities. Use for work objects, people, events, documents, implementation facts, and relationships. Omit relation to use RELATED_TO; invalid relation values are rejected."
         )
     }
 
     private static func updateCurrentUserProfileTool() -> MemoryOSBackgroundToolDescriptor {
-        MemoryOSBackgroundToolDescriptor(
+        let factTypes = jsonArray(Array(MemoryOSCanonicalizer.allowedL2FactTypes).sorted())
+        let relations = jsonArray(GraphPredicate.allCases.map(\.rawValue))
+        return MemoryOSBackgroundToolDescriptor(
             name: "memory_os_update_current_user_profile",
             description: "Write current-user-scoped L2 fact statements. Automatically handles current_user anchor, timestamps, and projection.",
-            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"facts\":{\"type\":\"array\",\"description\":\"Current-user facts.\",\"items\":{\"type\":\"object\",\"properties\":{\"statement\":{\"type\":\"string\",\"description\":\"Complete fact statement.\"},\"factType\":{\"type\":\"string\",\"description\":\"Supported L2 fact type.\"},\"relation\":{\"type\":\"string\",\"description\":\"GraphPredicate raw value.\"}},\"required\":[\"statement\",\"factType\",\"relation\"],\"additionalProperties\":false}}},\"required\":[\"facts\"],\"additionalProperties\":false}",
+            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"facts\":{\"type\":\"array\",\"description\":\"Current-user facts.\",\"items\":{\"type\":\"object\",\"properties\":{\"statement\":{\"type\":\"string\",\"description\":\"Complete fact statement.\"},\"factType\":{\"type\":\"string\",\"enum\":\(factTypes),\"description\":\"Supported L2 fact type.\"},\"relation\":{\"type\":\"string\",\"enum\":\(relations),\"description\":\"GraphPredicate raw value.\"}},\"required\":[\"statement\",\"factType\",\"relation\"],\"additionalProperties\":false}}},\"required\":[\"facts\"],\"additionalProperties\":false}",
             usagePolicy: "MANDATORY for current-user facts. When evidence identifies the human operator (first-person references with source support), use this tool instead of memory_os_l2_update_entities. Only provide statement, factType, and relation. For interests/preferences, use PREFERS. For topic relations, use ABOUT. Invalid relation and factType values are rejected."
         )
     }
@@ -687,12 +691,17 @@ public enum MemoryOSBackgroundToolCatalog {
     }
 
     private static func l4UpdateEntitiesTool() -> MemoryOSBackgroundToolDescriptor {
-        MemoryOSBackgroundToolDescriptor(
+        let entityTypes = jsonArray(MemoryOSEntityType.allCases.map(\.rawValue))
+        return MemoryOSBackgroundToolDescriptor(
             name: "memory_os_l4_update_entities",
             description: "Write L4 stable entities and typed entity-to-entity relations. Entities are upserted by name+type.",
-            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"entities\":{\"type\":\"array\",\"description\":\"L4 entities to upsert.\",\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Entity name.\"},\"type\":{\"type\":\"string\",\"description\":\"Optional entity type.\"},\"domain\":{\"type\":\"string\",\"description\":\"Optional domain.\"},\"summary\":{\"type\":\"string\",\"description\":\"Optional summary.\"},\"aliases\":{\"type\":\"string\",\"description\":\"Optional separated aliases.\"}},\"required\":[\"name\"],\"additionalProperties\":false}},\"relations\":{\"type\":\"array\",\"description\":\"Optional L4 relations.\",\"items\":{\"type\":\"object\",\"properties\":{\"subjectName\":{\"type\":\"string\",\"description\":\"Subject entity name.\"},\"predicate\":{\"type\":\"string\",\"description\":\"L4 predicate raw value.\"},\"objectName\":{\"type\":\"string\",\"description\":\"Object entity name.\"},\"text\":{\"type\":\"string\",\"description\":\"Optional relation text.\"}},\"required\":[\"subjectName\",\"predicate\",\"objectName\"],\"additionalProperties\":false}}},\"required\":[\"entities\"],\"additionalProperties\":false}",
+            inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"entities\":{\"type\":\"array\",\"description\":\"L4 entities to upsert.\",\"items\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Entity name.\"},\"type\":{\"type\":\"string\",\"enum\":\(entityTypes),\"description\":\"Optional entity type.\"},\"domain\":{\"type\":\"string\",\"description\":\"Optional domain.\"},\"summary\":{\"type\":\"string\",\"description\":\"Optional summary.\"},\"aliases\":{\"type\":\"string\",\"description\":\"Optional separated aliases.\"}},\"required\":[\"name\"],\"additionalProperties\":false}},\"relations\":{\"type\":\"array\",\"description\":\"Optional L4 relations.\",\"items\":{\"type\":\"object\",\"properties\":{\"subjectName\":{\"type\":\"string\",\"description\":\"Subject entity name.\"},\"predicate\":{\"type\":\"string\",\"description\":\"L4 predicate raw value.\"},\"objectName\":{\"type\":\"string\",\"description\":\"Object entity name.\"},\"text\":{\"type\":\"string\",\"description\":\"Optional relation text.\"}},\"required\":[\"subjectName\",\"predicate\",\"objectName\"],\"additionalProperties\":false}}},\"required\":[\"entities\"],\"additionalProperties\":false}",
             usagePolicy: "Search L4 first to check for existing entities. Create conceptEntities only when the concept has a stable name, useful summary, clear type, and future retrieval value. Use controlled entity types. Common natural-language or graph-style predicate aliases are normalized conservatively at write time."
         )
+    }
+
+    private static func jsonArray(_ values: [String]) -> String {
+        String(decoding: try! JSONEncoder().encode(values), as: UTF8.self)
     }
 }
 

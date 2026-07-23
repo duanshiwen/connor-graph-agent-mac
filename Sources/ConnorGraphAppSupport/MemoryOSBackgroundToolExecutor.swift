@@ -273,7 +273,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
     }
 
-    private func inputSchema(for toolName: String) -> AgentToolInputSchema? {
+    func inputSchema(for toolName: String) -> AgentToolInputSchema? {
         switch toolName {
         case "memory_os_recent_context": MemoryOSRecentContextTool(facade: facade, configuration: contextToolConfiguration).inputSchema
         case "memory_os_knowledge_context": MemoryOSKnowledgeContextTool(facade: facade, configuration: contextToolConfiguration).inputSchema
