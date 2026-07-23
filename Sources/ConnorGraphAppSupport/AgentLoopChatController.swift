@@ -69,6 +69,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
+            currentUserMessageID: userMessage.id,
             recentMessages: recentMessages,
             permissionMode: loopController.configuration.permissionMode,
             personReferences: personReferences

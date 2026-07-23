@@ -309,6 +309,7 @@ public struct AgentToolExecutionContext: Sendable {
     public var sessionID: String
     public var groupID: String
     public var userPrompt: String
+    public var currentUserMessageID: String?
     public var toolCallID: String
     public var policyEngine: AgentPolicyEngine
     public var approvedCapabilities: Set<AgentPermissionCapability>
@@ -319,7 +320,8 @@ public struct AgentToolExecutionContext: Sendable {
         groupID: String,
         userPrompt: String,
         toolCallID: String,
-        policyEngine: AgentPolicyEngine
+        policyEngine: AgentPolicyEngine,
+        currentUserMessageID: String? = nil
     ) {
         self.init(
             runID: runID,
@@ -328,7 +330,8 @@ public struct AgentToolExecutionContext: Sendable {
             userPrompt: userPrompt,
             toolCallID: toolCallID,
             policyEngine: policyEngine,
-            approvedCapabilities: []
+            approvedCapabilities: [],
+            currentUserMessageID: currentUserMessageID
         )
     }
 
@@ -339,12 +342,14 @@ public struct AgentToolExecutionContext: Sendable {
         userPrompt: String,
         toolCallID: String,
         policyEngine: AgentPolicyEngine,
-        approvedCapabilities: Set<AgentPermissionCapability>
+        approvedCapabilities: Set<AgentPermissionCapability>,
+        currentUserMessageID: String? = nil
     ) {
         self.runID = runID
         self.sessionID = sessionID
         self.groupID = groupID
         self.userPrompt = userPrompt
+        self.currentUserMessageID = currentUserMessageID
         self.toolCallID = toolCallID
         self.policyEngine = policyEngine
         self.approvedCapabilities = approvedCapabilities

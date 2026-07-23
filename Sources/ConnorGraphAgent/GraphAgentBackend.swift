@@ -6,6 +6,7 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var sessionID: String
     public var groupID: String
     public var userMessage: String
+    public var currentUserMessageID: String?
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
     public var permissionMode: AgentPermissionMode
@@ -26,6 +27,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         sessionID: String,
         groupID: String = "default",
         userMessage: String,
+        currentUserMessageID: String? = nil,
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -41,6 +43,7 @@ public struct AgentChatRequest: Sendable, Equatable {
             sessionID: sessionID,
             groupID: groupID,
             userMessage: userMessage,
+            currentUserMessageID: currentUserMessageID,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
             permissionMode: permissionMode,
@@ -59,6 +62,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         sessionID: String,
         groupID: String = "default",
         userMessage: String,
+        currentUserMessageID: String? = nil,
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -74,6 +78,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.sessionID = sessionID
         self.groupID = groupID
         self.userMessage = userMessage
+        self.currentUserMessageID = currentUserMessageID
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
         self.permissionMode = permissionMode
