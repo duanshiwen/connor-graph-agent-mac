@@ -1,6 +1,42 @@
 import Foundation
 import ConnorGraphAgent
 
+public enum ConnorVoiceGender: String, Codable, Sendable, Equatable, CaseIterable, Identifiable {
+    case male
+    case female
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .male: "男声"
+        case .female: "女声"
+        }
+    }
+
+    public var voiceDesignDescription: String {
+        switch self {
+        case .male: "一位二十多岁的青年男性"
+        case .female: "一位二十多岁的青年女性"
+        }
+    }
+}
+
+public struct ConnorSpeechSettings: Codable, Sendable, Equatable {
+    public var voiceGender: ConnorVoiceGender
+    public var automaticallyReadsReplies: Bool
+
+    public init(
+        voiceGender: ConnorVoiceGender = .male,
+        automaticallyReadsReplies: Bool = false
+    ) {
+        self.voiceGender = voiceGender
+        self.automaticallyReadsReplies = automaticallyReadsReplies
+    }
+
+    public static let `default` = ConnorSpeechSettings()
+}
+
 public struct ConnorPersonalitySettings: Codable, Sendable, Equatable {
     public static let lockedDisplayName = "康纳同学"
     public static let empty = ConnorPersonalitySettings()

@@ -410,6 +410,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var defaultSearchEngine: DefaultSearchEngine
     public var connorPersonality: ConnorPersonalitySettings
     public var connorPersonalityRevision: Int
+    public var connorSpeech: ConnorSpeechSettings
 
     public init(
         displayName: String = "",
@@ -422,7 +423,8 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         notes: String = "",
         defaultSearchEngine: DefaultSearchEngine = .default,
         connorPersonality: ConnorPersonalitySettings = .balancedDefault,
-        connorPersonalityRevision: Int = 0
+        connorPersonalityRevision: Int = 0,
+        connorSpeech: ConnorSpeechSettings = .default
     ) {
         self.displayName = displayName
         self.timezone = timezone
@@ -435,6 +437,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.defaultSearchEngine = defaultSearchEngine
         self.connorPersonality = connorPersonality
         self.connorPersonalityRevision = max(0, connorPersonalityRevision)
+        self.connorSpeech = connorSpeech
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -449,6 +452,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         case defaultSearchEngine
         case connorPersonality
         case connorPersonalityRevision
+        case connorSpeech
     }
 
     public init(from decoder: Decoder) throws {
@@ -464,6 +468,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.defaultSearchEngine = try container.decodeIfPresent(DefaultSearchEngine.self, forKey: .defaultSearchEngine) ?? .default
         self.connorPersonality = try container.decodeIfPresent(ConnorPersonalitySettings.self, forKey: .connorPersonality) ?? .balancedDefault
         self.connorPersonalityRevision = max(0, try container.decodeIfPresent(Int.self, forKey: .connorPersonalityRevision) ?? 0)
+        self.connorSpeech = try container.decodeIfPresent(ConnorSpeechSettings.self, forKey: .connorSpeech) ?? .default
     }
 }
 

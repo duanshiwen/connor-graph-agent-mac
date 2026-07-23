@@ -249,6 +249,7 @@ struct SettingsShortcutsSection: View {
 
 struct SettingsPreferencesSection: View {
     @Bindable var model: UserPreferencesFeatureModel
+    @Bindable var aiConnections: AIConnectionsFeatureModel
     @State private var showsPersonalityResetConfirmation = false
 
     var body: some View {
@@ -414,6 +415,44 @@ struct SettingsPreferencesSection: View {
                     Button("取消", role: .cancel) {}
                 } message: {
                     Text("已保存的自定义性格会被清除，康纳同学将恢复默认对话风格。")
+                }
+            }
+            SettingsGroup(title: "康纳同学的声音") {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("音色性别")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text("音色会结合当前人格特征动态设计。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Picker("音色性别", selection: $model.connorVoiceGender) {
+                            ForEach(ConnorVoiceGender.allCases) { gender in
+                                Text(gender.displayName).tag(gender)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 168)
+                    }
+
+                    Divider()
+
+                    Toggle(isOn: $model.automaticallyReadsReplies) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("回复后自动朗读")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text(aiConnections.isXiaomiMiMOSpeechAvailable
+                                 ? "康纳同学完成回复后自动播放语音。"
+                                 : "需要先启用带有效 API Key 的 Xiaomi MiMo 按量付费连接。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(!aiConnections.isXiaomiMiMOSpeechAvailable)
                 }
             }
             SettingsGroup(title: "备注") {

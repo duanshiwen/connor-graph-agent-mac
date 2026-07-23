@@ -57,6 +57,21 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.connorPersonality == .balancedDefault)
         #expect(preferences.connorPersonality.gender == "中性")
         #expect(preferences.connorPersonalityRevision == 0)
+        #expect(preferences.connorSpeech == .default)
+    }
+
+    @Test func connorSpeechSettingsRoundTripAndLegacyDecode() throws {
+        let preferences = AgentRuntimePreferenceSettings(
+            connorSpeech: ConnorSpeechSettings(voiceGender: .female, automaticallyReadsReplies: true)
+        )
+
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
+        let legacy = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: Data("{}".utf8))
+
+        #expect(decoded.connorSpeech.voiceGender == .female)
+        #expect(decoded.connorSpeech.automaticallyReadsReplies)
+        #expect(legacy.connorSpeech == .default)
     }
 
     @Test func decodesLegacyPreferencesWithoutDefaultSearchEngineAsBing() throws {
