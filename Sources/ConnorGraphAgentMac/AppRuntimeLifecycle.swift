@@ -525,7 +525,9 @@ final class AppRuntimeLifecycle {
         self.inputSettingsModel = InputSettingsFeatureModel()
         self.userPreferencesModel = UserPreferencesFeatureModel()
         self.connorSpeechPlaybackCoordinator = ConnorSpeechPlaybackCoordinator(
-            settingsRepository: llmSettingsRepository
+            settingsRepository: llmSettingsRepository,
+            cacheDirectory: storagePaths?.applicationSupportDirectory
+                .appendingPathComponent("speech-cache", isDirectory: true)
         )
         self.workspaceSettingsModel = WorkspaceSettingsFeatureModel()
         self.permissionSettingsModel = PermissionSettingsFeatureModel()
