@@ -278,7 +278,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             FROM memory_l0_provenance_fts
             WHERE memory_l0_provenance_fts MATCH \(store.quote(ftsQuery(text)))
         )
-        SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, '')
+        SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, ''), COALESCE(o.source_id, '')
         FROM memory_l1_capture_events c
         JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
         WHERE (c.provenance_object_id IN (SELECT object_id FROM matched_objects)
@@ -287,6 +287,8 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         LIMIT \(query.limit)
         """).map { row in
             var metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
+            metadata["source_type"] = row[1]
+            metadata["source_id"] = row[7]
             metadata["occurred_at"] = row[6]
             metadata["updated_at"] = row[6]
             metadata["effective_updated_at"] = row[6]
@@ -395,7 +397,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         }
         if layers.contains(.l1) {
             hits += try store.query(sql: """
-            SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, '')
+            SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, ''), COALESCE(o.source_id, '')
             FROM memory_l1_capture_events c
             JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
             WHERE 1 = 1\(timePredicate("c.occurred_at", query: query))
@@ -403,7 +405,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             LIMIT \(query.limit)
             """).map { row in
                 var metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
-                metadata.merge(["occurred_at": row[6], "updated_at": row[6], "effective_updated_at": row[6], "status": normalizedStatus(metadata["status"])]) { _, new in new }
+                metadata.merge(["source_type": row[1], "source_id": row[7], "occurred_at": row[6], "updated_at": row[6], "effective_updated_at": row[6], "status": normalizedStatus(metadata["status"])]) { _, new in new }
                 return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[4], matchedText: row[5], score: 1, evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: true, metadata: metadata)
             }
         }

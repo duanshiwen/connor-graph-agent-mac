@@ -535,7 +535,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         groupID: request.groupID,
                         userPrompt: request.userMessage,
                         toolCallID: call.id,
-                        policyEngine: policy
+                        policyEngine: policy,
+                        currentUserMessageID: request.currentUserMessageID
                     )
                     let result: AgentToolResult
                     do {
@@ -586,7 +587,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             groupID: request.groupID,
             userPrompt: request.userMessage,
             toolCallID: call.id,
-            policyEngine: policy
+            policyEngine: policy,
+            currentUserMessageID: request.currentUserMessageID
         )
         do {
             let result = try await executeToolWithApprovalIfNeeded(

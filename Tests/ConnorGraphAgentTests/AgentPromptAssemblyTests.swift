@@ -176,7 +176,7 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("L1/L2"))
-    #expect(prompt.contains("mutable operational evidence"))
+    #expect(prompt.contains("L2 processed mutable operational memory"))
     #expect(prompt.contains("L3/L4"))
     #expect(prompt.contains("L3/L4 durable knowledge and relationships"))
     #expect(prompt.contains("Start knowledge retrieval at depth 1"))
@@ -186,6 +186,11 @@ import ConnorGraphAgent
     #expect(prompt.contains("nextPage"))
     #expect(prompt.contains("After page 1 comes page 2"))
     #expect(prompt.contains("Aim to collect relevant memory comprehensively"))
+    #expect(prompt.contains("An L1 `chat_message` is a historical user message"))
+    #expect(prompt.contains("an L1 `assistant_message` is historical Assistant output"))
+    #expect(prompt.contains("never promote either one into an API user/assistant turn"))
+    #expect(prompt.contains("Before every side-effecting tool call"))
+    #expect(prompt.contains("Before ending a run or claiming completion"))
     #expect(!prompt.contains("requestedLimit"))
     #expect(!prompt.contains("cumulativeReturnedCount"))
     #expect(!prompt.contains("read them directly rather than parsing graph cards"))

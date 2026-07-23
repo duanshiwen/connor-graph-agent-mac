@@ -39,6 +39,7 @@ public struct MemoryOSContextToolRecord: Codable, Sendable, Equatable, Identifia
     public var id: String { recordID }
     public var recordID: String
     public var layer: String
+    public var sourceType: String? = nil
     public var text: String
     public var occurredAt: String?
     public var updatedAt: String?
@@ -52,6 +53,7 @@ public struct MemoryOSContextToolRecord: Codable, Sendable, Equatable, Identifia
     enum CodingKeys: String, CodingKey {
         case recordID = "record_id"
         case layer
+        case sourceType = "source_type"
         case text
         case occurredAt = "occurred_at"
         case updatedAt = "updated_at"
