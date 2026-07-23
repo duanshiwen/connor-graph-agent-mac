@@ -65,8 +65,16 @@ public struct AgentPromptDiagnostics: Codable, Sendable, Equatable {
 public struct AgentInstructionSection: Sendable, Equatable {
     public var text: String
 
-    public init(text: String = Self.defaultConnorInstruction) {
-        self.text = text
+    public init(text: String? = nil) {
+        self.text = text ?? Self.runtimeConnorInstruction
+    }
+
+    public static var runtimeConnorInstruction: String {
+        connorInstruction(runtimeEnvironment: .current())
+    }
+
+    public static func connorInstruction(runtimeEnvironment: AgentRuntimeEnvironmentDescription) -> String {
+        [defaultConnorInstruction, runtimeEnvironment.promptSection].joined(separator: "\n\n")
     }
 
     public static let defaultConnorInstruction = """

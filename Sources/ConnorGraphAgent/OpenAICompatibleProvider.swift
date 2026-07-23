@@ -346,7 +346,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     }
 
     private var systemPrompt: String {
-        AgentInstructionSection.defaultConnorInstruction
+        AgentInstructionSection.runtimeConnorInstruction
     }
 
     private func requestHeaders() -> [String: String] {

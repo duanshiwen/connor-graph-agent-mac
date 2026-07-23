@@ -2,6 +2,34 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphAgent
 
+@Test func runtimeSystemPromptDescribesCurrentDeviceAndOperatingSystem() {
+    let environment = AgentRuntimeEnvironmentDescription(
+        deviceType: "Mac",
+        hardwareModel: "Mac15,7",
+        architecture: "arm64",
+        operatingSystemName: "macOS",
+        operatingSystemVersion: "15.5.0",
+        operatingSystemDescription: "Version 15.5 (Build 24F74)"
+    )
+
+    let prompt = AgentInstructionSection.connorInstruction(runtimeEnvironment: environment)
+
+    #expect(prompt.contains("## Runtime Environment"))
+    #expect(prompt.contains("current Mac; hardware model: Mac15,7"))
+    #expect(prompt.contains("processor architecture: arm64"))
+    #expect(prompt.contains("Operating system: macOS 15.5.0"))
+    #expect(prompt.contains("system version description: Version 15.5 (Build 24F74)"))
+    #expect(prompt.contains("Do not infer that a tool, permission, application, or hardware capability is available"))
+}
+
+@Test func defaultInstructionSectionIncludesRuntimeEnvironment() {
+    let prompt = AgentInstructionSection().text
+
+    #expect(prompt.contains(AgentInstructionSection.defaultConnorInstruction))
+    #expect(prompt.contains("## Runtime Environment"))
+    #expect(prompt.contains("Operating system:"))
+}
+
 @Test func agentPromptAssemblyUsesGeneralPurposeConnorInstruction() {
     let assembly = AgentPromptAssembler().assemble(
         request: AgentChatRequest(sessionID: "session-prompt", userMessage: "Help me plan"),
