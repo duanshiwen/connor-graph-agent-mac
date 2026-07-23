@@ -99,11 +99,13 @@ struct ChatFeatureDependencies {
     let browser: BrowserFeatureModel
     let appSettings: AppSettingsFeatureModel
     let inputSettings: InputSettingsFeatureModel
+    let userPreferences: UserPreferencesFeatureModel
     let workspaceSettings: WorkspaceSettingsFeatureModel
     let skills: SkillRuntimeFeatureModel
     let contacts: ContactsFeatureModel
     let governance: GovernanceFeatureModel
     let aiConnections: AIConnectionsFeatureModel
+    let speechPlayback: ConnorSpeechPlaybackCoordinator
     let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
     let sources: SourceRuntimeFeatureModel
     let permissionMode: () -> AgentPermissionMode

@@ -132,6 +132,8 @@ struct AgentChatMessageRow: View {
     var onSaveImageAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
+    var speechPresentation = ConnorSpeechActionPresentation(isAvailable: false, phase: .idle, messageID: "")
+    var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -243,6 +245,8 @@ struct AgentChatMessageRow: View {
                 if assistantActionsPresentation.showsActions {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
+                        speechPresentation: speechPresentation,
+                        onToggleSpeech: { onToggleSpeech(row) },
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
                     )
@@ -334,11 +338,23 @@ struct AgentChatMessageRow: View {
 
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
+    var speechPresentation: ConnorSpeechActionPresentation
+    var onToggleSpeech: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceM) {
+            if speechPresentation.isVisible {
+                actionButton(
+                    title: speechPresentation.title,
+                    systemImage: speechPresentation.systemImage,
+                    accessibilityLabel: speechPresentation.accessibilityLabel,
+                    help: speechPresentation.help,
+                    showsProgress: speechPresentation.isLoading,
+                    action: onToggleSpeech
+                )
+            }
             actionButton(
                 title: presentation.copyTitle,
                 systemImage: "doc.on.doc",
@@ -364,13 +380,20 @@ private struct AgentAssistantMessageActionsView: View {
         systemImage: String,
         accessibilityLabel: String,
         help: String,
+        showsProgress: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 10, weight: .medium))
-                    .imageScale(.small)
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .frame(width: 10, height: 10)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 10, weight: .medium))
+                        .imageScale(.small)
+                }
                 Text(title)
                     .font(AgentChatTypography.microEmphasis)
             }
