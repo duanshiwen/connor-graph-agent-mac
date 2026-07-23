@@ -75,8 +75,12 @@ public enum XiaomiMiMOSpeechSynthesisError: Error, Sendable, Equatable, Localize
 public enum ConnorVoiceDesignPromptBuilder {
     public static func prompt(
         personality: ConnorPersonalitySettings,
-        voiceGender: ConnorVoiceGender
+        voiceGender: ConnorVoiceGender,
+        voiceProfile: ConnorVoiceProfile? = nil
     ) -> String {
+        if let voiceProfile, let profile = try? voiceProfile.validated() {
+            return customPrompt(profile: profile, voiceGender: voiceGender)
+        }
         let effectivePersonality = personality.isEmpty ? .balancedDefault : personality
         let traits = effectivePersonality.traits.prefix(4).joined(separator: "、")
         let identity = traits.isEmpty
@@ -91,6 +95,17 @@ public enum ConnorVoiceDesignPromptBuilder {
         return """
         \(voiceGender.voiceDesignDescription)，普通话自然标准，声音清晰温润、质感平衡。人格底色是\(trimmed(identity, limit: 180))。说话时\(trimmed(communication, limit: 150))，整体情绪\(trimmed(tone, limit: 80))。语速适中，咬字清楚，停顿从容，像一位可靠而有分寸的长期协作伙伴。
         """
+    }
+
+    private static func customPrompt(profile: ConnorVoiceProfile, voiceGender: ConnorVoiceGender) -> String {
+        var parts = [voiceGender.voiceDesignDescription, profile.summary]
+        if !profile.ageRange.isEmpty { parts.append("听感年龄：\(profile.ageRange)") }
+        if !profile.timbre.isEmpty { parts.append("音色质感：\(profile.timbre)") }
+        if !profile.speakingStyle.isEmpty { parts.append("表达方式：\(profile.speakingStyle)") }
+        if !profile.pace.isEmpty { parts.append("语速节奏：\(profile.pace)") }
+        if !profile.accent.isEmpty { parts.append("发音要求：\(profile.accent)") }
+        if !profile.emotionalTone.isEmpty { parts.append("情绪底色：\(profile.emotionalTone)") }
+        return parts.joined(separator: "。") + "。"
     }
 
     private static func trimmed(_ value: String, limit: Int) -> String {
@@ -127,6 +142,7 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
         markdown: String,
         personality: ConnorPersonalitySettings,
         voiceGender: ConnorVoiceGender,
+        voiceProfile: ConnorVoiceProfile? = nil,
         configuration: XiaomiMiMOSpeechConfiguration
     ) async throws -> Data {
         let text = ConnorSpeechTextFormatter.spokenText(from: markdown)
@@ -136,6 +152,7 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
             text: text,
             personality: personality,
             voiceGender: voiceGender,
+            voiceProfile: voiceProfile,
             configuration: configuration
         ))
         guard (200..<300).contains(response.statusCode) else {
@@ -160,12 +177,13 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
         text: String,
         personality: ConnorPersonalitySettings,
         voiceGender: ConnorVoiceGender,
+        voiceProfile: ConnorVoiceProfile?,
         configuration: XiaomiMiMOSpeechConfiguration
     ) throws -> AgentHTTPRequest {
         let body: [String: Any] = [
             "model": XiaomiMiMOSpeechConfiguration.voiceDesignModel,
             "messages": [
-                ["role": "user", "content": ConnorVoiceDesignPromptBuilder.prompt(personality: personality, voiceGender: voiceGender)],
+                ["role": "user", "content": ConnorVoiceDesignPromptBuilder.prompt(personality: personality, voiceGender: voiceGender, voiceProfile: voiceProfile)],
                 ["role": "assistant", "content": text]
             ],
             "audio": ["format": "wav", "optimize_text_preview": false]
