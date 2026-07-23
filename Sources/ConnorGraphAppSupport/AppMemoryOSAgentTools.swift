@@ -125,7 +125,7 @@ enum MemoryOSLayeredContextSupport {
         if includeDepth {
             properties["depth"] = .integer(description: "Knowledge graph hop depth. Defaults to 1 and must be between 1 and the configured maxDepth. Increase only when deeper relationships are needed.")
         }
-        return .object(properties: properties, required: [])
+        return .closedObject(properties: properties, required: [])
     }
 
     static func retrievalQuery(

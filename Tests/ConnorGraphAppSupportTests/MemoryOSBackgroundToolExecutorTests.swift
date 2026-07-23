@@ -169,6 +169,21 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(json["records"] is NSNull)
     }
 
+    @Test func backgroundContextToolRejectsRemovedLimitArgument() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        #expect(throws: MemoryOSBackgroundToolExecutionError.invalidArguments(
+            "Unsupported argument(s) for memory_os_recent_context: limit"
+        )) {
+            try executor.execute(
+                .init(id: "removed-limit", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","limit":10}"#),
+                context: .init(runID: "removed-limit-run", iteration: 1)
+            )
+        }
+    }
+
     @Test func l2UpdateToolAcceptsStatementStringShorthandInBackgroundExecutor() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()

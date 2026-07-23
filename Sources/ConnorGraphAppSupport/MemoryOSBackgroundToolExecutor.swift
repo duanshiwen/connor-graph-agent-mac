@@ -64,6 +64,15 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         switch call.name {
         case "memory_os_recent_context", "memory_os_knowledge_context":
             let isRecent = call.name == "memory_os_recent_context"
+            let allowedArguments: Set<String> = isRecent
+                ? ["query", "startDate", "endDate", "page"]
+                : ["query", "startDate", "endDate", "page", "depth"]
+            let unsupportedArguments = Set(args.values.keys).subtracting(allowedArguments).sorted()
+            guard unsupportedArguments.isEmpty else {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments(
+                    "Unsupported argument(s) for \(call.name): \(unsupportedArguments.joined(separator: ", "))"
+                )
+            }
             let page = args.values["page"] == nil ? 1 : (args.strictInt("page") ?? Int.min)
             let depth = isRecent ? 1 : max(1, min(args.int("depth") ?? 1, contextToolConfiguration.maxDepth))
             let layers: [MemoryOSRetrievalLayer] = isRecent ? [.l1, .l2] : [.l3, .l4]
