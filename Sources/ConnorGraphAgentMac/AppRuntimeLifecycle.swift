@@ -901,6 +901,15 @@ final class AppRuntimeLifecycle {
             let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
             return try await ConnorPersonalityGenerator().generate(from: request, provider: provider)
         }
+        userPreferencesModel.voiceGenerator = { [weak self] request, voiceGender in
+            guard let self else { throw ConnorVoiceProfileError.unavailable }
+            let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
+            return try await ConnorVoiceProfileGenerator().generate(
+                from: request,
+                voiceGender: voiceGender,
+                provider: provider
+            )
+        }
         workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
         }
@@ -3166,7 +3175,9 @@ final class AppRuntimeLifecycle {
                     markdown: latestAssistantMessage.content,
                     personality: userPreferencesModel.connorPersonality,
                     personalityRevision: userPreferencesModel.connorPersonalityRevision,
-                    voiceGender: userPreferencesModel.connorVoiceGender,
+                    voiceGender: userPreferencesModel.resolvedConnorVoiceGender,
+                    voiceProfile: userPreferencesModel.connorVoiceProfile,
+                    voiceRevision: userPreferencesModel.connorVoiceRevision,
                     enabled: userPreferencesModel.automaticallyReadsReplies
                 )
             }

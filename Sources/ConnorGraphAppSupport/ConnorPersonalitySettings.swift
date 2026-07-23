@@ -2,6 +2,7 @@ import Foundation
 import ConnorGraphAgent
 
 public enum ConnorVoiceGender: String, Codable, Sendable, Equatable, CaseIterable, Identifiable {
+    case neutral
     case male
     case female
 
@@ -9,6 +10,7 @@ public enum ConnorVoiceGender: String, Codable, Sendable, Equatable, CaseIterabl
 
     public var displayName: String {
         switch self {
+        case .neutral: "中性声"
         case .male: "男声"
         case .female: "女声"
         }
@@ -16,25 +18,40 @@ public enum ConnorVoiceGender: String, Codable, Sendable, Equatable, CaseIterabl
 
     public var voiceDesignDescription: String {
         switch self {
+        case .neutral: "一位二十多岁的中性青年，性别表达自然中性"
         case .male: "一位二十多岁的青年男性"
         case .female: "一位二十多岁的青年女性"
         }
+    }
+
+    public static func following(personalityGender: String) -> ConnorVoiceGender {
+        let value = personalityGender.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value.contains("女性") || value.contains("女声") || value == "女" || value == "female" || value == "woman" {
+            return .female
+        }
+        if value.contains("男性") || value.contains("男声") || value == "男" || value == "male" || value == "man" {
+            return .male
+        }
+        return .neutral
     }
 }
 
 public struct ConnorSpeechSettings: Codable, Sendable, Equatable {
     public var voiceGender: ConnorVoiceGender
+    public var followsPersonalityGender: Bool
     public var voiceProfile: ConnorVoiceProfile?
     public var voiceRevision: Int
     public var automaticallyReadsReplies: Bool
 
     public init(
         voiceGender: ConnorVoiceGender = .male,
+        followsPersonalityGender: Bool = true,
         voiceProfile: ConnorVoiceProfile? = nil,
         voiceRevision: Int = 0,
         automaticallyReadsReplies: Bool = false
     ) {
         self.voiceGender = voiceGender
+        self.followsPersonalityGender = followsPersonalityGender
         self.voiceProfile = voiceProfile
         self.voiceRevision = voiceRevision
         self.automaticallyReadsReplies = automaticallyReadsReplies
@@ -44,6 +61,7 @@ public struct ConnorSpeechSettings: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case voiceGender
+        case followsPersonalityGender
         case voiceProfile
         case voiceRevision
         case automaticallyReadsReplies
@@ -52,6 +70,7 @@ public struct ConnorSpeechSettings: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         voiceGender = try container.decodeIfPresent(ConnorVoiceGender.self, forKey: .voiceGender) ?? .male
+        followsPersonalityGender = try container.decodeIfPresent(Bool.self, forKey: .followsPersonalityGender) ?? false
         voiceProfile = try container.decodeIfPresent(ConnorVoiceProfile.self, forKey: .voiceProfile)
         voiceRevision = try container.decodeIfPresent(Int.self, forKey: .voiceRevision) ?? 0
         automaticallyReadsReplies = try container.decodeIfPresent(Bool.self, forKey: .automaticallyReadsReplies) ?? false

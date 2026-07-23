@@ -58,7 +58,8 @@ final class ConnorSpeechPlaybackCoordinator {
     typealias Synthesizer = @Sendable (
         _ markdown: String,
         _ personality: ConnorPersonalitySettings,
-        _ voiceGender: ConnorVoiceGender
+        _ voiceGender: ConnorVoiceGender,
+        _ voiceProfile: ConnorVoiceProfile?
     ) async throws -> Data
 
     private(set) var phase: ConnorSpeechPlaybackPhase = .idle
@@ -80,7 +81,7 @@ final class ConnorSpeechPlaybackCoordinator {
         synthesizer: Synthesizer? = nil
     ) {
         self.audioCache = ConnorSpeechAudioCache(directory: cacheDirectory)
-        self.synthesizer = synthesizer ?? { markdown, personality, voiceGender in
+        self.synthesizer = synthesizer ?? { markdown, personality, voiceGender, voiceProfile in
             guard let configuration = try settingsRepository.xiaomiMiMOSpeechConfiguration() else {
                 throw ConnorSpeechPlaybackError.unavailable
             }
@@ -89,6 +90,7 @@ final class ConnorSpeechPlaybackCoordinator {
                 markdown: markdown,
                 personality: personality,
                 voiceGender: voiceGender,
+                voiceProfile: voiceProfile,
                 configuration: configuration
             )
         }
@@ -103,7 +105,7 @@ final class ConnorSpeechPlaybackCoordinator {
         )
     }
 
-    func toggle(messageID: String, markdown: String, personality: ConnorPersonalitySettings, personalityRevision: Int, voiceGender: ConnorVoiceGender) {
+    func toggle(messageID: String, markdown: String, personality: ConnorPersonalitySettings, personalityRevision: Int, voiceGender: ConnorVoiceGender, voiceProfile: ConnorVoiceProfile?, voiceRevision: Int) {
         if phase.isLoading(messageID: messageID) || phase.isPlaying(messageID: messageID) {
             stop()
             return
@@ -113,12 +115,13 @@ final class ConnorSpeechPlaybackCoordinator {
             messageID: messageID,
             markdown: markdown,
             personality: personality,
-            cacheKey: cacheKey(messageID: messageID, personalityRevision: personalityRevision, voiceGender: voiceGender),
-            voiceGender: voiceGender
+            cacheKey: cacheKey(messageID: messageID, personalityRevision: personalityRevision, voiceGender: voiceGender, voiceRevision: voiceRevision),
+            voiceGender: voiceGender,
+            voiceProfile: voiceProfile
         )
     }
 
-    func automaticallyRead(messageID: String, markdown: String, personality: ConnorPersonalitySettings, personalityRevision: Int, voiceGender: ConnorVoiceGender, enabled: Bool) {
+    func automaticallyRead(messageID: String, markdown: String, personality: ConnorPersonalitySettings, personalityRevision: Int, voiceGender: ConnorVoiceGender, voiceProfile: ConnorVoiceProfile?, voiceRevision: Int, enabled: Bool) {
         guard enabled,
               isAvailable(),
               automaticallyReadMessageIDs.insert(messageID).inserted
@@ -127,8 +130,9 @@ final class ConnorSpeechPlaybackCoordinator {
             messageID: messageID,
             markdown: markdown,
             personality: personality,
-            cacheKey: cacheKey(messageID: messageID, personalityRevision: personalityRevision, voiceGender: voiceGender),
-            voiceGender: voiceGender
+            cacheKey: cacheKey(messageID: messageID, personalityRevision: personalityRevision, voiceGender: voiceGender, voiceRevision: voiceRevision),
+            voiceGender: voiceGender,
+            voiceProfile: voiceProfile
         )
     }
 
@@ -151,7 +155,7 @@ final class ConnorSpeechPlaybackCoordinator {
         automaticallyReadMessageIDs.removeAll()
     }
 
-    private func start(messageID: String, markdown: String, personality: ConnorPersonalitySettings, cacheKey: String, voiceGender: ConnorVoiceGender) {
+    private func start(messageID: String, markdown: String, personality: ConnorPersonalitySettings, cacheKey: String, voiceGender: ConnorVoiceGender, voiceProfile: ConnorVoiceProfile?) {
         stop()
         let currentGeneration = generation
         if let cachedURL = audioCache.cachedURL(for: cacheKey) {
@@ -163,7 +167,7 @@ final class ConnorSpeechPlaybackCoordinator {
         synthesisTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let audio = try await synthesizer(markdown, personality, voiceGender)
+                let audio = try await synthesizer(markdown, personality, voiceGender, voiceProfile)
                 try Task.checkCancellation()
                 guard generation == currentGeneration else { return }
                 let url = try await audioCache.store(wavData: audio, for: cacheKey)
@@ -224,8 +228,8 @@ final class ConnorSpeechPlaybackCoordinator {
         reportError(message)
     }
 
-    private func cacheKey(messageID: String, personalityRevision: Int, voiceGender: ConnorVoiceGender) -> String {
-        "\(messageID):\(personalityRevision):\(voiceGender.rawValue)"
+    private func cacheKey(messageID: String, personalityRevision: Int, voiceGender: ConnorVoiceGender, voiceRevision: Int) -> String {
+        "\(messageID):\(personalityRevision):\(voiceGender.rawValue):\(voiceRevision)"
     }
 }
 
