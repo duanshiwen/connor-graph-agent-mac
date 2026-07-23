@@ -133,6 +133,8 @@ final class UserPreferencesFeatureModel {
     var notes = "" { didSet { changed() } }
     private(set) var connorPersonality = ConnorPersonalitySettings.balancedDefault
     private(set) var connorPersonalityRevision = 0
+    var connorVoiceGender: ConnorVoiceGender = .male { didSet { changed() } }
+    var automaticallyReadsReplies = false { didSet { changed() } }
     var personalityRequest = ""
     private(set) var personalityDraft: ConnorPersonalitySettings?
     private(set) var isGeneratingPersonality = false
@@ -160,6 +162,8 @@ final class UserPreferencesFeatureModel {
         notes = preferences.notes
         connorPersonality = preferences.connorPersonality
         connorPersonalityRevision = preferences.connorPersonalityRevision
+        connorVoiceGender = preferences.connorSpeech.voiceGender
+        automaticallyReadsReplies = preferences.connorSpeech.automaticallyReadsReplies
         personalityDraft = nil
         personalityErrorMessage = nil
     }
@@ -175,6 +179,10 @@ final class UserPreferencesFeatureModel {
         settings.preferences.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.connorPersonality = connorPersonality
         settings.preferences.connorPersonalityRevision = connorPersonalityRevision
+        settings.preferences.connorSpeech = ConnorSpeechSettings(
+            voiceGender: connorVoiceGender,
+            automaticallyReadsReplies: automaticallyReadsReplies
+        )
     }
 
     func fillEmptyFieldsFromSystem() -> Bool {
