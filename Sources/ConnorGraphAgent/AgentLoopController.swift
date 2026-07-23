@@ -365,8 +365,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         for batchResult in batchResults {
                             retrievalCompliance.record(batchResult.result)
-                            let retrievalEvidenceTools = Set(AgentRetrievalCompliancePolicy.requiredMemoryTools + [AgentRetrievalCompliancePolicy.conversationHistoryTool])
-                            if retrievalEvidenceTools.contains(batchResult.call.name),
+                            if AgentRetrievalCompliancePolicy.requiredMemoryTools.contains(batchResult.call.name),
                                batchResult.result.error == nil {
                                 memoryEvidencePayloads.append(batchResult.result.contentJSON ?? batchResult.result.contentText)
                                 for citation in batchResult.result.citations where !memoryCitations.contains(citation) {

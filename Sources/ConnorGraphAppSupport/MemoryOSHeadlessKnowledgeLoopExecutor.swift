@@ -188,7 +188,7 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
                         let replayedResult = try replayableToolResult(for: call, runID: runID)
                         let result = try replayedResult ?? toolExecutor.execute(call, context: MemoryOSBackgroundToolExecutionContext(runID: runID, iteration: iteration))
                         let resultJSON = capped(result.contentJSON)
-                        try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, resultJSON: resultJSON, status: .succeeded, startedAt: toolStartedAt, finishedAt: now(), metadata: [
+                        try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: call.id, runID: runID, iteration: iteration, toolName: call.name, argumentsJSON: call.argumentsJSON, resultJSON: resultJSON, status: result.error == nil ? .succeeded : .failed, startedAt: toolStartedAt, finishedAt: now(), errorMessage: result.error, metadata: [
                             "citations": result.citations.joined(separator: ","),
                             "content_text": capped(result.contentText),
                             "idempotent_replay": String(replayedResult != nil)

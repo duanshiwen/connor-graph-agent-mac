@@ -53,6 +53,7 @@ public enum ConnorPersonalityProposalError: Error, Sendable, Equatable, Localize
     case invalidMode(String)
     case requestRequired
     case requestTooLong
+    case explicitPersistentRequestRequired
     case nameChangeForbidden
     case unsafePersonality(category: String)
     case revisionConflict(expected: Int, actual: Int)
@@ -65,6 +66,7 @@ public enum ConnorPersonalityProposalError: Error, Sendable, Equatable, Localize
         case .invalidMode(let mode): "不支持的人格修改模式：\(mode)。"
         case .requestRequired: "merge 和 replace 模式必须提供人格修改要求。"
         case .requestTooLong: "人格修改要求过长，请缩短到 2000 字以内。"
+        case .explicitPersistentRequestRequired: "本轮用户只是在询问人格属性，没有明确要求持久修改人格。"
         case .nameChangeForbidden: "康纳同学的姓名不可修改、替换、缩写或设置别名。"
         case .unsafePersonality(let category): "该人格要求包含不允许的行为倾向：\(category)。"
         case .revisionConflict(let expected, let actual): "人格配置已发生变化（提议版本 \(expected)，当前版本 \(actual)），请重新读取并生成提议。"
@@ -89,6 +91,23 @@ public struct ConnorPersonalityRuntime: Sendable {
 }
 
 public enum ConnorPersonalitySafetyPolicy {
+    public static func validatePersistentMutationIntent(_ userPrompt: String) throws {
+        let compact = userPrompt.lowercased().replacingOccurrences(of: " ", with: "")
+        let mutationSignals = [
+            "以后", "今后", "从现在开始", "一直", "永久", "设为", "设置为", "设置成", "改为", "改成",
+            "调整人格", "调整性格", "修改人格", "修改性格", "更新人格", "更新性格", "恢复默认性格", "恢复默认人格",
+            "fromnowon", "always", "setyour", "changeyour", "updateyourpersonality", "resetyourpersonality"
+        ]
+        let questionSignals = [
+            "你是", "你属于", "你的性别", "什么性别", "男生还是女生", "男性还是女性", "是什么", "吗", "呢", "?", "？",
+            "areyou", "whatisyour", "whichgender"
+        ]
+        if questionSignals.contains(where: compact.contains),
+           !mutationSignals.contains(where: compact.contains) {
+            throw ConnorPersonalityProposalError.explicitPersistentRequestRequired
+        }
+    }
+
     public static func validateRequest(_ request: String) throws {
         let compact = request.lowercased().replacingOccurrences(of: " ", with: "")
         let nameChangeSignals = [
@@ -111,6 +130,7 @@ public enum ConnorPersonalitySafetyPolicy {
 
     public static func validatePersonality(_ personality: ConnorPersonalitySettings) throws {
         let activeInstructions = [
+            personality.gender,
             personality.summary,
             personality.traits.joined(separator: " "),
             personality.communicationStyle,
@@ -179,7 +199,7 @@ public struct ConnorPersonalityGetCurrentTool: AgentTool {
 
 public struct ConnorPersonalityProposeUpdateTool: AgentTool {
     public let name = "personality_propose_update"
-    public let description = "Generate a governed personality-change proposal for 康纳同学. This never saves settings. Use only for explicit persistent requests; temporary tone requests should be followed only for the current response. Name changes are forbidden."
+    public let description = "Generate a governed personality-change proposal for 康纳同学. This never saves settings. Use only when the latest user message explicitly requests a persistent change. Questions about current attributes, including gender, are read-only and must never call this tool. Temporary tone requests should be followed only for the current response. Name changes are forbidden."
     public let permission: AgentPermissionCapability = .modelCall
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "request": .string(description: "User's persistent personality request. Required for merge and replace; omit for reset."),
@@ -198,6 +218,7 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(context.userPrompt)
         let modeRaw = arguments.string("mode")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard let mode = ConnorPersonalityUpdateMode(rawValue: modeRaw) else {
             throw ConnorPersonalityProposalError.invalidMode(modeRaw)
@@ -255,7 +276,7 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
 
 public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let name = "personality_commit_proposal"
-    public let description = "Immediately commit an existing personality proposal after an explicit persistent user request, without a second confirmation or native approval step. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
+    public let description = "Immediately commit an existing personality proposal only when the latest user message explicitly requests a persistent change, without a second confirmation or native approval step. Never commit in response to a question about current attributes, including gender, even if an older proposal ID appears in conversation history. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "proposal_id": .string(description: "Exact proposal ID returned by personality_propose_update.")
@@ -270,6 +291,7 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
     }
 
     public func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(context.userPrompt)
         let arguments = try AgentToolArguments(json: call.argumentsJSON)
         _ = try await resolvedProposal(arguments)
     }
@@ -292,6 +314,7 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(context.userPrompt)
         let proposal = try await resolvedProposal(arguments)
         let current = try await runtime.snapshot()
         guard current.revision == proposal.expectedRevision else {

@@ -48,6 +48,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     #expect(request.messages.first?.content.contains("性格配置生成器") == true)
     return AgentModelResponse(text: """
     {
+      "gender": "女性",
       "summary": "温和但更加直接",
       "traits": ["可靠", "坦诚"],
       "communicationStyle": "先给结论，再说明依据",
@@ -84,6 +85,69 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     )
     #expect(committed.contentText.contains("版本 3"))
     #expect(await state.read().snapshotSummary == "温和但更加直接")
+    #expect(await state.read().personality.gender == "女性")
+}
+
+@Test func personalityProposalRejectsReadOnlyGenderQuestion() async throws {
+    let state = PersonalityTestState()
+    let tool = ConnorPersonalityProposeUpdateTool(
+        runtime: personalityRuntime(state),
+        provider: personalityProvider,
+        store: ConnorPersonalityProposalStore()
+    )
+    let context = AgentToolExecutionContext(
+        runID: "run-gender-question",
+        sessionID: "session-personality",
+        groupID: "default",
+        userPrompt: "你是男生还是女生？",
+        toolCallID: UUID().uuidString,
+        policyEngine: AgentPolicyEngine(permissionMode: .askToWrite),
+        approvedCapabilities: [.modelCall]
+    )
+
+    await #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
+        try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "request": .string("设为女性"),
+                "mode": .string("merge"),
+                "expected_revision": .int(2)
+            ]),
+            context: context
+        )
+    }
+    #expect(await state.read().revision == 2)
+}
+
+@Test func personalityCommitRejectsOldProposalDuringReadOnlyGenderQuestion() async throws {
+    let state = PersonalityTestState()
+    let store = ConnorPersonalityProposalStore()
+    let proposal = ConnorPersonalityProposal(
+        mode: .merge,
+        request: "设为女性",
+        before: ConnorPersonalitySettings(summary: "温和可靠"),
+        after: ConnorPersonalitySettings(gender: "女性", summary: "温和可靠"),
+        expectedRevision: 2
+    )
+    await store.insert(proposal)
+    let tool = ConnorPersonalityCommitProposalTool(runtime: personalityRuntime(state), store: store)
+    let context = AgentToolExecutionContext(
+        runID: "run-old-proposal",
+        sessionID: "session-personality",
+        groupID: "default",
+        userPrompt: "你是男生还是女生？",
+        toolCallID: UUID().uuidString,
+        policyEngine: AgentPolicyEngine(permissionMode: .askToWrite),
+        approvedCapabilities: [.mutatePersonality]
+    )
+
+    await #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
+        try await tool.execute(
+            arguments: AgentToolArguments(values: ["proposal_id": .string(proposal.id)]),
+            context: context
+        )
+    }
+    #expect(await state.read().revision == 2)
+    #expect(await state.read().personality.gender.isEmpty)
 }
 
 @Test func personalityProposalRejectsNameChangesBeforeModelCall() async {

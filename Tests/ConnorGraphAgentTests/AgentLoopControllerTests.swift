@@ -358,21 +358,8 @@ private struct RetrievalEvidenceTool: AgentTool {
             contentText: "retrieved by \(name)",
             citations: name.hasPrefix("memory_os_")
                 ? ["record:\(name)"]
-                : (name == AgentRetrievalCompliancePolicy.conversationHistoryTool
-                    ? ["message:history"]
-                    : (AgentRetrievalCompliancePolicy.webEvidenceTools.contains(name) ? ["https://example.com/research"] : []))
+                : (AgentRetrievalCompliancePolicy.webEvidenceTools.contains(name) ? ["https://example.com/research"] : [])
         )
-    }
-}
-
-private struct FailingRetrievalTool: AgentTool {
-    let name: String
-    let description = "Fail deterministic retrieval"
-    let permission = AgentPermissionCapability.readSession
-    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
-
-    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        throw AgentToolError.permissionDenied("history unavailable")
     }
 }
 
@@ -795,8 +782,6 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(policy.isPureMemoryTask("请根据我的记忆总结我们之前的决定"))
     #expect(policy.isPureMemoryTask("请总结今天的工作"))
     #expect(policy.isPureMemoryTask("请回顾昨天的任务"))
-    #expect(!policy.isSingleDayConversationReview("请总结今天的新闻"))
-    #expect(!policy.isSingleDayConversationReview("请总结昨天的邮件"))
     #expect(!policy.isPureMemoryTask("请搜索最新 Swift 版本"))
     #expect(!policy.isPureMemoryTask("回顾昨天我们讨论的 Swift 版本，并核实现在是否仍是最新版。"))
     #expect(policy.requiresMemoryRetrieval("请搜索杭州的 AI 产品经理岗位"))
@@ -804,38 +789,8 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(!policy.requiresWebResearch("请搜索工作区里的 Swift 文件"))
     #expect(policy.requiredTools(for: "Explain Swift concurrency") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
     #expect(policy.requiredTools(for: "回忆我的偏好") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
-    #expect(policy.requiredTools(for: "请回顾昨天的任务") == AgentRetrievalCompliancePolicy.requiredMemoryTools + [AgentRetrievalCompliancePolicy.conversationHistoryTool])
-    #expect(policy.requiredTools(for: "回顾昨天我们讨论的 Swift 版本，并核实现在是否仍是最新版。") == AgentRetrievalCompliancePolicy.requiredMemoryTools + [AgentRetrievalCompliancePolicy.conversationHistoryTool, "web_search"])
-}
-
-@Test func retrievalComplianceKeepsConversationHistoryIndependentForSingleDayReview() async throws {
-    let historyTool = AgentRetrievalCompliancePolicy.conversationHistoryTool
-    let memoryCalls = AgentRetrievalCompliancePolicy.requiredMemoryTools.enumerated().map {
-        AgentToolCall(id: "memory-\($0.offset)", name: $0.element, argumentsJSON: "{}")
-    }
-    let provider = ScriptedModelProvider(responses: [
-        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "history", name: historyTool, argumentsJSON: "{}")], finishReason: .toolCalls),
-        AgentModelResponse(text: "premature"),
-        AgentModelResponse(text: nil, toolCalls: memoryCalls, finishReason: .toolCalls),
-        AgentModelResponse(text: "Yesterday recap")
-    ])
-    var registry = AgentToolRegistry()
-    registry.register(RetrievalEvidenceTool(name: historyTool))
-    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"] {
-        registry.register(RetrievalEvidenceTool(name: name))
-    }
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
-
-    var completed: AgentTextCompleteEvent?
-    for try await event in loop.run(AgentChatRequest(sessionID: "history-review", userMessage: "请回顾昨天的任务")) {
-        if case .textComplete(let payload) = event { completed = payload }
-    }
-
-    let requests = await provider.requests
-    #expect(requests.count == 4)
-    #expect(requests[2].messages.last?.content.contains("memory_os_recent_context") == true)
-    #expect(completed?.text == "Yesterday recap")
-    #expect(completed?.citations.count == 4)
+    #expect(policy.requiredTools(for: "请回顾昨天的任务") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
+    #expect(policy.requiredTools(for: "回顾昨天我们讨论的 Swift 版本，并核实现在是否仍是最新版。") == AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"])
 }
 
 @Test func agentLoopRewritesExternalResearchAnswerThatOmitsSuccessfulWebResults() async throws {
@@ -895,33 +850,6 @@ private struct BashLikeOutputTool: AgentTool {
     let requests = await provider.requests
     #expect(requests.count == 1)
     #expect(completed?.text.contains("选择工作目录") == true)
-}
-
-@Test func retrievalComplianceDoesNotChangeRequirementsWhenConversationHistoryFails() async throws {
-    let historyTool = AgentRetrievalCompliancePolicy.conversationHistoryTool
-    let memoryCalls = AgentRetrievalCompliancePolicy.requiredMemoryTools.enumerated().map {
-        AgentToolCall(id: "fallback-\($0.offset)", name: $0.element, argumentsJSON: "{}")
-    }
-    let provider = ScriptedModelProvider(responses: [
-        AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "history-failure", name: historyTool, argumentsJSON: "{}")] + memoryCalls, finishReason: .toolCalls),
-        AgentModelResponse(text: "Recap from available evidence")
-    ])
-    var registry = AgentToolRegistry()
-    registry.register(FailingRetrievalTool(name: historyTool))
-    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools {
-        registry.register(RetrievalEvidenceTool(name: name))
-    }
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
-
-    var completed: AgentTextCompleteEvent?
-    for try await event in loop.run(AgentChatRequest(sessionID: "history-fallback", userMessage: "请回顾昨天的任务")) {
-        if case .textComplete(let payload) = event { completed = payload }
-    }
-
-    let requests = await provider.requests
-    #expect(requests.count == 2)
-    #expect(completed?.text.contains("Recap from available evidence") == true)
-    #expect(completed?.citations.count == 3)
 }
 
 @Test func memoryClaimValidatorClassifiesUnsupportedIndirectAndConflictedClaims() {

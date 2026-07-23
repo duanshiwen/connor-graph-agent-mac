@@ -78,6 +78,7 @@ struct AgentRuntimePreferenceSettingsTests {
 
     @Test func personalitySettingsRoundTripAndNormalizeGeneratedValues() throws {
         let personality = try ConnorPersonalitySettings(
+            gender: "女性",
             summary: "  温和但直接，重视事实。  ",
             traits: ["可靠", "", "可靠", "有耐心"],
             communicationStyle: "  先给结论， 再说明依据。 ",
@@ -89,9 +90,25 @@ struct AgentRuntimePreferenceSettingsTests {
         let decoded = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
 
         #expect(decoded.connorPersonality.summary == "温和但直接，重视事实。")
+        #expect(decoded.connorPersonality.gender == "女性")
         #expect(decoded.connorPersonality.traits == ["可靠", "有耐心"])
         #expect(decoded.connorPersonality.communicationStyle == "先给结论， 再说明依据。")
         #expect(decoded.connorPersonalityRevision == 4)
+    }
+
+    @Test func decodesLegacyPersonalityWithoutGender() throws {
+        let data = Data("""
+        {
+          "summary": "温和可靠",
+          "traits": ["可靠"],
+          "communicationStyle": "简洁"
+        }
+        """.utf8)
+
+        let personality = try JSONDecoder().decode(ConnorPersonalitySettings.self, from: data)
+
+        #expect(personality.gender.isEmpty)
+        #expect(personality.summary == "温和可靠")
     }
 
     @Test func personalityGeneratorRejectsIdentityAndUnknownFields() throws {
@@ -115,6 +132,7 @@ struct AgentRuntimePreferenceSettingsTests {
 
     @Test func personalityPromptLocksNameAndGuidesConversationStyle() throws {
         let personality = ConnorPersonalitySettings(
+            gender: "非二元",
             summary: "温和、直接并关注行动",
             traits: ["可靠", "坦诚"],
             communicationStyle: "先给结论，再给依据"
@@ -126,6 +144,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(prompt.contains("姓名固定为“康纳同学”"))
         #expect(prompt.contains("持续以以下人格与用户对话"))
         #expect(prompt.contains("用户最新明确任务"))
+        #expect(prompt.contains("- 性别：非二元"))
         #expect(prompt.contains("- 沟通方式：先给结论，再给依据"))
     }
 

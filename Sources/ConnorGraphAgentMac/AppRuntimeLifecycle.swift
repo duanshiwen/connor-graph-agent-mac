@@ -1841,7 +1841,7 @@ final class AppRuntimeLifecycle {
         let provider = try sessionAgentModelProvider(sessionID: sessionID)
         return AnyLLMProvider { prompt, _ in
             let response = try await provider.complete(AgentModelRequest(messages: [
-                AgentModelMessage(role: .system, content: AgentInstructionSection.defaultConnorInstruction),
+                AgentModelMessage(role: .system, content: AgentInstructionSection.runtimeConnorInstruction),
                 AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
             ]))
             return LLMResponse(text: response.text ?? "", citations: [])

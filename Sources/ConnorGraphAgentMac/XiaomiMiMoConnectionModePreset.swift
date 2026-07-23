@@ -40,6 +40,27 @@ enum XiaomiMiMoConnectionModePreset: String, CaseIterable, Identifiable, Equatab
         }
     }
 
+    var purchaseURLString: String? {
+        switch self {
+        case .payAsYouGo: nil
+        case .tokenPlan: "https://platform.xiaomimimo.com/#/token-plan"
+        }
+    }
+
+    var managementURLString: String? {
+        switch self {
+        case .payAsYouGo: nil
+        case .tokenPlan: "https://platform.xiaomimimo.com/#/console/plan-manage"
+        }
+    }
+
+    var restrictionNotice: String? {
+        switch self {
+        case .payAsYouGo: nil
+        case .tokenPlan: "套餐额度仅限 AI 编程工具使用，不可用于自动化脚本、自定义应用后端等非 Coding 场景。"
+        }
+    }
+
     func keyEndpointMismatchWarning(for apiKey: String) -> String? {
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else { return nil }

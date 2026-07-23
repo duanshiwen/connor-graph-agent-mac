@@ -434,6 +434,7 @@ private struct ConnorPersonalityPreview: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(SettingsListTypography.rowTitleSelected)
+            personalityRow("性别", personality.gender)
             personalityRow("总体人格", personality.summary)
             personalityRow("核心特征", personality.traits.joined(separator: "、"))
             personalityRow("沟通方式", personality.communicationStyle)

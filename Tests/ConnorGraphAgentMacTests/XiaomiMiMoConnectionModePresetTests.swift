@@ -19,6 +19,9 @@ struct XiaomiMiMoConnectionModePresetTests {
         #expect(preset.openAIEndpoint == "https://token-plan-cn.xiaomimimo.com/v1")
         #expect(preset.keyPlaceholder == "tp-...")
         #expect(preset.keyPrefixHint == "tp-...")
+        #expect(preset.purchaseURLString == "https://platform.xiaomimimo.com/#/token-plan")
+        #expect(preset.managementURLString == "https://platform.xiaomimimo.com/#/console/plan-manage")
+        #expect(preset.restrictionNotice?.contains("AI 编程工具") == true)
     }
 
     @Test func detectsTokenPlanKeyUsedWithPayAsYouGoMode() {

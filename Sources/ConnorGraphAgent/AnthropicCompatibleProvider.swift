@@ -139,7 +139,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
 
     public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
         let response = try await complete(AgentModelRequest(messages: [
-            AgentModelMessage(role: .system, content: AgentInstructionSection.defaultConnorInstruction),
+            AgentModelMessage(role: .system, content: AgentInstructionSection.runtimeConnorInstruction),
             AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
         ]))
         guard let text = response.text, !text.isEmpty else { throw AnthropicCompatibleProviderError.missingAssistantMessage }

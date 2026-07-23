@@ -29,65 +29,6 @@ public enum MemoryOSBackgroundToolExecutionError: Error, Sendable, Equatable, Cu
     }
 }
 
-private final class MemoryOSBackgroundContextCursorStore: @unchecked Sendable {
-    private let lock = NSLock()
-    private var deliveredByKey: [String: Set<String>] = [:]
-
-    func response(
-        runID: String,
-        queryKey: String,
-        query: String,
-        requestedLimit: Int,
-        candidates: [MemoryOSContextToolRecord],
-        maxResponseCharacters: Int
-    ) throws -> MemoryOSContextToolResponse {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let key = "\(runID)|\(queryKey)"
-        var delivered = deliveredByKey[key] ?? []
-        let target = candidates.prefix(requestedLimit).filter { !delivered.contains(Self.cursorID(for: $0)) }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        var selected: [MemoryOSContextToolRecord] = []
-        var capacityPartial = false
-
-        for record in target {
-            let tentative = selected + [record]
-            let response = MemoryOSContextToolResponse(
-                query: query,
-                requestedLimit: requestedLimit,
-                returnedCount: tentative.count,
-                cumulativeReturnedCount: delivered.count + tentative.count,
-                hasMore: candidates.count > requestedLimit ? true : nil,
-                partial: false,
-                records: tentative
-            )
-            if try encoder.encode(response).count > maxResponseCharacters {
-                capacityPartial = true
-                break
-            }
-            selected = tentative
-        }
-
-        delivered.formUnion(selected.map(Self.cursorID))
-        deliveredByKey[key] = delivered
-        return MemoryOSContextToolResponse(
-            query: query,
-            requestedLimit: requestedLimit,
-            returnedCount: selected.count,
-            cumulativeReturnedCount: delivered.count,
-            hasMore: candidates.count > requestedLimit || capacityPartial ? true : nil,
-            partial: capacityPartial,
-            records: selected
-        )
-    }
-
-    private static func cursorID(for record: MemoryOSContextToolRecord) -> String {
-        ([record.recordID] + record.path.map(\.recordID)).joined(separator: ">")
-    }
-}
-
 public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     public static let defaultAllowedToolNames: Set<String> = [
         "memory_os_recent_context",
@@ -106,7 +47,6 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
 
     public var facade: AppMemoryOSFacade
     public var contextToolConfiguration: MemoryOSContextToolConfiguration
-    private let contextCursorStore: MemoryOSBackgroundContextCursorStore
 
     public init(
         facade: AppMemoryOSFacade,
@@ -114,7 +54,6 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
     ) {
         self.facade = facade
         self.contextToolConfiguration = contextToolConfiguration
-        self.contextCursorStore = MemoryOSBackgroundContextCursorStore()
     }
 
     public func execute(_ call: MemoryOSBackgroundToolCall, context: MemoryOSBackgroundToolExecutionContext) throws -> MemoryOSBackgroundToolResult {
@@ -125,29 +64,27 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         switch call.name {
         case "memory_os_recent_context", "memory_os_knowledge_context":
             let isRecent = call.name == "memory_os_recent_context"
-            let requestedLimit = max(contextToolConfiguration.minimumResultLimit, args.int("limit") ?? contextToolConfiguration.defaultResultLimit)
+            let page = args.values["page"] == nil ? 1 : (args.strictInt("page") ?? Int.min)
             let depth = isRecent ? 1 : max(1, min(args.int("depth") ?? 1, contextToolConfiguration.maxDepth))
             let layers: [MemoryOSRetrievalLayer] = isRecent ? [.l1, .l2] : [.l3, .l4]
-            let query = try Self.retrievalQuery(args: args, layers: layers, limit: requestedLimit + 1, depth: depth)
-            let hits = try facade.searchMemoryOS(query)
+            let query = try Self.retrievalQuery(args: args, layers: layers, limit: Int.max, depth: depth)
+            let hits = try facade.searchMemoryOSContext(query)
             var candidates = hits.map(MemoryOSLayeredContextSupport.record)
             if !isRecent {
                 for hit in hits where !query.text.isEmpty && hit.layer == .l4 && hit.canExpandDepth {
                     let entity = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
                     candidates += MemoryOSLayeredContextSupport.records(
-                        from: try facade.expandMemoryOSL4(entityName: entity, depth: depth, limit: requestedLimit + 1)
+                        from: try facade.expandMemoryOSL4(entityName: entity, depth: depth, limit: Int.max)
                     )
                 }
                 candidates = MemoryOSLayeredContextSupport.filtered(candidates, by: query)
                 candidates.sort { Self.contextRecordPrecedes($0, $1, byOccurrence: query.startDate != nil || query.endDate != nil) }
             }
-            let response = try contextCursorStore.response(
-                runID: context.runID,
-                queryKey: MemoryOSLayeredContextSupport.queryKey(for: query),
+            let response = try MemoryOSLayeredContextSupport.response(
                 query: query.text,
-                requestedLimit: requestedLimit,
+                page: page,
                 candidates: candidates,
-                maxResponseCharacters: contextToolConfiguration.maxResponseCharacters
+                configuration: contextToolConfiguration
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
@@ -160,7 +97,8 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                 name: call.name,
                 contentJSON: jsonString,
                 contentText: jsonString,
-                citations: citations
+                citations: citations,
+                error: response.success ? nil : response.reason
             )
 
         case "memory_os_search":
@@ -428,6 +366,14 @@ private struct Arguments {
         if let value = values[key] as? Int { return value }
         if let value = values[key] as? NSNumber { return value.intValue }
         if let value = values[key] as? String { return Int(value) }
+        return nil
+    }
+
+    func strictInt(_ key: String) -> Int? {
+        guard let value = values[key] else { return nil }
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID() { return nil }
+        if let value = value as? NSNumber, value.doubleValue.rounded() == value.doubleValue { return value.intValue }
         return nil
     }
 
