@@ -22,14 +22,16 @@ enum ConnorSpeechPlaybackPhase: Equatable {
 
 struct ConnorSpeechActionPresentation: Equatable {
     var isVisible: Bool
+    var isEnabled: Bool
     var title: String
     var systemImage: String
     var accessibilityLabel: String
     var help: String
     var isLoading: Bool
 
-    init(isAvailable: Bool, phase: ConnorSpeechPlaybackPhase, messageID: String) {
-        isVisible = isAvailable
+    init(isConfigured: Bool, isAvailable: Bool, phase: ConnorSpeechPlaybackPhase, messageID: String) {
+        isVisible = isConfigured
+        isEnabled = isAvailable
         isLoading = phase.isLoading(messageID: messageID)
         if isLoading {
             title = "生成中"
@@ -44,8 +46,8 @@ struct ConnorSpeechActionPresentation: Equatable {
         } else {
             title = "朗读"
             systemImage = "speaker.wave.2"
-            accessibilityLabel = "朗读这条助理回复"
-            help = "使用 Xiaomi MiMo 朗读"
+            accessibilityLabel = isAvailable ? "朗读这条助理回复" : "朗读不可用，需要有效的 Xiaomi MiMo API Key"
+            help = isAvailable ? "使用 Xiaomi MiMo 朗读" : "已检测到 MiMo；请检查此连接是否保存了有效 API Key"
         }
     }
 }
@@ -60,6 +62,7 @@ final class ConnorSpeechPlaybackCoordinator {
     ) async throws -> Data
 
     private(set) var phase: ConnorSpeechPlaybackPhase = .idle
+    @ObservationIgnored var isConfigured: () -> Bool = { false }
     @ObservationIgnored var isAvailable: () -> Bool = { false }
     @ObservationIgnored var reportError: (String) -> Void = { _ in }
 
@@ -92,7 +95,12 @@ final class ConnorSpeechPlaybackCoordinator {
     }
 
     func presentation(messageID: String) -> ConnorSpeechActionPresentation {
-        ConnorSpeechActionPresentation(isAvailable: isAvailable(), phase: phase, messageID: messageID)
+        ConnorSpeechActionPresentation(
+            isConfigured: isConfigured(),
+            isAvailable: isAvailable(),
+            phase: phase,
+            messageID: messageID
+        )
     }
 
     func toggle(messageID: String, markdown: String, personality: ConnorPersonalitySettings, personalityRevision: Int, voiceGender: ConnorVoiceGender) {
@@ -225,6 +233,6 @@ enum ConnorSpeechPlaybackError: Error, LocalizedError {
     case unavailable
 
     var errorDescription: String? {
-        "需要先启用带有效 API Key 的 Xiaomi MiMo 按量付费连接。"
+        "需要先启用带有效 API Key 的 Xiaomi MiMo 连接。"
     }
 }

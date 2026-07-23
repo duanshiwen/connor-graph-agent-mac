@@ -29,17 +29,25 @@ public extension AppLLMSettingsRepository {
     func xiaomiMiMOSpeechConfiguration() throws -> XiaomiMiMOSpeechConfiguration? {
         let settings = try loadSettings()
         guard let connection = settings.xiaomiMiMOSpeechConnection,
-              let config = try openAICompatibleConfig(
-                connectionID: connection.id,
-                modelOverride: XiaomiMiMOSpeechConfiguration.voiceDesignModel
-              )
+              let apiKey = try apiKey(for: connection.id),
+              !apiKey.isEmpty,
+              let sourceURL = URL(string: connection.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = sourceURL.host?.lowercased()
         else { return nil }
+        let endpoint: String
+        switch host {
+        case "api.xiaomimimo.com":
+            endpoint = "https://api.xiaomimimo.com/v1"
+        case "token-plan-cn.xiaomimimo.com":
+            endpoint = "https://token-plan-cn.xiaomimimo.com/v1"
+        default:
+            return nil
+        }
+        guard let baseURL = URL(string: endpoint) else { return nil }
         return XiaomiMiMOSpeechConfiguration(
-            baseURL: config.baseURL,
-            apiKey: config.apiKey,
-            extraHeaders: config.extraHeaders,
-            apiKeyHeaderKind: config.apiKeyHeaderKind,
-            requestTimeout: config.requestTimeout
+            baseURL: baseURL,
+            apiKey: apiKey,
+            apiKeyHeaderKind: .apiKey
         )
     }
 }

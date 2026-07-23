@@ -709,6 +709,9 @@ final class AppRuntimeLifecycle {
         connorSpeechPlaybackCoordinator.isAvailable = { [weak self] in
             self?.aiConnectionsModel.isXiaomiMiMOSpeechAvailable ?? false
         }
+        connorSpeechPlaybackCoordinator.isConfigured = { [weak self] in
+            self?.aiConnectionsModel.hasXiaomiMiMOConnection ?? false
+        }
         connorSpeechPlaybackCoordinator.reportError = { [weak self] message in
             self?.chatComposerCoordinator.showToast(
                 title: "朗读失败",

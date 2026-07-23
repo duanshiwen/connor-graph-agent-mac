@@ -183,11 +183,17 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     }
 
     public var supportsXiaomiMiMOSpeech: Bool {
-        guard providerMode == .openAICompatible,
-              hasAPIKey,
-              URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines))?.host?.lowercased() == "api.xiaomimimo.com"
-        else { return false }
-        return modelOptions.contains { $0.lowercased().hasPrefix("mimo-") }
+        hasAPIKey && isXiaomiMiMOConnection
+    }
+
+    public var isXiaomiMiMOConnection: Bool {
+        let host = URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines))?.host?.lowercased()
+        return (host == "api.xiaomimimo.com" || host == "token-plan-cn.xiaomimimo.com")
+            && usesXiaomiMiMOModel
+    }
+
+    private var usesXiaomiMiMOModel: Bool {
+        modelOptions.contains { $0.lowercased().hasPrefix("mimo-") }
             || effectiveModel.lowercased().hasPrefix("mimo-")
     }
 

@@ -3,7 +3,7 @@ import Testing
 
 @Suite("Xiaomi MiMo speech availability")
 struct XiaomiMiMOSpeechAvailabilityTests {
-    @Test func requiresOfficialPayAsYouGoEndpointMiMoModelAndAPIKey() {
+    @Test func requiresOfficialEndpointMiMoModelAndAPIKey() {
         let available = connection(
             endpoint: "https://api.xiaomimimo.com/v1",
             model: "mimo-v2.5-pro",
@@ -11,9 +11,28 @@ struct XiaomiMiMOSpeechAvailabilityTests {
         )
 
         #expect(available.supportsXiaomiMiMOSpeech)
+        #expect(available.isXiaomiMiMOConnection)
         #expect(!connection(endpoint: available.baseURLString, model: available.model, hasAPIKey: false).supportsXiaomiMiMOSpeech)
-        #expect(!connection(endpoint: "https://token-plan-cn.xiaomimimo.com/v1", model: available.model, hasAPIKey: true).supportsXiaomiMiMOSpeech)
+        let tokenPlan = connection(endpoint: "https://token-plan-cn.xiaomimimo.com/v1", model: available.model, hasAPIKey: true)
+        #expect(tokenPlan.isXiaomiMiMOConnection)
+        #expect(tokenPlan.supportsXiaomiMiMOSpeech)
         #expect(!connection(endpoint: available.baseURLString, model: "deepseek-v4", hasAPIKey: true).supportsXiaomiMiMOSpeech)
+    }
+
+    @Test func supportsOfficialAnthropicTokenPlanForSpeech() {
+        let connection = AppLLMConnectionConfig(
+            id: "mimo-token-plan",
+            name: "Xiaomi MiMo",
+            providerMode: .anthropicMessages,
+            connectionKind: .anthropicCompatible,
+            baseURLString: "https://token-plan-cn.xiaomimimo.com/anthropic",
+            model: "mimo-v2.5-pro, mimo-v2.5",
+            selectedModel: "mimo-v2.5-pro",
+            hasAPIKey: true
+        )
+
+        #expect(connection.isXiaomiMiMOConnection)
+        #expect(connection.supportsXiaomiMiMOSpeech)
     }
 
     @Test func settingsPreferDefaultAvailableConnectionThenFallBackToAnotherMiMoConnection() {
