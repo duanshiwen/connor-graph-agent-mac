@@ -64,14 +64,19 @@ final class ConnorSpeechPlaybackCoordinator {
     @ObservationIgnored var reportError: (String) -> Void = { _ in }
 
     @ObservationIgnored private let synthesizer: Synthesizer
+    @ObservationIgnored private let audioCache: ConnorSpeechAudioCache
     @ObservationIgnored private let playback = AgentAudioPlaybackController()
     @ObservationIgnored private var generation: UInt64 = 0
     @ObservationIgnored private var synthesisTask: Task<Void, Never>?
     @ObservationIgnored private var playbackMonitorTask: Task<Void, Never>?
-    @ObservationIgnored private var cachedAudioURLs: [String: URL] = [:]
     @ObservationIgnored private var automaticallyReadMessageIDs = Set<String>()
 
-    init(settingsRepository: AppLLMSettingsRepository, synthesizer: Synthesizer? = nil) {
+    init(
+        settingsRepository: AppLLMSettingsRepository,
+        cacheDirectory: URL? = nil,
+        synthesizer: Synthesizer? = nil
+    ) {
+        self.audioCache = ConnorSpeechAudioCache(directory: cacheDirectory)
         self.synthesizer = synthesizer ?? { markdown, personality, voiceGender in
             guard let configuration = try settingsRepository.xiaomiMiMOSpeechConfiguration() else {
                 throw ConnorSpeechPlaybackError.unavailable
@@ -135,15 +140,13 @@ final class ConnorSpeechPlaybackCoordinator {
 
     func shutdown() {
         stop()
-        for url in cachedAudioURLs.values { try? FileManager.default.removeItem(at: url) }
-        cachedAudioURLs.removeAll()
         automaticallyReadMessageIDs.removeAll()
     }
 
     private func start(messageID: String, markdown: String, personality: ConnorPersonalitySettings, cacheKey: String, voiceGender: ConnorVoiceGender) {
         stop()
         let currentGeneration = generation
-        if let cachedURL = cachedAudioURLs[cacheKey], FileManager.default.fileExists(atPath: cachedURL.path) {
+        if let cachedURL = audioCache.cachedURL(for: cacheKey) {
             beginPlayback(url: cachedURL, messageID: messageID, generation: currentGeneration)
             return
         }
@@ -155,11 +158,9 @@ final class ConnorSpeechPlaybackCoordinator {
                 let audio = try await synthesizer(markdown, personality, voiceGender)
                 try Task.checkCancellation()
                 guard generation == currentGeneration else { return }
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("connor-mimo-speech-\(UUID().uuidString)")
-                    .appendingPathExtension("wav")
-                try audio.write(to: url, options: .atomic)
-                cachedAudioURLs[cacheKey] = url
+                let url = try await audioCache.store(wavData: audio, for: cacheKey)
+                try Task.checkCancellation()
+                guard generation == currentGeneration else { return }
                 synthesisTask = nil
                 beginPlayback(url: url, messageID: messageID, generation: currentGeneration)
             } catch is CancellationError {
