@@ -131,7 +131,7 @@ final class UserPreferencesFeatureModel {
     var city = "" { didSet { changed() } }
     var country = "" { didSet { changed() } }
     var notes = "" { didSet { changed() } }
-    private(set) var connorPersonality = ConnorPersonalitySettings.empty
+    private(set) var connorPersonality = ConnorPersonalitySettings.balancedDefault
     private(set) var connorPersonalityRevision = 0
     var personalityRequest = ""
     private(set) var personalityDraft: ConnorPersonalitySettings?
@@ -237,8 +237,8 @@ final class UserPreferencesFeatureModel {
     }
 
     func resetPersonality() {
-        guard !connorPersonality.isEmpty else { return }
-        connorPersonality = .empty
+        guard connorPersonality != .balancedDefault else { return }
+        connorPersonality = .balancedDefault
         connorPersonalityRevision += 1
         personalityDraft = nil
         personalityErrorMessage = nil
