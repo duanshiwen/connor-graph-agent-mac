@@ -754,7 +754,9 @@ private struct AgentChatConversationView: View {
                         markdown: message.message.content,
                         personality: preferences.connorPersonality,
                         personalityRevision: preferences.connorPersonalityRevision,
-                        voiceGender: preferences.connorVoiceGender
+                        voiceGender: preferences.resolvedConnorVoiceGender,
+                        voiceProfile: preferences.connorVoiceProfile,
+                        voiceRevision: preferences.connorVoiceRevision
                     )
                 }
             )

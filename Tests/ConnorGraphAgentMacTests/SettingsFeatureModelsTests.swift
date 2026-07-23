@@ -46,17 +46,73 @@ struct SettingsFeatureModelsTests {
         model.apply(AgentRuntimePreferenceSettings(
             connorSpeech: ConnorSpeechSettings(
                 voiceGender: .female,
+                followsPersonalityGender: false,
+                voiceProfile: ConnorVoiceProfile(summary: "清澈沉稳"),
+                voiceRevision: 2,
                 automaticallyReadsReplies: true
             )
         ))
 
         #expect(model.connorVoiceGender == .female)
+        #expect(model.connorVoiceGenderSelection == .female)
+        #expect(model.resolvedConnorVoiceGender == .female)
+        #expect(model.connorVoiceProfile == ConnorVoiceProfile(summary: "清澈沉稳"))
+        #expect(model.connorVoiceRevision == 2)
         #expect(model.automaticallyReadsReplies)
 
         var settings = AgentRuntimeSettings.default
         model.apply(to: &settings)
         #expect(settings.preferences.connorSpeech.voiceGender == .female)
+        #expect(!settings.preferences.connorSpeech.followsPersonalityGender)
+        #expect(settings.preferences.connorSpeech.voiceProfile == ConnorVoiceProfile(summary: "清澈沉稳"))
+        #expect(settings.preferences.connorSpeech.voiceRevision == 2)
         #expect(settings.preferences.connorSpeech.automaticallyReadsReplies)
+    }
+
+    @Test func voiceGenderFollowsPersonalityByDefaultAndSupportsAnExplicitOverride() {
+        let model = UserPreferencesFeatureModel()
+        model.apply(AgentRuntimePreferenceSettings(
+            connorPersonality: ConnorPersonalitySettings(gender: "女性", summary: "温和可靠")
+        ))
+
+        #expect(model.connorVoiceGenderSelection == .followPersonality)
+        #expect(model.resolvedConnorVoiceGender == .female)
+
+        model.setConnorVoiceGenderSelection(.male)
+        #expect(model.connorVoiceGenderSelection == .male)
+        #expect(model.resolvedConnorVoiceGender == .male)
+
+        model.setConnorVoiceGenderSelection(.followPersonality)
+        #expect(model.resolvedConnorVoiceGender == .female)
+    }
+
+    @Test func voiceGenerationRequiresConfirmationAndCanReturnToPersonalityDefault() async {
+        let model = UserPreferencesFeatureModel()
+        let generated = ConnorVoiceProfile(summary: "清澈而沉稳", timbre: "中低音")
+        var changes = 0
+        model.onChanged = { changes += 1 }
+        model.voiceGenerator = { request, gender in
+            #expect(request == "声音更沉稳一些")
+            #expect(gender == .neutral)
+            return generated
+        }
+        model.voiceRequest = "声音更沉稳一些"
+
+        await model.generateVoiceDraft()
+
+        #expect(model.voiceDraft == generated)
+        #expect(model.connorVoiceProfile == nil)
+        #expect(changes == 0)
+
+        model.confirmVoiceDraft()
+        #expect(model.connorVoiceProfile == generated)
+        #expect(model.connorVoiceRevision == 1)
+        #expect(changes == 1)
+
+        model.resetVoiceToFollowPersonality()
+        #expect(model.connorVoiceProfile == nil)
+        #expect(model.connorVoiceRevision == 2)
+        #expect(changes == 2)
     }
 
     @Test func personalityGenerationRequiresConfirmationBeforeSaving() async {

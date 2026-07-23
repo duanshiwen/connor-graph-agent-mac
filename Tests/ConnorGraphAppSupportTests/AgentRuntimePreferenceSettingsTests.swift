@@ -68,6 +68,7 @@ struct AgentRuntimePreferenceSettingsTests {
         let preferences = AgentRuntimePreferenceSettings(
             connorSpeech: ConnorSpeechSettings(
                 voiceGender: .female,
+                followsPersonalityGender: false,
                 voiceProfile: voiceProfile,
                 voiceRevision: 3,
                 automaticallyReadsReplies: true
@@ -79,6 +80,7 @@ struct AgentRuntimePreferenceSettingsTests {
         let legacy = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: Data("{}".utf8))
 
         #expect(decoded.connorSpeech.voiceGender == .female)
+        #expect(!decoded.connorSpeech.followsPersonalityGender)
         #expect(decoded.connorSpeech.voiceProfile == voiceProfile)
         #expect(decoded.connorSpeech.voiceRevision == 3)
         #expect(decoded.connorSpeech.automaticallyReadsReplies)
@@ -89,9 +91,17 @@ struct AgentRuntimePreferenceSettingsTests {
             from: Data(#"{"voiceGender":"female","automaticallyReadsReplies":true}"#.utf8)
         )
         #expect(legacySpeech.voiceGender == .female)
+        #expect(!legacySpeech.followsPersonalityGender)
         #expect(legacySpeech.voiceProfile == nil)
         #expect(legacySpeech.voiceRevision == 0)
         #expect(legacySpeech.automaticallyReadsReplies)
+    }
+
+    @Test func voiceGenderInferenceUsesNeutralForNonBinaryOrUnspecifiedPersonalities() {
+        #expect(ConnorVoiceGender.following(personalityGender: "女性") == .female)
+        #expect(ConnorVoiceGender.following(personalityGender: "male") == .male)
+        #expect(ConnorVoiceGender.following(personalityGender: "非二元") == .neutral)
+        #expect(ConnorVoiceGender.following(personalityGender: "中性") == .neutral)
     }
 
     @Test func voiceProfileGeneratorRejectsUnexpectedFieldsAndNormalizesValues() throws {
