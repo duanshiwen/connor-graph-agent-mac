@@ -38,38 +38,58 @@ struct MailFeatureModelTests {
         #expect(f.model.preferences.defaultSendAccountID == data.account.id)
     }
 
-    @Test func listProjectionUsesBoundedWindowAndPersistsFiltersInModel() throws {
+    @Test func listProjectionLoadsAllMessagesThroughDatabasePages() async throws {
         let f = try fixture(); defer { f.cleanup() }
         let data = mailFixture(id: "message-template")
-        let messages = (0..<250).map { index in
-            MailMessageSummary(
-                id: MailMessageID(rawValue: "message-\(index)"),
+        let messages = (0..<130).map { index in
+            MailMessageDetail(summary: MailMessageSummary(
+                id: MailMessageID(rawValue: String(format: "message-%03d", index)),
                 accountID: data.account.id,
                 mailboxID: data.mailbox.id,
-                subject: index == 149 ? "Needle" : "Subject \(index)",
+                subject: "Subject \(index)",
                 from: MailAddress(email: "sender@example.com"),
                 to: data.account.identities.map(\.address),
-                date: Date(timeIntervalSince1970: TimeInterval(index)),
+                date: Date(timeIntervalSince1970: TimeInterval(10_000 - index / 3)),
                 snippet: "Snippet"
-            )
+            ), body: MailMessageBody(
+                plainText: MailBodyPart(
+                    mimeType: "text/plain",
+                    text: index.isMultiple(of: 2) ? "BodyNeedle \(index)" : "Ordinary body \(index)",
+                    byteCount: 32
+                ),
+                redactedPreview: "Body preview"
+            ))
         }
+        try await f.store.saveAccount(data.account)
+        try await f.store.saveMailbox(data.mailbox)
+        try await f.store.saveMessagesBatch(messages)
 
-        f.model.presentation = NativeMailBrowserPresentation(
-            accounts: [data.account],
-            mailboxes: [data.mailbox],
-            messages: messages
-        )
-        #expect(f.model.filteredListMessages.count == 250)
+        await f.model.reload()
+        #expect(f.model.visibleListMessages.count == 50)
+
+        f.model.loadMoreListMessagesIfNeeded(currentMessageID: messages[10].id)
+        await f.model.waitForPendingOperations()
+        #expect(f.model.visibleListMessages.count == 50)
+
+        let firstPageEnd = try #require(f.model.visibleListMessages.last?.id)
+        f.model.loadMoreListMessagesIfNeeded(currentMessageID: firstPageEnd)
+        f.model.loadMoreListMessagesIfNeeded(currentMessageID: firstPageEnd)
+        await f.model.waitForPendingOperations()
         #expect(f.model.visibleListMessages.count == 100)
-        #expect(f.model.hiddenFilteredListMessageCount == 150)
 
-        f.model.loadMoreListMessages()
-        #expect(f.model.visibleListMessages.count == 200)
-        #expect(f.model.hiddenFilteredListMessageCount == 50)
+        f.model.loadMoreListMessagesIfNeeded(currentMessageID: try #require(f.model.visibleListMessages.last?.id))
+        await f.model.waitForPendingOperations()
+        #expect(f.model.visibleListMessages.count == 130)
+        #expect(Set(f.model.visibleListMessages.map(\.id)).count == 130)
+        #expect(f.model.visibleListMessages.map(\.id) == messages.map(\.id))
 
-        f.model.searchQuery = "Needle"
-        #expect(f.model.filteredListMessages.map(\.subject) == ["Needle"])
-        #expect(f.model.visibleListMessages.count == 1)
+        f.model.searchQuery = "BodyNeedle"
+        await f.model.waitForPendingOperations()
+        #expect(f.model.visibleListMessages.count == 50)
+        f.model.loadMoreListMessagesIfNeeded(currentMessageID: try #require(f.model.visibleListMessages.last?.id))
+        await f.model.waitForPendingOperations()
+        #expect(f.model.visibleListMessages.count == 65)
+        #expect(Set(f.model.visibleListMessages.map(\.id)).count == 65)
     }
 
     @Test func shutdownPreventsFurtherReloadApplication() async throws {

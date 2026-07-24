@@ -1495,11 +1495,8 @@ private struct AddTaskAutomationSheet: View {
 struct CraftMailListPane: View {
     @Bindable var model: MailFeatureModel
 
-    private static let visibleMessagesBatchSize = 100
-
     private var presentation: NativeMailBrowserPresentation { model.presentation }
     private var visibleMessages: [MailMessageSummary] { model.visibleListMessages }
-    private var hiddenFilteredMessageCount: Int { model.hiddenFilteredListMessageCount }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1522,7 +1519,9 @@ struct CraftMailListPane: View {
             } else if presentation.mailboxes.isEmpty {
                 ContentUnavailableView("还没有邮箱文件夹", systemImage: "tray", description: Text("账户添加后，康纳同学会在同步完成时显示收件箱和其他文件夹。"))
                     .padding(.top, 80)
-            } else if presentation.messages.isEmpty {
+            } else if presentation.messages.isEmpty
+                        && model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && model.listDirectionFilter == .all {
                 ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else {
@@ -1546,14 +1545,9 @@ struct CraftMailListPane: View {
                                 )
                                 .equatable()
                                 .nativeListRowStyle()
-                            }
-                            if hiddenFilteredMessageCount > 0 {
-                                MailListLoadMoreRow(
-                                    hiddenCount: hiddenFilteredMessageCount,
-                                    batchSize: Self.visibleMessagesBatchSize,
-                                    onLoadMore: model.loadMoreListMessages
-                                )
-                                .nativeListRowStyle()
+                                .onAppear {
+                                    model.loadMoreListMessagesIfNeeded(currentMessageID: message.id)
+                                }
                             }
                         }
                         .listStyle(.plain)
@@ -1639,32 +1633,6 @@ extension MailMessageDirectionFilter {
         case .received: "tray"
         case .sent: "paperplane"
         }
-    }
-}
-
-private struct MailListLoadMoreRow: View, Equatable {
-    var hiddenCount: Int
-    var batchSize: Int
-    var onLoadMore: () -> Void
-
-    nonisolated static func == (lhs: MailListLoadMoreRow, rhs: MailListLoadMoreRow) -> Bool {
-        lhs.hiddenCount == rhs.hiddenCount && lhs.batchSize == rhs.batchSize
-    }
-
-    var body: some View {
-        Button(action: onLoadMore) {
-            VStack(spacing: 4) {
-                Text("显示更多邮件")
-                    .font(AppListTypography.rowCaptionEmphasized)
-                Text("还有 \(hiddenCount) 封，点击继续加载最近 \(min(batchSize, hiddenCount)) 封")
-                    .font(AppListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 }
 
