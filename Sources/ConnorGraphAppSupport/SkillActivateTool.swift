@@ -74,7 +74,7 @@ public func buildSkillCatalogSummary(from packages: [SkillPackage]) -> String {
 /// Prefer this over injecting the full catalog into the system prompt.
 public struct SkillListTool: AgentTool {
     public let name = "connor_skill_list"
-    public let description = "List installed skills available for this session in stable slug order. page defaults to 1 and page_size defaults to 50. The response includes page, pageSize, returnedItems, totalItems, totalPages, hasNextPage, nextPage, and skills. When hasNextPage is true, call again with exactly nextPage and the same page_size to retrieve the complete catalog without gaps or duplicates."
+    public let description = "List installed skills available for this session in stable slug order. This is the internal skill-discovery function. page defaults to 1 and page_size defaults to 50. The response includes page, pageSize, returnedItems, totalItems, totalPages, hasNextPage, nextPage, and skills. Whenever nextPage is non-null (equivalently, hasNextPage is true), immediately call this same connor_skill_list tool again with page set to exactly nextPage and the same page_size. Repeat until nextPage is null before selecting or activating a skill, so the complete catalog is retrieved without gaps or duplicates."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "page": .integer(description: "1-based result page. Defaults to 1; use nextPage from the previous response."),

@@ -77,6 +77,9 @@ import ConnorGraphStore
         ))
     }
     let tool = SessionListByStatusTool(repository: repository)
+    let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+    let pageSize = try #require(properties["page_size"] as? [String: Any])
+    #expect((pageSize["description"] as? String)?.contains("must remain unchanged") == true)
     var page = 1
     var collected: [String] = []
 

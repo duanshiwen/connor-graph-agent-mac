@@ -66,6 +66,11 @@ struct TaskAgentToolsTests {
             _ = try service.createScheduledSessionMessageTask(origin: .ai, name: "Task \(index)", runAt: Date(timeIntervalSince1970: Double(100 + index)), recurrence: .daily, timezoneIdentifier: nil, message: "Message \(index)")
         }
         let tool = TaskListTool(repository: repository)
+        let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+        let pageSchema = try #require(properties["page"] as? [String: Any])
+        let pageSizeSchema = try #require(properties["page_size"] as? [String: Any])
+        #expect((pageSchema["description"] as? String)?.contains("use exactly that value") == true)
+        #expect((pageSizeSchema["description"] as? String)?.contains("must remain unchanged") == true)
         var page = 1
         var ids: [String] = []
         var reportedTotal = 0
