@@ -392,7 +392,7 @@ enum LocalTextEditor {
         for edit in edits {
             let ranges = ranges(of: edit.oldText, in: original)
             guard ranges.count == 1 else {
-                throw AgentToolError.invalidArguments("old_text must occur exactly once; found \(ranges.count): \(edit.oldText)")
+                throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count): \(edit.oldText)")
             }
         }
         var updated = original
