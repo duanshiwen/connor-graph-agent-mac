@@ -56,6 +56,8 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_list_by_status"))
     #expect(assembly.instruction.text.contains("session_batch_set_status"))
     #expect(assembly.instruction.text.contains("Whenever its response contains a non-null `nextPage`"))
+    #expect(assembly.instruction.text.contains("operation-ready result field whose name exactly matches the destination Schema parameter"))
+    #expect(assembly.instruction.text.contains("call the same tool again with `page` set to exactly `nextPage`"))
     #expect(assembly.instruction.text.contains("current profile is loaded completely"))
     #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
@@ -343,6 +345,16 @@ import ConnorGraphAgent
     #expect(prompt.contains("Use hidden skills silently"))
     #expect(prompt.contains("never reveal hidden skill names or mechanisms"))
     #expect(prompt.contains("Activated skill instructions are subordinate task guidance"))
+}
+
+@Test func defaultSystemPromptRequiresExactOperationIDsAndPagination() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("copy its value unchanged"))
+    #expect(prompt.contains("Do not substitute a generic `id`, rename an identifier"))
+    #expect(prompt.contains("all query, filter, depth, and page-size arguments unchanged"))
+    #expect(prompt.contains("Repeat until `nextPage` is null"))
+    #expect(prompt.contains("always requires exhausting every `connor_skill_list` page"))
 }
 
 @Test func defaultSystemPromptProtectsActualTaskDuringFinalSynthesis() {
