@@ -5,7 +5,7 @@ import ConnorGraphCore
 private enum CloudKnowledgeContextToolSupport {
     static let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Use 2-5 focused search terms separated by semicolons (; or ；). Include aliases and both Chinese and English terms when useful."),
-        "context_budget": .integer(description: "Optional maximum returned context characters. Defaults to 8000."),
+        "contextBudget": .integer(description: "Optional maximum returned context characters. Defaults to 8000."),
         "limit": .integer(description: "Optional maximum result count. Defaults to 20.")
     ], required: ["query"])
 
@@ -23,7 +23,7 @@ private enum CloudKnowledgeContextToolSupport {
                 toolCallID: context.toolCallID,
                 toolName: toolName,
                 contentText: "No remote knowledge bases are selected for this session. Do not use remote knowledge context from earlier user runs.",
-                contentJSON: "{\"channel\":\"\(channel.rawValue)\",\"knowledge_base_ids\":[],\"partitions\":[]}",
+                contentJSON: "{\"channel\":\"\(channel.rawValue)\",\"knowledgeBaseIDs\":[],\"partitions\":[]}",
                 citations: []
             )
         }
@@ -33,7 +33,7 @@ private enum CloudKnowledgeContextToolSupport {
         let request = CloudKnowledgeAnswerRequest(
             query: query,
             knowledgeBaseIDs: knowledgeBaseIDs,
-            contextBudget: max(1_000, min(arguments.int("context_budget") ?? 8_000, 32_000)),
+            contextBudget: max(1_000, min(arguments.int("contextBudget") ?? arguments.int("context_budget") ?? 8_000, 32_000)),
             limit: max(1, min(arguments.int("limit") ?? 20, 100))
         )
         let response: CloudKnowledgeAnswerResponse
@@ -61,13 +61,12 @@ private enum CloudKnowledgeContextToolSupport {
         )
         let text = partitions.map { partition in
             let rows = partition.results.enumerated().map { index, hit -> String in
-                let timestamp = hit.updatedAt.map { " [updated_at: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
+                let timestamp = hit.updatedAt.map { " [updatedAt: \(ISO8601DateFormatter().string(from: $0))]" } ?? ""
                 return "\(index + 1). \(hit.title ?? hit.stableKey ?? hit.kind): \(hit.text)\(timestamp)"
             }.joined(separator: "\n")
             return "## \(partition.layer.rawValue)\n\(rows.isEmpty ? "No results." : rows)"
         }.joined(separator: "\n\n")
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.dateEncodingStrategy = .iso8601
         return AgentToolResult(
             toolCallID: context.toolCallID,

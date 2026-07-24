@@ -114,9 +114,11 @@ struct CloudKnowledgePhase3Tests {
         let executionContext = AgentToolExecutionContext(runID: "agent-run", sessionID: "local", groupID: "g", userPrompt: "publish", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll))
         let search = try await executor.execute(toolName: "cloud_kb_knowledge_context", arguments: try AgentToolArguments(json: #"{"query":"Connor","limit":20}"#), context: executionContext)
         let searchData = try #require(search.contentJSON?.data(using: String.Encoding.utf8)); let response = try JSONDecoder.cloudContract.decode(CloudKnowledgeSearchResponse.self, from: searchData)
-        _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"search_context_id":"\#(response.searchContextID)","decision":"skip_duplicate","semantic_terms":["Connor"],"payload":{}}"#), context: executionContext)
+        _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"searchContextID":"\#(response.searchContextID)","decision":"skip_duplicate","semanticTerms":["Connor"],"payload":{}}"#), context: executionContext)
         #expect(await api.operations.isEmpty)
-        _ = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"search_context_id":"\#(response.searchContextID)","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor","valid_from":"2026-07-13T10:00:00Z","payload":{"title":"Connor"}}}"#), context: executionContext)
+        let staged = try await executor.execute(toolName: "cloud_kb_l3_update_knowledge", arguments: try AgentToolArguments(json: #"{"searchContextID":"\#(response.searchContextID)","decision":"create_new","semanticTerms":["Connor"],"payload":{"kind":"reusable_knowledge","stableKey":"connor","validFrom":"2026-07-13T10:00:00Z","payload":{"title":"Connor"}}}"#), context: executionContext)
+        #expect(staged.contentJSON?.contains("\"stableKey\":\"connor\"") == true)
+        #expect(staged.contentJSON?.contains("\"stable_key\"") == false)
         let operation = try #require(await api.operations.first)
         #expect(operation.operationType == "create")
         #expect(operation.targetIdentityID == nil)
@@ -154,10 +156,10 @@ struct CloudKnowledgePhase3Tests {
         let payloadSchema = try #require(properties["payload"] as? [String: Any])
         let payloadProperties = try #require(payloadSchema["properties"] as? [String: Any])
         #expect(payloadProperties["kind"] != nil)
-        #expect(payloadProperties["stable_key"] != nil)
-        #expect(payloadProperties["valid_from"] != nil)
+        #expect(payloadProperties["stableKey"] != nil)
+        #expect(payloadProperties["validFrom"] != nil)
         #expect(payloadProperties["payload"] != nil)
-        #expect(write.description.contains("kind, stable_key, valid_from"))
+        #expect(write.description.contains("kind, stableKey, validFrom"))
     }
 
     @Test func realModelToolLoopSearchesStagesAndSummarizesConversation() async throws {
@@ -273,7 +275,7 @@ struct CloudKnowledgePhase3Tests {
         let firstRequest = try #require(events.first { $0.kind == .modelRequest })
         #expect(firstRequest.messages?.first?.content == CloudKnowledgeExtractionPrompt.systemInstruction)
         #expect(firstRequest.messages?.last?.content.contains("source-conversation-turns-json") == true)
-        #expect(firstRequest.tools?.contains { $0.name == "cloud_kb_l3_update_knowledge" && $0.inputSchemaJSON.contains("search_context_id") } == true)
+        #expect(firstRequest.tools?.contains { $0.name == "cloud_kb_l3_update_knowledge" && $0.inputSchemaJSON.contains("searchContextID") } == true)
         #expect(firstRequest.messageCharacterCount == firstRequest.messages?.reduce(0) { $0 + $1.content.count })
         let firstResponse = try #require(events.first { $0.kind == .modelResponse }?.response)
         #expect(firstResponse.toolCalls.first?.name == "cloud_kb_recent_context")
@@ -443,7 +445,7 @@ private actor CloudKnowledgeScriptedProvider {
         case 1:
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-search", name: "cloud_kb_recent_context", argumentsJSON: #"{"query":"Connor","limit":20}"#)], finishReason: .toolCalls)
         case 2:
-            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["Connor"],"payload":{"kind":"reusable_knowledge","stable_key":"connor-publishing","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "wrong-write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"searchContextID":"search-1","decision":"create_new","semanticTerms":["Connor"],"payload":{"kind":"reusable_knowledge","stableKey":"connor-publishing","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"Connor 发布流程"}}}"#)], finishReason: .toolCalls)
         default:
             return AgentModelResponse(text: nil, finishReason: .stop)
         }
@@ -472,7 +474,7 @@ private actor CloudKnowledgeWriteAssistProvider {
             return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "read", name: "cloud_kb_read_record", argumentsJSON: #"{"query":"Answer cache","limit":20}"#)], finishReason: .toolCalls)
         }
         if requestCount == 2 {
-            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"search_context_id":"search-1","decision":"create_new","semantic_terms":["answer-package"],"payload":{"kind":"reusable_knowledge","stable_key":"answer-cache-refresh","valid_from":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
+            return AgentModelResponse(text: nil, toolCalls: [AgentToolCall(id: "write", name: "cloud_kb_l3_update_knowledge", argumentsJSON: #"{"searchContextID":"search-1","decision":"create_new","semanticTerms":["answer-package"],"payload":{"kind":"reusable_knowledge","stableKey":"answer-cache-refresh","validFrom":"2026-07-16T00:00:00Z","payload":{"title":"Answer cache refresh","text":"Answer cache uses bounded refresh policies."}}}"#)], finishReason: .toolCalls)
         }
         return AgentModelResponse(text: "已完成知识整理", finishReason: .stop)
     }
