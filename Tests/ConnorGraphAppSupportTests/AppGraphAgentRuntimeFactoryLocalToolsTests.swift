@@ -52,6 +52,8 @@ import ConnorGraphStore
 
     #expect(names.contains("session_get_status"))
     #expect(names.contains("session_set_status"))
+    #expect(names.contains("session_list_by_status"))
+    #expect(names.contains("session_batch_set_status"))
 }
 
 @Test func agentLoopRuntimeFactoryRegistersCurrentTimeTool() throws {
