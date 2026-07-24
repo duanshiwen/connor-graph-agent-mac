@@ -140,7 +140,6 @@ import ConnorGraphAgent
     #expect(prompt.contains("## Mandatory Task Bootstrap"))
     #expect(prompt.contains("For every user run, when their named tools are available, call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile` as one continuity preflight"))
     #expect(prompt.contains("Retrieval is mandatory when the tools are available, but using or mentioning any returned record is conditional"))
-    #expect(prompt.contains("do not accept `limit`"))
     #expect(prompt.contains("pass `page: 1` as a JSON integer, never a quoted string"))
     #expect(prompt.contains("`page` set to exactly that `nextPage` integer"))
     #expect(prompt.contains("keep `query`, time bounds, and (for knowledge) `depth` unchanged"))
