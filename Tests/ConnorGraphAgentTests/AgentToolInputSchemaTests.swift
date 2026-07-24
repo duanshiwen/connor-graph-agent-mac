@@ -78,6 +78,36 @@ import ConnorGraphAgent
     ])
 }
 
+@Test func agentToolInputSchemaRejectsSnakeCasePropertiesAndNormalizesLegacyArguments() {
+    let schema = AgentToolInputSchema.closedObject(
+        properties: [
+            "taskID": .string(description: "Task ID"),
+            "expectedUpdatedAt": .string(description: "Expected update time")
+        ],
+        required: ["taskID"]
+    )
+    #expect(schema.validationIssues(toolName: "camel_tool").isEmpty)
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "task_id": .string("task-1"),
+        "expected_updated_at": .string("2026-07-24T00:00:00Z")
+    ])) == .object([
+        "taskID": .string("task-1"),
+        "expectedUpdatedAt": .string("2026-07-24T00:00:00Z")
+    ]))
+
+    let invalid = AgentToolInputSchema.closedObject(
+        properties: ["task_id": .string(description: "Task ID")],
+        required: ["task_id"]
+    )
+    #expect(invalid.validationIssues(toolName: "snake_tool") == [
+        AgentToolSchemaValidationIssue(
+            toolName: "snake_tool",
+            path: "$.properties.task_id",
+            message: "property names exposed to the model must use camelCase"
+        )
+    ])
+}
+
 private struct InvalidSchemaTestTool: AgentTool {
     let name = "invalid_schema_test"
     let description = "Invalid schema test tool"

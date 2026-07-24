@@ -109,6 +109,13 @@ public extension AgentToolInputSchema {
                 ))
             }
             for name in properties.keys.sorted() {
+                if name.contains("_") {
+                    issues.append(AgentToolSchemaValidationIssue(
+                        toolName: toolName,
+                        path: "\(path).properties.\(name)",
+                        message: "property names exposed to the model must use camelCase"
+                    ))
+                }
                 issues.append(contentsOf: properties[name]!.validationIssues(
                     toolName: toolName,
                     path: "\(path).properties.\(name)"
@@ -116,6 +123,35 @@ public extension AgentToolInputSchema {
             }
             return issues
         }
+    }
+
+    func normalizingLegacyPropertyAliases(_ value: SendableJSONValue) -> SendableJSONValue {
+        switch (self, value) {
+        case let (.array(items, _), .array(values)):
+            return .array(values.map { items.normalizingLegacyPropertyAliases($0) })
+        case let (.nullable(wrapped), value):
+            return wrapped.normalizingLegacyPropertyAliases(value)
+        case let (.object(properties, _), .object(values)), let (.closedObject(properties, _), .object(values)):
+            var normalized: [String: SendableJSONValue] = [:]
+            for key in values.keys.sorted() where properties[key] != nil {
+                normalized[key] = properties[key]!.normalizingLegacyPropertyAliases(values[key]!)
+            }
+            for key in values.keys.sorted() where properties[key] == nil {
+                let resolvedKey = matchingProperty(for: key, in: properties.keys) ?? key
+                guard normalized[resolvedKey] == nil else { continue }
+                normalized[resolvedKey] = properties[resolvedKey]?.normalizingLegacyPropertyAliases(values[key]!) ?? values[key]!
+            }
+            return .object(normalized)
+        default:
+            return value
+        }
+    }
+
+    private func matchingProperty(for legacyKey: String, in properties: Dictionary<String, AgentToolInputSchema>.Keys) -> String? {
+        guard legacyKey.contains("_") else { return nil }
+        let normalizedLegacy = legacyKey.replacingOccurrences(of: "_", with: "").lowercased()
+        let matches = properties.filter { $0.lowercased() == normalizedLegacy }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     func argumentValidationIssues(_ value: SendableJSONValue, path: String = "$") -> [String] {
@@ -525,12 +561,16 @@ public struct AgentToolRegistry: Sendable {
         guard let tool = tools[call.name] else {
             throw AgentToolError.unknownTool(call.name)
         }
-        let arguments = try AgentToolArguments(json: call.argumentsJSON)
-        let argumentObject = SendableJSONValue.object(arguments.values)
+        let rawArguments = try AgentToolArguments(json: call.argumentsJSON)
+        let argumentObject = tool.inputSchema.normalizingLegacyPropertyAliases(.object(rawArguments.values))
         let argumentIssues = tool.inputSchema.argumentValidationIssues(argumentObject)
         guard argumentIssues.isEmpty else {
             throw AgentToolError.invalidArguments(argumentIssues.joined(separator: "; "))
         }
+        guard case .object(let normalizedValues) = argumentObject else {
+            throw AgentToolError.invalidArguments("$ must be an object")
+        }
+        let arguments = AgentToolArguments(values: normalizedValues)
         try await tool.preflight(call: call, context: context)
         var executionContext = context
         if !context.approvedCapabilities.contains(tool.permission) {
