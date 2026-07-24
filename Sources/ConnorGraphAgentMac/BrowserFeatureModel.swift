@@ -1015,8 +1015,8 @@ final class BrowserFeatureModel {
         let task = Task.detached(priority: .utility) { [weak self] in
             let tool = NativeWebFetchTool()
             let arguments = AgentToolArguments(values: [
-                "url": .string(record.url), "extract_mode": .string("markdown"),
-                "render_mode": .string("auto"), "timeout_ms": .int(60_000)
+                "url": .string(record.url), "extractMode": .string("markdown"),
+                "renderMode": .string("auto"), "timeoutMs": .int(60_000)
             ])
             let context = AgentToolExecutionContext(
                 runID: "browser-history-content-fetch-\(recordID.uuidString)", sessionID: record.sessionID,
