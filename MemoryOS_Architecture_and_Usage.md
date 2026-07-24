@@ -467,7 +467,7 @@ swift run connor memory run <run-id> messages
 swift run connor memory run <run-id> tool-calls
 ```
 
-`ingest-chat` 还支持 `--file <path>`、`--session-id <id>` 和 `--message-id <id>`。命令返回规范化状态、`retrieval_text`、模型ID、L0 provenance ID 和 L1 capture ID。规范化失败时仍保存 L0 原文，但 L1 `retrieval_text` 为空。
+`ingest-chat` 还支持 `--file <path>`、`--session-id <id>`、`--message-id <id>` 和仅用于诊断的 `--normalization-timeout-seconds <秒>`。命令返回规范化状态、`retrieval_text`、模型ID、L0 provenance ID 和 L1 capture ID。规范化失败时仍保存 L0 原文，但 L1 `retrieval_text` 为空。超时覆盖只影响本次 CLI 调用，生产写入默认仍为 6 秒。
 
 `plan-l1` 的 `--min-pending-count`、`--max-events-per-block` 和 `--max-tokens-per-block` 只影响本次CLI调用，适合端到端验收，不会更改 `MemoryOSL1ProcessingTriggerPolicy` 的生产默认值。
 
