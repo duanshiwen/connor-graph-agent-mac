@@ -159,17 +159,18 @@ private final class RetryWriteLoopModel: MemoryOSBackgroundToolLoopModel, @unche
 
     let modelID = "retry-write-loop-model"
     private var invocation = 0
-    private let arguments = #"{"beliefs":[{"statement":"Retries must be idempotent.","domain":"engineering"}]}"#
+    private let legacyArguments = #"{"beliefs":[{"statement":"Retries must be idempotent.","domain":"engineering","related_entity_names":"Background tools"}]}"#
+    private let canonicalArguments = #"{"beliefs":[{"statement":"Retries must be idempotent.","domain":"engineering","relatedEntityNames":"Background tools"}]}"#
 
     func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
         invocation += 1
         switch invocation {
         case 1:
-            return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-1", name: "memory_os_l3_update_beliefs", argumentsJSON: arguments)])
+            return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-1", name: "memory_os_l3_update_beliefs", argumentsJSON: legacyArguments)])
         case 2:
             throw Failure.disconnected
         case 3:
-            return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-2", name: "memory_os_l3_update_beliefs", argumentsJSON: arguments)])
+            return MemoryOSBackgroundLoopModelResponse(toolCalls: [MemoryOSBackgroundToolCall(id: "write-2", name: "memory_os_l3_update_beliefs", argumentsJSON: canonicalArguments)])
         default:
             return MemoryOSBackgroundLoopModelResponse(assistantText: "{}")
         }

@@ -299,6 +299,29 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
     }
 
+    func normalizedArgumentsJSON(for call: MemoryOSBackgroundToolCall) throws -> String {
+        let rawArguments: AgentToolArguments
+        do {
+            rawArguments = try AgentToolArguments(json: call.argumentsJSON)
+        } catch {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
+        }
+        let normalizedObject = inputSchema(for: call.name)?
+            .normalizingLegacyPropertyAliases(.object(rawArguments.values))
+            ?? .object(rawArguments.values)
+        guard case .object(let normalizedValues) = normalizedObject else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ must be an object")
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: normalizedValues.mapValues(\.jsonCompatibleObject),
+            options: [.sortedKeys]
+        )
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ could not be normalized to JSON")
+        }
+        return json
+    }
+
     func inputSchema(for toolName: String) -> AgentToolInputSchema? {
         switch toolName {
         case "memory_os_recent_context": MemoryOSRecentContextTool(facade: facade, configuration: contextToolConfiguration).inputSchema
