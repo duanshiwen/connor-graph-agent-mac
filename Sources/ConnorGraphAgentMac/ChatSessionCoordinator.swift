@@ -25,7 +25,7 @@ final class ChatSessionCoordinator {
     @ObservationIgnored var onSelectionWillChange: (String?, String) -> Void = { _, _ in }
     @ObservationIgnored var onSelectionStarted: (String) -> Void = { _ in }
     @ObservationIgnored var onSelectionLoaded: (ChatSessionDetailLoadSnapshot, Int, ContinuousClock.Instant) async -> Void = { _, _, _ in }
-    @ObservationIgnored var onReloadSelectedSession: (AgentSession, Bool) throws -> Void = { _, _ in }
+    @ObservationIgnored var onReloadSelectedSession: (AgentSession, Bool, Int, Int?) throws -> Void = { _, _, _, _ in }
     @ObservationIgnored var onSelectionCleared: () -> Void = {}
     @ObservationIgnored var onSessionsChanged: ([AgentSession]) -> Void = { _ in }
     @ObservationIgnored var onSessionAdded: (AgentSession) -> Void = { _ in }
@@ -81,8 +81,13 @@ final class ChatSessionCoordinator {
             onSessionsChanged(model.allSessions)
             let selectedID = selectedSessionIDVisible(in: sessions)
             model.selectedSessionID = selectedID
-            if let selectedID, let session = try repository.loadSession(id: selectedID) {
-                try onReloadSelectedSession(session, restoreWorkspaceMode)
+            if let selectedID, let messagePage = try repository.loadSessionMessagePage(id: selectedID) {
+                try onReloadSelectedSession(
+                    messagePage.session,
+                    restoreWorkspaceMode,
+                    messagePage.totalMessageCount,
+                    messagePage.nextBeforePosition
+                )
             } else {
                 clearSelection()
             }

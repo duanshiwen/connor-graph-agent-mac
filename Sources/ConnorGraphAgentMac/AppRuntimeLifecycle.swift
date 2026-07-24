@@ -1116,13 +1116,20 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.onSelectionLoaded = { [weak self] snapshot, generation, startedAt in
             await self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
         }
-        chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode in
+        chatFeatureModel.run.loadOlderMessages = { [weak self] in
+            await self?.loadOlderSelectedChatMessages() ?? 0
+        }
+        chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode, totalMessageCount, nextBeforePosition in
             guard let self, let repository = self.chatSessionRepository else { return }
             let sessionID = session.id
             try self.loadSessionCapsule(sessionID: sessionID)
             try self.chatBackgroundTaskCoordinator.load(sessionID: sessionID)
             chatRunCoordinator.installManager(self.makeNativeSessionManager(for: session), fallbackSession: session)
             self.replaceSelectedChatTranscript(session.messages)
+            self.chatRunCoordinator.configureTranscriptPagination(
+                totalCount: totalMessageCount,
+                nextBeforePosition: nextBeforePosition
+            )
             self.restoreChatInputDraft(for: sessionID)
             self.refreshSelectedSubmittingState()
             if self.chatRunCoordinator.timeline(sessionID: sessionID) == nil {
@@ -1354,6 +1361,10 @@ final class AppRuntimeLifecycle {
         chatBackgroundTaskCoordinator.install(snapshot.backgroundTasks, sessionID: sessionID)
         chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
         replaceSelectedChatTranscript(session.messages)
+        chatRunCoordinator.configureTranscriptPagination(
+            totalCount: snapshot.selectedSessionTotalMessageCount,
+            nextBeforePosition: snapshot.selectedSessionNextMessageBeforePosition
+        )
         restoreChatInputDraft(for: sessionID)
         refreshSelectedSubmittingState()
         chatRunCoordinator.applyPresentation(timeline: snapshot.timeline, summary: snapshot.latestSummary, sessionID: sessionID)
@@ -2687,6 +2698,26 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.select(sessionID)
     }
 
+    private func loadOlderSelectedChatMessages() async -> Int {
+        guard let repository = chatSessionRepository,
+              let sessionID = chatFeatureModel.sessions.selectedSessionID,
+              let beforePosition = chatFeatureModel.run.nextMessageBeforePosition
+        else { return 0 }
+        do {
+            let page = try await Task.detached(priority: .utility) {
+                try repository.loadSessionMessagePage(id: sessionID, beforePosition: beforePosition)
+            }.value
+            guard let page, chatFeatureModel.sessions.selectedSessionID == sessionID else { return 0 }
+            return chatRunCoordinator.prependTranscript(
+                page.session.messages,
+                nextBeforePosition: page.nextBeforePosition
+            )
+        } catch {
+            errorMessage = String(describing: error)
+            return 0
+        }
+    }
+
     private func applySelectedChatSessionSnapshot(
         _ snapshot: ChatSessionDetailLoadSnapshot,
         generation: Int,
@@ -2720,6 +2751,10 @@ final class AppRuntimeLifecycle {
             manager: nil,
             timeline: snapshot.timeline,
             summary: snapshot.latestSummary
+        )
+        chatRunCoordinator.configureTranscriptPagination(
+            totalCount: snapshot.totalMessageCount,
+            nextBeforePosition: snapshot.nextMessageBeforePosition
         )
         restoreChatInputDraft(for: session.id)
         chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories

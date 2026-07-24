@@ -45,6 +45,18 @@ public struct AppChatSessionSummary: Sendable, Equatable {
     }
 }
 
+public struct AppChatSessionMessagePage: Sendable, Equatable {
+    public var session: AgentSession
+    public var totalMessageCount: Int
+    public var nextBeforePosition: Int?
+
+    public init(session: AgentSession, totalMessageCount: Int, nextBeforePosition: Int?) {
+        self.session = session
+        self.totalMessageCount = totalMessageCount
+        self.nextBeforePosition = nextBeforePosition
+    }
+}
+
 private struct AppChatSessionCursor: Codable {
     var updatedAt: Date
     var id: String
@@ -123,6 +135,18 @@ public struct AppChatSessionRepository: Sendable {
 
     public func loadSession(id: String) throws -> AgentSession? {
         try store.session(id: id)
+    }
+
+    public func loadSessionMessagePage(id: String, beforePosition: Int? = nil, limit: Int = 50) throws -> AppChatSessionMessagePage? {
+        guard var session = try store.sessionMetadata(id: id) else { return nil }
+        let page = try store.sessionMessagePage(sessionID: id, beforePosition: beforePosition, limit: limit)
+        session.messages = page.messages
+        let count = try store.sessionMessageCount(id: id) ?? page.messages.count
+        return AppChatSessionMessagePage(
+            session: session,
+            totalMessageCount: count,
+            nextBeforePosition: page.nextBeforePosition
+        )
     }
 
     public func makeNewSession(title: String = "新对话", now: Date = Date()) throws -> AgentSession {

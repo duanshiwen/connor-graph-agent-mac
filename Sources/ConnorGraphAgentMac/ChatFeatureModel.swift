@@ -142,6 +142,9 @@ final class ChatComposerModel {
 final class ChatRunModel {
     var transcript: [AgentMessage] = []
     var transcriptRevision = 0
+    var totalTranscriptMessageCount = 0
+    var nextMessageBeforePosition: Int?
+    @ObservationIgnored var loadOlderMessages: () async -> Int = { 0 }
     var lastContext: AgentContext?
     var lastPromptInspection: AgentChatPromptInspection?
     var submittingSessionIDs: Set<String> = []
