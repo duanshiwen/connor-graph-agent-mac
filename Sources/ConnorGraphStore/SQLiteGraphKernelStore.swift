@@ -156,6 +156,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_agent_audit_events_run",
         "idx_agent_pending_approvals_run",
         "idx_agent_pending_approvals_status",
+        "idx_agent_pending_approvals_status_page",
         "idx_session_pending_plans_session",
         "idx_session_pending_plans_status",
         "idx_session_branch_records_source",
@@ -460,6 +461,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_run ON agent_pending_approvals(run_id, created_at);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_status ON agent_pending_approvals(status, created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_status_page ON agent_pending_approvals(status, created_at, id);")
         try execute("""
         CREATE TABLE IF NOT EXISTS session_pending_plans (
             id TEXT PRIMARY KEY,
@@ -984,6 +986,29 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try query(sql: """
         SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
         FROM agent_pending_approvals WHERE status = \(quote(status.rawValue)) ORDER BY created_at ASC LIMIT \(limit)
+        """).map(decodePendingApproval)
+    }
+
+    public func pendingApprovalPage(
+        status: AgentPendingApprovalStatus = .pending,
+        afterCreatedAt: Date? = nil,
+        afterID: String? = nil,
+        limit: Int = 50
+    ) throws -> [AgentPendingApproval] {
+        let boundedLimit = min(max(limit, 1), 101)
+        let cursorClause: String
+        if let afterCreatedAt, let afterID {
+            let createdAt = quote(iso(afterCreatedAt))
+            cursorClause = " AND (created_at > \(createdAt) OR (created_at = \(createdAt) AND id > \(quote(afterID))))"
+        } else {
+            cursorClause = ""
+        }
+        return try query(sql: """
+        SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
+        FROM agent_pending_approvals
+        WHERE status = \(quote(status.rawValue))\(cursorClause)
+        ORDER BY created_at ASC, id ASC
+        LIMIT \(boundedLimit)
         """).map(decodePendingApproval)
     }
 

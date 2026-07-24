@@ -11,6 +11,7 @@ final class ChatApprovalCoordinator {
     private let repository: AppAgentPendingApprovalRepository?
     private var resolutionTasksByRequestID: [String: Task<Void, Never>] = [:]
     private var reloadTask: Task<Void, Never>?
+    private var loadMoreTask: Task<Void, Never>?
     private var generation = 0
     private var reloadGeneration = 0
     private var isShutdown = false
@@ -33,6 +34,7 @@ final class ChatApprovalCoordinator {
     func install(_ approvals: [AgentPendingApproval]) {
         guard !isShutdown else { return }
         model.pendingApprovals = approvals
+        model.nextPageCursor = nil
         autoApproveCurrentPolicy()
     }
 
@@ -40,19 +42,57 @@ final class ChatApprovalCoordinator {
         guard !isShutdown else { return }
         guard let repository else {
             model.pendingApprovals = []
+            model.nextPageCursor = nil
             return
         }
         reloadGeneration += 1
         let currentGeneration = reloadGeneration
         reloadTask?.cancel()
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        model.isLoadingNextPage = false
         reloadTask = Task { [weak self] in
             do {
                 let approvals = try await Task.detached(priority: .userInitiated) {
-                    try repository.loadPending()
+                    try repository.loadPendingPage()
                 }.value
                 try Task.checkCancellation()
                 guard let self, !self.isShutdown, self.reloadGeneration == currentGeneration else { return }
-                self.model.pendingApprovals = approvals
+                self.model.pendingApprovals = approvals.approvals
+                self.model.nextPageCursor = approvals.nextCursor
+                self.autoApproveCurrentPolicy()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self, !self.isShutdown, self.reloadGeneration == currentGeneration else { return }
+                self.onError(String(describing: error))
+            }
+        }
+    }
+
+    func loadMoreIfNeeded(currentApprovalID: String) {
+        guard !isShutdown,
+              model.pendingApprovals.last?.id == currentApprovalID,
+              let cursor = model.nextPageCursor,
+              !model.isLoadingNextPage,
+              loadMoreTask == nil,
+              let repository else { return }
+        model.isLoadingNextPage = true
+        let currentGeneration = reloadGeneration
+        loadMoreTask = Task { [weak self] in
+            defer {
+                self?.model.isLoadingNextPage = false
+                self?.loadMoreTask = nil
+            }
+            do {
+                let page = try await Task.detached(priority: .userInitiated) {
+                    try repository.loadPendingPage(cursor: cursor)
+                }.value
+                try Task.checkCancellation()
+                guard let self, !self.isShutdown, self.reloadGeneration == currentGeneration else { return }
+                let existingIDs = Set(self.model.pendingApprovals.map(\.id))
+                self.model.pendingApprovals.append(contentsOf: page.approvals.filter { !existingIDs.contains($0.id) })
+                self.model.nextPageCursor = page.nextCursor
                 self.autoApproveCurrentPolicy()
             } catch is CancellationError {
                 return
@@ -176,6 +216,9 @@ final class ChatApprovalCoordinator {
         reloadGeneration += 1
         reloadTask?.cancel()
         reloadTask = nil
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        model.isLoadingNextPage = false
         for task in resolutionTasksByRequestID.values { task.cancel() }
         resolutionTasksByRequestID.removeAll()
     }
@@ -184,6 +227,7 @@ final class ChatApprovalCoordinator {
 extension ChatApprovalCoordinator: ChatApprovalCommanding {
     var activeChatPendingApprovals: [AgentPendingApproval] { activeApprovals(sessionID: activeSessionID()) }
     func reloadPendingApprovals() { reload() }
+    func loadMorePendingApprovalsIfNeeded(currentApprovalID: String) { loadMoreIfNeeded(currentApprovalID: currentApprovalID) }
     func approvePendingApproval(_ approval: AgentPendingApproval) { approve(approval) }
     func denyPendingApproval(_ approval: AgentPendingApproval) { deny(approval) }
     func cancelPendingApproval(_ approval: AgentPendingApproval) { cancel(approval) }

@@ -137,6 +137,8 @@ final class ChatRunModel {
 final class ChatApprovalModel {
     var pendingApprovals: [AgentPendingApproval] = []
     var lastResultSummary: String?
+    var isLoadingNextPage = false
+    var nextPageCursor: String?
 
     func hasPendingApproval(sessionID: String) -> Bool {
         pendingApprovals.contains { $0.sessionID == sessionID }

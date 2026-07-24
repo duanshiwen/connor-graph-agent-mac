@@ -79,6 +79,7 @@ extension ChatRunCommanding {
 @MainActor protocol ChatApprovalCommanding: AnyObject {
     var activeChatPendingApprovals: [AgentPendingApproval] { get }
     func reloadPendingApprovals()
+    func loadMorePendingApprovalsIfNeeded(currentApprovalID: String)
     func approvePendingApproval(_ approval: AgentPendingApproval)
     func denyPendingApproval(_ approval: AgentPendingApproval)
     func cancelPendingApproval(_ approval: AgentPendingApproval)
