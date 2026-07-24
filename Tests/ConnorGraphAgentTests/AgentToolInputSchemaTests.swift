@@ -95,6 +95,24 @@ import ConnorGraphAgent
         "expectedUpdatedAt": .string("2026-07-24T00:00:00Z")
     ]))
 
+    let nestedSchema = AgentToolInputSchema.closedObject(properties: [
+        "updates": .array(items: .closedObject(properties: [
+            "sessionID": .string(description: "Session ID"),
+            "expectedUpdatedAt": .string(description: "Expected update time")
+        ], required: ["sessionID"]), description: "Session updates")
+    ], required: ["updates"])
+    #expect(nestedSchema.normalizingLegacyPropertyAliases(.object([
+        "updates": .array([.object([
+            "session_id": .string("session-1"),
+            "expected_updated_at": .string("2026-07-24T00:00:00Z")
+        ])])
+    ])) == .object([
+        "updates": .array([.object([
+            "sessionID": .string("session-1"),
+            "expectedUpdatedAt": .string("2026-07-24T00:00:00Z")
+        ])])
+    ]))
+
     let invalid = AgentToolInputSchema.closedObject(
         properties: ["task_id": .string(description: "Task ID")],
         required: ["task_id"]
