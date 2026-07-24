@@ -451,6 +451,9 @@ swift run connor memory l1 pending
 # 用当前模型规范化并摄取一条CLI测试用户消息
 swift run connor memory ingest-chat --content "请记住：L1端到端测试标记为 MEMORY-L1-E2E"
 
+# 摄取一条助手消息以构造完整对话；该路径不调用用户意图规范化
+swift run connor memory ingest-chat --role assistant --content "这里是需要参与L1提取的助手回复"
+
 # 按生产阈值触发L1投影
 swift run connor memory pipeline plan-l1
 
@@ -467,7 +470,9 @@ swift run connor memory run <run-id> messages
 swift run connor memory run <run-id> tool-calls
 ```
 
-`ingest-chat` 还支持 `--file <path>`、`--session-id <id>`、`--message-id <id>` 和仅用于诊断的 `--normalization-timeout-seconds <秒>`。命令返回规范化状态、`retrieval_text`、模型ID、L0 provenance ID 和 L1 capture ID。规范化失败时仍保存 L0 原文，但 L1 `retrieval_text` 为空。超时覆盖只影响本次 CLI 调用，生产写入默认上限仍为 60 秒；特殊模型可在测试时单次设置为 100 秒。
+`ingest-chat` 还支持 `--role user|assistant`、`--file <path>`、`--session-id <id>`、`--message-id <id>` 和仅用于诊断的 `--normalization-timeout-seconds <秒>`。默认角色为 `user`：命令返回规范化状态、`retrieval_text`、模型ID、L0 provenance ID 和 L1 capture ID；规范化失败时仍保存 L0 原文，但 L1 `retrieval_text` 为空。`assistant` 角色用于构造端到端测试对话，保存完整原文但不调用用户意图规范化。超时覆盖只影响本次CLI用户消息调用，生产写入默认上限仍为 60 秒；特殊模型可在测试时单次设置为 100 秒。
+
+L1 后台知识提取会把用户指令和话语、助手消息及网页、邮件、日历、RSS 等外部知识性数据统一放入按时间排序的输入包，并从 L0 读取完整原文。它们是同等重要的历史参考信息：系统不得因来源忽略、降级或优先处理任何一类，也不设置来源权重、优先级或 `context_only`；用户历史指令仍是重要信息，但不构成当前命令。模型从全面上下文中自行判断应写入 L2、L3 或 L4。每条事件保留 `source_kind`，但它只用于理解语义和正确归因，不决定信息能否被提取。
 
 `plan-l1` 的 `--min-pending-count`、`--max-events-per-block` 和 `--max-tokens-per-block` 只影响本次CLI调用，适合端到端验收，不会更改 `MemoryOSL1ProcessingTriggerPolicy` 的生产默认值。
 

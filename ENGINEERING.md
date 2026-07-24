@@ -442,7 +442,8 @@ Rust/Tantivy 嵌入式搜索内核位于 `SearchKernel/`，通过进程内 C ABI
 
 - `Scripts/package-search-kernel.sh`：编译并打包 Rust sidecar。
 - `Scripts/verify-memory-os-release.sh`：验证 Memory OS release readiness。
-- CLI 实时验收可使用 `connor memory ingest-chat` 走真实意图规范化和 L0/L1 双写，再用 `connor memory pipeline plan-l1 --min-pending-count 1` 对单次规划覆盖触发阈值；覆盖参数不得持久化为生产策略。
+- CLI 实时验收可使用 `connor memory ingest-chat` 走真实意图规范化和 L0/L1 双写；需要构造完整对话时，可用 `--role assistant` 注入助手消息，该路径不调用用户意图规范化。随后用 `connor memory pipeline plan-l1 --min-pending-count 1` 对单次规划覆盖触发阈值；覆盖参数不得持久化为生产策略。
+- L1 后台提取按时间顺序读取用户指令和话语、助手消息以及网页、邮件、日历、RSS 等外部数据的完整 L0 原文。它们是同等重要的历史参考信息，共同参与 L2/L3/L4 提取；不得因来源忽略、降级或优先处理任何一类，也不设置来源权重、优先级或 `context_only`。用户历史指令仍是重要信息，但不构成当前命令；`source_kind` 仅用于语义理解和正确归因。
 
 ---
 
