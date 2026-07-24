@@ -193,6 +193,26 @@ import ConnorGraphStore
     #expect(json.contains("Connor Memory OS"))
 }
 
+@Test func memoryOSSearchAddsLayerSpecificOperationIDs() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 11_000)
+    try store.upsert(belief: MemoryOSBelief(id: "belief-operation-id", statement: "Operation-ready identifiers support reliable tool chaining.", domain: "tooling", createdAt: now, updatedAt: now))
+    try store.upsert(provenance: MemoryOSProvenanceObject(id: "provenance-operation-id", sourceType: .manual, sourceID: "source-operation-id", title: "Operation ID source", content: "Operation-ready identifiers support reliable tool chaining.", occurredAt: now))
+
+    let result = try await MemoryOSSearchTool(facade: facade).execute(
+        arguments: AgentToolArguments(json: #"{"query":"operation-ready identifiers","layers":["L0","L3"],"limit":10}"#),
+        context: memoryOSToolContext()
+    )
+    let payload = try memoryOSToolJSON(result)
+    let hits = try #require(payload["hits"] as? [[String: Any]])
+    let belief = try #require(hits.first { $0["recordID"] as? String == "belief-operation-id" })
+    let provenance = try #require(hits.first { $0["recordID"] as? String == "provenance-operation-id" })
+    #expect(belief["beliefID"] as? String == "belief-operation-id")
+    #expect(provenance["provenanceObjectID"] as? String == "provenance-operation-id")
+}
+
 @Test func memoryOSRecentAndKnowledgeContextToolsReturnDifferentSemantics() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()

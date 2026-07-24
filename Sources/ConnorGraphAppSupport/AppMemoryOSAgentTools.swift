@@ -484,7 +484,7 @@ public struct MemoryOSSearchTool: AgentTool {
         let query = try MemoryOSLayeredContextSupport.retrievalQuery(from: arguments, layers: layers, limit: limit, depth: depth)
         let hits = try facade.searchMemoryOS(query)
         let rows = hits.map { hit -> [String: Any] in
-            [
+            var row: [String: Any] = [
                 "layer": hit.layer.rawValue,
                 "recordID": hit.recordID,
                 "title": hit.title,
@@ -500,6 +500,9 @@ public struct MemoryOSSearchTool: AgentTool {
                 "canExpandDepth": hit.canExpandDepth,
                 "metadata": hit.metadata
             ]
+            if hit.layer == .l0 { row["provenanceObjectID"] = hit.recordID }
+            if hit.layer == .l3 { row["beliefID"] = hit.recordID }
+            return row
         }
         let payload: [String: Any] = ["query": query.text, "hitCount": hits.count, "hits": rows]
         let json = try Self.renderJSON(payload)
@@ -829,7 +832,7 @@ public struct MemoryOSL3ExpandBeliefTool: AgentTool {
     public let description = "Expand Memory OS L3 statement nodes. L3 no longer stores supporting L2 evidence edges; related_object_names are durable L4 concept names/aliases only."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "beliefID": .string(description: "Optional exact beliefID returned on an L3 node by memory_os_l3_expand_belief; copy the field without renaming it."),
+        "beliefID": .string(description: "Optional exact beliefID returned by an L3 memory_os_search hit or on an L3 node by memory_os_l3_expand_belief; copy the field without renaming it."),
         "domain": .string(description: "Optional discipline domain filter."),
         "text": .string(description: "Optional text query over statement only."),
         "limit": .integer(description: "Maximum L3 statement nodes. Defaults to 20.")
@@ -1117,7 +1120,7 @@ public struct MemoryOSReadProvenanceTool: AgentTool {
     public let description = "Read exact Connor Memory OS L0 provenance object/span content. Use when a prompt preview or search hit is insufficient and exact raw evidence is required."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "provenanceObjectID": .string(description: "L0 provenance object id."),
+        "provenanceObjectID": .string(description: "Exact provenanceObjectID returned by an L0 memory_os_search hit; copy the field without renaming it."),
         "spanID": .string(description: "Optional L0 provenance span id.")
     ], required: ["provenanceObjectID"])
 
