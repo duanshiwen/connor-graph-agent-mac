@@ -8,6 +8,47 @@ public enum AgentEnvironmentDataStatus: String, Codable, Sendable, Equatable {
     case timedOut
 }
 
+public enum AgentEnvironmentDataKind: String, Codable, Sendable, Equatable, CaseIterable {
+    case currentObservation = "current_observation"
+    case forecast
+    case historicalObservation = "historical_observation"
+    case historicalReanalysis = "historical_reanalysis"
+}
+
+public struct AgentEnvironmentRegion: Codable, Sendable, Equatable, Hashable {
+    public static let gridSystem = "decimal_degree"
+    public static let gridPrecisionVersion = 1
+    public static let gridStepDegrees = 0.05
+
+    public var gridCellID: String
+    public var centerLatitude: Double
+    public var centerLongitude: Double
+
+    public init(gridCellID: String, centerLatitude: Double, centerLongitude: Double) {
+        self.gridCellID = gridCellID
+        self.centerLatitude = centerLatitude
+        self.centerLongitude = centerLongitude
+    }
+
+    public static func containing(latitude: Double, longitude: Double) -> AgentEnvironmentRegion? {
+        guard latitude.isFinite, longitude.isFinite,
+              (-90...90).contains(latitude), (-180...180).contains(longitude) else { return nil }
+        let latitudeIndex = Int(floor((latitude + 90) / gridStepDegrees))
+        let longitudeIndex = Int(floor((longitude + 180) / gridStepDegrees))
+        let centerLatitude = min(90, -90 + (Double(latitudeIndex) + 0.5) * gridStepDegrees)
+        let centerLongitude = min(180, -180 + (Double(longitudeIndex) + 0.5) * gridStepDegrees)
+        return AgentEnvironmentRegion(
+            gridCellID: "v\(gridPrecisionVersion):\(latitudeIndex):\(longitudeIndex)",
+            centerLatitude: rounded(centerLatitude),
+            centerLongitude: rounded(centerLongitude)
+        )
+    }
+
+    private static func rounded(_ value: Double) -> Double {
+        (value * 1_000_000).rounded() / 1_000_000
+    }
+}
+
 public struct AgentEnvironmentRequest: Sendable, Equatable {
     public var runID: String
     public var sessionID: String
@@ -25,6 +66,7 @@ public struct AgentEnvironmentLocation: Codable, Sendable, Equatable {
     public var locality: String?
     public var administrativeArea: String?
     public var country: String?
+    public var gridCellID: String?
     public var latitude: Double?
     public var longitude: Double?
     public var horizontalAccuracyMeters: Double?
@@ -36,6 +78,7 @@ public struct AgentEnvironmentLocation: Codable, Sendable, Equatable {
         locality: String? = nil,
         administrativeArea: String? = nil,
         country: String? = nil,
+        gridCellID: String? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
         horizontalAccuracyMeters: Double? = nil,
@@ -46,6 +89,7 @@ public struct AgentEnvironmentLocation: Codable, Sendable, Equatable {
         self.locality = locality
         self.administrativeArea = administrativeArea
         self.country = country
+        self.gridCellID = gridCellID
         self.latitude = latitude
         self.longitude = longitude
         self.horizontalAccuracyMeters = horizontalAccuracyMeters
