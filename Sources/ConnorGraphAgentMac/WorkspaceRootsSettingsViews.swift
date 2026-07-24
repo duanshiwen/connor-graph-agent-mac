@@ -257,7 +257,7 @@ struct SettingsPreferencesSection: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsHeroHeader(
                 title: "偏好",
-                subtitle: "管理康纳同学用于称呼、语言、时区、位置和个性化上下文的用户信息。",
+                subtitle: "管理康纳同学用于称呼、语言、时区和个性化上下文的用户信息。",
                 systemImage: "person.crop.circle"
             ) {
                 EmptyView()
@@ -295,30 +295,24 @@ struct SettingsPreferencesSection: View {
                         .controlSize(.regular)
                 }
             }
-            SettingsGroup(title: "位置") {
-                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $model.city)
-                Divider()
-                SettingsTextFieldRow(title: "国家/地区", subtitle: "未设置时会优先从系统地区推断，也可手动更改。", text: $model.country)
-                Divider()
-                HStack(alignment: .firstTextBaseline) {
+            SettingsGroup(title: "环境感知") {
+                HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("当前位置")
+                        Text("定位权限")
                             .font(SettingsListTypography.rowTitleSelected)
-                        if let message = model.locationStatusMessage {
-                            Text(message)
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("申请位置权限后自动填写城市和国家/地区。")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text(model.environmentLocationStatusMessage)
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("使用当前位置") { model.requestLocation() }
+                    Button("打开系统设置") { model.openLocationPrivacySettings() }
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
                 }
+                Divider()
+                SettingsValueRow(title: "天气服务", value: "Open-Meteo · 15 分钟缓存")
+                Divider()
+                SettingsValueRow(title: "位置存储", value: "不保存位置轨迹")
             }
             SettingsGroup(title: "康纳同学的性格") {
                 VStack(alignment: .leading, spacing: 16) {
@@ -560,6 +554,7 @@ struct SettingsPreferencesSection: View {
                     .appFormTextEditor()
             }
         }
+        .onAppear { model.refreshEnvironmentPermissionStatus() }
     }
 }
 
