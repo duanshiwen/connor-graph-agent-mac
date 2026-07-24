@@ -15,14 +15,24 @@ public enum AppMemoryOSCLIRouter {
             return try route(args: args, inspector: inspector, encoder: encoder)
         }
         guard let content = try chatContent(args: args), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return try encode(MemoryOSCLIError(error: "missing_chat_content", usage: "connor memory ingest-chat --content <text> [--session-id id] [--message-id id] [--normalization-timeout-seconds N] | --file <path>"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "missing_chat_content", usage: "connor memory ingest-chat --content <text> [--role user|assistant] [--session-id id] [--message-id id] [--normalization-timeout-seconds N] | --file <path>"), encoder: encoder)
         }
-        let timeoutSeconds = max(1, doubleOption("--normalization-timeout-seconds", in: args, default: MemoryOSUserIntentNormalizer.defaultTimeoutSeconds))
-        let normalizer = try intentNormalizer ?? makeLiveIntentNormalizer(timeoutSeconds: timeoutSeconds)
+        let role = optionValue("--role", in: args) ?? "user"
+        guard role == "user" || role == "assistant" else {
+            return try encode(MemoryOSCLIError(error: "invalid_chat_role", usage: "connor memory ingest-chat --role user|assistant --content <text>"), encoder: encoder)
+        }
+        let normalizer: AnyMemoryOSUserIntentNormalizer?
+        if role == "assistant" {
+            normalizer = nil
+        } else {
+            let timeoutSeconds = max(1, doubleOption("--normalization-timeout-seconds", in: args, default: MemoryOSUserIntentNormalizer.defaultTimeoutSeconds))
+            normalizer = try intentNormalizer ?? makeLiveIntentNormalizer(timeoutSeconds: timeoutSeconds)
+        }
         let result = await inspector.ingestChatMessage(
             content: content,
             sessionID: optionValue("--session-id", in: args) ?? "cli-memory-test",
             messageID: optionValue("--message-id", in: args) ?? "cli-memory-test:\(UUID().uuidString)",
+            role: role,
             intentNormalizer: normalizer
         )
         return try encode(result, encoder: encoder)
