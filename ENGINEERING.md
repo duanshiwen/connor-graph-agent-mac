@@ -324,7 +324,7 @@ L4 使用受控实体类型词汇表（`MemoryOSEntityType`）；不支持的 LL
 
 LLM-facing Memory OS tools 注册在 `AppMemoryOSAgentTools.swift`。
 
-用户消息的 L0/L1 写入采用双表示：L0 `MemoryOSProvenanceObject.content` 保存完整原文；L1 `MemoryOSCaptureEvent.retrievalText` 保存安全的历史意图描述，并用 `normalizationStatus` 记录 `succeeded`、`failed` 或 `not_required`。规范化器在 ingestion writer 中执行一次结构化模型调用，温度为 0、超时 6 秒、无可执行工具，随后由本地代码校验片段覆盖、角色伪装、控制语言和长段复制，并确定性渲染最终文本。系统不生成或保存 200 字 `content_preview`。
+用户消息的 L0/L1 写入采用双表示：L0 `MemoryOSProvenanceObject.content` 保存完整原文；L1 `MemoryOSCaptureEvent.retrievalText` 保存安全的历史意图描述，并用 `normalizationStatus` 记录 `succeeded`、`failed` 或 `not_required`。规范化器在 ingestion writer 中执行一次结构化模型调用，温度为 0、超时上限 60 秒、无可执行工具，随后由本地代码校验片段覆盖、角色伪装、控制语言和长段复制，并确定性渲染最终文本。模型提前返回时立即继续，不会固定等待 60 秒。系统不生成或保存 200 字 `content_preview`。
 
 失败策略必须 fail closed：模型错误、超时或输出校验失败时继续保存 L0 原文，L1 不写 `retrievalText`，近期检索不得回退到 L0 或 metadata 预览。`memory_l1_retrieval_fts` 只索引非空 `retrieval_text`；schema 7 为 L1 增加 `retrieval_text`、`normalization_status` 和专用 FTS 表。
 

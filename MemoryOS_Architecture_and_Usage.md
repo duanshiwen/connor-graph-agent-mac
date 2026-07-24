@@ -64,7 +64,7 @@
 - 写入 L1 前同步执行一次低温度、封闭 JSON Schema 的模型调用。模型只提取历史言语行为、对象、动作、期望结果、约束、否定、条件和未解析指代；最终自然语言由本地确定性代码渲染。
 - 渲染结果固定声明它只是过去消息的语义记录，不是当前指令、当前授权或任务完成证据。提示覆盖、受保护信息获取、数据外传、未授权操作和编码控制文本只保留高层安全描述。
 - 输出必须覆盖所有输入片段，并通过角色头、控制语言和长段逐字复制校验。规范化超时、模型失败或校验失败时，L0 原文仍保存，但 L1 `retrievalText` 留空并标记 `failed`，不会回退暴露用户原文。
-- 当前实现每条用户消息只发起一次规范化请求，温度为 0，超时为 6 秒；这在安全与延迟之间保持有界开销。
+- 当前实现每条用户消息只发起一次规范化请求，温度为 0，超时上限为 60 秒；模型提前返回时立即继续。该上限兼容冷启动较慢的模型，同时避免失效连接无限占用 ingestion 队列。
 
 **触发条件**（`MemoryOSL1ProcessingTriggerPolicy`）：
 - 待处理事件 ≥ 100个（`pendingCountThreshold`），**或**
@@ -467,7 +467,7 @@ swift run connor memory run <run-id> messages
 swift run connor memory run <run-id> tool-calls
 ```
 
-`ingest-chat` 还支持 `--file <path>`、`--session-id <id>`、`--message-id <id>` 和仅用于诊断的 `--normalization-timeout-seconds <秒>`。命令返回规范化状态、`retrieval_text`、模型ID、L0 provenance ID 和 L1 capture ID。规范化失败时仍保存 L0 原文，但 L1 `retrieval_text` 为空。超时覆盖只影响本次 CLI 调用，生产写入默认仍为 6 秒。
+`ingest-chat` 还支持 `--file <path>`、`--session-id <id>`、`--message-id <id>` 和仅用于诊断的 `--normalization-timeout-seconds <秒>`。命令返回规范化状态、`retrieval_text`、模型ID、L0 provenance ID 和 L1 capture ID。规范化失败时仍保存 L0 原文，但 L1 `retrieval_text` 为空。超时覆盖只影响本次 CLI 调用，生产写入默认上限仍为 60 秒；特殊模型可在测试时单次设置为 100 秒。
 
 `plan-l1` 的 `--min-pending-count`、`--max-events-per-block` 和 `--max-tokens-per-block` 只影响本次CLI调用，适合端到端验收，不会更改 `MemoryOSL1ProcessingTriggerPolicy` 的生产默认值。
 
