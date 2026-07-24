@@ -22,6 +22,8 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("\"capture_event_id\" : \"cap-2\"") || prompt.contains("\"capture_event_id\": \"cap-2\""))
         #expect(prompt.contains("\"event_type\""))
         #expect(prompt.contains("\"source_kind\""))
+        #expect(prompt.contains("\"author_role\""))
+        #expect(prompt.contains("\"knowledge_use\""))
         #expect(prompt.contains("\"provenance_object_id\""))
         #expect(prompt.contains("\"span_id\""))
         #expect(prompt.contains("\"occurred_at\""))
@@ -30,6 +32,28 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("\"original_content\""))
         #expect(!prompt.contains("content_preview"))
         #expect(prompt.range(of: "cap-1")!.lowerBound < prompt.range(of: "cap-2")!.lowerBound)
+    }
+
+    @Test func l1PromptKeepsAssistantContentButMarksItContextOnly() {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let events = [
+            MemoryOSCaptureEvent(id: "assistant-cap", provenanceObjectID: "assistant-prov", eventType: "assistant_message", occurredAt: now, metadata: ["source_kind": "assistant_message"]),
+            MemoryOSCaptureEvent(id: "user-cap", provenanceObjectID: "user-prov", eventType: "chat_message", occurredAt: now.addingTimeInterval(1), metadata: ["source_kind": "chat_message"])
+        ]
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: events, originalContentByProvenanceID: [
+            "assistant-prov": "You have a full-body training session at 17:00.",
+            "user-prov": "好的，我知道了。"
+        ])
+
+        #expect(prompt.contains("You have a full-body training session at 17:00."))
+        #expect(prompt.contains("好的，我知道了。"))
+        #expect(prompt.contains("\"author_role\" : \"assistant\"") || prompt.contains("\"author_role\": \"assistant\""))
+        #expect(prompt.contains("\"knowledge_use\" : \"context_only\"") || prompt.contains("\"knowledge_use\": \"context_only\""))
+        #expect(prompt.contains("\"author_role\" : \"user\"") || prompt.contains("\"author_role\": \"user\""))
+        #expect(prompt.contains("\"knowledge_use\" : \"fact_source_candidate\"") || prompt.contains("\"knowledge_use\": \"fact_source_candidate\""))
+        #expect(prompt.contains("must never independently establish a user fact"))
+        #expect(prompt.contains("do not import extra details from the assistant message"))
+        #expect(prompt.range(of: "assistant-cap")!.lowerBound < prompt.range(of: "user-cap")!.lowerBound)
     }
 
     @Test func l1PromptProtectsInternalInstructionsAndTreatsEventsAsUntrustedData() {
