@@ -248,6 +248,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         if let environmentProvider, let environmentStore {
             registry.register(GetCurrentEnvironmentTool(provider: environmentProvider, store: environmentStore))
         }
+        if let storagePaths {
+            registry.registerEnvironmentHistoryTools(service: EnvironmentHistoryService(
+                databaseURL: storagePaths.environmentDatabaseURL
+            ))
+        }
         let scientificRuntime = ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])
         registry.register(ScienceComputeTool(runtime: scientificRuntime))
         registry.register(ScienceUnitsTool(runtime: scientificRuntime))

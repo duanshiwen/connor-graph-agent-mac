@@ -345,6 +345,41 @@ public actor SQLiteEnvironmentStore {
         )
     }
 
+    public func regions(matching placeName: String) throws -> [StoredEnvironmentRegion] {
+        let normalized = placeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return [] }
+        let pattern = "%\(normalized.replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_"))%"
+        let sql = """
+        SELECT region_id, grid_cell_id, center_latitude, center_longitude, timezone_identifier,
+               country_code, administrative_area, locality
+        FROM environment_regions
+        WHERE locality LIKE ? ESCAPE '\\' COLLATE NOCASE
+           OR administrative_area LIKE ? ESCAPE '\\' COLLATE NOCASE
+           OR country_code = ? COLLATE NOCASE
+           OR grid_cell_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 20
+        """
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        try bind([.text(pattern), .text(pattern), .text(normalized), .text(normalized)], to: statement)
+        var regions: [StoredEnvironmentRegion] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            regions.append(StoredEnvironmentRegion(
+                id: sqlite3_column_int64(statement, 0),
+                gridCellID: text(statement, 1) ?? "",
+                centerLatitude: sqlite3_column_double(statement, 2),
+                centerLongitude: sqlite3_column_double(statement, 3),
+                timeZoneIdentifier: text(statement, 4) ?? "UTC",
+                countryCode: text(statement, 5),
+                administrativeArea: text(statement, 6),
+                locality: text(statement, 7)
+            ))
+        }
+        try checkStep(statement)
+        return regions
+    }
+
     private func regionID(forGridCellID gridCellID: String) throws -> Int64 {
         guard let id = try region(gridCellID: gridCellID)?.id else {
             throw EnvironmentStoreError.sqlite("写入区域后无法读取 region_id")

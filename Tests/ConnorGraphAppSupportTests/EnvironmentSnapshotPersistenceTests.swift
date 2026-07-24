@@ -3,7 +3,7 @@ import Testing
 import ConnorGraphAgent
 @testable import ConnorGraphAppSupport
 
-@Test func snapshotPersistenceStoresOnlyGridCoordinatesAndForecasts() async throws {
+@Test func snapshotPersistenceStoresOnlyOnePointPerProviderQuery() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let paths = AppStoragePaths(applicationSupportDirectory: root)
@@ -40,6 +40,7 @@ import ConnorGraphAgent
     )
 
     await persistence.record(snapshot)
+    await persistence.record(snapshot)
 
     let store = try await SQLiteEnvironmentStore.open(databaseURL: paths.environmentDatabaseURL)
     let storedRegion = try #require(try await store.region(gridCellID: region.gridCellID))
@@ -50,8 +51,9 @@ import ConnorGraphAgent
     )
     #expect(storedRegion.centerLatitude == region.centerLatitude)
     #expect(storedRegion.centerLongitude == region.centerLongitude)
-    #expect(points.map(\.dataKind).contains(.currentObservation))
-    #expect(points.map(\.dataKind).contains(.forecast))
+    #expect(points.count == 1)
+    #expect(points.first?.dataKind == .currentObservation)
+    #expect(points.first?.observedAt == capturedAt)
 
     let databaseBytes = try Data(contentsOf: paths.environmentDatabaseURL)
     let databaseText = String(decoding: databaseBytes, as: UTF8.self)
