@@ -304,8 +304,6 @@ Memory OS 证据描述用户历史、偏好、决定、关系和内部项目；W
 
 Memory OS 是 Connor 的后台认知基础设施。它**不是**图谱编辑器、dashboard 或直接 LLM-write surface。
 
-完整独立说明见 [MemoryOS_Architecture_and_Usage.md](MemoryOS_Architecture_and_Usage.md)。
-
 ### 6.1 层级架构
 
 | Layer | 名称 | 职责 | 可变性 | 数据模型 |

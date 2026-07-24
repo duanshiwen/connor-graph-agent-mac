@@ -111,7 +111,7 @@ swift test
 swift run connor --help
 ```
 
-完整架构、模块边界、Memory OS、Search Kernel、开发命令和打包说明请参阅 [ENGINEERING.md](ENGINEERING.md)。Memory OS 的独立说明见 [MemoryOS_Architecture_and_Usage.md](MemoryOS_Architecture_and_Usage.md)。
+完整架构、模块边界、Memory OS、Search Kernel、开发命令和打包说明请参阅 [ENGINEERING.md](ENGINEERING.md)。
 
 ## License
 
