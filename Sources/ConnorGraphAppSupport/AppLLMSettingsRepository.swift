@@ -182,6 +182,21 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         return Self.firstModel(in: model)
     }
 
+    public var supportsXiaomiMiMOSpeech: Bool {
+        hasAPIKey && isXiaomiMiMOConnection
+    }
+
+    public var isXiaomiMiMOConnection: Bool {
+        let host = URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines))?.host?.lowercased()
+        return (host == "api.xiaomimimo.com" || host == "token-plan-cn.xiaomimimo.com")
+            && usesXiaomiMiMOModel
+    }
+
+    private var usesXiaomiMiMOModel: Bool {
+        modelOptions.contains { $0.lowercased().hasPrefix("mimo-") }
+            || effectiveModel.lowercased().hasPrefix("mimo-")
+    }
+
     public static func modelOptions(in rawValue: String) -> [String] {
         rawValue
             .split(separator: ",")
@@ -338,6 +353,10 @@ public struct AppLLMSettings: Sendable, Equatable {
 
     public var effectiveThinkingLevel: AppLLMThinkingLevel { defaultThinkingLevel }
     public var hasUsableDefaultConnection: Bool { Self.isUsableConnection(defaultConnection) }
+    public var xiaomiMiMOSpeechConnection: AppLLMConnectionConfig? {
+        if defaultConnection?.supportsXiaomiMiMOSpeech == true { return defaultConnection }
+        return connections.first(where: \.supportsXiaomiMiMOSpeech)
+    }
 
     public static func modelOptions(in rawValue: String) -> [String] { AppLLMConnectionConfig.modelOptions(in: rawValue) }
     public static func firstModel(in rawValue: String) -> String { AppLLMConnectionConfig.firstModel(in: rawValue) }

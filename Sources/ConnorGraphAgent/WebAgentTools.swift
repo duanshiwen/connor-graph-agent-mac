@@ -90,7 +90,7 @@ public struct BrowserFetchTool: AgentTool {
     public let name = "browser_fetch"
     public let description = "Fetch a known web page through Connor's system-browser-assisted path and return a lightweight text/HTML snapshot. Use this as the fallback when web_fetch returns HTTP 403, cannot use a required authenticated browser session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content. Never use it to bypass authorization or access content the user is not permitted to access."
     public let permission: AgentPermissionCapability = .externalNetwork
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "url": .string(description: "The absolute http/https URL to fetch."),
         "max_chars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
         "user_agent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0."),
@@ -374,9 +374,9 @@ public struct NativeWebSearchTool: AgentTool {
     public let name = "web_search"
     public let description = "Search the web using Connor's native web search client, with browser assistance for engines that require interactive rendering. Use this for current information, external grounding, Wikipedia/Wikidata lookup, and discovery before fetching a page."
     public let permission: AgentPermissionCapability = .externalNetwork
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Search query keywords."),
-        "engine": .string(description: "Search engine: duckduckgo, bing, google, yahoo, or baidu. Defaults to duckduckgo."),
+        "engine": .stringEnumeration(values: ["duckduckgo", "bing", "google", "yahoo", "baidu"], description: "Search engine. Defaults to duckduckgo."),
         "max_results": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
     ], required: ["query"])
 
@@ -577,11 +577,11 @@ public struct NativeWebFetchTool: AgentTool {
     public let name = "web_fetch"
     public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. This is the standard original-page reader and should normally be tried before browser_fetch. If it returns HTTP 403, cannot use a required authenticated session, fails on JavaScript rendering, is blocked by anti-bot protection, or otherwise returns unusable content, fall back to browser_fetch."
     public let permission: AgentPermissionCapability = .externalNetwork
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "url": .string(description: "The absolute URL to fetch."),
-        "extract_mode": .string(description: "markdown or text. Defaults to markdown."),
-        "render_mode": .string(description: "auto, http, or js. Defaults to auto."),
-        "wait_until": .string(description: "load, domcontentloaded, networkidle, or commit. Defaults to networkidle."),
+        "extract_mode": .stringEnumeration(values: ["markdown", "text"], description: "Extraction format. Defaults to markdown."),
+        "render_mode": .stringEnumeration(values: ["auto", "http", "js"], description: "Rendering strategy. Defaults to auto."),
+        "wait_until": .stringEnumeration(values: ["load", "domcontentloaded", "networkidle", "commit"], description: "Page readiness condition. Defaults to networkidle."),
         "timeout_ms": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
     ], required: ["url"])
 

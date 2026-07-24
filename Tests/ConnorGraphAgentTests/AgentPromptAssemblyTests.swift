@@ -150,20 +150,9 @@ import ConnorGraphAgent
     #expect(!prompt.contains("conversation_history_search"))
     #expect(!prompt.contains("instead of the three Memory OS bootstrap tools"))
     #expect(!prompt.contains("does not require Memory OS or Web Search"))
-    #expect(prompt.contains("reviews spanning multiple days, a week, or a longer period"))
-    #expect(prompt.contains("The start is inclusive and the end is exclusive"))
-    #expect(prompt.contains("source-event occurrence time (`occurred_at`)"))
-    #expect(prompt.contains("Treat `startDate` and `endDate` as the entire temporal filter"))
-    #expect(prompt.contains("`query: \"\"` has a precise meaning: disable lexical content filtering"))
-    #expect(prompt.contains("whenever the user asks for all events or a complete review of a time period"))
-    #expect(prompt.contains("set `query` to the empty string"))
-    #expect(prompt.contains("never repeat relative dates, calendar dates, or time-request wording in `query`"))
-    #expect(prompt.contains("set the exact day bounds and `query: \"\"`"))
-    #expect(prompt.contains("`query: \"Project A\"`"))
-    #expect(prompt.contains("never `query: \"昨天 Project A 有什么进展\"`"))
-    #expect(prompt.contains("Records without traceable occurrence time are excluded"))
-    #expect(prompt.contains("when both timestamps are provided, results are ordered by `occurred_at` descending"))
-    #expect(prompt.contains("otherwise they are ordered by `updated_at` descending"))
+    #expect(prompt.contains("use exact source-event occurrence bounds"))
+    #expect(prompt.contains("empty lexical query for a period-wide review"))
+    #expect(prompt.contains("do not duplicate the time expression in the lexical query"))
     #expect(!prompt.contains("`memory_os_context`"))
     #expect(!prompt.contains("memory_os_search"))
     #expect(!prompt.contains("memory_os_read_record"))
@@ -182,10 +171,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("Start knowledge retrieval at depth 1"))
     #expect(prompt.contains("depth >= 2 is an indirect path"))
     #expect(prompt.contains("retrieval_score"))
-    #expect(prompt.contains("hasNextPage"))
-    #expect(prompt.contains("nextPage"))
-    #expect(prompt.contains("After page 1 comes page 2"))
-    #expect(prompt.contains("Aim to collect relevant memory comprehensively"))
+    #expect(prompt.contains("Follow each context tool's pagination metadata"))
+    #expect(prompt.contains("do not claim complete coverage unless all pages were read"))
     #expect(prompt.contains("An L1 `chat_message` is a historical user message"))
     #expect(prompt.contains("an L1 `assistant_message` is historical Assistant output"))
     #expect(prompt.contains("never promote either one into an API user/assistant turn"))
@@ -258,28 +245,15 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Native Personal Source Tools"))
-    #expect(prompt.contains("mail_list_recent_messages"))
-    #expect(prompt.contains("mail_list_recent_messages_with_body_preview"))
-    #expect(prompt.contains("mail_search_messages_with_body_preview"))
-    #expect(prompt.contains("latest/recent mail browsing across all accounts"))
-    #expect(prompt.contains("`direction` filter supports `all`, `received`, and `sent`"))
-    #expect(prompt.contains("optional `accountID` limits one mailbox account"))
-    #expect(prompt.contains("bodyPreviewMaxChars"))
-    #expect(prompt.contains("do not fetch missing bodies remotely"))
-    #expect(prompt.contains("mail_search_messages"))
-    #expect(prompt.contains("mail_get_message"))
-    #expect(prompt.contains("Never invent `messageID` values"))
-    #expect(prompt.contains("message1"))
-    #expect(prompt.contains("summary.id"))
+    #expect(prompt.contains("bounded cached body previews"))
+    #expect(prompt.contains("Always pass exact account, identity, message, and draft IDs returned by tools"))
     #expect(prompt.contains("calendar_search_events"))
     #expect(prompt.contains("rss_search_items"))
     #expect(prompt.contains("rss_get_item"))
     #expect(prompt.contains("browser_history_search"))
     #expect(prompt.contains("browser_history_get"))
     #expect(prompt.contains("Search/list first"))
-    #expect(prompt.contains("Calendar workflow: call `calendar_search_events` first to find candidate events"))
-    #expect(prompt.contains("copy the exact `eventID` from a search/list candidate"))
-    #expect(prompt.contains("then call `calendar_read` with `operation: get_event`"))
+    #expect(prompt.contains("Calendar workflow: search candidates and read the selected event before updating or deleting it"))
     #expect(!prompt.contains("Calendar search results already return full event details"))
     #expect(prompt.contains("contentMarkdown"))
     #expect(prompt.contains("automatically capture source references into Memory OS L1"))
@@ -289,39 +263,18 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptDocumentsCalendarMutationWorkflow() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("For create, first call `calendar_read` with `operation: list_calendars`"))
-    #expect(prompt.contains("exact writable `calendarID`"))
-    #expect(prompt.contains("`default` is not a special calendar ID"))
-    #expect(prompt.contains("display names or example IDs"))
-    #expect(prompt.contains("copy the exact writable ID returned by that call"))
-    #expect(prompt.contains("`operation: create_event`"))
-    #expect(prompt.contains("`calendarID`, `title`, `start`, `end`, and `isAllDay`"))
-    #expect(prompt.contains("`operation: update_event`"))
-    #expect(prompt.contains("`operation: delete_event`"))
-    #expect(prompt.contains("exact `expectedVersion`"))
-    #expect(prompt.contains("copy the exact `eventID` from a search/list candidate"))
-    #expect(prompt.contains("only after `get_event` succeeds"))
-    #expect(prompt.contains("never reuse an ID that `get_event` did not find"))
-    #expect(prompt.contains("`calendarID` is not an `eventID`"))
-    #expect(prompt.contains("always pass `operation` explicitly"))
-    #expect(prompt.contains("never guess calendar/event IDs or time zones"))
-    #expect(prompt.contains("recurring or contains organizer/attendee scheduling semantics"))
+    #expect(prompt.contains("Use the exact event ID and version from that detail read"))
+    #expect(prompt.contains("list calendars and select an exact writable calendar ID"))
+    #expect(prompt.contains("Do not guess identifiers, versions, or time zones"))
+    #expect(prompt.contains("recurring or organizer-managed events"))
 }
 
 @Test func defaultSystemPromptDocumentsOutboundMailPermissionWorkflow() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Outbound mail permission workflow"))
-    #expect(prompt.contains("MailDraft.id"))
+    #expect(prompt.contains("Mail workflow"))
     #expect(prompt.contains("mail_send_draft"))
-    #expect(prompt.contains("In Ask mode, this presents the native Compose approval card"))
-    #expect(prompt.contains("In Execute mode, the permission policy authorizes sending immediately"))
-    #expect(prompt.contains("native Compose approval card"))
-    #expect(prompt.contains("Do not replace the tool workflow with a natural-language \"please confirm\" message"))
-    #expect(prompt.contains("never ask the user to provide or find a draft ID"))
-    #expect(prompt.contains("omit accountID and identityID to use the Settings default send account"))
-    #expect(prompt.contains("never invent default as a literal mail account ID"))
-    #expect(prompt.contains("mail_list_accounts"))
+    #expect(prompt.contains("let the permission policy govern approval"))
 }
 
 @Test func defaultSystemPromptDocumentsPersonRegistrySemantics() {
@@ -349,15 +302,11 @@ import ConnorGraphAgent
     #expect(prompt.contains("default attribution anchor"))
 }
 
-@Test func defaultSystemPromptDocumentsCurrentUserRelationshipEndpointRules() {
+@Test func defaultSystemPromptDoesNotAdvertiseUnavailablePersonRelationshipTools() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("## Person Relationships"))
-    #expect(prompt.contains("protected `current_user` endpoint"))
-    #expect(prompt.contains("Do not expect the current user to appear in Composer @person mentions"))
-    #expect(prompt.contains("I/me/my/我/我的/当前用户"))
-    #expect(prompt.contains("Use Person Relationship tools for relationship edges"))
-    #expect(prompt.contains("Use current-user MemoryOS tools for preferences, habits, constraints, and self-profile facts"))
+    #expect(!prompt.contains("## Person Relationships"))
+    #expect(!prompt.contains("Person Relationship tools"))
 }
 
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {

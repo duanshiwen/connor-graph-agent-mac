@@ -131,12 +131,21 @@ final class UserPreferencesFeatureModel {
     var city = "" { didSet { changed() } }
     var country = "" { didSet { changed() } }
     var notes = "" { didSet { changed() } }
-    private(set) var connorPersonality = ConnorPersonalitySettings.empty
+    private(set) var connorPersonality = ConnorPersonalitySettings.balancedDefault
     private(set) var connorPersonalityRevision = 0
+    private(set) var connorVoiceGender: ConnorVoiceGender = .male
+    private(set) var connorVoiceFollowsPersonalityGender = true
+    private(set) var connorVoiceProfile: ConnorVoiceProfile?
+    private(set) var connorVoiceRevision = 0
+    var automaticallyReadsReplies = false { didSet { changed() } }
     var personalityRequest = ""
     private(set) var personalityDraft: ConnorPersonalitySettings?
     private(set) var isGeneratingPersonality = false
     private(set) var personalityErrorMessage: String?
+    var voiceRequest = ""
+    private(set) var voiceDraft: ConnorVoiceProfile?
+    private(set) var isGeneratingVoice = false
+    private(set) var voiceErrorMessage: String?
     private(set) var locationStatusMessage: String?
 
     @ObservationIgnored private var locationCoordinator: UserLocationCoordinator?
@@ -144,7 +153,21 @@ final class UserPreferencesFeatureModel {
     @ObservationIgnored var personalityGenerator: @MainActor (String) async throws -> ConnorPersonalitySettings = { _ in
         throw ConnorPersonalityError.unavailable
     }
+    @ObservationIgnored var voiceGenerator: @MainActor (String, ConnorVoiceGender) async throws -> ConnorVoiceProfile = { _, _ in
+        throw ConnorVoiceProfileError.unavailable
+    }
     @ObservationIgnored private var isApplying = false
+
+    var connorVoiceGenderSelection: ConnorVoiceGenderSelection {
+        if connorVoiceFollowsPersonalityGender { return .followPersonality }
+        return connorVoiceGender == .female ? .female : .male
+    }
+
+    var resolvedConnorVoiceGender: ConnorVoiceGender {
+        connorVoiceFollowsPersonalityGender
+            ? .following(personalityGender: connorPersonality.gender)
+            : connorVoiceGender
+    }
 
     func apply(_ preferences: AgentRuntimePreferenceSettings) {
         isApplying = true
@@ -160,8 +183,15 @@ final class UserPreferencesFeatureModel {
         notes = preferences.notes
         connorPersonality = preferences.connorPersonality
         connorPersonalityRevision = preferences.connorPersonalityRevision
+        connorVoiceGender = preferences.connorSpeech.voiceGender
+        connorVoiceFollowsPersonalityGender = preferences.connorSpeech.followsPersonalityGender
+        connorVoiceProfile = preferences.connorSpeech.voiceProfile
+        connorVoiceRevision = preferences.connorSpeech.voiceRevision
+        automaticallyReadsReplies = preferences.connorSpeech.automaticallyReadsReplies
         personalityDraft = nil
         personalityErrorMessage = nil
+        voiceDraft = nil
+        voiceErrorMessage = nil
     }
 
     func apply(to settings: inout AgentRuntimeSettings) {
@@ -175,6 +205,13 @@ final class UserPreferencesFeatureModel {
         settings.preferences.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.connorPersonality = connorPersonality
         settings.preferences.connorPersonalityRevision = connorPersonalityRevision
+        settings.preferences.connorSpeech = ConnorSpeechSettings(
+            voiceGender: connorVoiceGender,
+            followsPersonalityGender: connorVoiceFollowsPersonalityGender,
+            voiceProfile: connorVoiceProfile,
+            voiceRevision: connorVoiceRevision,
+            automaticallyReadsReplies: automaticallyReadsReplies
+        )
     }
 
     func fillEmptyFieldsFromSystem() -> Bool {
@@ -237,12 +274,69 @@ final class UserPreferencesFeatureModel {
     }
 
     func resetPersonality() {
-        guard !connorPersonality.isEmpty else { return }
-        connorPersonality = .empty
+        guard connorPersonality != .balancedDefault else { return }
+        connorPersonality = .balancedDefault
         connorPersonalityRevision += 1
         personalityDraft = nil
         personalityErrorMessage = nil
         onChanged()
+    }
+
+    func generateVoiceDraft() async {
+        guard !isGeneratingVoice else { return }
+        let request = voiceRequest.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty else {
+            voiceErrorMessage = ConnorVoiceProfileError.emptyRequest.localizedDescription
+            return
+        }
+        isGeneratingVoice = true
+        voiceErrorMessage = nil
+        defer { isGeneratingVoice = false }
+        do {
+            voiceDraft = try await voiceGenerator(request, resolvedConnorVoiceGender)
+        } catch {
+            voiceDraft = nil
+            voiceErrorMessage = error.localizedDescription
+        }
+    }
+
+    func confirmVoiceDraft() {
+        guard let voiceDraft else { return }
+        connorVoiceProfile = voiceDraft
+        connorVoiceRevision += 1
+        self.voiceDraft = nil
+        voiceErrorMessage = nil
+        onChanged()
+    }
+
+    func cancelVoiceDraft() {
+        voiceDraft = nil
+        voiceErrorMessage = nil
+    }
+
+    func resetVoiceToFollowPersonality() {
+        guard connorVoiceProfile != nil else { return }
+        connorVoiceProfile = nil
+        connorVoiceRevision += 1
+        voiceDraft = nil
+        voiceErrorMessage = nil
+        onChanged()
+    }
+
+    func setConnorVoiceGenderSelection(_ selection: ConnorVoiceGenderSelection) {
+        switch selection {
+        case .followPersonality:
+            connorVoiceFollowsPersonalityGender = true
+        case .male:
+            connorVoiceFollowsPersonalityGender = false
+            connorVoiceGender = .male
+        case .female:
+            connorVoiceFollowsPersonalityGender = false
+            connorVoiceGender = .female
+        }
+        voiceDraft = nil
+        voiceErrorMessage = nil
+        changed()
     }
 
     func applyApprovedPersonality(_ personality: ConnorPersonalitySettings, expectedRevision: Int) throws {
@@ -294,6 +388,22 @@ final class UserPreferencesFeatureModel {
         if trimmed.isEmpty { genderIdentitySelection = ""; genderIdentityCustomText = "" }
         else if Self.genderIdentityPresetValues.contains(trimmed) { genderIdentitySelection = trimmed; genderIdentityCustomText = "" }
         else { genderIdentitySelection = Self.customGenderIdentitySelection; genderIdentityCustomText = trimmed }
+    }
+}
+
+enum ConnorVoiceGenderSelection: String, CaseIterable, Identifiable {
+    case followPersonality
+    case male
+    case female
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .followPersonality: "跟随人格"
+        case .male: "男声"
+        case .female: "女声"
+        }
     }
 }
 

@@ -42,7 +42,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(!input.sessionSpeechTranscriptionEnabled)
     }
 
-    @Test func defaultsAreEmptyUntilSystemOrUserFillsThem() {
+    @Test func defaultsUseBalancedConnorPersonalityUntilUserCustomizesIt() {
         let preferences = AgentRuntimePreferenceSettings()
 
         #expect(preferences.displayName.isEmpty)
@@ -54,8 +54,64 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.birthDate.isEmpty)
         #expect(preferences.notes.isEmpty)
         #expect(preferences.defaultSearchEngine == .bing)
-        #expect(preferences.connorPersonality.isEmpty)
+        #expect(preferences.connorPersonality == .balancedDefault)
+        #expect(preferences.connorPersonality.gender == "中性")
         #expect(preferences.connorPersonalityRevision == 0)
+        #expect(preferences.connorSpeech == .default)
+    }
+
+    @Test func connorSpeechSettingsRoundTripAndLegacyDecode() throws {
+        let voiceProfile = ConnorVoiceProfile(
+            summary: "清澈、克制的青年声音",
+            timbre: "中低音，轻微胸腔共鸣"
+        )
+        let preferences = AgentRuntimePreferenceSettings(
+            connorSpeech: ConnorSpeechSettings(
+                voiceGender: .female,
+                followsPersonalityGender: false,
+                voiceProfile: voiceProfile,
+                voiceRevision: 3,
+                automaticallyReadsReplies: true
+            )
+        )
+
+        let data = try JSONEncoder().encode(preferences)
+        let decoded = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
+        let legacy = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: Data("{}".utf8))
+
+        #expect(decoded.connorSpeech.voiceGender == .female)
+        #expect(!decoded.connorSpeech.followsPersonalityGender)
+        #expect(decoded.connorSpeech.voiceProfile == voiceProfile)
+        #expect(decoded.connorSpeech.voiceRevision == 3)
+        #expect(decoded.connorSpeech.automaticallyReadsReplies)
+        #expect(legacy.connorSpeech == .default)
+
+        let legacySpeech = try JSONDecoder().decode(
+            ConnorSpeechSettings.self,
+            from: Data(#"{"voiceGender":"female","automaticallyReadsReplies":true}"#.utf8)
+        )
+        #expect(legacySpeech.voiceGender == .female)
+        #expect(!legacySpeech.followsPersonalityGender)
+        #expect(legacySpeech.voiceProfile == nil)
+        #expect(legacySpeech.voiceRevision == 0)
+        #expect(legacySpeech.automaticallyReadsReplies)
+    }
+
+    @Test func voiceGenderInferenceUsesNeutralForNonBinaryOrUnspecifiedPersonalities() {
+        #expect(ConnorVoiceGender.following(personalityGender: "女性") == .female)
+        #expect(ConnorVoiceGender.following(personalityGender: "male") == .male)
+        #expect(ConnorVoiceGender.following(personalityGender: "非二元") == .neutral)
+        #expect(ConnorVoiceGender.following(personalityGender: "中性") == .neutral)
+    }
+
+    @Test func voiceProfileGeneratorRejectsUnexpectedFieldsAndNormalizesValues() throws {
+        let profile = try ConnorVoiceProfileGenerator().decode(#"{"summary":"  清澈而沉稳  ","ageRange":"二十多岁","timbre":"中低音","speakingStyle":"停顿自然","pace":"适中","accent":"普通话","emotionalTone":"温和"}"#)
+
+        #expect(profile.summary == "清澈而沉稳")
+        #expect(profile.timbre == "中低音")
+        #expect(throws: ConnorVoiceProfileError.unexpectedField("name")) {
+            try ConnorVoiceProfileGenerator().decode(#"{"summary":"沉稳","name":"某位演员"}"#)
+        }
     }
 
     @Test func decodesLegacyPreferencesWithoutDefaultSearchEngineAsBing() throws {
@@ -73,7 +129,7 @@ struct AgentRuntimePreferenceSettingsTests {
         let preferences = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
 
         #expect(preferences.defaultSearchEngine == .bing)
-        #expect(preferences.connorPersonality.isEmpty)
+        #expect(preferences.connorPersonality == .balancedDefault)
     }
 
     @Test func personalitySettingsRoundTripAndNormalizeGeneratedValues() throws {

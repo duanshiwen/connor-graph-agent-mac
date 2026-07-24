@@ -641,3 +641,29 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(deepseekConfig.apiKey == "deepseek-key")
     #expect(deepseekConfig.baseURL.absoluteString == "https://api.deepseek.com/v1")
 }
+
+@Test func tokenPlanAnthropicConnectionProvidesOpenAICompatibleMiMOSpeechConfiguration() throws {
+    let repository = AppLLMSettingsRepository(
+        settingsStore: FakeSettingsStore(),
+        credentialStore: FakeCredentialStore()
+    )
+    let connection = AppLLMConnectionConfig(
+        id: "mimo-token-plan",
+        name: "Xiaomi MiMo Token Plan",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://token-plan-cn.xiaomimimo.com/anthropic",
+        model: "mimo-v2.5-pro,mimo-v2.5",
+        selectedModel: "mimo-v2.5-pro"
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "tp-secret"
+    )
+
+    let configuration = try #require(try repository.xiaomiMiMOSpeechConfiguration())
+
+    #expect(configuration.baseURL.absoluteString == "https://token-plan-cn.xiaomimimo.com/v1")
+    #expect(configuration.apiKey == "tp-secret")
+    #expect(configuration.apiKeyHeaderKind == .apiKey)
+}

@@ -36,6 +36,8 @@
 		A6D100010000000000000001 /* Sources/ConnorGraphAgentMac/AgentInlineAttachmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D100000000000000000001 /* Sources/ConnorGraphAgentMac/AgentInlineAttachmentView.swift */; };
 		A6D100010000000000000002 /* Sources/ConnorGraphAgentMac/AgentAudioPlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D100000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAudioPlaybackController.swift */; };
 		A6D100010000000000000003 /* Sources/ConnorGraphAgentMac/AgentPCMStreamPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D100000000000000000003 /* Sources/ConnorGraphAgentMac/AgentPCMStreamPlaybackEngine.swift */; };
+		B7C500010000000000000001 /* Sources/ConnorGraphAgentMac/ConnorSpeechAudioCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C500000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorSpeechAudioCache.swift */; };
+		B7C500010000000000000002 /* Sources/ConnorGraphAgentMac/ConnorSpeechPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C500000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorSpeechPlaybackCoordinator.swift */; };
 		9A17D0B100000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift */; };
 		9A17D0B100000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift */; };
 		9A17D0B100000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift */; };
@@ -218,6 +220,8 @@
 		A6D100000000000000000001 /* Sources/ConnorGraphAgentMac/AgentInlineAttachmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentInlineAttachmentView.swift; sourceTree = "<group>"; };
 		A6D100000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAudioPlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentAudioPlaybackController.swift; sourceTree = "<group>"; };
 		A6D100000000000000000003 /* Sources/ConnorGraphAgentMac/AgentPCMStreamPlaybackEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentPCMStreamPlaybackEngine.swift; sourceTree = "<group>"; };
+		B7C500000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorSpeechAudioCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorSpeechAudioCache.swift; sourceTree = "<group>"; };
+		B7C500000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorSpeechPlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorSpeechPlaybackCoordinator.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift; sourceTree = "<group>"; };
@@ -471,6 +475,8 @@
 				A6D100000000000000000001 /* Sources/ConnorGraphAgentMac/AgentInlineAttachmentView.swift */,
 				A6D100000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAudioPlaybackController.swift */,
 				A6D100000000000000000003 /* Sources/ConnorGraphAgentMac/AgentPCMStreamPlaybackEngine.swift */,
+				B7C500000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorSpeechAudioCache.swift */,
+				B7C500000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorSpeechPlaybackCoordinator.swift */,
 				9A17D0B000000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift */,
 				C7A700000000000000000001 /* Sources/ConnorGraphAgentMac/ChatViewport/AgentChatTimelineAdapter.swift */,
 				C7A700000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift */,
@@ -782,6 +788,8 @@
 				A6D100010000000000000001 /* Sources/ConnorGraphAgentMac/AgentInlineAttachmentView.swift in Sources */,
 				A6D100010000000000000002 /* Sources/ConnorGraphAgentMac/AgentAudioPlaybackController.swift in Sources */,
 				A6D100010000000000000003 /* Sources/ConnorGraphAgentMac/AgentPCMStreamPlaybackEngine.swift in Sources */,
+				B7C500010000000000000001 /* Sources/ConnorGraphAgentMac/ConnorSpeechAudioCache.swift in Sources */,
+				B7C500010000000000000002 /* Sources/ConnorGraphAgentMac/ConnorSpeechPlaybackCoordinator.swift in Sources */,
 				9A17D0B100000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift in Sources */,
 				C7A710000000000000000001 /* Sources/ConnorGraphAgentMac/ChatViewport/AgentChatTimelineAdapter.swift in Sources */,
 				C7A710000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift in Sources */,
@@ -1008,7 +1016,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.22;
+				MARKETING_VERSION = 1.0.25;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;
@@ -1046,7 +1054,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.22;
+				MARKETING_VERSION = 1.0.25;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;

@@ -235,7 +235,7 @@ graph/evaluations/reports/*.json
 
 运行时在首次完成前检查三个 Memory 工具，以及非纯记忆任务的 Web Search；缺失时只补救一次。工具不可用、权限拒绝、无结果或失败时，Agent 应透明说明并使用最佳可用证据继续，不能无限重试。`web_search`、`web_fetch` 和 `browser_fetch` 均受 `.externalNetwork` Policy Engine 边界约束；`readOnly` 模式不会绕过该边界。
 
-主会话不再自动注入旧 Graph/Graph Hybrid Context，也不从旧上下文生成 citations。System prompt 只引用对话时需要的三个 Memory OS 只读工具；返回记录包含真实 `record_id`，citations 只来自本轮工具结果。Recent/Knowledge 的 `limit` 默认且最小为 10，可按累计目标提高；Knowledge 的 `depth` 默认 1、初始上限 6，两者均可通过 `MemoryOSContextToolConfiguration` 配置。相同 run 和查询扩大 limit 时仅返回新增记录；容量不足按完整记录/路径裁剪，并通过 `partial` 与诚实的 `hasMore` 表示。
+主会话不再自动注入旧 Graph/Graph Hybrid Context，也不从旧上下文生成 citations。System prompt 只引用对话时需要的三个 Memory OS 只读工具；返回记录包含真实 `record_id`，citations 只来自本轮工具结果。Recent/Knowledge 使用 1-based `page` 分页，响应返回 `pageSize`、`totalItems`、`totalPages`、`hasNextPage` 和 `nextPage`；继续读取时必须使用 `nextPage` 并保持检索参数不变，无效页码不会回退到第一页。Knowledge 的 `depth` 默认 1、初始上限 6，可通过 `MemoryOSContextToolConfiguration` 配置。
 
 Memory OS 证据描述用户历史、偏好、决定、关系和内部项目；Web 证据描述外部公开事实，两者不得互相覆盖。当前状态优先 active、较新且有证据的 L1/L2，历史问题保留旧记录，无法消解的冲突必须展示。
 

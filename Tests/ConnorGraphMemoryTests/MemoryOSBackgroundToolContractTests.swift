@@ -45,7 +45,7 @@ struct MemoryOSBackgroundToolContractTests {
         #expect(readRecord.usagePolicy.contains("summary-level context is insufficient"))
         let recent = try #require(tools.first { $0.name == "memory_os_recent_context" })
         #expect(recent.inputSchemaJSON.contains("startDate"))
-        #expect(recent.inputSchemaJSON.contains("empty means all records in range"))
+        #expect(recent.inputSchemaJSON.contains("empty means all records in the supplied range"))
         #expect(recent.inputSchemaJSON.contains("page"))
         #expect(!recent.inputSchemaJSON.contains("limit"))
         #expect(recent.usagePolicy.contains("hasNextPage"))

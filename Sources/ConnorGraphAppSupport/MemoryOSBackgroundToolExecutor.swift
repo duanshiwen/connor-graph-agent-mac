@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
@@ -60,10 +61,31 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         guard context.allowedToolNames.contains(call.name) else {
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
         }
+        let agentArguments: AgentToolArguments
+        do {
+            agentArguments = try AgentToolArguments(json: call.argumentsJSON)
+        } catch {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
+        }
+        if let schema = inputSchema(for: call.name) {
+            let issues = schema.argumentValidationIssues(.object(agentArguments.values))
+            guard issues.isEmpty else {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments(issues.joined(separator: "; "))
+            }
+        }
         let args = try Arguments(json: call.argumentsJSON)
         switch call.name {
         case "memory_os_recent_context", "memory_os_knowledge_context":
             let isRecent = call.name == "memory_os_recent_context"
+            let allowedArguments: Set<String> = isRecent
+                ? ["query", "startDate", "endDate", "page"]
+                : ["query", "startDate", "endDate", "page", "depth"]
+            let unsupportedArguments = Set(args.values.keys).subtracting(allowedArguments).sorted()
+            guard unsupportedArguments.isEmpty else {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments(
+                    "Unsupported argument(s) for \(call.name): \(unsupportedArguments.joined(separator: ", "))"
+                )
+            }
             let page = args.values["page"] == nil ? 1 : (args.strictInt("page") ?? Int.min)
             let depth = isRecent ? 1 : max(1, min(args.int("depth") ?? 1, contextToolConfiguration.maxDepth))
             let layers: [MemoryOSRetrievalLayer] = isRecent ? [.l1, .l2] : [.l3, .l4]
@@ -208,8 +230,12 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                       let rawRelation = factObj["relation"] as? String, !rawRelation.isEmpty else {
                     throw MemoryOSBackgroundToolExecutionError.invalidArguments("facts[\(index)] must have statement, factType, and relation")
                 }
-                let predicate = MemoryOSCanonicalizer.canonicalizeGraphPredicate(rawRelation) ?? .relatedTo
-                let normalizedFactType = MemoryOSCanonicalizer.canonicalizeL2FactType(factType) ?? factType
+                guard let predicate = MemoryOSCanonicalizer.canonicalizeGraphPredicate(rawRelation) else {
+                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("facts[\(index)].relation is not supported: \(rawRelation)")
+                }
+                guard let normalizedFactType = MemoryOSCanonicalizer.canonicalizeL2FactType(factType) else {
+                    throw MemoryOSBackgroundToolExecutionError.invalidArguments("facts[\(index)].factType is not supported: \(factType)")
+                }
                 let artifactJSON = try Self.buildCurrentUserFactJSON(statement: statement, factType: normalizedFactType, predicate: predicate, anchor: anchor, now: now)
                 let summary = try facade.projectAndRecordLLMArtifact(rawContent: artifactJSON, modelID: "memory_os_update_current_user_profile", processingRunID: context.runID, artifactType: "memory_os_current_user_fact_update", schemaName: "MemoryOSL1UnifiedProjectionOutput", now: now)
                 artifactIDs.append(summary.artifactID)
@@ -244,6 +270,24 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
 
         default:
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
+        }
+    }
+
+    func inputSchema(for toolName: String) -> AgentToolInputSchema? {
+        switch toolName {
+        case "memory_os_recent_context": MemoryOSRecentContextTool(facade: facade, configuration: contextToolConfiguration).inputSchema
+        case "memory_os_knowledge_context": MemoryOSKnowledgeContextTool(facade: facade, configuration: contextToolConfiguration).inputSchema
+        case "memory_os_search": MemoryOSSearchTool(facade: facade).inputSchema
+        case "memory_os_read_record": MemoryOSReadRecordTool(facade: facade).inputSchema
+        case "memory_os_read_provenance": MemoryOSReadProvenanceTool(facade: facade).inputSchema
+        case "memory_os_expand_l4": MemoryOSExpandL4Tool(facade: facade).inputSchema
+        case "memory_os_l4_find_entity": MemoryOSL4FindEntityTool(facade: facade).inputSchema
+        case "memory_os_l4_neighbors": MemoryOSL4NeighborsTool(facade: facade).inputSchema
+        case "memory_os_l2_update_entities": MemoryOSL2UpdateEntitiesTool(facade: facade).inputSchema
+        case "memory_os_update_current_user_profile": MemoryOSUpdateCurrentUserProfileTool(facade: facade).inputSchema
+        case "memory_os_l3_update_beliefs": MemoryOSL3UpdateBeliefsTool(facade: facade).inputSchema
+        case "memory_os_l4_update_entities": MemoryOSL4UpdateEntitiesTool(facade: facade).inputSchema
+        default: nil
         }
     }
 

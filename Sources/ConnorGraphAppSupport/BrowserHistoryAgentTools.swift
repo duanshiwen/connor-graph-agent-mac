@@ -121,7 +121,7 @@ public struct BrowserHistorySearchTool: AgentTool {
     public var description: String { "Search saved browser history records by URL, title, session title, or saved page markdown. Returns summaries/previews so the model can choose which page bodies to read." }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "query": .string(description: "Search query"),
             "limit": .integer(description: "Maximum history summaries to return"),
             "previewCharacters": .integer(description: "Maximum saved markdown preview characters per result")
@@ -156,7 +156,7 @@ public struct BrowserHistoryGetTool: AgentTool {
     public var description: String { "Get a saved browser history record by ID, including saved page markdown content when available." }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "recordID": .string(description: "Browser history record UUID returned by browser_history_search")
         ], required: ["recordID"])
     }
