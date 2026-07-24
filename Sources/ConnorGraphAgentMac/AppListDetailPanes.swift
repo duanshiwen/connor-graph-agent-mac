@@ -618,7 +618,10 @@ struct CraftSessionListPane: View {
             row: row,
             readState: model.sessions.readStates[row.id],
             isSelected: row.id == model.sessions.selectedSessionID,
-            isRunning: rowActions.isSubmitting(row.id),
+            executionState: .resolve(
+                isSubmitting: rowActions.isSubmitting(row.id),
+                hasPendingApproval: model.approvals.hasPendingApproval(sessionID: row.id)
+            ),
             isRegeneratingTitle: model.sessions.regeneratingTitleSessionIDs.contains(row.id),
             hasRunningBackgroundTask: !rowActions.canDelete(row.id),
             labelDefinitions: governanceModel.config.labels,
@@ -3045,7 +3048,7 @@ struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
     var readState: SessionReadState?
     var isSelected: Bool
-    var isRunning: Bool
+    var executionState: ChatSessionExecutionPresentation
     var isRegeneratingTitle: Bool
     var hasRunningBackgroundTask: Bool
     var labelDefinitions: [AgentSessionLabelDefinition]
@@ -3186,7 +3189,13 @@ struct CraftSessionRow: View {
 
     @ViewBuilder
     private var leadingSessionIcon: some View {
-        if isRunning || isRegeneratingTitle {
+        if let systemImage = executionState.systemImage {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 18, height: 18)
+                .help(executionState.helpText ?? "")
+        } else if executionState == .running || isRegeneratingTitle {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 18, height: 18)
@@ -3260,10 +3269,11 @@ struct CraftSessionRow: View {
 
     @ViewBuilder
     private var trailingSessionStatusText: some View {
-        if isRunning {
-            Text("运行中")
+        if let statusText = executionState.statusText {
+            Text(statusText)
                 .font(AppListTypography.rowCaptionEmphasized)
-                .foregroundStyle(activeMetaTextColor)
+                .foregroundStyle(executionState == .awaitingApproval ? .orange : activeMetaTextColor)
+                .help(executionState.helpText ?? "")
         } else if isRegeneratingTitle {
             Text("生成中")
                 .font(AppListTypography.rowCaptionEmphasized)
