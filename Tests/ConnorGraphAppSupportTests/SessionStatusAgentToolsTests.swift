@@ -159,6 +159,9 @@ import ConnorGraphStore
 
     let object = try resultJSONObject(result)
     let items = try #require(object["results"] as? [[String: Any]])
+    let modelContent = AgentToolResultGate().gatedContent(for: result)
+    #expect(modelContent.contains("\"results\""))
+    #expect(modelContent.contains("\"sessionID\":\"batch-update\""))
     let outcomes = Dictionary(uniqueKeysWithValues: items.compactMap { item -> (String, String)? in
         guard let id = item["sessionID"] as? String, let outcome = item["outcome"] as? String else { return nil }
         return (id, outcome)
