@@ -242,17 +242,19 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(json["records"] is NSNull)
     }
 
-    @Test func backgroundContextToolRejectsRemovedLimitArgument() throws {
+    @Test func backgroundContextToolNormalizesLegacyLimitAndQuotedPage() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()
         let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
 
-        #expect(throws: MemoryOSBackgroundToolExecutionError.invalidArguments("$.limit is not supported")) {
-            try executor.execute(
-                .init(id: "removed-limit", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","limit":10}"#),
-                context: .init(runID: "removed-limit-run", iteration: 1)
-            )
-        }
+        let result = try executor.execute(
+            .init(id: "legacy-pagination", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","page":"1","limit":"10"}"#),
+            context: .init(runID: "legacy-pagination-run", iteration: 1)
+        )
+        let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(result.contentJSON.utf8))
+
+        #expect(response.success)
+        #expect(response.page == 1)
     }
 
     @Test func l2UpdateToolAcceptsStructuredStatementsInBackgroundExecutor() throws {
