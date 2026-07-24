@@ -15,9 +15,10 @@ public enum AppMemoryOSCLIRouter {
             return try route(args: args, inspector: inspector, encoder: encoder)
         }
         guard let content = try chatContent(args: args), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return try encode(MemoryOSCLIError(error: "missing_chat_content", usage: "connor memory ingest-chat --content <text> [--session-id id] [--message-id id] | --file <path>"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "missing_chat_content", usage: "connor memory ingest-chat --content <text> [--session-id id] [--message-id id] [--normalization-timeout-seconds N] | --file <path>"), encoder: encoder)
         }
-        let normalizer = try intentNormalizer ?? makeLiveIntentNormalizer()
+        let timeoutSeconds = max(1, doubleOption("--normalization-timeout-seconds", in: args, default: 6))
+        let normalizer = try intentNormalizer ?? makeLiveIntentNormalizer(timeoutSeconds: timeoutSeconds)
         let result = await inspector.ingestChatMessage(
             content: content,
             sessionID: optionValue("--session-id", in: args) ?? "cli-memory-test",
@@ -256,8 +257,8 @@ public enum AppMemoryOSCLIRouter {
         AgentModelBackgroundToolLoopModel(provider: try makeLiveAgentModelProvider())
     }
 
-    private static func makeLiveIntentNormalizer() throws -> AnyMemoryOSUserIntentNormalizer {
-        AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: try makeLiveAgentModelProvider()))
+    private static func makeLiveIntentNormalizer(timeoutSeconds: Double) throws -> AnyMemoryOSUserIntentNormalizer {
+        AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: try makeLiveAgentModelProvider(), timeoutSeconds: timeoutSeconds))
     }
 
     private static func makeLiveAgentModelProvider() throws -> AnyAgentModelProvider {
@@ -332,6 +333,10 @@ public enum AppMemoryOSCLIRouter {
 
     private static func intOption(_ name: String, in args: [String], default defaultValue: Int) -> Int {
         optionValue(name, in: args).flatMap(Int.init) ?? defaultValue
+    }
+
+    private static func doubleOption(_ name: String, in args: [String], default defaultValue: Double) -> Double {
+        optionValue(name, in: args).flatMap(Double.init) ?? defaultValue
     }
 
     private static func splitCSV(_ value: String) -> [String] {
