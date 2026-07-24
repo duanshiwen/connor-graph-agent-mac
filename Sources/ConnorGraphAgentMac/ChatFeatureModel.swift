@@ -22,6 +22,36 @@ struct ChatSessionSidebarSummary: Sendable, Equatable {
     }
 }
 
+enum ChatSessionExecutionPresentation: Sendable, Equatable {
+    case idle
+    case running
+    case awaitingApproval
+
+    static func resolve(isSubmitting: Bool, hasPendingApproval: Bool) -> Self {
+        if hasPendingApproval { return .awaitingApproval }
+        return isSubmitting ? .running : .idle
+    }
+
+    var statusText: String? {
+        switch self {
+        case .idle: nil
+        case .running: "运行中"
+        case .awaitingApproval: "请求审批"
+        }
+    }
+
+    var systemImage: String? {
+        switch self {
+        case .idle, .running: nil
+        case .awaitingApproval: "lock.fill"
+        }
+    }
+
+    var helpText: String? {
+        self == .awaitingApproval ? "当前会话正在等待权限审批，请前往处理" : nil
+    }
+}
+
 @MainActor
 @Observable
 final class ChatSessionListModel {
@@ -107,6 +137,10 @@ final class ChatRunModel {
 final class ChatApprovalModel {
     var pendingApprovals: [AgentPendingApproval] = []
     var lastResultSummary: String?
+
+    func hasPendingApproval(sessionID: String) -> Bool {
+        pendingApprovals.contains { $0.sessionID == sessionID }
+    }
 }
 
 @MainActor
