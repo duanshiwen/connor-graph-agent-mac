@@ -127,6 +127,7 @@ final class BrowserAutomationRuntime {
         let tabs: [[String: Any]] = snapshot.tabs.map { tab in
             [
                 "id": tab.id.uuidString,
+                "tab_id": tab.id.uuidString,
                 "selected": tab.id == snapshot.selectedTabID,
                 "title": tab.title,
                 "url": tab.currentURLString,
@@ -333,7 +334,7 @@ final class BrowserAutomationRuntime {
         try png.write(to: url, options: .atomic)
         return BrowserControlResponse(
             contentText: "Browser screenshot saved to \(url.path)",
-            contentJSON: Self.jsonString(["path": url.path, "fullPage": request.fullPage, "tabID": resolved.tab.id.uuidString]),
+            contentJSON: Self.jsonString(["path": url.path, "fullPage": request.fullPage, "tabID": resolved.tab.id.uuidString, "tab_id": resolved.tab.id.uuidString]),
             citations: webView.url.map { [$0.absoluteString] } ?? []
         )
     }
@@ -386,7 +387,7 @@ final class BrowserAutomationRuntime {
         let reason = request.value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return BrowserControlResponse(
             contentText: "Built-in browser handed to the user\(reason?.isEmpty == false ? ": \(reason!)" : ".")",
-            contentJSON: Self.jsonString(["tabID": resolved.tab.id.uuidString, "url": webView.url?.absoluteString ?? "", "reason": reason ?? ""]),
+            contentJSON: Self.jsonString(["tabID": resolved.tab.id.uuidString, "tab_id": resolved.tab.id.uuidString, "url": webView.url?.absoluteString ?? "", "reason": reason ?? ""]),
             citations: webView.url.map { [$0.absoluteString] } ?? []
         )
     }
@@ -410,6 +411,7 @@ final class BrowserAutomationRuntime {
         object["host"] = webView.url?.host ?? ""
         object["url"] = webView.url?.absoluteString ?? ""
         object["tabID"] = resolved.tab.id.uuidString
+        object["tab_id"] = resolved.tab.id.uuidString
         let json = Self.jsonString(object)
         return BrowserControlResponse(contentText: "Browser action target described for approval.", contentJSON: json, citations: webView.url.map { [$0.absoluteString] } ?? [])
     }
@@ -465,7 +467,7 @@ final class BrowserAutomationRuntime {
     private func navigationResponse(action: String, sessionID: String, tabID: UUID, url: String) -> BrowserControlResponse {
         BrowserControlResponse(
             contentText: "Browser navigation action completed: \(action). Tab: \(tabID.uuidString). URL: \(url)",
-            contentJSON: Self.jsonString(["action": action, "sessionID": sessionID, "tabID": tabID.uuidString, "url": url]),
+            contentJSON: Self.jsonString(["action": action, "sessionID": sessionID, "tabID": tabID.uuidString, "tab_id": tabID.uuidString, "url": url]),
             citations: url.isEmpty ? [] : [url]
         )
     }
@@ -502,7 +504,7 @@ final class BrowserAutomationRuntime {
     private func waitResponse(condition: String, tab: AppBrowserTabSnapshot) -> BrowserControlResponse {
         BrowserControlResponse(
             contentText: "Browser wait condition satisfied: \(condition).",
-            contentJSON: Self.jsonString(["condition": condition, "tabID": tab.id.uuidString, "url": tab.currentURLString, "title": tab.title]),
+            contentJSON: Self.jsonString(["condition": condition, "tabID": tab.id.uuidString, "tab_id": tab.id.uuidString, "url": tab.currentURLString, "title": tab.title]),
             citations: tab.currentURLString.isEmpty ? [] : [tab.currentURLString]
         )
     }
@@ -576,6 +578,7 @@ final class BrowserAutomationRuntime {
       nodeMap.set(nodeRef, element);
       nodes.push({
         nodeRef,
+        node_ref: nodeRef,
         role: role(element),
         name: name(element),
         tag: element.tagName.toLowerCase(),
@@ -608,18 +611,18 @@ final class BrowserAutomationRuntime {
       const element = globalThis.__connorBrowserNodeMap?.get(String(nodeRef));
       return !!(element && element.isConnected);
     }
-    if (current()) return JSON.stringify({ found: true, nodeRef: String(nodeRef) });
+    if (current()) return JSON.stringify({ found: true, nodeRef: String(nodeRef), node_ref: String(nodeRef) });
     return await new Promise(resolve => {
       const observer = new MutationObserver(() => {
         if (!current()) return;
         observer.disconnect();
         clearTimeout(timer);
-        resolve(JSON.stringify({ found: true, nodeRef: String(nodeRef) }));
+        resolve(JSON.stringify({ found: true, nodeRef: String(nodeRef), node_ref: String(nodeRef) }));
       });
       observer.observe(document, { subtree: true, childList: true, attributes: true });
       const timer = setTimeout(() => {
         observer.disconnect();
-        resolve(JSON.stringify({ found: false, nodeRef: String(nodeRef) }));
+        resolve(JSON.stringify({ found: false, nodeRef: String(nodeRef), node_ref: String(nodeRef) }));
       }, Math.max(250, Number(timeoutMs) || 10000));
     });
     """#
@@ -658,7 +661,7 @@ final class BrowserAutomationRuntime {
     const value = String(actionValue || '');
     if (requestedAction === 'upload') {
       element.focus();
-      return JSON.stringify({ ok: true, action: requestedAction, nodeRef: reference, handoff: true, url: location.href || '' });
+      return JSON.stringify({ ok: true, action: requestedAction, nodeRef: reference, node_ref: reference, handoff: true, url: location.href || '' });
     } else if (requestedAction === 'click' || requestedAction === 'submit' || requestedAction === 'download') {
       element.click();
     } else if (requestedAction === 'fill') {
@@ -687,19 +690,20 @@ final class BrowserAutomationRuntime {
     } else {
       return JSON.stringify({ ok: false, error: 'Unsupported browser interaction action.' });
     }
-    return JSON.stringify({ ok: true, action: requestedAction, nodeRef: reference, url: location.href || '' });
+    return JSON.stringify({ ok: true, action: requestedAction, nodeRef: reference, node_ref: reference, url: location.href || '' });
     """#
 
     private static let describeNodeScript = #"""
     const reference = String(nodeRef || '');
     const element = globalThis.__connorBrowserNodeMap?.get(reference);
-    if (!element || !element.isConnected) return JSON.stringify({ stale: true, nodeRef: reference });
+    if (!element || !element.isConnected) return JSON.stringify({ stale: true, nodeRef: reference, node_ref: reference });
     const type = String(element.getAttribute('type') || '').toLowerCase();
     const tag = element.tagName.toLowerCase();
     const name = String(element.getAttribute('aria-label') || element.innerText || element.title || '').replace(/\s+/g, ' ').trim().slice(0, 240);
     return JSON.stringify({
       stale: false,
       nodeRef: reference,
+      node_ref: reference,
       tag,
       type,
       role: element.getAttribute('role') || (tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag),
@@ -717,6 +721,6 @@ final class BrowserAutomationRuntime {
     if (!element || !element.isConnected) return JSON.stringify({ ok: false, stale: true });
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     element.focus();
-    return JSON.stringify({ ok: true, nodeRef: reference });
+    return JSON.stringify({ ok: true, nodeRef: reference, node_ref: reference });
     """#
 }

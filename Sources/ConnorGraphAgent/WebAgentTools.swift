@@ -149,6 +149,7 @@ public struct BrowserFetchTool: AgentTool {
                     "taskID": result.taskID,
                     "sessionID": result.sessionID,
                     "tabID": result.tabID,
+                    "tab_id": result.tabID,
                     "status": result.status.rawValue,
                     "errorMessage": result.errorMessage as Any,
                     "interventionReason": result.interventionReason as Any,
@@ -432,6 +433,7 @@ public struct NativeWebSearchTool: AgentTool {
                         "taskID": browserResult.taskID,
                         "sessionID": browserResult.sessionID,
                         "tabID": browserResult.tabID,
+                        "tab_id": browserResult.tabID,
                         "url": browserResult.urlString,
                         "status": browserResult.status
                     ]),
@@ -702,6 +704,7 @@ public struct NativeWebFetchTool: AgentTool {
             "taskID": browserResult.taskID,
             "sessionID": browserResult.sessionID,
             "tabID": browserResult.tabID,
+            "tab_id": browserResult.tabID,
             "status": browserResult.status.rawValue,
             "errorMessage": browserResult.errorMessage as Any,
             "interventionReason": browserResult.interventionReason as Any,

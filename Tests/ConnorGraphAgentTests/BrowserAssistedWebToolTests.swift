@@ -50,8 +50,20 @@ struct BrowserAssistedWebToolTests {
         #expect(recorder.request?.maxNodes == 500)
         #expect(result.contentText == "snapshot")
 
+        let tabsTool = BrowserTabsTool(handler: handler)
+        #expect(tabsTool.description.contains("tab_id"))
+        #expect(BrowserSnapshotTool(handler: handler).description.contains("node_ref"))
+        let snapshotSchema = tool.inputSchema.jsonObject
+        let snapshotProperties = try #require(snapshotSchema["properties"] as? [String: Any])
+        let tabSchema = try #require(snapshotProperties["tab_id"] as? [String: Any])
+        #expect((tabSchema["description"] as? String)?.contains("copy it without renaming") == true)
+        let interactSchema = BrowserInteractTool(handler: handler).inputSchema.jsonObject
+        let interactProperties = try #require(interactSchema["properties"] as? [String: Any])
+        let nodeSchema = try #require(interactProperties["node_ref"] as? [String: Any])
+        #expect((nodeSchema["description"] as? String)?.contains("copy it without renaming") == true)
+
         var registry = AgentToolRegistry()
-        registry.register(BrowserTabsTool(handler: handler))
+        registry.register(tabsTool)
         registry.register(BrowserSnapshotTool(handler: handler))
         registry.register(BrowserNavigateTool(handler: handler))
         registry.register(BrowserWaitTool(handler: handler))
