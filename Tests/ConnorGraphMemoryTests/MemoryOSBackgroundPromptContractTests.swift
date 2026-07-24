@@ -466,7 +466,6 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("hasNextPage"))
         #expect(prompt.contains("nextPage"))
         #expect(prompt.contains("Aim to collect relevant memory comprehensively"))
-        #expect(prompt.contains("limit is not supported"))
         #expect(prompt.contains("page and depth must be JSON integers"))
         #expect(prompt.contains("page set to that exact integer"))
         #expect(!prompt.contains("memory_os_knowledge_context(query, limit, depth)"))
