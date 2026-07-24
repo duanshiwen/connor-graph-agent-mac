@@ -425,10 +425,10 @@ struct CalendarContactsAgentToolsTests {
         #expect(writeTool.description.contains("never guess IDs from display names"))
 
         guard case .closedObject(let readProperties, _) = readTool.inputSchema,
-              case .string(let readIDDescription) = readProperties["person_id"],
+              case .string(let readIDDescription) = readProperties["personID"],
               case .closedObject(let writeProperties, _) = writeTool.inputSchema,
-              case .string(let writeIDDescription) = writeProperties["person_id"] else {
-            Issue.record("Expected contacts tools to expose object schemas with person_id descriptions")
+              case .string(let writeIDDescription) = writeProperties["personID"] else {
+            Issue.record("Expected contacts tools to expose object schemas with personID descriptions")
             return
         }
 

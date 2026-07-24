@@ -4,11 +4,11 @@ import ConnorGraphCore
 
 public struct TaskListTool: AgentTool {
     public let name = "tasks_list"
-    public let description = "List Connor task definitions with stable pagination. Start at page 1 and follow nextPage with the same page_size until hasNextPage is false for complete results."
+    public let description = "List Connor task definitions with stable pagination. Start at page 1 and follow nextPage with the same pageSize until hasNextPage is false for complete results."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "page": .integer(description: "1-based page. Defaults to 1; when nextPage is non-null, use exactly that value for the next call."),
-        "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
+        "pageSize": .integer(description: "Items per page from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
     ], required: [])
     private let repository: AppTaskManagementRepository
 
@@ -18,9 +18,9 @@ public struct TaskListTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let page = arguments.int("page") ?? 1
-        let pageSize = arguments.int("page_size") ?? 50
+        let pageSize = arguments.int("pageSize") ?? arguments.int("page_size") ?? 50
         guard page >= 1 else { throw AgentToolError.invalidArguments("page must be at least 1") }
-        guard (1...100).contains(pageSize) else { throw AgentToolError.invalidArguments("page_size must be between 1 and 100") }
+        guard (1...100).contains(pageSize) else { throw AgentToolError.invalidArguments("pageSize must be between 1 and 100") }
         let tasks = try repository.loadOrCreateDefault().sorted {
             let comparison = $0.name.localizedCaseInsensitiveCompare($1.name)
             return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
@@ -39,28 +39,28 @@ public struct TaskListTool: AgentTool {
 
 public struct TaskUpdateScheduledSessionMessageTool: AgentTool {
     public let name = "tasks_update_scheduled_session_message"
-    public let description = "Update a user or AI scheduled task that creates a session and sends a message. Pass expected_updated_at from tasks_list to prevent overwriting concurrent changes."
+    public let description = "Update a user or AI scheduled task that creates a session and sends a message. Pass expectedUpdatedAt from tasks_list to prevent overwriting concurrent changes."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "task_id": .string(description: "Exact task_id returned by tasks_list; copy the field without renaming it"),
-        "expected_updated_at": .string(description: "Optional current updatedAt ISO-8601 value for optimistic concurrency"),
+        "taskID": .string(description: "Exact taskID returned by tasks_list; copy the field without renaming it"),
+        "expectedUpdatedAt": .string(description: "Optional current updatedAt ISO-8601 value for optimistic concurrency"),
         "name": .string(description: "Optional replacement task name"),
         "runAt": .string(description: "Optional replacement first run time as ISO-8601"),
         "recurrence": .string(description: "Optional once, daily, weekly, or monthly"),
         "timezone": .string(description: "Optional replacement IANA timezone; empty removes it"),
         "message": .string(description: "Optional replacement message"),
         "title": .string(description: "Optional replacement session title; empty removes it")
-    ], required: ["task_id"])
+    ], required: ["taskID"])
     private let repository: AppTaskManagementRepository
 
     public init(repository: AppTaskManagementRepository) { self.repository = repository }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let taskID = nonEmpty(arguments.string("task_id")) else { throw AgentToolError.invalidArguments("task_id is required") }
+        guard let taskID = nonEmpty(arguments.string("taskID") ?? arguments.string("task_id")) else { throw AgentToolError.invalidArguments("taskID is required") }
         let formatter = ISO8601DateFormatter()
         let expectedUpdatedAt: Date?
-        if let raw = nonEmpty(arguments.string("expected_updated_at")) {
-            guard let value = formatter.date(from: raw) else { throw AgentToolError.invalidArguments("expected_updated_at must be ISO-8601") }
+        if let raw = nonEmpty(arguments.string("expectedUpdatedAt") ?? arguments.string("expected_updated_at")) {
+            guard let value = formatter.date(from: raw) else { throw AgentToolError.invalidArguments("expectedUpdatedAt must be ISO-8601") }
             expectedUpdatedAt = value
         } else {
             expectedUpdatedAt = nil
@@ -104,15 +104,15 @@ public struct TaskDeleteTool: AgentTool {
     public let description = "Soft-delete a user or AI task. Protected system tasks cannot be deleted."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "task_id": .string(description: "Exact task_id returned by tasks_list; copy the field without renaming it"),
+        "taskID": .string(description: "Exact taskID returned by tasks_list; copy the field without renaming it"),
         "reason": .string(description: "Optional deletion reason")
-    ], required: ["task_id"])
+    ], required: ["taskID"])
     private let repository: AppTaskManagementRepository
 
     public init(repository: AppTaskManagementRepository) { self.repository = repository }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let taskID = nonEmpty(arguments.string("task_id")) else { throw AgentToolError.invalidArguments("task_id is required") }
+        guard let taskID = nonEmpty(arguments.string("taskID") ?? arguments.string("task_id")) else { throw AgentToolError.invalidArguments("taskID is required") }
         let task = try repository.deleteTask(id: taskID, reason: nonEmpty(arguments.string("reason")))
         return try result(task: task, context: context, toolName: name, text: "Deleted task \(taskID)")
     }
@@ -223,7 +223,7 @@ private struct TaskListItem: Encodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case taskID = "task_id"
+        case taskID
     }
 }
 
