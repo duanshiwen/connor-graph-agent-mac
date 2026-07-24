@@ -804,7 +804,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
         let referencedIDs = try captureEventIDsReferencedByActiveL1QueueItems()
         return try store.query(sql: """
-        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
+        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, retrieval_text, normalization_status, metadata_json
         FROM memory_l1_capture_events
         WHERE processing_state = 'pending'
         ORDER BY occurred_at ASC
@@ -818,7 +818,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 occurredAt: parseDate(row[3]),
                 tokenEstimate: Int(row[4]) ?? 0,
                 processingState: MemoryOSQueueStatus(rawValue: row[5]) ?? .pending,
-                metadata: (try? store.decode([String: String].self, row[6])) ?? [:]
+                retrievalText: row[6].isEmpty ? nil : row[6],
+                normalizationStatus: MemoryOSIntentNormalizationStatus(rawValue: row[7]) ?? .notRequired,
+                metadata: (try? store.decode([String: String].self, row[8])) ?? [:]
             )
         }
     }
