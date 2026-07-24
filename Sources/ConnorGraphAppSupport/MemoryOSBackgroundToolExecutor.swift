@@ -395,9 +395,6 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         let query = MemorySearchQueryParser.parse(rawQuery).terms.joined(separator: " ")
         let startDate = try args.iso8601Date("startDate")
         let endDate = try args.iso8601Date("endDate")
-        if query.isEmpty && (startDate == nil || endDate == nil) {
-            throw MemoryOSBackgroundToolExecutionError.invalidArguments("query may be empty only when both startDate and endDate are provided")
-        }
         if let startDate, let endDate, startDate >= endDate {
             throw MemoryOSBackgroundToolExecutionError.invalidArguments("startDate must be earlier than endDate")
         }
