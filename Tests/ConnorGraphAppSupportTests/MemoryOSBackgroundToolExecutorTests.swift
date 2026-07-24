@@ -59,6 +59,35 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(result.citations == ["prov-1", "span-1"])
     }
 
+    @Test func normalizesLegacyAliasesBeforeBackgroundSchemaValidationAndExecution() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 1_000)
+        try store.upsert(provenance: MemoryOSProvenanceObject(
+            id: "prov-legacy",
+            sourceType: .chatMessage,
+            sourceID: "message-legacy",
+            title: "Legacy evidence",
+            content: "Legacy aliases reach the background executor.",
+            contentHash: "hash-legacy",
+            occurredAt: now,
+            ingestedAt: now
+        ))
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        let result = try executor.execute(
+            MemoryOSBackgroundToolCall(
+                id: "call-legacy",
+                name: "memory_os_read_provenance",
+                argumentsJSON: #"{"provenance_object_id":"prov-legacy"}"#
+            ),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-legacy", iteration: 1)
+        )
+
+        #expect(result.contentText.contains("prov-legacy"))
+        #expect(result.contentJSON.contains("Legacy aliases reach the background executor"))
+    }
+
     @Test func readsSparseEnvironmentSnapshotsWithoutNetworkOrReconstruction() async throws {
         let memoryStore = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try memoryStore.migrate()
