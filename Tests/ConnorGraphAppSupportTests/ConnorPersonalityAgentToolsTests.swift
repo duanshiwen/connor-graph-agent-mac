@@ -68,7 +68,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     let committed = try await registry.execute(
         AgentToolCall(
             name: "personality_update",
-            argumentsJSON: #"{"request":"以后更直接一些","mode":"merge","expected_revision":2}"#
+            argumentsJSON: #"{"request":"以后更直接一些","mode":"merge","expectedRevision":2}"#
         ),
         context: personalityContext()
     )
@@ -93,7 +93,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
             arguments: AgentToolArguments(values: [
                 "request": .string("以后更直接一些"),
                 "mode": .string("merge"),
-                "expected_revision": .int(2)
+                "expectedRevision": .int(2)
             ]),
             context: personalityContext()
         )
@@ -124,7 +124,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
             arguments: AgentToolArguments(values: [
                 "request": .string("设为女性"),
                 "mode": .string("merge"),
-                "expected_revision": .int(2)
+                "expectedRevision": .int(2)
             ]),
             context: context
         )
@@ -143,18 +143,19 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
         arguments: AgentToolArguments(values: [
             "request": .string("以后说话更直接"),
             "mode": .string("merge"),
-            "expected_revision": .int(2)
+            "expectedRevision": .int(2)
         ]),
         context: personalityContext(approved: [.modelCall])
     )
     let json = try #require(result.contentJSON)
     let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
-    #expect(object["proposal_id"] as? String == object["proposalID"] as? String)
+    #expect(object["proposalID"] as? String != nil)
+    #expect(object["proposal_id"] == nil)
 
     let commit = ConnorPersonalityCommitProposalTool(runtime: personalityRuntime(state), store: ConnorPersonalityProposalStore())
     let properties = try #require(commit.inputSchema.jsonObject["properties"] as? [String: Any])
-    let proposalIDSchema = try #require(properties["proposal_id"] as? [String: Any])
-    #expect((proposalIDSchema["description"] as? String)?.contains("proposal_id returned") == true)
+    let proposalIDSchema = try #require(properties["proposalID"] as? [String: Any])
+    #expect((proposalIDSchema["description"] as? String)?.contains("proposalID returned") == true)
 }
 
 @Test func personalityCommitRejectsOldProposalDuringReadOnlyGenderQuestion() async throws {
@@ -181,7 +182,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
 
     await #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
         try await tool.execute(
-            arguments: AgentToolArguments(values: ["proposal_id": .string(proposal.id)]),
+            arguments: AgentToolArguments(values: ["proposalID": .string(proposal.id)]),
             context: context
         )
     }
@@ -229,7 +230,7 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
 
     await #expect(throws: ConnorPersonalityProposalError.revisionConflict(expected: 2, actual: 3)) {
         try await tool.execute(
-            arguments: AgentToolArguments(values: ["proposal_id": .string(proposal.id)]),
+            arguments: AgentToolArguments(values: ["proposalID": .string(proposal.id)]),
             context: personalityContext(approved: [.mutatePersonality])
         )
     }
