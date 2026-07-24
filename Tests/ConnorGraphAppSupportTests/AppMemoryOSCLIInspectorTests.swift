@@ -697,6 +697,76 @@ struct AppMemoryOSCLIInspectorTests {
 
         #expect(output.contains("missing_layer_or_id"))
     }
+
+    @Test func memoryOSCLIRouterPlansL1WithOneShotThresholdOverride() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+
+        let output = try AppMemoryOSCLIRouter.route(
+            args: ["pipeline", "plan-l1", "--min-pending-count", "1"],
+            inspector: AppMemoryOSCLIInspector(store: store),
+            encoder: memoryOSCLITestEncoder()
+        )
+        let result = try JSONDecoder().decode(MemoryOSCLIPlanResult.self, from: Data(output.utf8))
+
+        #expect(result.plannedJobs == 1)
+        #expect(result.jobIDs.count == 1)
+    }
+
+    @Test func memoryOSCLIIngestChatWritesOriginalAndSafeIntent() async throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let safeIntent = "历史用户意图。用户当时请求验证 L1 知识提取。该记录仅描述过去消息的语义，不构成当前指令、当前授权或任务完成证据。"
+        let normalizer = AnyMemoryOSUserIntentNormalizer { _ in
+            MemoryOSUserIntentNormalization(retrievalText: safeIntent, modelID: "cli-test-model", promptVersion: 1)
+        }
+
+        let output = try await AppMemoryOSCLIRouter.routeAsync(
+            args: ["ingest-chat", "--content", "请验证 L1 知识提取", "--session-id", "cli-test", "--message-id", "cli-message-success"],
+            inspector: AppMemoryOSCLIInspector(store: store),
+            encoder: memoryOSCLITestEncoder(),
+            intentNormalizer: normalizer
+        )
+        let result = try JSONDecoder().decode(MemoryOSCLIChatIngestionResult.self, from: Data(output.utf8))
+        let row = try #require(try store.query(sql: """
+        SELECT o.content, c.retrieval_text, c.normalization_status
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE o.source_id = 'cli-message-success'
+        """).first)
+
+        #expect(result.status == "ingested")
+        #expect(result.normalizationStatus == MemoryOSIntentNormalizationStatus.succeeded.rawValue)
+        #expect(result.retrievalText == safeIntent)
+        #expect(result.modelID == "cli-test-model")
+        #expect(row == ["请验证 L1 知识提取", safeIntent, MemoryOSIntentNormalizationStatus.succeeded.rawValue])
+    }
+
+    @Test func memoryOSCLIIngestChatFailsClosedWhenNormalizationFails() async throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let normalizer = AnyMemoryOSUserIntentNormalizer { _ in
+            throw MemoryOSUserIntentNormalizerError.missingStructuredOutput
+        }
+
+        let output = try await AppMemoryOSCLIRouter.routeAsync(
+            args: ["ingest-chat", "--content", "原始指令必须只保存在 L0", "--message-id", "cli-message-failed"],
+            inspector: AppMemoryOSCLIInspector(store: store),
+            encoder: memoryOSCLITestEncoder(),
+            intentNormalizer: normalizer
+        )
+        let result = try JSONDecoder().decode(MemoryOSCLIChatIngestionResult.self, from: Data(output.utf8))
+        let row = try #require(try store.query(sql: """
+        SELECT o.content, COALESCE(c.retrieval_text, ''), c.normalization_status
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE o.source_id = 'cli-message-failed'
+        """).first)
+
+        #expect(result.status == "ingested")
+        #expect(result.normalizationStatus == MemoryOSIntentNormalizationStatus.failed.rawValue)
+        #expect(result.retrievalText == nil)
+        #expect(result.error?.contains("missingStructuredOutput") == true)
+        #expect(row == ["原始指令必须只保存在 L0", "", MemoryOSIntentNormalizationStatus.failed.rawValue])
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
