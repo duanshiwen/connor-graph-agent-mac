@@ -16,7 +16,7 @@ import ConnorGraphAgent
     let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"command":"cat hello.txt","timeout_seconds":15}"#),
+        arguments: try AgentToolArguments(json: #"{"command":"cat hello.txt","timeoutSeconds":15}"#),
         context: .shellToolTestContext(toolCallID: "bash-1")
     )
 
@@ -31,7 +31,7 @@ import ConnorGraphAgent
 
     await #expect(throws: LocalWorkspacePolicyError.self) {
         _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"command":"sudo rm -rf /","timeout_seconds":5}"#),
+            arguments: try AgentToolArguments(json: #"{"command":"sudo rm -rf /","timeoutSeconds":5}"#),
             context: .shellToolTestContext(toolCallID: "bash-danger")
         )
     }
@@ -43,7 +43,7 @@ import ConnorGraphAgent
 
     await #expect(throws: LocalWorkspacePolicyError.self) {
         _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"command":"sleep 2","timeout_seconds":1}"#),
+            arguments: try AgentToolArguments(json: #"{"command":"sleep 2","timeoutSeconds":1}"#),
             context: .shellToolTestContext(toolCallID: "bash-timeout")
         )
     }

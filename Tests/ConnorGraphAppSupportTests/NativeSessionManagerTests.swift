@@ -259,7 +259,7 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
         modelProvider: NativeSessionScriptedProvider(responses: [
             AgentModelResponse(
                 text: nil,
-                toolCalls: [AgentToolCall(id: "native-write-call", name: "Write", argumentsJSON: #"{"file_path":"approved.txt","content":"ok"}"#)],
+                toolCalls: [AgentToolCall(id: "native-write-call", name: "Write", argumentsJSON: #"{"filePath":"approved.txt","content":"ok"}"#)],
                 usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
                 finishReason: .toolCalls
             ),
