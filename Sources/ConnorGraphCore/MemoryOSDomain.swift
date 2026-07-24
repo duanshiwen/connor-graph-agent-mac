@@ -35,6 +35,12 @@ public enum MemoryOSQueueStatus: String, Codable, Sendable, Equatable, CaseItera
     case cancelled
 }
 
+public enum MemoryOSIntentNormalizationStatus: String, Codable, Sendable, Equatable, CaseIterable {
+    case notRequired = "not_required"
+    case succeeded
+    case failed
+}
+
 public enum MemoryOSAssertionKind: String, Codable, Sendable, Equatable, CaseIterable {
     case observed
     case inferred
@@ -275,10 +281,12 @@ public struct MemoryOSCaptureEvent: Codable, Sendable, Equatable, Identifiable {
     public var occurredAt: Date
     public var tokenEstimate: Int
     public var processingState: MemoryOSQueueStatus
+    public var retrievalText: String?
+    public var normalizationStatus: MemoryOSIntentNormalizationStatus
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, provenanceObjectID: String, eventType: String, occurredAt: Date, tokenEstimate: Int = 0, processingState: MemoryOSQueueStatus = .pending, metadata: [String: String] = [:]) {
-        self.id = id; self.provenanceObjectID = provenanceObjectID; self.eventType = eventType; self.occurredAt = occurredAt; self.tokenEstimate = tokenEstimate; self.processingState = processingState; self.metadata = metadata
+    public init(id: String = UUID().uuidString, provenanceObjectID: String, eventType: String, occurredAt: Date, tokenEstimate: Int = 0, processingState: MemoryOSQueueStatus = .pending, retrievalText: String? = nil, normalizationStatus: MemoryOSIntentNormalizationStatus = .notRequired, metadata: [String: String] = [:]) {
+        self.id = id; self.provenanceObjectID = provenanceObjectID; self.eventType = eventType; self.occurredAt = occurredAt; self.tokenEstimate = tokenEstimate; self.processingState = processingState; self.retrievalText = retrievalText; self.normalizationStatus = normalizationStatus; self.metadata = metadata
     }
 }
 
