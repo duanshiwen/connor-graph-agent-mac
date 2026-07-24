@@ -93,9 +93,23 @@ public enum AppMemoryOSCLIRouter {
         }
     }
 
-    public static func makeLiveInspector() throws -> AppMemoryOSCLIInspector {
-        let paths = try AppStoragePaths.live()
+    public static func makeLiveInspector(
+        storagePaths: AppStoragePaths? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> AppMemoryOSCLIInspector {
+        let paths = try storagePaths ?? AppStoragePaths.live()
         try paths.ensureDirectoryHierarchy()
+        if let override = environment["CONNOR_MEMORY_OS_DATABASE_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty {
+            let databaseURL = URL(fileURLWithPath: override).standardizedFileURL
+            try FileManager.default.createDirectory(
+                at: databaseURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let store = try SQLiteMemoryOSStore(path: databaseURL.path)
+            try store.migrate()
+            try AppMemoryOSFacade(store: store).ensureCurrentUserAnchor()
+            return AppMemoryOSCLIInspector(store: store, databasePath: databaseURL.path)
+        }
         let store = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
         try store.migrate()
         try AppMemoryOSFacade(store: store).ensureCurrentUserAnchor()
