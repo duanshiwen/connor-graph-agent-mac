@@ -55,7 +55,7 @@ public enum CloudKnowledgeExtractionPrompt {
     2. Process only that frozen candidate list. For every group, search the appropriate combined committed + current-run staged view, then use one write tool to record exactly one writing or non-writing decision.
     3. Continue after each tool result until every identified group has a decision. A successful write is not, by itself, a reason to stop.
     4. Use the write tools only for derived durable knowledge. Record duplicate or unsuitable candidates with the appropriate non-writing decision. Do not copy raw conversation text into tool payloads.
-    5. For create_new, use the exact candidate payload envelope: {"kind":"reusable_knowledge","stable_key":"lowercase-kebab-key","valid_from":"ISO-8601 timestamp","payload":{"title":"short title","summary":"concise summary","text":"derived reusable knowledge"}}. Do not flatten the nested payload or omit any of those four envelope fields.
+    5. For create_new, use the exact candidate payload envelope: {"kind":"reusable_knowledge","stableKey":"lowercase-kebab-key","validFrom":"ISO-8601 timestamp","payload":{"title":"short title","summary":"concise summary","text":"derived reusable knowledge"}}. Do not flatten the nested payload or omit any of those four envelope fields.
     6. Do not call publication validation; the application validates once after all selected conversations finish.
 
     Termination contract:
@@ -472,11 +472,12 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         guard isWriteTool(call.name),
               let data = call.argumentsJSON.data(using: .utf8),
               var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let contextID = object["search_context_id"] as? String,
+              let contextID = (object["searchContextID"] ?? object["search_context_id"]) as? String,
               let metadata = searchMetadataByContextID[contextID],
               !metadata.terms.isEmpty
         else { return call }
-        object["semantic_terms"] = [coverageNormalized(metadata.query)]
+        object["semanticTerms"] = [coverageNormalized(metadata.query)]
+        object.removeValue(forKey: "semantic_terms")
         guard let normalizedData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let normalizedJSON = String(data: normalizedData, encoding: .utf8)
         else { return call }
@@ -491,11 +492,11 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     ) -> AgentToolCall? {
         guard isWriteTool(call.name),
               let arguments = try? AgentToolArguments(json: call.argumentsJSON),
-              let contextID = arguments.string("search_context_id"),
+              let contextID = arguments.string("searchContextID") ?? arguments.string("search_context_id"),
               let metadata = searchMetadataByContextID[contextID],
               let requiredTool = correctiveSearchTool(for: call.name, arguments: arguments)
         else { return nil }
-        let semanticTerms = arguments.array("semantic_terms")?.compactMap(\.stringValue) ?? []
+        let semanticTerms = (arguments.array("semanticTerms") ?? arguments.array("semantic_terms"))?.compactMap(\.stringValue) ?? []
         let uncoveredTerms = semanticTerms.filter { !searchQuery(metadata.query, covers: $0) }
         let needsChannelCorrection = !acceptedSearchTools(for: call.name, arguments: arguments).contains(metadata.toolName)
         guard needsChannelCorrection || !uncoveredTerms.isEmpty else { return nil }
@@ -547,7 +548,8 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
         guard let data = call.argumentsJSON.data(using: .utf8),
               var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return call }
-        object["search_context_id"] = contextID
+        object["searchContextID"] = contextID
+        object.removeValue(forKey: "search_context_id")
         guard let correctedData = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let correctedJSON = String(data: correctedData, encoding: .utf8)
         else { return call }
@@ -562,14 +564,14 @@ public struct CloudKnowledgeLLMGenerationRunner: Sendable {
     ) throws {
         guard isWriteTool(call.name),
               let arguments = try? AgentToolArguments(json: call.argumentsJSON),
-              let contextID = arguments.string("search_context_id"),
+              let contextID = arguments.string("searchContextID") ?? arguments.string("search_context_id"),
               let metadata = searchMetadataByContextID[contextID]
         else { return }
         let acceptedTools = acceptedSearchTools(for: call.name, arguments: arguments)
         guard acceptedTools.contains(metadata.toolName) else {
             let requiredTool = correctiveSearchTool(for: call.name, arguments: arguments) ?? "cloud_kb_knowledge_context"
             throw AgentToolError.invalidArguments(
-                "search_context_id came from \(metadata.toolName), but \(call.name) requires a new \(requiredTool) search for this semantic group"
+                "searchContextID came from \(metadata.toolName), but \(call.name) requires a new \(requiredTool) search for this semantic group"
             )
         }
     }
