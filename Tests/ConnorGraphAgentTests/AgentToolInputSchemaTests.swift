@@ -108,6 +108,27 @@ import ConnorGraphAgent
     ])
 }
 
+@Test func agentToolRegistryAcceptsLegacySnakeCaseAliasesWithoutExposingThem() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(LegacyAliasTestTool())
+    let result = try await registry.execute(
+        AgentToolCall(name: "legacy_alias_test", argumentsJSON: #"{"task_id":"task-1"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run",
+            sessionID: "session",
+            groupID: "group",
+            userPrompt: "test aliases",
+            toolCallID: "call",
+            policyEngine: AgentPolicyEngine(permissionMode: .readOnly)
+        )
+    )
+
+    #expect(result.contentText == "task-1")
+    let properties = try #require(registry.definition(named: "legacy_alias_test")?.inputSchema.jsonObject["properties"] as? [String: Any])
+    #expect(properties["taskID"] != nil)
+    #expect(properties["task_id"] == nil)
+}
+
 private struct InvalidSchemaTestTool: AgentTool {
     let name = "invalid_schema_test"
     let description = "Invalid schema test tool"
@@ -119,6 +140,20 @@ private struct InvalidSchemaTestTool: AgentTool {
 
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "unused")
+    }
+}
+
+private struct LegacyAliasTestTool: AgentTool {
+    let name = "legacy_alias_test"
+    let description = "Legacy alias test tool"
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["taskID": .string(description: "Task ID")],
+        required: ["taskID"]
+    )
+    let permission = AgentPermissionCapability.readSession
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: arguments.string("taskID") ?? "missing")
     }
 }
 
