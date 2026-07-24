@@ -419,7 +419,7 @@ struct CalendarContactsAgentToolsTests {
         let writeTool = ContactsWriteTool(runtime: InMemoryAgentContactRuntime())
 
         #expect(readTool.description.contains("Referenced People"))
-        #expect(readTool.description.contains("person_id"))
+        #expect(readTool.description.contains("personID"))
         #expect(readTool.description.contains("do not guess IDs from display names"))
         #expect(writeTool.description.contains("Referenced People"))
         #expect(writeTool.description.contains("never guess IDs from display names"))
@@ -432,8 +432,8 @@ struct CalendarContactsAgentToolsTests {
             return
         }
 
-        #expect(readIDDescription.contains("copy the field without renaming it"))
-        #expect(writeIDDescription.contains("copy the field without renaming it"))
+        #expect(readIDDescription.contains("copy the field and value unchanged"))
+        #expect(writeIDDescription.contains("copy the field and value unchanged"))
     }
 
     @Test func registryRegistersCalendarContactsAndTimeTools() {

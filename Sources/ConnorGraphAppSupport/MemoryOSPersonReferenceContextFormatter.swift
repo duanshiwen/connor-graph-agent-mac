@@ -34,19 +34,19 @@ public struct MemoryOSPersonReferenceContextFormatter: Sendable {
         for reference in personReferences {
             lines.append("- mention: \(reference.mentionText)")
             lines.append("  type: person")
-            lines.append("  person_id: \(reference.personID.rawValue)")
-            lines.append("  display_name: \(reference.displayName)")
+            lines.append("  personID: \(reference.personID.rawValue)")
+            lines.append("  displayName: \(reference.displayName)")
             if let status = reference.status {
                 lines.append("  status: \(status.rawValue)")
             }
             if let mergedIntoID = reference.mergedIntoID {
-                lines.append("  merged_into_person_id: \(mergedIntoID.rawValue)")
+                lines.append("  mergedIntoPersonID: \(mergedIntoID.rawValue)")
             }
             if let memoryEntityID = reference.memoryEntityID {
-                lines.append("  memory_entity_id: \(memoryEntityID)")
+                lines.append("  memoryEntityID: \(memoryEntityID)")
             }
             if let memoryStableKey = reference.memoryStableKey {
-                lines.append("  memory_stable_key: \(memoryStableKey)")
+                lines.append("  memoryStableKey: \(memoryStableKey)")
             }
         }
         return lines.joined(separator: "\n")

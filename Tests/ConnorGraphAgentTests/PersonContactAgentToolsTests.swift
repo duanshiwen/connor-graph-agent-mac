@@ -41,8 +41,8 @@ struct PersonContactAgentToolsTests {
             context: Self.context(toolCallID: "call-list-people-summary")
         )
         #expect(listed.contentText.contains("Found 1 people"))
-        #expect(listed.contentText.contains("person_id: person-zhang-xia"))
-        #expect(listed.contentText.contains("display_name: 张霞"))
+        #expect(listed.contentText.contains("personID: person-zhang-xia"))
+        #expect(listed.contentText.contains("displayName: 张霞"))
         #expect(listed.contentText.contains("status: active"))
         #expect(listed.contentText.contains("段诗闻和段福强的妈妈"))
         #expect(listed.contentJSON?.contains(#""personID":"person-zhang-xia""#) == true)
@@ -53,8 +53,8 @@ struct PersonContactAgentToolsTests {
             context: Self.context(toolCallID: "call-get-person-summary")
         )
         #expect(loaded.contentText.contains("Loaded person"))
-        #expect(loaded.contentText.contains("person_id: person-zhang-xia"))
-        #expect(loaded.contentText.contains("display_name: 张霞"))
+        #expect(loaded.contentText.contains("personID: person-zhang-xia"))
+        #expect(loaded.contentText.contains("displayName: 张霞"))
     }
 
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
