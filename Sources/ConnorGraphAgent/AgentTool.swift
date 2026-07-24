@@ -478,6 +478,7 @@ public protocol AgentTool: Sendable {
     var inputSchema: AgentToolInputSchema { get }
     var inputExamples: [[String: SendableJSONValue]] { get }
 
+    func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments
     func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws
     func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult
@@ -485,6 +486,7 @@ public protocol AgentTool: Sendable {
 
 public extension AgentTool {
     var inputExamples: [[String: SendableJSONValue]] { [] }
+    func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments { arguments }
 
     func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {}
 
@@ -562,7 +564,8 @@ public struct AgentToolRegistry: Sendable {
             throw AgentToolError.unknownTool(call.name)
         }
         let rawArguments = try AgentToolArguments(json: call.argumentsJSON)
-        let argumentObject = tool.inputSchema.normalizingLegacyPropertyAliases(.object(rawArguments.values))
+        let legacyNormalizedArguments = tool.normalizeLegacyArguments(rawArguments)
+        let argumentObject = tool.inputSchema.normalizingLegacyPropertyAliases(.object(legacyNormalizedArguments.values))
         let argumentIssues = tool.inputSchema.argumentValidationIssues(argumentObject)
         guard argumentIssues.isEmpty else {
             throw AgentToolError.invalidArguments(argumentIssues.joined(separator: "; "))

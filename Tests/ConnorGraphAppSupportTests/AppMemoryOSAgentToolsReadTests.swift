@@ -91,9 +91,17 @@ import ConnorGraphAppSupport
     #expect(recentQueryDescription.contains("use only the topic"))
     #expect(recentProperties["page"] != nil)
     #expect(recentProperties["limit"] == nil)
+    let recentPageSchema = try #require(recentProperties["page"] as? [String: Any])
+    let recentPageDescription = try #require(recentPageSchema["description"] as? String)
+    #expect(recentPageDescription.contains("JSON integer"))
+    #expect(recentPageDescription.contains("nextPage"))
+    #expect(recentDefinition.description.contains("does not accept limit"))
+    #expect(recentDefinition.inputExamples == [["query": .string("Project A"), "page": .int(1)]])
     let knowledgeProperties = try #require(knowledgeDefinition.inputSchema.jsonObject["properties"] as? [String: Any])
     #expect(knowledgeProperties["page"] != nil)
     #expect(knowledgeProperties["limit"] == nil)
+    #expect(knowledgeDefinition.description.contains("does not accept limit"))
+    #expect(knowledgeDefinition.inputExamples == [["query": .string("Project A"), "page": .int(1), "depth": .int(1)]])
     let profileProperties = try #require(profileDefinition.inputSchema.jsonObject["properties"] as? [String: Any])
     #expect(profileProperties["page"] != nil)
     #expect(recentDefinition.description.contains("totalItems"))
@@ -109,6 +117,33 @@ import ConnorGraphAppSupport
     #expect(registry.definition(named: "memory_os_l2_find_entities") == nil)
     #expect(registry.definition(named: "memory_os_l4_find_entity") == nil)
     #expect(registry.definition(named: "memory_os_read_record") == nil)
+}
+
+@Test func contextToolRegistryNormalizesLegacyLimitAndQuotedIntegers() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSReadToolDatabaseURL().path)
+    try store.migrate()
+    var registry = AgentToolRegistry()
+    registry.registerMemoryOSReadTools(facade: AppMemoryOSFacade(store: store))
+
+    let recent = try await registry.execute(
+        AgentToolCall(name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","limit":"10"}"#),
+        context: memoryOSReadToolContext()
+    )
+    let recentResponse = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(recent.contentJSON).utf8)
+    )
+    #expect(recentResponse.page == 1)
+
+    let knowledge = try await registry.execute(
+        AgentToolCall(name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"memory","page":"1","depth":"2","limit":"15"}"#),
+        context: memoryOSReadToolContext()
+    )
+    let knowledgeResponse = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(knowledge.contentJSON).utf8)
+    )
+    #expect(knowledgeResponse.page == 1)
 }
 
 private func memoryOSReadToolContext() -> AgentToolExecutionContext {

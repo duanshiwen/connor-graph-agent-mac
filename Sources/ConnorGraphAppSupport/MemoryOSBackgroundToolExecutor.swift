@@ -73,15 +73,24 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         } catch {
             throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
         }
+        let legacyNormalizedArguments: AgentToolArguments
+        switch call.name {
+        case "memory_os_recent_context":
+            legacyNormalizedArguments = MemoryOSLayeredContextSupport.normalizeLegacyArguments(rawArguments, includeDepth: false)
+        case "memory_os_knowledge_context":
+            legacyNormalizedArguments = MemoryOSLayeredContextSupport.normalizeLegacyArguments(rawArguments, includeDepth: true)
+        default:
+            legacyNormalizedArguments = rawArguments
+        }
         let normalizedObject: SendableJSONValue
         if let schema = inputSchema(for: call.name) {
-            normalizedObject = schema.normalizingLegacyPropertyAliases(.object(rawArguments.values))
+            normalizedObject = schema.normalizingLegacyPropertyAliases(.object(legacyNormalizedArguments.values))
             let issues = schema.argumentValidationIssues(normalizedObject)
             guard issues.isEmpty else {
                 throw MemoryOSBackgroundToolExecutionError.invalidArguments(issues.joined(separator: "; "))
             }
         } else {
-            normalizedObject = .object(rawArguments.values)
+            normalizedObject = .object(legacyNormalizedArguments.values)
         }
         guard case .object(let normalizedValues) = normalizedObject else {
             throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ must be an object")
