@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac 工程说明
 
-文档更新时间：2026-07-18 GMT+8
+文档更新时间：2026-07-24 GMT+8
 定位：本文件记录 Connor Graph Agent Mac 的工程架构、边界、运行布局、Memory OS、开发命令和质量约束。普通用户使用说明请看 [README.md](README.md)。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -324,6 +324,10 @@ L4 使用受控实体类型词汇表（`MemoryOSEntityType`）；不支持的 LL
 
 LLM-facing Memory OS tools 注册在 `AppMemoryOSAgentTools.swift`。
 
+用户消息的 L0/L1 写入采用双表示：L0 `MemoryOSProvenanceObject.content` 保存完整原文；L1 `MemoryOSCaptureEvent.retrievalText` 保存安全的历史意图描述，并用 `normalizationStatus` 记录 `succeeded`、`failed` 或 `not_required`。规范化器在 ingestion writer 中执行一次结构化模型调用，温度为 0、超时 6 秒、无可执行工具，随后由本地代码校验片段覆盖、角色伪装、控制语言和长段复制，并确定性渲染最终文本。系统不生成或保存 200 字 `content_preview`。
+
+失败策略必须 fail closed：模型错误、超时或输出校验失败时继续保存 L0 原文，L1 不写 `retrievalText`，近期检索不得回退到 L0 或 metadata 预览。`memory_l1_retrieval_fts` 只索引非空 `retrieval_text`；schema 7 为 L1 增加 `retrieval_text`、`normalization_status` 和专用 FTS 表。
+
 读取工具包括：
 
 - `memory_os_recent_context`
@@ -376,6 +380,8 @@ Tool result delivery contract：
 - `contentJSON` 保留完整结构化 payload，供 UI、debug 或程序消费者使用。
 - `AgentToolResultGate.gatedContent()` 会在 `contentText` 非空时优先选择它。
 - 工具不能假设 `contentJSON` 会被 LLM 看到。
+
+L1 recent retrieval 永远返回 `retrieval_text`，不返回 `MemoryOSProvenanceObject.content`，也不搜索 L0 FTS 来命中 L1。该行为不按调用者切换。只有 L1 后台 unified projection 在组包时按 provenance ID 读取完整 L0 `content`，以 `original_content` 提供给知识提取模型；单条事件即使超过批次 token 目标也不截断内容。
 
 Context building pipeline：
 
