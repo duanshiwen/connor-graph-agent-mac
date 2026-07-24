@@ -476,6 +476,67 @@ import ConnorGraphStore
     #expect(!json.contains("shiwen"))
 }
 
+@Test func memoryOSGetCurrentUserProfileReturnsAllPagesWithoutDuplicates() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 11_000)
+    let user = MemoryOSEntity(
+        id: "person-current-pages",
+        stableKey: "current_user",
+        entityType: "person",
+        name: "Current User",
+        createdAt: now,
+        updatedAt: now,
+        metadata: ["role": "current_user"]
+    )
+    try store.upsert(entity: user)
+    for index in 0..<8 {
+        try store.upsert(entityStatement: MemoryOSEntityStatement(
+            id: "profile-page-record-\(index)",
+            entityID: user.id,
+            predicate: .relatedTo,
+            text: "Current user profile preference \(index).",
+            confidence: 0.9,
+            validAt: now.addingTimeInterval(Double(index)),
+            committedAt: now.addingTimeInterval(Double(index)),
+            evidenceSpanIDs: []
+        ))
+    }
+    let tool = MemoryOSGetCurrentUserProfileTool(
+        facade: facade,
+        configuration: .init(pageSize: 3)
+    )
+    var page = 1
+    var collected: [String] = []
+
+    while true {
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: ["page": .int(page)]),
+            context: memoryOSToolContext()
+        )
+        let payload = try JSONDecoder().decode(
+            MemoryOSContextToolResponse.self,
+            from: Data(try #require(result.contentJSON).utf8)
+        )
+        #expect(payload.page == page)
+        #expect(payload.pageSize == 3)
+        #expect(payload.totalItems == 8)
+        #expect(payload.totalPages == 3)
+        collected.append(contentsOf: payload.records.map(\.recordID))
+        if let nextPage = payload.nextPage {
+            #expect(payload.hasNextPage)
+            page = nextPage
+        } else {
+            #expect(!payload.hasNextPage)
+            break
+        }
+    }
+
+    #expect(collected.count == 8)
+    #expect(Set(collected) == Set((0..<8).map { "profile-page-record-\($0)" }))
+}
+
 @Test func memoryOSBootstrapEnsuresCurrentUserAnchorWithoutGenericAliases() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
