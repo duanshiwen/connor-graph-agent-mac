@@ -79,6 +79,49 @@ public struct EnvironmentWeatherPoint: Sendable, Equatable {
     }
 }
 
+public struct EnvironmentAirQualityPoint: Sendable, Equatable {
+    public var regionID: Int64
+    public var observedAt: Date
+    public var dataKind: AgentEnvironmentDataKind
+    public var provider: String
+    public var europeanAQI: Int?
+    public var usAQI: Int?
+    public var pm10: Double?
+    public var pm2_5: Double?
+    public var nitrogenDioxide: Double?
+    public var ozone: Double?
+    public var sourceURL: String?
+    public var fetchedAt: Date
+
+    public init(
+        regionID: Int64,
+        observedAt: Date,
+        dataKind: AgentEnvironmentDataKind,
+        provider: String,
+        europeanAQI: Int? = nil,
+        usAQI: Int? = nil,
+        pm10: Double? = nil,
+        pm2_5: Double? = nil,
+        nitrogenDioxide: Double? = nil,
+        ozone: Double? = nil,
+        sourceURL: String? = nil,
+        fetchedAt: Date
+    ) {
+        self.regionID = regionID
+        self.observedAt = observedAt
+        self.dataKind = dataKind
+        self.provider = provider
+        self.europeanAQI = europeanAQI
+        self.usAQI = usAQI
+        self.pm10 = pm10
+        self.pm2_5 = pm2_5
+        self.nitrogenDioxide = nitrogenDioxide
+        self.ozone = ozone
+        self.sourceURL = sourceURL
+        self.fetchedAt = fetchedAt
+    }
+}
+
 public actor SQLiteEnvironmentStore {
     private final class DatabaseHandle: @unchecked Sendable {
         let rawValue: OpaquePointer
@@ -214,6 +257,65 @@ public actor SQLiteEnvironmentStore {
                 sourceURL: text(statement, 11),
                 fetchedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 12)),
                 expiresAt: optionalDouble(statement, 13).map(Date.init(timeIntervalSince1970:))
+            ))
+        }
+        try checkStep(statement)
+        return points
+    }
+
+    public func upsertAirQualityPoint(_ point: EnvironmentAirQualityPoint) throws {
+        let sql = """
+        INSERT INTO environment_air_quality_points (
+            region_id, observed_at, data_kind, provider, european_aqi, us_aqi, pm10, pm2_5,
+            nitrogen_dioxide, ozone, source_url, fetched_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(region_id, observed_at, data_kind, provider) DO UPDATE SET
+            european_aqi = excluded.european_aqi,
+            us_aqi = excluded.us_aqi,
+            pm10 = excluded.pm10,
+            pm2_5 = excluded.pm2_5,
+            nitrogen_dioxide = excluded.nitrogen_dioxide,
+            ozone = excluded.ozone,
+            source_url = excluded.source_url,
+            fetched_at = excluded.fetched_at
+        """
+        try run(sql, bindings: [
+            .integer(point.regionID), .real(point.observedAt.timeIntervalSince1970), .text(point.dataKind.rawValue),
+            .text(point.provider), .optionalInteger(point.europeanAQI.map(Int64.init)),
+            .optionalInteger(point.usAQI.map(Int64.init)), .optionalReal(point.pm10), .optionalReal(point.pm2_5),
+            .optionalReal(point.nitrogenDioxide), .optionalReal(point.ozone), .optionalText(point.sourceURL),
+            .real(point.fetchedAt.timeIntervalSince1970)
+        ])
+    }
+
+    public func airQualityPoints(regionID: Int64, from start: Date, through end: Date) throws -> [EnvironmentAirQualityPoint] {
+        let sql = """
+        SELECT observed_at, data_kind, provider, european_aqi, us_aqi, pm10, pm2_5,
+               nitrogen_dioxide, ozone, source_url, fetched_at
+        FROM environment_air_quality_points
+        WHERE region_id = ? AND observed_at >= ? AND observed_at <= ?
+        ORDER BY observed_at ASC, data_kind ASC, provider ASC
+        """
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        try bind([.integer(regionID), .real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)], to: statement)
+        var points: [EnvironmentAirQualityPoint] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let kindRaw = text(statement, 1), let kind = AgentEnvironmentDataKind(rawValue: kindRaw),
+                  let provider = text(statement, 2) else { continue }
+            points.append(EnvironmentAirQualityPoint(
+                regionID: regionID,
+                observedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                dataKind: kind,
+                provider: provider,
+                europeanAQI: optionalInt(statement, 3),
+                usAQI: optionalInt(statement, 4),
+                pm10: optionalDouble(statement, 5),
+                pm2_5: optionalDouble(statement, 6),
+                nitrogenDioxide: optionalDouble(statement, 7),
+                ozone: optionalDouble(statement, 8),
+                sourceURL: text(statement, 9),
+                fetchedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 10))
             ))
         }
         try checkStep(statement)
