@@ -460,6 +460,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             content: content,
             occurredAt: occurredAt,
             sessionID: sessionID,
+            retrievalText: content,
             metadata: metadata
         ))
         try repository.save(result)
@@ -490,6 +491,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             occurredAt: occurredAt,
             sessionID: sessionID,
             workObjectID: workObjectID,
+            retrievalText: content,
             metadata: eventMetadata
         ))
         try repository.save(result)
@@ -625,7 +627,17 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
         let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
-        let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(from: events, now: now)
+        let originalContentByProvenanceID = try Dictionary(uniqueKeysWithValues: events.map { event in
+            guard let object = try store.provenanceObject(id: event.provenanceObjectID) else {
+                throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(event.provenanceObjectID)")
+            }
+            return (event.provenanceObjectID, object.content)
+        })
+        let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(
+            from: events,
+            originalContentByProvenanceID: originalContentByProvenanceID,
+            now: now
+        )
         var inserted: [MemoryOSQueueItem] = []
         for draft in drafts {
             let payload = store.json(draft)
