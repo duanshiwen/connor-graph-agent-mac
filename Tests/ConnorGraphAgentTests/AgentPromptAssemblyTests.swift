@@ -55,7 +55,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(assembly.instruction.text.contains("session_list_by_status"))
     #expect(assembly.instruction.text.contains("session_batch_set_status"))
-    #expect(assembly.instruction.text.contains("Follow `nextPage` with the same page size until `hasNextPage` is false"))
+    #expect(assembly.instruction.text.contains("Whenever its response contains a non-null `nextPage`"))
     #expect(assembly.instruction.text.contains("current profile is loaded completely"))
     #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
@@ -335,7 +335,10 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptRequiresSkillConsiderationDuringBootstrap() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("After the current-time and calendar preflight, and before task-specific retrieval or execution, call `connor_skill_list`"))
+    #expect(prompt.contains("After the current-time and calendar preflight, and before task-specific retrieval or execution, call the internal skill-discovery tool `connor_skill_list`"))
+    #expect(prompt.contains("Whenever its response contains a non-null `nextPage`"))
+    #expect(prompt.contains("immediately call `connor_skill_list` again with `page` set to exactly that `nextPage` value and the same `page_size`"))
+    #expect(prompt.contains("Repeat until `nextPage` is null"))
     #expect(prompt.contains("connor_skill_activate"))
     #expect(prompt.contains("Use hidden skills silently"))
     #expect(prompt.contains("never reveal hidden skill names or mechanisms"))

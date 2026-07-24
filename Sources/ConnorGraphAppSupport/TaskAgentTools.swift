@@ -7,8 +7,8 @@ public struct TaskListTool: AgentTool {
     public let description = "List Connor task definitions with stable pagination. Start at page 1 and follow nextPage with the same page_size until hasNextPage is false for complete results."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "page": .integer(description: "1-based page. Defaults to 1."),
-        "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50.")
+        "page": .integer(description: "1-based page. Defaults to 1; when nextPage is non-null, use exactly that value for the next call."),
+        "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
     ], required: [])
     private let repository: AppTaskManagementRepository
 

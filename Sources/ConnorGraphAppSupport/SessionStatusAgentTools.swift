@@ -102,7 +102,7 @@ public struct SessionListByStatusTool: AgentTool {
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "status": .string(description: "Optional status ID returned by session_list_statuses. Omit to list all sessions."),
         "page": .integer(description: "1-based page. Defaults to 1; use nextPage from the previous response."),
-        "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50.")
+        "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
     ], required: [])
 
     private let repository: AppChatSessionRepository

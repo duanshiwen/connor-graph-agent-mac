@@ -44,6 +44,9 @@ private func skillListContext(_ page: Int) -> AgentToolExecutionContext {
 
 @Test func skillListFollowsNextPageWithoutGapsOrDuplicatesInStableOrder() async throws {
     let tool = SkillListTool(packages: ["echo", "alpha", "delta", "bravo", "charlie"].map(pagedSkill))
+    #expect(tool.description.contains("Whenever nextPage is non-null"))
+    #expect(tool.description.contains("immediately call this same connor_skill_list tool again"))
+    #expect(tool.description.contains("Repeat until nextPage is null"))
     var page = 1
     var slugs: [String] = []
     var seenPages: [Int] = []
