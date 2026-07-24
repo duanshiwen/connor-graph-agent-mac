@@ -7,7 +7,7 @@ public struct SessionGetStatusTool: AgentTool {
     public let description = "Read the governance status for the current Connor session or a specific session."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "session_id": .string(description: "Optional session ID. Omit to read the current session status.")
+        "session_id": .string(description: "Optional exact session_id returned by session_list_by_status. Omit to read the current session status.")
     ], required: [])
 
     private let repository: AppChatSessionRepository
@@ -36,8 +36,8 @@ public struct SessionSetStatusTool: AgentTool {
     public let description = "Set the governance status for the current Connor session or a specific session. Call `session_list_statuses` first to get the available status IDs."
     public let permission: AgentPermissionCapability = .mutateSessionStatus
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "session_id": .string(description: "Optional session ID. Omit to update the current session."),
-        "status": .string(description: "Required status id. Must be one of the ids returned by session_list_statuses."),
+        "session_id": .string(description: "Optional exact session_id returned by session_list_by_status. Omit to update the current session."),
+        "status": .string(description: "Required exact status returned by session_list_statuses; copy the field without renaming it."),
         "reason": .string(description: "Optional human-readable reason for the status change.")
     ], required: ["status"])
 
@@ -100,7 +100,7 @@ public struct SessionListByStatusTool: AgentTool {
     public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. page defaults to 1 and page_size to 50. Follow nextPage with the same status and page_size for complete results."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "status": .string(description: "Optional status ID returned by session_list_statuses. Omit to list all sessions."),
+        "status": .string(description: "Optional exact status returned by session_list_statuses; copy the field without renaming it. Omit to list all sessions."),
         "page": .integer(description: "1-based page. Defaults to 1; use nextPage from the previous response."),
         "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
     ], required: [])
@@ -136,6 +136,7 @@ public struct SessionListByStatusTool: AgentTool {
         let items = sessions[start..<end].map { session in
             SessionStatusListItem(
                 sessionID: session.id,
+                session_id: session.id,
                 title: session.title,
                 status: session.governance.status.rawValue,
                 statusDisplayName: displayName(for: session.governance.status.rawValue, governanceConfig: governanceConfig),
@@ -164,10 +165,10 @@ public struct SessionBatchSetStatusTool: AgentTool {
     public let permission: AgentPermissionCapability = .mutateSessionStatus
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "updates": .array(items: .closedObject(properties: [
-            "session_id": .string(description: "Session ID to update."),
+            "session_id": .string(description: "Exact session_id returned by session_list_by_status; copy the field without renaming it."),
             "expected_updated_at": .string(description: "Optional ISO-8601 updatedAt value returned by session_list_by_status.")
         ], required: ["session_id"]), description: "One or more session updates. Duplicate session IDs are processed once."),
-        "status": .string(description: "Target status ID returned by session_list_statuses."),
+        "status": .string(description: "Exact status returned by session_list_statuses; copy the field without renaming it."),
         "reason": .string(description: "Optional reason recorded for successfully updated sessions.")
     ], required: ["updates", "status"])
 
@@ -262,7 +263,7 @@ public struct SessionListStatusesTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let statuses = governanceConfig.statuses.map { status -> [String: String] in
-            ["id": status.id, "name": status.name]
+            ["id": status.id, "status": status.id, "name": status.name]
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -339,6 +340,7 @@ private struct SessionStatusToolPayload: Codable {
 
 private struct SessionStatusListItem: Codable {
     var sessionID: String
+    var session_id: String
     var title: String
     var status: String
     var statusDisplayName: String

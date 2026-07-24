@@ -132,6 +132,31 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     #expect(await state.read().revision == 2)
 }
 
+@Test func personalityProposalReturnsCommitReadyProposalID() async throws {
+    let state = PersonalityTestState()
+    let tool = ConnorPersonalityProposeUpdateTool(
+        runtime: personalityRuntime(state),
+        provider: personalityProvider,
+        store: ConnorPersonalityProposalStore()
+    )
+    let result = try await tool.execute(
+        arguments: AgentToolArguments(values: [
+            "request": .string("以后说话更直接"),
+            "mode": .string("merge"),
+            "expected_revision": .int(2)
+        ]),
+        context: personalityContext(approved: [.modelCall])
+    )
+    let json = try #require(result.contentJSON)
+    let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    #expect(object["proposal_id"] as? String == object["proposalID"] as? String)
+
+    let commit = ConnorPersonalityCommitProposalTool(runtime: personalityRuntime(state), store: ConnorPersonalityProposalStore())
+    let properties = try #require(commit.inputSchema.jsonObject["properties"] as? [String: Any])
+    let proposalIDSchema = try #require(properties["proposal_id"] as? [String: Any])
+    #expect((proposalIDSchema["description"] as? String)?.contains("proposal_id returned") == true)
+}
+
 @Test func personalityCommitRejectsOldProposalDuringReadOnlyGenderQuestion() async throws {
     let state = PersonalityTestState()
     let store = ConnorPersonalityProposalStore()
