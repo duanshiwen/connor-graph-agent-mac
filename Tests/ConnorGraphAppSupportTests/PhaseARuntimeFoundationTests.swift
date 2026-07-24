@@ -140,6 +140,29 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.ui.textDeltaFlushCharacterThreshold == 120)
 }
 
+@Test func runtimeSettingsRepositoryCommitsPersonalityWithOptimisticRevision() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+    var initial = AgentRuntimeSettings.default
+    initial.preferences.connorPersonality = ConnorPersonalitySettings(summary: "温和可靠")
+    initial.preferences.connorPersonalityRevision = 2
+    try repository.save(initial)
+
+    var updated = initial
+    updated.preferences.connorPersonality = ConnorPersonalitySettings(summary: "直接可靠")
+    updated.preferences.connorPersonalityRevision = 3
+    try repository.commitPersonality(updated, expectedRevision: 2)
+
+    let loaded = try repository.loadOrCreateDefault()
+    #expect(loaded.preferences.connorPersonality.summary == "直接可靠")
+    #expect(loaded.preferences.connorPersonalityRevision == 3)
+    #expect(throws: ConnorPersonalityProposalError.revisionConflict(expected: 2, actual: 3)) {
+        try repository.commitPersonality(updated, expectedRevision: 2)
+    }
+}
+
 @Test func runtimeSettingsRepositoryPersistsSessionNotificationSettings() throws {
     let root = phaseATemporaryRoot()
     let paths = AppStoragePaths(applicationSupportDirectory: root)

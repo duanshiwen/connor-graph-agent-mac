@@ -274,6 +274,79 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
     }
 }
 
+/// One-step session tool. Proposal generation and durable commit deliberately share
+/// one invocation so a runtime rebuild cannot orphan an in-memory proposal ID.
+public struct ConnorPersonalityUpdateTool: AgentTool {
+    public let name = "personality_update"
+    public let description = "Generate, validate, and durably apply a persistent personality update for 康纳同学 in one call. Use only when the latest user message explicitly asks for a lasting change. This call does not require a second confirmation in ask-to-write mode; read-only sessions reject it."
+    public let permission: AgentPermissionCapability = .mutatePersonality
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "request": .string(description: "User's persistent personality request. Use an empty string only for reset."),
+        "mode": .stringEnumeration(values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue), description: "Update mode."),
+        "expected_revision": .integer(description: "Exact revision returned by personality_get_current.")
+    ], required: ["request", "mode", "expected_revision"])
+
+    private let runtime: ConnorPersonalityRuntime
+    private let provider: AnyAgentModelProvider
+
+    public init(runtime: ConnorPersonalityRuntime, provider: AnyAgentModelProvider) {
+        self.runtime = runtime
+        self.provider = provider
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(context.userPrompt)
+        let modeRaw = arguments.string("mode")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let mode = ConnorPersonalityUpdateMode(rawValue: modeRaw) else {
+            throw ConnorPersonalityProposalError.invalidMode(modeRaw)
+        }
+        guard let expectedRevision = arguments.int("expected_revision") else {
+            throw AgentToolError.invalidArguments("expected_revision is required")
+        }
+        let request = arguments.string("request")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if mode != .reset, request.isEmpty { throw ConnorPersonalityProposalError.requestRequired }
+        if request.count > 2_000 { throw ConnorPersonalityProposalError.requestTooLong }
+        try ConnorPersonalitySafetyPolicy.validateRequest(request)
+
+        let current = try await runtime.snapshot()
+        guard current.revision == expectedRevision else {
+            throw ConnorPersonalityProposalError.revisionConflict(expected: expectedRevision, actual: current.revision)
+        }
+        let after: ConnorPersonalitySettings
+        if mode == .reset {
+            after = .empty
+        } else {
+            after = try await ConnorPersonalityGenerator().generateUpdate(
+                from: request,
+                mode: mode,
+                current: current.personality,
+                provider: provider
+            )
+            try ConnorPersonalitySafetyPolicy.validatePersonality(after)
+        }
+        let proposal = ConnorPersonalityProposal(
+            mode: mode,
+            request: request,
+            before: current.personality,
+            after: after,
+            expectedRevision: expectedRevision
+        )
+        let updated = try await runtime.commit(proposal)
+        let payload = ConnorPersonalityCommitPayload(
+            proposalID: proposal.id,
+            lockedName: ConnorPersonalitySettings.lockedDisplayName,
+            revision: updated.revision,
+            personality: updated.personality
+        )
+        return try personalityToolResult(
+            payload,
+            text: "人格配置已保存为版本 \(updated.revision)，将在后续对话中生效。康纳同学的姓名保持不变。",
+            toolName: name,
+            context: context
+        )
+    }
+}
+
 public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let name = "personality_commit_proposal"
     public let description = "Immediately commit an existing personality proposal only when the latest user message explicitly requests a persistent change, without a second confirmation or native approval step. Never commit in response to a question about current attributes, including gender, even if an older proposal ID appears in conversation history. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
@@ -347,10 +420,8 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
 
 public extension AgentToolRegistry {
     mutating func registerConnorPersonalityTools(runtime: ConnorPersonalityRuntime, provider: AnyAgentModelProvider) {
-        let store = ConnorPersonalityProposalStore()
         register(ConnorPersonalityGetCurrentTool(runtime: runtime))
-        register(ConnorPersonalityProposeUpdateTool(runtime: runtime, provider: provider, store: store))
-        register(ConnorPersonalityCommitProposalTool(runtime: runtime, store: store))
+        register(ConnorPersonalityUpdateTool(runtime: runtime, provider: provider))
     }
 }
 

@@ -822,24 +822,9 @@ final class AppRuntimeLifecycle {
                     commit: { [weak self] proposal in
                         try await MainActor.run {
                             guard let self else { throw ConnorPersonalityError.unavailable }
-                            let previousPersonality = self.userPreferencesModel.connorPersonality
-                            let previousRevision = self.userPreferencesModel.connorPersonalityRevision
-                            try self.userPreferencesModel.applyApprovedPersonality(
+                            return try self.commitPersonality(
                                 proposal.after,
                                 expectedRevision: proposal.expectedRevision
-                            )
-                            do {
-                                try self.runtimeSettingsCoordinator.saveImmediately(snapshot: self.runtimeSettingsSnapshot())
-                            } catch {
-                                self.userPreferencesModel.restorePersonalityAfterFailedCommit(
-                                    previousPersonality,
-                                    revision: previousRevision
-                                )
-                                throw error
-                            }
-                            return ConnorPersonalitySnapshot(
-                                personality: self.userPreferencesModel.connorPersonality,
-                                revision: self.userPreferencesModel.connorPersonalityRevision
                             )
                         }
                     }
@@ -2001,6 +1986,34 @@ final class AppRuntimeLifecycle {
         settings.workspace.recentWorkspacePaths = workspaceSettingsModel.recentPaths
         userPreferencesModel.apply(to: &settings)
         return settings
+    }
+
+    private func commitPersonality(
+        _ personality: ConnorPersonalitySettings,
+        expectedRevision: Int
+    ) throws -> ConnorPersonalitySnapshot {
+        guard userPreferencesModel.connorPersonalityRevision == expectedRevision else {
+            throw ConnorPersonalityProposalError.revisionConflict(
+                expected: expectedRevision,
+                actual: userPreferencesModel.connorPersonalityRevision
+            )
+        }
+        let snapshot = ConnorPersonalitySnapshot(
+            personality: personality,
+            revision: expectedRevision + 1
+        )
+        var settings = runtimeSettingsSnapshot()
+        settings.preferences.connorPersonality = snapshot.personality
+        settings.preferences.connorPersonalityRevision = snapshot.revision
+        try runtimeSettingsCoordinator.commitPersonality(
+            snapshot: settings,
+            expectedRevision: expectedRevision
+        )
+        try userPreferencesModel.applyApprovedPersonality(
+            snapshot.personality,
+            expectedRevision: expectedRevision
+        )
+        return snapshot
     }
 
     private func handleRuntimeSettingsSaved(_ settings: AgentRuntimeSettings) {

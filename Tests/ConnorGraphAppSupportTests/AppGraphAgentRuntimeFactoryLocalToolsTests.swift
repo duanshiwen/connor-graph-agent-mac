@@ -264,6 +264,40 @@ import ConnorGraphStore
     #expect(instruction.contains("do not call file or shell tools"))
 }
 
+@Test func newSessionRuntimeLoadsDurablyCommittedPersonalityIntoPrompt() throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryPersonalityReload-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let repository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
+    var settings = AgentRuntimeSettings.default
+    settings.preferences.connorPersonality = ConnorPersonalitySettings(
+        summary: "冷静、直接且重视可验证依据",
+        communicationStyle: "先给结论"
+    )
+    settings.preferences.connorPersonalityRevision = 4
+    try repository.save(settings)
+
+    let store = try SQLiteGraphKernelStore(path: appDirectory.appendingPathComponent("store.sqlite").path)
+    try store.migrate()
+    let factory = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: AppLLMSettingsRepository(
+            settingsStore: LocalToolsSettingsStore(),
+            credentialStore: LocalToolsCredentialStore()
+        ),
+        storagePaths: storagePaths
+    )
+
+    let instruction = factory.makeAgentLoopController().configuration.instructionAppendix
+    #expect(instruction.contains("冷静、直接且重视可验证依据"))
+    #expect(instruction.contains("先给结论"))
+}
+
 @Test func agentLoopRuntimeFactoryRejectsPreviousWorkspaceAfterReplacement() async throws {
     let tempBase = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryWorkspaceReplacement-", isDirectory: true)

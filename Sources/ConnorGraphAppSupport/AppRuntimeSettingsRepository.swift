@@ -581,4 +581,26 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(updated).write(to: fileURL, options: .atomic)
     }
+
+    /// Persists a personality change only if the on-disk revision still matches the
+    /// revision that the caller read before proposing the change.
+    public func commitPersonality(
+        _ settings: AgentRuntimeSettings,
+        expectedRevision: Int
+    ) throws {
+        let current = try loadOrCreateDefault()
+        guard current.preferences.connorPersonalityRevision == expectedRevision else {
+            throw ConnorPersonalityProposalError.revisionConflict(
+                expected: expectedRevision,
+                actual: current.preferences.connorPersonalityRevision
+            )
+        }
+        guard settings.preferences.connorPersonalityRevision == expectedRevision + 1 else {
+            throw ConnorPersonalityProposalError.revisionConflict(
+                expected: expectedRevision + 1,
+                actual: settings.preferences.connorPersonalityRevision
+            )
+        }
+        try save(settings)
+    }
 }
