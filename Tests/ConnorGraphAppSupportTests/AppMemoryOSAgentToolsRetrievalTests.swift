@@ -304,14 +304,30 @@ import ConnorGraphStore
     #expect(!focusedPayload.records.contains { $0.recordID == "outside-range" })
 }
 
-@Test func memoryOSContextToolsRequireTimeBoundsWhenQueryIsEmpty() async throws {
+@Test func memoryOSContextToolsSupportUnboundedEmptyQueryPagination() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
-    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
-
-    await #expect(throws: AgentToolError.self) {
-        try await tool.execute(arguments: AgentToolArguments(json: #"{"query":""}"#), context: memoryOSToolContext())
+    let now = Date(timeIntervalSince1970: 40_000)
+    for index in 0..<3 {
+        let nodeID = "unbounded-node-\(index)"
+        try store.upsert(node: MemoryOSNode(id: nodeID, stableKey: nodeID, nodeType: "project", name: "Unbounded \(index)"))
+        try store.upsert(statement: MemoryOSStatement(id: "unbounded-statement-\(index)", subjectID: nodeID, predicate: "status", text: "Unbounded memory \(index)", confidence: 0.9, validAt: now.addingTimeInterval(Double(index)), committedAt: now.addingTimeInterval(Double(index)), evidenceSpanIDs: []))
     }
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store), configuration: .init(pageSize: 2))
+
+    let first = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"","page":1}"#), context: memoryOSToolContext())
+    let second = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"","page":2}"#), context: memoryOSToolContext())
+    let firstPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(first.contentJSON).utf8))
+    let secondPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(second.contentJSON).utf8))
+
+    #expect(firstPayload.success)
+    #expect(firstPayload.query.isEmpty)
+    #expect(firstPayload.totalItems == 3)
+    #expect(firstPayload.returnedItems == 2)
+    #expect(firstPayload.nextPage == 2)
+    #expect(secondPayload.returnedItems == 1)
+    #expect(secondPayload.nextPage == nil)
+    #expect(Set(firstPayload.records.map(\.recordID)).isDisjoint(with: secondPayload.records.map(\.recordID)))
 }
 
 @Test func memoryOSRecentContextReturnsSequentialCompletePages() async throws {
