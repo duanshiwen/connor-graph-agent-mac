@@ -19,7 +19,7 @@ struct NoteImportCenterView: View {
                 if !issueJobs.isEmpty { Section("需要处理") { ForEach(issueJobs) { jobRow($0) } } }
                 if !completedJobs.isEmpty { Section("已完成") { ForEach(completedJobs) { jobRow($0) } } }
             }
-            .navigationTitle("导入中心")
+            .navigationTitle("笔记导入中心")
             .contentMargins(.top, 6, for: .scrollContent)
             .frame(minWidth: 260)
         } detail: {
@@ -56,7 +56,7 @@ struct NoteImportCenterView: View {
                 Task { await model.deleteJob(id: id) }
             }
         } message: { Text("只会删除导入过程记录和暂存数据，已经导入的笔记会保留。") }
-        .alert("导入中心", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("好") { model.error = nil } } message: { Text(model.error ?? "") }
+        .alert("笔记导入中心", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("好") { model.error = nil } } message: { Text(model.error ?? "") }
     }
 
     private var activeJobs: [NoteImportJobRecord] {
