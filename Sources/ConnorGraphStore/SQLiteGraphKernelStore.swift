@@ -758,6 +758,24 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    public func compareAndSetSessionStatus(
+        sessionID: String,
+        statusRaw: String,
+        expectedUpdatedAt: Date,
+        updatedAt: Date = Date()
+    ) throws -> Bool {
+        try withDatabaseLock {
+            try execute("""
+            UPDATE agent_sessions
+            SET status = \(quote(statusRaw)), updated_at = \(quote(iso(updatedAt)))
+            WHERE id = \(quote(sessionID))
+              AND deleted_at IS NULL
+              AND updated_at = \(quote(iso(expectedUpdatedAt)))
+            """)
+            return sqlite3_changes(db) == 1
+        }
+    }
+
     public func updateSessionReadState(sessionID: String, readState: SessionReadState) throws {
         try execute("""
         UPDATE agent_sessions

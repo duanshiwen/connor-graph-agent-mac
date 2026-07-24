@@ -15,6 +15,12 @@ public enum AppChatSessionRepositoryError: Error, Equatable, CustomStringConvert
     }
 }
 
+public enum AppSessionStatusUpdateOutcome: Sendable, Equatable {
+    case updated(AgentSession, warning: String?)
+    case unchanged(AgentSession)
+    case conflict(AgentSession)
+}
+
 public struct AppChatSessionRepository: Sendable {
     public var store: SQLiteGraphKernelStore
     public var storagePaths: AppStoragePaths?
@@ -263,6 +269,48 @@ public struct AppChatSessionRepository: Sendable {
         }
         try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_status_changed", message: "Session status changed to \(statusRaw)", metadata: ["status": statusRaw])
         return updated
+    }
+
+    public func setStatusOptimistically(
+        sessionID: String,
+        statusRaw: String,
+        expectedUpdatedAt: Date? = nil,
+        now: Date = Date()
+    ) throws -> AppSessionStatusUpdateOutcome {
+        guard let current = try loadSession(id: sessionID) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(sessionID)
+        }
+        if current.governance.status.rawValue == statusRaw { return .unchanged(current) }
+        let expected = expectedUpdatedAt ?? current.updatedAt
+        guard expected == current.updatedAt else { return .conflict(current) }
+        let effectiveNow = max(now, current.updatedAt.addingTimeInterval(1))
+        let updated = try store.compareAndSetSessionStatus(
+            sessionID: sessionID,
+            statusRaw: statusRaw,
+            expectedUpdatedAt: expected,
+            updatedAt: effectiveNow
+        )
+        guard updated, let persisted = try loadSession(id: sessionID) else {
+            guard let latest = try loadSession(id: sessionID) else {
+                throw AppChatSessionRepositoryError.sessionNotFound(sessionID)
+            }
+            return .conflict(latest)
+        }
+        let warning: String?
+        do {
+            try appendJournalEvent(
+                runID: UUID().uuidString,
+                sessionID: sessionID,
+                kind: .sessionStatusChanged,
+                action: "session_status_changed",
+                message: "Session status changed to \(statusRaw)",
+                metadata: ["status": statusRaw]
+            )
+            warning = nil
+        } catch {
+            warning = "Status was updated, but the journal event failed: \(error)"
+        }
+        return .updated(persisted, warning: warning)
     }
 
     @discardableResult
