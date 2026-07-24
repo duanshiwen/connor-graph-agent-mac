@@ -5,6 +5,26 @@ import ConnorGraphAgent
 
 @Suite("Calendar Contacts Agent Tools Tests")
 struct CalendarContactsAgentToolsTests {
+    @Test func contactDraftOutputMatchesCommitSchemaID() async throws {
+        let runtime = InMemoryAgentContactRuntime()
+        let create = ContactCreateDraftTool(runtime: runtime)
+        let created = try await create.execute(
+            arguments: try AgentToolArguments(json: #"{"email":"alice@example.com","name":"Alice"}"#),
+            context: Self.context(toolCallID: "contact-create")
+        )
+        let json = try #require(created.contentJSON)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect(object["draftID"] as? String == object["id"] as? String)
+
+        let commit = ContactCommitDraftTool(runtime: runtime)
+        guard case .closedObject(let properties, _) = commit.inputSchema,
+              case .string(let description) = properties["draftID"] else {
+            Issue.record("Expected contact_commit_draft draftID schema")
+            return
+        }
+        #expect(description.contains("draftID returned by contact_create_draft"))
+    }
+
     @Test func timeAnalyzeRangesToolComputesOverlapJSON() async throws {
         let tool = TimeAnalyzeRangesTool()
         let call = AgentToolCall(
