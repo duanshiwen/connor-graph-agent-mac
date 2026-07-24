@@ -246,6 +246,65 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
+    public func ingestChatMessage(
+        content: String,
+        sessionID: String,
+        messageID: String,
+        role: String = "user",
+        intentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
+        now: Date = Date()
+    ) async -> MemoryOSCLIChatIngestionResult {
+        var retrievalText: String? = role == "assistant" ? content : nil
+        var normalizationStatus = role == "assistant" ? MemoryOSIntentNormalizationStatus.notRequired : .failed
+        var modelID: String?
+        var errorMessage: String?
+        if role == "user" {
+            do {
+                guard let intentNormalizer else { throw MemoryOSUserIntentNormalizerError.missingStructuredOutput }
+                let normalization = try await intentNormalizer.normalize(message: content)
+                retrievalText = normalization.retrievalText
+                normalizationStatus = .succeeded
+                modelID = normalization.modelID
+            } catch {
+                errorMessage = String(describing: error)
+            }
+        }
+
+        do {
+            let ingestion = try AppMemoryOSFacade(store: store, searchKernel: searchKernel).ingestChatMessage(
+                messageID: messageID,
+                sessionID: sessionID,
+                role: role,
+                content: content,
+                occurredAt: now,
+                retrievalText: retrievalText,
+                normalizationStatus: normalizationStatus,
+                metadata: ["source": "cli_memory_test"]
+            )
+            return MemoryOSCLIChatIngestionResult(
+                status: "ingested",
+                messageID: messageID,
+                provenanceObjectID: ingestion.provenanceObject?.id,
+                captureEventID: ingestion.captureEvent?.id,
+                normalizationStatus: normalizationStatus.rawValue,
+                retrievalText: retrievalText,
+                modelID: modelID,
+                originalCharacterCount: content.count,
+                error: errorMessage
+            )
+        } catch {
+            return MemoryOSCLIChatIngestionResult(
+                status: "failed",
+                messageID: messageID,
+                normalizationStatus: normalizationStatus.rawValue,
+                retrievalText: retrievalText,
+                modelID: modelID,
+                originalCharacterCount: content.count,
+                error: String(describing: error)
+            )
+        }
+    }
+
     public func hasRunnableBackgroundAIJob(kind: String? = nil, limit: Int = 1, now: Date = Date()) throws -> Bool {
         let effectiveLimit = safeLimit(limit)
         let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
@@ -419,22 +478,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
     }
 
     private func searchHitContent(for hit: MemoryOSRetrievalHit) -> String {
-        if hit.layer == .l1,
-           let content = try? l1ProvenanceContent(captureEventID: hit.recordID),
-           !content.isEmpty {
-            return content
-        }
         return hit.matchedText
-    }
-
-    private func l1ProvenanceContent(captureEventID: String) throws -> String {
-        try store.query(sql: """
-        SELECT o.content
-        FROM memory_l1_capture_events c
-        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
-        WHERE c.id = \(store.quote(captureEventID))
-        LIMIT 1
-        """).first?.first ?? ""
     }
 
     public func read(layer: String, id: String) throws -> MemoryOSCLIRecord? {
@@ -780,6 +824,42 @@ public struct MemoryOSCLIPlanResult: Codable, Sendable, Equatable {
         case plannedJobs = "planned_jobs"
         case kind
         case jobIDs = "job_ids"
+    }
+}
+
+public struct MemoryOSCLIChatIngestionResult: Codable, Sendable, Equatable {
+    public var status: String
+    public var messageID: String
+    public var provenanceObjectID: String?
+    public var captureEventID: String?
+    public var normalizationStatus: String
+    public var retrievalText: String?
+    public var modelID: String?
+    public var originalCharacterCount: Int
+    public var error: String?
+
+    public init(status: String, messageID: String, provenanceObjectID: String? = nil, captureEventID: String? = nil, normalizationStatus: String, retrievalText: String? = nil, modelID: String? = nil, originalCharacterCount: Int, error: String? = nil) {
+        self.status = status
+        self.messageID = messageID
+        self.provenanceObjectID = provenanceObjectID
+        self.captureEventID = captureEventID
+        self.normalizationStatus = normalizationStatus
+        self.retrievalText = retrievalText
+        self.modelID = modelID
+        self.originalCharacterCount = originalCharacterCount
+        self.error = error
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case messageID = "message_id"
+        case provenanceObjectID = "provenance_object_id"
+        case captureEventID = "capture_event_id"
+        case normalizationStatus = "normalization_status"
+        case retrievalText = "retrieval_text"
+        case modelID = "model_id"
+        case originalCharacterCount = "original_character_count"
+        case error
     }
 }
 

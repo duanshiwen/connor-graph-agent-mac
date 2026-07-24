@@ -273,27 +273,29 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         }
         let eventTypePredicate = eventTypeClauses.isEmpty ? "0" : eventTypeClauses.joined(separator: " OR ")
         return try store.query(sql: """
-        WITH matched_objects AS (
-            SELECT object_id
-            FROM memory_l0_provenance_fts
-            WHERE memory_l0_provenance_fts MATCH \(store.quote(ftsQuery(text)))
+        WITH matched_events AS (
+            SELECT capture_event_id
+            FROM memory_l1_retrieval_fts
+            WHERE memory_l1_retrieval_fts MATCH \(store.quote(ftsQuery(text)))
         )
-        SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, ''), COALESCE(o.source_id, '')
+        SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, c.retrieval_text, COALESCE(c.occurred_at, ''), COALESCE(o.source_id, ''), c.normalization_status
         FROM memory_l1_capture_events c
         JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
-        WHERE (c.provenance_object_id IN (SELECT object_id FROM matched_objects)
+        WHERE c.retrieval_text IS NOT NULL AND c.retrieval_text != ''
+          AND (c.id IN (SELECT capture_event_id FROM matched_events)
            OR \(eventTypePredicate))\(timePredicate("c.occurred_at", query: query))
         ORDER BY c.occurred_at DESC
         LIMIT \(query.limit)
         """).map { row in
-            var metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
+            var metadata = sanitizedL1Metadata((try? store.decode([String: String].self, row[3])) ?? [:])
             metadata["source_type"] = row[1]
             metadata["source_id"] = row[7]
             metadata["occurred_at"] = row[6]
             metadata["updated_at"] = row[6]
             metadata["effective_updated_at"] = row[6]
             metadata["status"] = normalizedStatus(metadata["status"])
-            return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[4], matchedText: row[5], score: lexicalScore(terms.joined(separator: " "), haystack: row[4] + " " + row[5]), evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: true, metadata: metadata)
+            metadata["normalization_status"] = row[8]
+            return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[5], matchedText: row[5], score: lexicalScore(terms.joined(separator: " "), haystack: row[5]), evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: false, metadata: metadata)
         }
     }
 
@@ -397,16 +399,17 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         }
         if layers.contains(.l1) {
             hits += try store.query(sql: """
-            SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, o.content, COALESCE(c.occurred_at, ''), COALESCE(o.source_id, '')
+            SELECT c.id, c.event_type, c.provenance_object_id, c.metadata_json, o.title, c.retrieval_text, COALESCE(c.occurred_at, ''), COALESCE(o.source_id, ''), c.normalization_status
             FROM memory_l1_capture_events c
             JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
-            WHERE 1 = 1\(timePredicate("c.occurred_at", query: query))
+            WHERE c.retrieval_text IS NOT NULL AND c.retrieval_text != ''\(timePredicate("c.occurred_at", query: query))
             ORDER BY c.occurred_at DESC
             LIMIT \(query.limit)
             """).map { row in
-                var metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
+                var metadata = sanitizedL1Metadata((try? store.decode([String: String].self, row[3])) ?? [:])
                 metadata.merge(["source_type": row[1], "source_id": row[7], "occurred_at": row[6], "updated_at": row[6], "effective_updated_at": row[6], "status": normalizedStatus(metadata["status"])]) { _, new in new }
-                return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[4], matchedText: row[5], score: 1, evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: true, metadata: metadata)
+                metadata["normalization_status"] = row[8]
+                return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[5], matchedText: row[5], score: 1, evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: false, metadata: metadata)
             }
         }
         if layers.contains(.l2) {
@@ -573,6 +576,12 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         if MemoryOSRecordTemporalStatus(rawValue: normalized) != nil { return normalized }
         if ["inactive", "archived", "deleted"].contains(normalized) { return MemoryOSRecordTemporalStatus.historical.rawValue }
         return MemoryOSRecordTemporalStatus.active.rawValue
+    }
+
+    private func sanitizedL1Metadata(_ metadata: [String: String]) -> [String: String] {
+        metadata.filter { key, _ in
+            key != "content_preview" && key != "preview" && key != "intent_normalization_error"
+        }
     }
 
     private func score(fromFTSRank rank: String) -> Double {

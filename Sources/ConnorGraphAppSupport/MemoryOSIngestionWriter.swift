@@ -12,11 +12,13 @@ public actor MemoryOSIngestionWriter {
     }
 
     private let facade: AppMemoryOSFacade
+    private let intentNormalizer: AnyMemoryOSUserIntentNormalizer?
     private var queuedMessages: [QueuedChatMessage] = []
     private var isFlushing = false
 
-    public init(facade: AppMemoryOSFacade) {
+    public init(facade: AppMemoryOSFacade, intentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil) {
         self.facade = facade
+        self.intentNormalizer = intentNormalizer
     }
 
     public func enqueueChatMessage(
@@ -35,10 +37,10 @@ public actor MemoryOSIngestionWriter {
             occurredAt: occurredAt,
             personReferences: personReferences
         ))
-        Task { try? flush() }
+        Task { try? await flush() }
     }
 
-    public func flush() throws {
+    public func flush() async throws {
         guard !isFlushing else { return }
         isFlushing = true
         defer { isFlushing = false }
@@ -46,13 +48,31 @@ public actor MemoryOSIngestionWriter {
         while !queuedMessages.isEmpty {
             let message = queuedMessages.removeFirst()
             let formatter = MemoryOSPersonReferenceContextFormatter()
+            var metadata = formatter.metadata(personReferences: message.personReferences)
+            var retrievalText: String?
+            var normalizationStatus: MemoryOSIntentNormalizationStatus?
+            if message.role == "user" {
+                do {
+                    guard let intentNormalizer else { throw MemoryOSUserIntentNormalizerError.missingStructuredOutput }
+                    let normalization = try await intentNormalizer.normalize(message: message.content)
+                    retrievalText = normalization.retrievalText
+                    normalizationStatus = .succeeded
+                    metadata["intent_normalizer_model_id"] = normalization.modelID
+                    metadata["intent_normalizer_prompt_version"] = String(normalization.promptVersion)
+                } catch {
+                    normalizationStatus = .failed
+                    metadata["intent_normalization_error"] = String(describing: error)
+                }
+            }
             _ = try facade.ingestChatMessage(
                 messageID: message.messageID,
                 sessionID: message.sessionID,
                 role: message.role,
-                content: formatter.content(message.content, personReferences: message.personReferences),
+                content: message.content,
                 occurredAt: message.occurredAt,
-                metadata: formatter.metadata(personReferences: message.personReferences)
+                retrievalText: retrievalText,
+                normalizationStatus: normalizationStatus,
+                metadata: metadata
             )
         }
     }

@@ -23,7 +23,7 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 6
+    public static let currentSchemaVersion = 7
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
@@ -35,7 +35,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
         "memory_l3_beliefs", "memory_l3_belief_evidence", "memory_l3_belief_relations", "memory_l3_promotion_records",
         "memory_l4_entities", "memory_l4_entity_aliases", "memory_l4_entity_statements", "memory_l4_entity_statement_evidence", "memory_l4_archive_runs", "memory_l4_archive_statement_links", "memory_l4_merge_events", "memory_l4_split_events",
-        "memory_l0_provenance_fts", "memory_l2_nodes_fts", "memory_l2_statements_fts", "memory_l3_beliefs_fts", "memory_l4_entities_fts", "memory_l4_statements_fts"
+        "memory_l0_provenance_fts", "memory_l1_retrieval_fts", "memory_l2_nodes_fts", "memory_l2_statements_fts", "memory_l3_beliefs_fts", "memory_l4_entities_fts", "memory_l4_statements_fts"
     ]
 
     public static let requiredSchemaIndexes: Set<String> = [
@@ -86,10 +86,11 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try configurePragmas()
         try rebuildLegacyL3BeliefSchemaIfNeeded()
         try execute(Self.schemaSQL)
+        try addL1IntentNormalizationColumnsIfNeeded()
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
-        VALUES (\(Self.currentSchemaVersion), 'memory_os_background_run_trace_schema', \(quote(iso(Date()))), '{}')
+        VALUES (\(Self.currentSchemaVersion), 'memory_os_l1_safe_intent_schema', \(quote(iso(Date()))), '{}')
         """)
         // Optimize indexes after migration
         try execute("PRAGMA optimize;")
@@ -110,6 +111,16 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         guard columns.contains("topic") || columns.contains("projection_kind") || columns.contains("metadata_json") else { return }
         try execute("DROP TABLE IF EXISTS memory_l3_beliefs_fts;")
         try execute("DROP TABLE IF EXISTS memory_l3_beliefs;")
+    }
+
+    private func addL1IntentNormalizationColumnsIfNeeded() throws {
+        let columns = Set(try query(sql: "PRAGMA table_info(memory_l1_capture_events);").map { $0[1] })
+        if !columns.contains("retrieval_text") {
+            try execute("ALTER TABLE memory_l1_capture_events ADD COLUMN retrieval_text TEXT;")
+        }
+        if !columns.contains("normalization_status") {
+            try execute("ALTER TABLE memory_l1_capture_events ADD COLUMN normalization_status TEXT NOT NULL DEFAULT 'not_required';")
+        }
     }
 
     public func indexNames() throws -> Set<String> {
@@ -241,9 +252,16 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public func upsert(captureEvent event: MemoryOSCaptureEvent) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l1_capture_events
-        (id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json)
-        VALUES (\(quote(event.id)), \(quote(event.provenanceObjectID)), \(quote(event.eventType)), \(quote(iso(event.occurredAt))), \(event.tokenEstimate), \(quote(event.processingState.rawValue)), \(quote(json(event.metadata))))
+        (id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, retrieval_text, normalization_status, metadata_json)
+        VALUES (\(quote(event.id)), \(quote(event.provenanceObjectID)), \(quote(event.eventType)), \(quote(iso(event.occurredAt))), \(event.tokenEstimate), \(quote(event.processingState.rawValue)), \(quote(event.retrievalText)), \(quote(event.normalizationStatus.rawValue)), \(quote(json(event.metadata))))
         """)
+        try execute("DELETE FROM memory_l1_retrieval_fts WHERE capture_event_id = \(quote(event.id));")
+        if let retrievalText = event.retrievalText, !retrievalText.isEmpty {
+            try execute("""
+            INSERT INTO memory_l1_retrieval_fts(capture_event_id, event_type, retrieval_text)
+            VALUES (\(quote(event.id)), \(quote(event.eventType)), \(quote(retrievalText)))
+            """)
+        }
         try enqueueSearchIndexChange(layer: "L1", recordID: event.id)
     }
 
@@ -827,8 +845,9 @@ public extension SQLiteMemoryOSStore {
     CREATE TABLE IF NOT EXISTS memory_l0_content_hashes (content_hash TEXT PRIMARY KEY, provenance_object_id TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(provenance_object_id) REFERENCES memory_l0_provenance_objects(id));
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l0_provenance_fts USING fts5(object_id UNINDEXED, source_type UNINDEXED, title, content, tokenize = 'unicode61 remove_diacritics 2');
 
-    CREATE TABLE IF NOT EXISTS memory_l1_capture_events (id TEXT PRIMARY KEY, provenance_object_id TEXT NOT NULL, event_type TEXT NOT NULL, occurred_at TEXT NOT NULL, token_estimate INTEGER NOT NULL DEFAULT 0, processing_state TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(provenance_object_id) REFERENCES memory_l0_provenance_objects(id));
+    CREATE TABLE IF NOT EXISTS memory_l1_capture_events (id TEXT PRIMARY KEY, provenance_object_id TEXT NOT NULL, event_type TEXT NOT NULL, occurred_at TEXT NOT NULL, token_estimate INTEGER NOT NULL DEFAULT 0, processing_state TEXT NOT NULL, retrieval_text TEXT, normalization_status TEXT NOT NULL DEFAULT 'not_required', metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(provenance_object_id) REFERENCES memory_l0_provenance_objects(id));
     CREATE INDEX IF NOT EXISTS idx_memory_l1_capture_state ON memory_l1_capture_events(processing_state, occurred_at DESC);
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_l1_retrieval_fts USING fts5(capture_event_id UNINDEXED, event_type UNINDEXED, retrieval_text, tokenize = 'unicode61 remove_diacritics 2');
     CREATE TABLE IF NOT EXISTS memory_l1_time_blocks (id TEXT PRIMARY KEY, title TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT NOT NULL, token_estimate INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l1_time_blocks_status ON memory_l1_time_blocks(status, started_at DESC);
     CREATE TABLE IF NOT EXISTS memory_l1_time_block_events (time_block_id TEXT NOT NULL, capture_event_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(time_block_id, capture_event_id), FOREIGN KEY(time_block_id) REFERENCES memory_l1_time_blocks(id), FOREIGN KEY(capture_event_id) REFERENCES memory_l1_capture_events(id));
