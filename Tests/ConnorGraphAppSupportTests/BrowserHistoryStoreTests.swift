@@ -4,6 +4,59 @@ import Testing
 
 @Suite("Browser History Store Tests")
 struct BrowserHistoryStoreTests {
+    @Test("Pages every JSONL record backwards without duplicates")
+    func pagesEveryRecord() {
+        let (store, url) = makeStore()
+        defer { cleanup(url) }
+        for index in 0..<137 {
+            store.appendRecord(.init(
+                url: "https://example.com/\(index)",
+                title: "Page \(index)",
+                sessionID: "session",
+                sessionTitle: "Session",
+                visitedAt: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+
+        var titles: [String] = []
+        var cursor: String?
+        repeat {
+            let page = store.loadHistoryPage(cursor: cursor, pageSize: 50)
+            titles += page.records.map(\.title)
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        #expect(titles == (0..<137).reversed().map { "Page \($0)" })
+        #expect(Set(titles).count == 137)
+    }
+
+    @Test("Search pages continue scanning past nonmatching records")
+    func pagesSearchResults() {
+        let (store, url) = makeStore()
+        defer { cleanup(url) }
+        for index in 0..<137 {
+            store.appendRecord(.init(
+                url: "https://example.com/\(index)",
+                title: index.isMultiple(of: 3) ? "Matched \(index)" : "Other \(index)",
+                sessionID: "session",
+                sessionTitle: "Session",
+                visitedAt: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+
+        var records: [BrowserHistoryRecord] = []
+        var cursor: String?
+        repeat {
+            let page = store.loadHistoryPage(cursor: cursor, query: "matched", pageSize: 17)
+            records += page.records
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        #expect(records.count == 46)
+        #expect(records.allSatisfy { $0.title.hasPrefix("Matched") })
+        #expect(Set(records.map(\.id)).count == 46)
+    }
+
     private func tempURL() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("browser-history-test-\(UUID().uuidString).jsonl")
     }

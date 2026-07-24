@@ -115,6 +115,6 @@ actor AppContentBootstrapActor {
     }
 
     private nonisolated static func loadBrowserHistory(paths: AppStoragePaths) -> StartupDomainResult<[BrowserHistoryRecord]> {
-        .success(BrowserHistoryStore(historyURL: paths.browserHistoryURL).loadHistory())
+        .success(BrowserHistoryStore(historyURL: paths.browserHistoryURL).loadHistoryPage(pageSize: 50).records)
     }
 }

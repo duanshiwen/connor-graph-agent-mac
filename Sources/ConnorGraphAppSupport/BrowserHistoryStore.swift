@@ -1,6 +1,16 @@
 import Foundation
 import ConnorGraphCore
 
+public struct BrowserHistoryPage: Sendable, Equatable {
+    public var records: [BrowserHistoryRecord]
+    public var nextCursor: String?
+
+    public init(records: [BrowserHistoryRecord], nextCursor: String?) {
+        self.records = records
+        self.nextCursor = nextCursor
+    }
+}
+
 /// Persists browser history as a JSONL file at `browser/history.jsonl`.
 /// Global across all sessions — history is a browser-level concern, not session-scoped.
 public final class BrowserHistoryStore: @unchecked Sendable {
@@ -66,6 +76,12 @@ public final class BrowserHistoryStore: @unchecked Sendable {
     /// Load all records sorted by `visitedAt` ascending.
     public func loadHistory() -> [BrowserHistoryRecord] {
         queue.sync { loadRecordsUnsafe() }
+    }
+
+    /// Reads newest-first pages directly from the append-only JSONL file.
+    /// The cursor is a byte offset, so loading older pages does not reread newer records.
+    public func loadHistoryPage(cursor: String? = nil, query: String = "", pageSize: Int = 50) -> BrowserHistoryPage {
+        queue.sync { loadHistoryPageUnsafe(cursor: cursor, query: query, pageSize: pageSize) }
     }
 
     /// Search records by query string (matches URL, title, session title, or fetched page content, case-insensitive).
@@ -175,6 +191,71 @@ public final class BrowserHistoryStore: @unchecked Sendable {
         guard fileManager.fileExists(atPath: historyURL.path) else { return 0 }
         guard let data = try? Data(contentsOf: historyURL), let text = String(data: data, encoding: .utf8) else { return 0 }
         return text.split(separator: "\n", omittingEmptySubsequences: true).count
+    }
+
+    private func loadHistoryPageUnsafe(cursor: String?, query: String, pageSize: Int) -> BrowserHistoryPage {
+        guard fileManager.fileExists(atPath: historyURL.path),
+              let handle = try? FileHandle(forReadingFrom: historyURL) else {
+            return BrowserHistoryPage(records: [], nextCursor: nil)
+        }
+        defer { try? handle.close() }
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        var scanEnd = min(UInt64(cursor.flatMap(UInt64.init) ?? fileSize), fileSize)
+        let resolvedPageSize = max(1, pageSize)
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let tokens = Self.searchTokens(for: normalizedQuery)
+        var carry = Data()
+        var records: [BrowserHistoryRecord] = []
+        var oldestIncludedOffset: UInt64?
+        let chunkSize: UInt64 = 64 * 1_024
+
+        while scanEnd > 0, records.count < resolvedPageSize {
+            let start = scanEnd > chunkSize ? scanEnd - chunkSize : 0
+            try? handle.seek(toOffset: start)
+            var buffer = (try? handle.read(upToCount: Int(scanEnd - start))) ?? Data()
+            buffer.append(carry)
+            let bytes = [UInt8](buffer)
+            var ranges: [Range<Int>] = []
+            var lineStart = 0
+            for index in bytes.indices where bytes[index] == 0x0A {
+                ranges.append(lineStart..<index)
+                lineStart = index + 1
+            }
+            if lineStart < bytes.count { ranges.append(lineStart..<bytes.count) }
+
+            let firstCompleteIndex = start == 0 ? 0 : min(1, ranges.count)
+            if firstCompleteIndex < ranges.count {
+                for range in ranges[firstCompleteIndex...].reversed() where !range.isEmpty {
+                    guard records.count < resolvedPageSize else { break }
+                    let line = Data(bytes[range])
+                    guard let record = try? decoder.decode(BrowserHistoryRecord.self, from: line),
+                          normalizedQuery.isEmpty || Self.record(record, matches: normalizedQuery, tokens: tokens) else { continue }
+                    records.append(record)
+                    oldestIncludedOffset = start + UInt64(range.lowerBound)
+                }
+            }
+
+            if start > 0 {
+                if let firstRange = ranges.first {
+                    carry = Data(bytes[firstRange])
+                } else {
+                    carry = buffer
+                }
+            }
+            scanEnd = start
+        }
+
+        let nextCursor = records.count == resolvedPageSize
+            ? oldestIncludedOffset.flatMap { $0 > 0 ? String($0) : nil }
+            : nil
+        return BrowserHistoryPage(records: records, nextCursor: nextCursor)
+    }
+
+    private static func record(_ record: BrowserHistoryRecord, matches query: String, tokens: [String]) -> Bool {
+        let searchable = searchableText(for: record)
+        if searchable.contains(query) { return true }
+        let tokenMatches = tokens.filter { searchable.localizedCaseInsensitiveContains($0) }.count
+        return tokenMatches >= min(max(tokens.count, 1), 2)
     }
 
     private func appendRecordUnsafe(_ record: BrowserHistoryRecord) {
