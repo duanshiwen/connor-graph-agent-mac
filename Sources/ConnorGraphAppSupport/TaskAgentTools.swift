@@ -32,7 +32,7 @@ public struct TaskListTool: AgentTool {
         let end = min(start + pageSize, totalItems)
         let items = Array(tasks[start..<end])
         let hasNextPage = end < totalItems
-        let payload = TaskListPage(page: page, pageSize: pageSize, returnedItems: items.count, totalItems: totalItems, totalPages: totalPages, hasNextPage: hasNextPage, nextPage: hasNextPage ? page + 1 : nil, tasks: items)
+        let payload = TaskListPage(page: page, pageSize: pageSize, returnedItems: items.count, totalItems: totalItems, totalPages: totalPages, hasNextPage: hasNextPage, nextPage: hasNextPage ? page + 1 : nil, tasks: items.map(TaskListItem.init))
         return try taskJSONResult(payload, context: context, toolName: name, text: "Returned \(items.count) of \(totalItems) task(s) on page \(page).")
     }
 }
@@ -42,7 +42,7 @@ public struct TaskUpdateScheduledSessionMessageTool: AgentTool {
     public let description = "Update a user or AI scheduled task that creates a session and sends a message. Pass expected_updated_at from tasks_list to prevent overwriting concurrent changes."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "task_id": .string(description: "Task ID returned by tasks_list"),
+        "task_id": .string(description: "Exact task_id returned by tasks_list; copy the field without renaming it"),
         "expected_updated_at": .string(description: "Optional current updatedAt ISO-8601 value for optimistic concurrency"),
         "name": .string(description: "Optional replacement task name"),
         "runAt": .string(description: "Optional replacement first run time as ISO-8601"),
@@ -104,7 +104,7 @@ public struct TaskDeleteTool: AgentTool {
     public let description = "Soft-delete a user or AI task. Protected system tasks cannot be deleted."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "task_id": .string(description: "Task ID returned by tasks_list"),
+        "task_id": .string(description: "Exact task_id returned by tasks_list; copy the field without renaming it"),
         "reason": .string(description: "Optional deletion reason")
     ], required: ["task_id"])
     private let repository: AppTaskManagementRepository
@@ -208,7 +208,23 @@ private struct TaskListPage: Encodable {
     var totalPages: Int
     var hasNextPage: Bool
     var nextPage: Int?
-    var tasks: [ConnorTaskDefinition]
+    var tasks: [TaskListItem]
+}
+
+private struct TaskListItem: Encodable {
+    var task: ConnorTaskDefinition
+
+    init(_ task: ConnorTaskDefinition) { self.task = task }
+
+    func encode(to encoder: Encoder) throws {
+        try task.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(task.id, forKey: .taskID)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case taskID = "task_id"
+    }
 }
 
 private func taskJSONResult<T: Encodable>(_ payload: T, context: AgentToolExecutionContext, toolName: String, text: String) throws -> AgentToolResult {

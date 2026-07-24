@@ -257,6 +257,7 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
         await store.insert(proposal)
         let payload = ConnorPersonalityProposalPayload(
             proposalID: proposal.id,
+            proposal_id: proposal.id,
             lockedName: ConnorPersonalitySettings.lockedDisplayName,
             mode: mode,
             expectedRevision: proposal.expectedRevision,
@@ -352,7 +353,7 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let description = "Immediately commit an existing personality proposal only when the latest user message explicitly requests a persistent change, without a second confirmation or native approval step. Never commit in response to a question about current attributes, including gender, even if an older proposal ID appears in conversation history. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "proposal_id": .string(description: "Exact proposal ID returned by personality_propose_update.")
+        "proposal_id": .string(description: "Exact proposal_id returned by personality_propose_update; copy the field without renaming it.")
     ], required: ["proposal_id"])
 
     private let runtime: ConnorPersonalityRuntime
@@ -433,6 +434,7 @@ private struct ConnorPersonalityCurrentPayload: Codable {
 
 private struct ConnorPersonalityProposalPayload: Codable {
     var proposalID: String
+    var proposal_id: String
     var lockedName: String
     var mode: ConnorPersonalityUpdateMode
     var expectedRevision: Int
