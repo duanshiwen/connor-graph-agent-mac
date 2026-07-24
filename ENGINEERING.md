@@ -442,6 +442,7 @@ Rust/Tantivy 嵌入式搜索内核位于 `SearchKernel/`，通过进程内 C ABI
 
 - `Scripts/package-search-kernel.sh`：编译并打包 Rust sidecar。
 - `Scripts/verify-memory-os-release.sh`：验证 Memory OS release readiness。
+- CLI 实时验收可使用 `connor memory ingest-chat` 走真实意图规范化和 L0/L1 双写，再用 `connor memory pipeline plan-l1 --min-pending-count 1` 对单次规划覆盖触发阈值；覆盖参数不得持久化为生产策略。
 
 ---
 
