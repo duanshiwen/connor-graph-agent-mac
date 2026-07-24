@@ -97,7 +97,7 @@ public extension AgentToolRegistry {
 
 public struct SessionListByStatusTool: AgentTool {
     public let name = "session_list_by_status"
-    public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. page defaults to 1 and pageSize to 50. Follow nextPage with the same status and pageSize for complete results. Each result exposes an operation-ready sessionID for status tools."
+    public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. The response contains a sessions array; every item has an operation-ready sessionID that can be copied directly into session_set_status or session_batch_set_status updates[].sessionID. page defaults to 1 and pageSize to 50. When nextPage is non-null, call this tool again with page set to exactly nextPage and keep status and pageSize unchanged."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "status": .string(description: "Optional exact status returned by session_list_statuses; copy the field without renaming it. Omit to list all sessions."),
@@ -154,7 +154,13 @@ public struct SessionListByStatusTool: AgentTool {
             nextPage: hasNextPage ? page + 1 : nil,
             sessions: items
         )
-        return try sessionStatusJSONResult(payload, context: context, toolName: name, text: "Returned \(items.count) of \(totalItems) session(s) on page \(page).")
+        return try sessionStatusJSONResult(
+            payload,
+            context: context,
+            toolName: name,
+            text: "Returned \(items.count) of \(totalItems) session(s) on page \(page).",
+            modelContentUsesJSON: true
+        )
     }
 }
 
@@ -247,7 +253,13 @@ public struct SessionBatchSetStatusTool: AgentTool {
             failedItems: results.filter { !["updated", "unchanged"].contains($0.outcome) }.count,
             results: results
         )
-        return try sessionStatusJSONResult(payload, context: context, toolName: name, text: "Batch status update completed: \(payload.updatedItems) updated, \(payload.unchangedItems) unchanged, \(payload.failedItems) failed or conflicted.")
+        return try sessionStatusJSONResult(
+            payload,
+            context: context,
+            toolName: name,
+            text: "Batch status update completed: \(payload.updatedItems) updated, \(payload.unchangedItems) unchanged, \(payload.failedItems) failed or conflicted.",
+            modelContentUsesJSON: true
+        )
     }
 }
 
@@ -270,11 +282,10 @@ public struct SessionListStatusesTool: AgentTool {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let json = String(decoding: try encoder.encode(statuses), as: UTF8.self)
-        let names = statuses.map { $0["name"] ?? $0["id"] ?? "" }.joined(separator: ", ")
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Found \(statuses.count) status definition(s): \(names).",
+            contentText: json,
             contentJSON: json
         )
     }
@@ -380,13 +391,19 @@ private func sessionStatusJSONResult<T: Encodable>(
     _ payload: T,
     context: AgentToolExecutionContext,
     toolName: String,
-    text: String
+    text: String,
+    modelContentUsesJSON: Bool = false
 ) throws -> AgentToolResult {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     encoder.dateEncodingStrategy = .iso8601
     let json = String(decoding: try encoder.encode(payload), as: UTF8.self)
-    return AgentToolResult(toolCallID: context.toolCallID, toolName: toolName, contentText: text, contentJSON: json)
+    return AgentToolResult(
+        toolCallID: context.toolCallID,
+        toolName: toolName,
+        contentText: modelContentUsesJSON ? json : text,
+        contentJSON: json
+    )
 }
 
 private func validateStatus(_ status: String, governanceConfig: AppSessionGovernanceConfig) throws {
