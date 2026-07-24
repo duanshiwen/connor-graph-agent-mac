@@ -121,6 +121,17 @@ struct AppRouteViewDependencyTests {
         #expect(source.contains("nextSessionPageCursor = page.nextCursor"))
     }
 
+    @Test func calendarListLazilyCreatesEventSections() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let start = try #require(source.range(of: "private struct CalendarSectionScrollView: View"))
+        let tail = source[start.lowerBound...]
+        let end = try #require(tail.range(of: "private struct CalendarEventButton: View"))
+        let implementation = tail[..<end.lowerBound]
+
+        #expect(implementation.contains("LazyVStack(alignment: .leading, spacing: AppShellLayout.spaceM)"))
+        #expect(!implementation.contains("\n            VStack(alignment: .leading, spacing: AppShellLayout.spaceM)"))
+    }
+
     @Test func listPaneHeadersCenterTitlesIndependentlyFromTrailingActions() throws {
         let designSystem = try String(contentsOf: projectSourceURL(named: "AppShellDesignSystem.swift"), encoding: .utf8)
         let listPanes = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)

@@ -439,7 +439,7 @@ private struct CalendarSectionScrollView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+            LazyVStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                         Text(section.title)
