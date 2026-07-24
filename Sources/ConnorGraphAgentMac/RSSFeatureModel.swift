@@ -20,14 +20,19 @@ final class RSSFeatureModel {
         didSet { rebuildVisibleItems(resetWindow: false) }
     }
     var searchQuery = "" {
-        didSet { rebuildVisibleItems(resetWindow: true) }
+        didSet {
+            guard searchQuery != oldValue else { return }
+            rebuildVisibleItems(resetWindow: true)
+            reloadItemsForCurrentQuery()
+        }
     }
     private(set) var visibleItems: [RSSItemSummary] = []
     private(set) var visibleWindowItems: [RSSItemSummary] = []
     private(set) var visibleItemsRevision: UInt64 = 0
-    @ObservationIgnored private let initialWindowSize = 50
-    @ObservationIgnored private let windowBatchSize = 50
-    @ObservationIgnored private var visibleWindowLimit = 50
+    private(set) var isLoadingNextPage = false
+    @ObservationIgnored private let pageSize = 50
+    @ObservationIgnored private var nextPageCursor: String?
+    @ObservationIgnored private var loadedQuery = ""
     var selectedSourceID: RSSSourceID?
     var selectedItemID: RSSItemID?
     var isPresentingAddSourceSheet = false
@@ -58,17 +63,18 @@ final class RSSFeatureModel {
         let auditSessionID = sessionID ?? sessionIDProvider()
         do {
             async let sourcesRequest = runtime.listSources(runID: runID, sessionID: auditSessionID)
-            async let itemsRequest = runtime.listItems(
-                sourceID: nil,
-                includeHidden: false,
-                limit: 200,
+            let requestedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            async let itemsRequest = runtime.listItemsPage(
+                RSSItemPageRequest(query: requestedQuery, pageSize: pageSize),
                 runID: runID,
                 sessionID: auditSessionID
             )
-            let (sources, items) = try await (sourcesRequest, itemsRequest)
+            let (sources, page) = try await (sourcesRequest, itemsRequest)
             guard !Task.isCancelled, !isShutdown, generation == reloadGeneration else { return }
-            presentation = NativeRSSBrowserPresentation(sources: sources, items: items)
-            applySelectionFallback(sources: sources, items: items)
+            loadedQuery = requestedQuery
+            nextPageCursor = page.nextCursor
+            presentation = NativeRSSBrowserPresentation(sources: sources, items: page.items)
+            applySelectionFallback(sources: sources, items: page.items)
         } catch is CancellationError {
             return
         } catch {
@@ -80,25 +86,44 @@ final class RSSFeatureModel {
     private func rebuildVisibleItems(resetWindow: Bool) {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         visibleItems = query.isEmpty ? presentation.items : presentation.items(sourceID: nil, query: query)
-        if resetWindow {
-            visibleWindowLimit = initialWindowSize
-        } else {
-            visibleWindowLimit = max(initialWindowSize, visibleWindowLimit)
-        }
-        rebuildVisibleWindow()
+        visibleWindowItems = visibleItems
         visibleItemsRevision &+= 1
     }
 
     func loadMoreVisibleItemsIfNeeded(currentItemID: RSSItemID) {
         guard visibleWindowItems.last?.id == currentItemID,
-              visibleWindowItems.count < visibleItems.count else { return }
-        visibleWindowLimit = min(visibleWindowLimit + windowBatchSize, visibleItems.count)
-        rebuildVisibleWindow()
+              nextPageCursor != nil,
+              !isLoadingNextPage else { return }
+        startOwnedTask { [weak self] in await self?.loadNextPage() }
     }
 
-    private func rebuildVisibleWindow() {
-        visibleWindowLimit = min(visibleWindowLimit, visibleItems.count)
-        visibleWindowItems = Array(visibleItems.prefix(visibleWindowLimit))
+    private func reloadItemsForCurrentQuery() {
+        guard !isShutdown else { return }
+        startOwnedTask { [weak self] in await self?.reload() }
+    }
+
+    private func loadNextPage() async {
+        guard !isShutdown, !isLoadingNextPage, let cursor = nextPageCursor else { return }
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query == loadedQuery else { return }
+        isLoadingNextPage = true
+        defer { isLoadingNextPage = false }
+        do {
+            let page = try await runtime.listItemsPage(
+                RSSItemPageRequest(query: query, pageSize: pageSize, cursor: cursor),
+                runID: nil,
+                sessionID: sessionIDProvider()
+            )
+            guard !Task.isCancelled, query == searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            let existingIDs = Set(presentation.items.map(\.id))
+            let appended = page.items.filter { !existingIDs.contains($0.id) }
+            nextPageCursor = page.nextCursor
+            presentation = NativeRSSBrowserPresentation(sources: presentation.sources, items: presentation.items + appended)
+        } catch is CancellationError {
+            return
+        } catch {
+            reportFailure(String(describing: error))
+        }
     }
 
     func selectItem(_ item: RSSItemSummary) {
