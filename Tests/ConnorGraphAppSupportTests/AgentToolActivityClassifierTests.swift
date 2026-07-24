@@ -9,7 +9,7 @@ import ConnorGraphAgent
         runID: "run",
         sessionID: "session",
         name: "Read",
-        argumentsJSON: "{\"file_path\":\"Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift\",\"offset\":596,\"limit\":270}"
+        argumentsJSON: "{\"filePath\":\"Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift\",\"offset\":596,\"limit\":270}"
     )
 
     let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)
@@ -25,7 +25,7 @@ import ConnorGraphAgent
     let call = AgentToolCall(
         id: "write-1",
         name: "Write",
-        argumentsJSON: "{\"file_path\":\"README.md\",\"content\":\"hello\"}"
+        argumentsJSON: "{\"filePath\":\"README.md\",\"content\":\"hello\"}"
     )
 
     let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)

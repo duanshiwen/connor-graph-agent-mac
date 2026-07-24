@@ -110,7 +110,7 @@ public struct AgentToolActivityClassifier: Sendable {
             return ToolDescriptor(
                 semanticKind: .readFile,
                 title: "Read File",
-                target: basename(string(arguments["file_path"]) ?? string(result["path"])),
+                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: lineRange(offset: offset, limit: limit),
                 icon: "doc.text.magnifyingglass"
             )
@@ -119,7 +119,7 @@ public struct AgentToolActivityClassifier: Sendable {
             return ToolDescriptor(
                 semanticKind: .writeFile,
                 title: "Write File",
-                target: basename(string(arguments["file_path"]) ?? string(result["path"])),
+                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: operation,
                 icon: "square.and.pencil"
             )
@@ -127,7 +127,7 @@ public struct AgentToolActivityClassifier: Sendable {
             return ToolDescriptor(
                 semanticKind: .editFile,
                 title: "Edit File",
-                target: basename(string(arguments["file_path"]) ?? string(result["path"])),
+                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: editSubtitle(arguments: arguments, result: result),
                 icon: "pencil"
             )
