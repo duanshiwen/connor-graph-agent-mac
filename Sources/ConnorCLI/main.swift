@@ -21,7 +21,7 @@ struct ConnorCLI {
             return try routeTasks(args: Array(args.dropFirst()), encoder: encoder)
         }
         if args.first == "memory" {
-            return try AppMemoryOSCLIRouter.route(args: Array(args.dropFirst()), inspector: AppMemoryOSCLIRouter.makeLiveInspector(), encoder: encoder)
+            return try await AppMemoryOSCLIRouter.routeAsync(args: Array(args.dropFirst()), inspector: AppMemoryOSCLIRouter.makeLiveInspector(), encoder: encoder)
         }
         if args.first == "knowledge-market" {
             return try await AppCloudKnowledgeCLIRouter.route(args: Array(args.dropFirst()), encoder: encoder)

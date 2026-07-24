@@ -422,9 +422,13 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         role: String,
         content: String,
         occurredAt: Date,
+        retrievalText: String? = nil,
+        normalizationStatus: MemoryOSIntentNormalizationStatus? = nil,
         metadata: [String: String] = [:]
     ) throws -> MemoryOSIngestionResult {
         let sourceType: MemoryOSSourceType = role == "assistant" ? .assistantMessage : .chatMessage
+        let resolvedRetrievalText = sourceType == .assistantMessage ? (retrievalText ?? content) : retrievalText
+        let resolvedNormalizationStatus = normalizationStatus ?? (sourceType == .assistantMessage ? .notRequired : .failed)
         let result = ingestionService.ingest(MemoryOSIngestionInput(
             sourceType: sourceType,
             sourceID: messageID,
@@ -432,6 +436,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             content: content,
             occurredAt: occurredAt,
             sessionID: sessionID,
+            retrievalText: resolvedRetrievalText,
+            normalizationStatus: resolvedNormalizationStatus,
             metadata: metadata.merging(["source_kind": role == "assistant" ? "assistant_message" : "chat_message"]) { current, _ in current }
         ))
         try repository.save(result)
@@ -454,6 +460,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             content: content,
             occurredAt: occurredAt,
             sessionID: sessionID,
+            retrievalText: content,
             metadata: metadata
         ))
         try repository.save(result)
@@ -484,6 +491,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             occurredAt: occurredAt,
             sessionID: sessionID,
             workObjectID: workObjectID,
+            retrievalText: content,
             metadata: eventMetadata
         ))
         try repository.save(result)
@@ -619,7 +627,17 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
         let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
-        let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(from: events, now: now)
+        let originalContentByProvenanceID = try Dictionary(uniqueKeysWithValues: events.map { event in
+            guard let object = try store.provenanceObject(id: event.provenanceObjectID) else {
+                throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(event.provenanceObjectID)")
+            }
+            return (event.provenanceObjectID, object.content)
+        })
+        let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(
+            from: events,
+            originalContentByProvenanceID: originalContentByProvenanceID,
+            now: now
+        )
         var inserted: [MemoryOSQueueItem] = []
         for draft in drafts {
             let payload = store.json(draft)
@@ -804,7 +822,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
         let referencedIDs = try captureEventIDsReferencedByActiveL1QueueItems()
         return try store.query(sql: """
-        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
+        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, retrieval_text, normalization_status, metadata_json
         FROM memory_l1_capture_events
         WHERE processing_state = 'pending'
         ORDER BY occurred_at ASC
@@ -818,7 +836,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 occurredAt: parseDate(row[3]),
                 tokenEstimate: Int(row[4]) ?? 0,
                 processingState: MemoryOSQueueStatus(rawValue: row[5]) ?? .pending,
-                metadata: (try? store.decode([String: String].self, row[6])) ?? [:]
+                retrievalText: row[6].isEmpty ? nil : row[6],
+                normalizationStatus: MemoryOSIntentNormalizationStatus(rawValue: row[7]) ?? .notRequired,
+                metadata: (try? store.decode([String: String].self, row[8])) ?? [:]
             )
         }
     }
