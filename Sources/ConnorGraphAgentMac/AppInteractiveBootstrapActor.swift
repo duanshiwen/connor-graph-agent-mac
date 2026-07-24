@@ -9,6 +9,8 @@ struct InitialSessionContentSnapshot: Sendable {
     let messageCounts: [String: Int]
     let summary: AppChatSessionSummary
     let selectedSession: AgentSession?
+    let selectedSessionTotalMessageCount: Int
+    let selectedSessionNextMessageBeforePosition: Int?
     let state: AppSessionStateSnapshot?
     let records: [AppSessionRecord]
     let browserStatesBySessionID: [String: AppBrowserStateSnapshot]
@@ -61,7 +63,8 @@ actor AppInteractiveBootstrapActor {
             }
             let allSessions = sessions
             let summary = try sessionsRepository.loadSessionSummary()
-            guard let selectedSession = sessions.first.flatMap({ try? sessionsRepository.loadSession(id: $0.id) }) else {
+            guard let selectedSessionID = sessions.first?.id,
+                  let selectedMessagePage = try sessionsRepository.loadSessionMessagePage(id: selectedSessionID) else {
                 return .success(InitialSessionContentSnapshot(
                     sessions: sessions,
                     allSessions: allSessions,
@@ -69,6 +72,8 @@ actor AppInteractiveBootstrapActor {
                     messageCounts: page.messageCounts,
                     summary: summary,
                     selectedSession: nil,
+                    selectedSessionTotalMessageCount: 0,
+                    selectedSessionNextMessageBeforePosition: nil,
                     state: nil,
                     records: [],
                     browserStatesBySessionID: [:],
@@ -78,6 +83,7 @@ actor AppInteractiveBootstrapActor {
                     artifactDirectories: nil
                 ))
             }
+            let selectedSession = selectedMessagePage.session
             let sessionID = selectedSession.id
             _ = try sessionsRepository.artifactDirectories(sessionID: sessionID)
             let state: AppSessionStateSnapshot
@@ -103,6 +109,8 @@ actor AppInteractiveBootstrapActor {
                 messageCounts: page.messageCounts,
                 summary: summary,
                 selectedSession: selectedSession,
+                selectedSessionTotalMessageCount: selectedMessagePage.totalMessageCount,
+                selectedSessionNextMessageBeforePosition: selectedMessagePage.nextBeforePosition,
                 state: state,
                 records: records,
                 browserStatesBySessionID: browserStatesBySessionID,

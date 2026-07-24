@@ -41,8 +41,28 @@ final class ChatRunCoordinator {
         releaseOffMain(previous)
     }
 
+    func configureTranscriptPagination(totalCount: Int, nextBeforePosition: Int?) {
+        model.totalTranscriptMessageCount = totalCount
+        model.nextMessageBeforePosition = nextBeforePosition
+    }
+
+    @discardableResult
+    func prependTranscript(_ messages: [AgentMessage], nextBeforePosition: Int?) -> Int {
+        let existingIDs = Set(model.transcript.map(\.id))
+        let prepended = messages.filter { !existingIDs.contains($0.id) }
+        guard !prepended.isEmpty else {
+            model.nextMessageBeforePosition = nextBeforePosition
+            return 0
+        }
+        model.transcript.insert(contentsOf: prepended, at: 0)
+        model.transcriptRevision += 1
+        model.nextMessageBeforePosition = nextBeforePosition
+        return prepended.count
+    }
+
     func prepareSelection(sessionID: String) {
         replaceTranscript([])
+        configureTranscriptPagination(totalCount: 0, nextBeforePosition: nil)
         replaceVisibleTimeline(timeline(sessionID: sessionID) ?? [])
         model.latestSummary = nil
         model.summaryMessage = nil
@@ -78,6 +98,7 @@ final class ChatRunCoordinator {
     func clearSelectedRuntime() {
         installManager(nil)
         replaceTranscript([])
+        configureTranscriptPagination(totalCount: 0, nextBeforePosition: nil)
         replaceVisibleTimeline([])
         model.latestSummary = nil
         model.summaryMessage = nil

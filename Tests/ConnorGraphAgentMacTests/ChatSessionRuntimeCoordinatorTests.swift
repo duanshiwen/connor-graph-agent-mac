@@ -263,7 +263,7 @@ struct ChatSessionRuntimeCoordinatorTests {
         var selectionChangeCount = 0
         var detailReloadCount = 0
         coordinator.onSelectionWillChange = { _, _ in selectionChangeCount += 1 }
-        coordinator.onReloadSelectedSession = { _, _ in detailReloadCount += 1 }
+        coordinator.onReloadSelectedSession = { _, _, _, _ in detailReloadCount += 1 }
         var noteGovernance = AgentSessionGovernanceMetadata.default
         noteGovernance.kind = .note
         let olderNote = AgentSession(id: "note-older", title: "Older", createdAt: Date(timeIntervalSince1970: 2_000), updatedAt: Date(timeIntervalSince1970: 2_000), governance: noteGovernance)

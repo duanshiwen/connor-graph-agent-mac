@@ -480,11 +480,21 @@ public struct NativeSessionManager: Sendable {
     }
 
     private mutating func persistSession() throws {
+        var sessionToPersist = session
         if let persisted = try sessionRepository.loadSession(id: session.id) {
             session.governance = persisted.governance
             session.readState = persisted.readState
+            sessionToPersist.governance = persisted.governance
+            sessionToPersist.readState = persisted.readState
+            if let firstLoadedID = session.messages.first?.id,
+               let firstLoadedIndex = persisted.messages.firstIndex(where: { $0.id == firstLoadedID }) {
+                sessionToPersist.messages = Array(persisted.messages[..<firstLoadedIndex]) + session.messages
+            } else if !persisted.messages.isEmpty, !session.messages.isEmpty {
+                let currentIDs = Set(session.messages.map(\.id))
+                sessionToPersist.messages = persisted.messages.filter { !currentIDs.contains($0.id) } + session.messages
+            }
         }
-        try sessionRepository.saveSession(session)
+        try sessionRepository.saveSession(sessionToPersist)
     }
 
     // MARK: - Context Compression

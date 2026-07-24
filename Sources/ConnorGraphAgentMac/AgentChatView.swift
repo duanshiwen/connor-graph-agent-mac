@@ -529,6 +529,7 @@ private struct AgentChatConversationView: View {
 
     private var hasOlderMessages: Bool {
         visibleMessageLimit < model.run.transcript.count
+            || model.run.nextMessageBeforePosition != nil
     }
 
     private var expandedApproval: AgentPendingApproval? {
@@ -684,16 +685,31 @@ private struct AgentChatConversationView: View {
 
         let previousLimit = visibleMessageLimit
         let nextLimit = min(model.run.transcript.count, previousLimit + Self.messagePageSize)
-        guard nextLimit > previousLimit else { return }
-
-        isLoadingOlderMessages = true
         let anchorItemID = dataSetID.namespacedElementID(firstVisibleItemID)
         chatViewportController.prepareForPrepend(anchorItemID: anchorItemID)
-        pendingPrependCorrection = PendingPrependCorrection(
-            previousFirstItemID: anchorItemID,
-            addedMessageCount: nextLimit - previousLimit
-        )
-        visibleMessageLimit = nextLimit
+        if nextLimit > previousLimit {
+            isLoadingOlderMessages = true
+            pendingPrependCorrection = PendingPrependCorrection(
+                previousFirstItemID: anchorItemID,
+                addedMessageCount: nextLimit - previousLimit
+            )
+            visibleMessageLimit = nextLimit
+            return
+        }
+
+        guard model.run.nextMessageBeforePosition != nil else { return }
+        isLoadingOlderMessages = true
+        Task { @MainActor in
+            let addedCount = await model.run.loadOlderMessages()
+            guard addedCount > 0 else {
+                isLoadingOlderMessages = false
+                return
+            }
+            pendingPrependCorrection = PendingPrependCorrection(
+                previousFirstItemID: anchorItemID,
+                addedMessageCount: addedCount
+            )
+        }
     }
 
     private func initialActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation]? {
