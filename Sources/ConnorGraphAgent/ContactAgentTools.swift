@@ -237,12 +237,12 @@ public struct ContactCommitDraftTool: AgentTool {
 private func summarizePeople(_ people: [PersonProfile], prefix: String) -> String {
     let lines = people.prefix(20).map { person in
         var parts = [
-            "person_id: \(person.id.rawValue)",
-            "display_name: \(person.displayName)",
+            "personID: \(person.id.rawValue)",
+            "displayName: \(person.displayName)",
             "status: \(person.status.rawValue)"
         ]
         if let mergedIntoID = person.mergedIntoID {
-            parts.append("merged_into_person_id: \(mergedIntoID.rawValue)")
+            parts.append("mergedIntoPersonID: \(mergedIntoID.rawValue)")
         }
         if let notes = person.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
             parts.append("notes: \(String(notes.prefix(160)))")
@@ -261,12 +261,12 @@ private func summarizePerson(_ person: PersonProfile?) -> String {
     guard let person else { return "Person not found" }
     var lines = [
         "Loaded person",
-        "person_id: \(person.id.rawValue)",
-        "display_name: \(person.displayName)",
+        "personID: \(person.id.rawValue)",
+        "displayName: \(person.displayName)",
         "status: \(person.status.rawValue)"
     ]
     if let mergedIntoID = person.mergedIntoID {
-        lines.append("merged_into_person_id: \(mergedIntoID.rawValue)")
+        lines.append("mergedIntoPersonID: \(mergedIntoID.rawValue)")
     }
     if !person.aliases.isEmpty {
         lines.append("aliases: \(person.aliases.joined(separator: ", "))")
@@ -286,14 +286,14 @@ private func summarizePerson(_ person: PersonProfile?) -> String {
 public struct ContactsReadTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_read" }
-    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts. For get_person, prefer the exact person_id from the prompt's Referenced People section; do not guess IDs from display names." }
+    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts. For get_person, copy the exact personID from the prompt's Referenced People section or a prior result; do not guess IDs from display names." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["list_people", "search_people", "get_person", "resolve_person", "list_contacts", "search_contacts", "get_contact", "resolve_contact"], description: "Read operation."),
             "query": .string(description: "Person/contact query; use this for plain names that were not already resolved in Referenced People"),
-            "personID": .string(description: "Exact personID returned by a Person Registry list/search result; copy the field without renaming it. For Referenced People, use its person_id value; do not infer IDs from display_name."),
-            "id": .string(description: "Legacy Person/contact ID accepted for compatibility. Prefer personID for Person Registry operations; do not infer IDs from display_name")
+            "personID": .string(description: "Exact personID returned by a Person Registry list/search result or Referenced People; copy the field and value unchanged. Do not infer IDs from displayName."),
+            "id": .string(description: "Legacy Person/contact ID accepted for compatibility. Prefer personID for Person Registry operations; do not infer IDs from displayName")
         ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -326,12 +326,12 @@ public struct ContactsReadTool: AgentTool {
 public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
-    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. For update/delete/merge, use exact person_id values from Referenced People or prior contacts_read results; never guess IDs from display names." }
+    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. For update/delete/merge, copy exact personID values from Referenced People or prior contacts_read results; never guess IDs from display names." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["create_person", "update_person", "delete_person", "merge_people"], description: "Write operation."),
-            "personID": .string(description: "Exact personID returned by contacts_read; copy the field without renaming it for update_person or delete_person. For Referenced People, use its person_id value."),
+            "personID": .string(description: "Exact personID returned by contacts_read or Referenced People; copy the field and value unchanged for update_person or delete_person."),
             "id": .string(description: "Legacy Person ID accepted for compatibility. Prefer personID; never infer IDs from display name"),
             "sourceID": .string(description: "For merge_people, copy the source person's exact personID returned by contacts_read into this field"),
             "targetID": .string(description: "For merge_people, copy the target person's exact personID returned by contacts_read into this field"),

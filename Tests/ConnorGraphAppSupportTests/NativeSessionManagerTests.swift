@@ -239,8 +239,8 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(response.session.messages.first?.personReferences == [reference])
     #expect(loaded.messages.first?.personReferences == [reference])
     #expect(renderedMessages.contains("Referenced People in Current User Request"))
-    #expect(renderedMessages.contains("person_id: person-duan-leiqiang"))
-    #expect(renderedMessages.contains("memory_entity_id: memory-person-duan"))
+    #expect(renderedMessages.contains("personID: person-duan-leiqiang"))
+    #expect(renderedMessages.contains("memoryEntityID: memory-person-duan"))
 }
 
 @Test func nativeSessionManagerPersistsAskToWritePendingApprovalAndContinuesAfterApproval() async throws {
