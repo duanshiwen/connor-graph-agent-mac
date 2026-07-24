@@ -147,11 +147,15 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     try "one\ntwo\n".write(to: file, atomically: true, encoding: .utf8)
     let tool = LocalMultiEditTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
-    await #expect(throws: AgentToolError.self) {
+    do {
         _ = try await tool.execute(
             arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","edits":[{"oldText":"one","newText":"ONE"},{"oldText":"missing","newText":"MISSING"}]}"#),
             context: .localToolTestContext(toolCallID: "multi-invalid")
         )
+        Issue.record("Expected an invalidArguments error")
+    } catch let error as AgentToolError {
+        #expect(error.description.contains("oldText must occur exactly once"))
+        #expect(!error.description.contains("old_text"))
     }
     #expect(try String(contentsOf: file, encoding: .utf8) == "one\ntwo\n")
 }

@@ -92,7 +92,7 @@ public struct CloudKnowledgeRecentContextTool: AgentTool {
         self.knowledgeBaseIDs = resolvedIDs
         self.description = resolvedIDs.isEmpty
             ? "No remote knowledge bases are selected for this session. Do not call this tool or reuse remote knowledge context from earlier user runs."
-            : "Search only L2 mutable operational context from the remote knowledge bases selected for this session, including current project or task state, recent decisions, and other time-sensitive facts. Compare recorded_at when results conflict. This tool never returns L3/L4 durable knowledge."
+            : "Search only L2 mutable operational context from the remote knowledge bases selected for this session, including current project or task state, recent decisions, and other time-sensitive facts. Compare the returned updatedAt values when results conflict. This tool never returns L3/L4 durable knowledge."
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {

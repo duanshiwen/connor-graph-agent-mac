@@ -187,6 +187,8 @@ struct CloudKnowledgePhase6Tests {
 
         let recent = try await recentTool.execute(arguments: arguments, context: context)
         let knowledge = try await knowledgeTool.execute(arguments: arguments, context: context)
+        #expect(recentTool.description.contains("updatedAt"))
+        #expect(!recentTool.description.contains("recorded_at"))
         #expect(recent.contentText.contains("## L2"))
         #expect(!recent.contentText.contains("## L3"))
         #expect(knowledge.contentText.contains("## L3"))
