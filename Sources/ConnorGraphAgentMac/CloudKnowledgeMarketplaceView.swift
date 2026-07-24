@@ -36,6 +36,18 @@ struct CloudKnowledgeMarketplaceListPane: View {
             if canUseMarketplace {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
+                        marketplaceSectionHeader("知识市场")
+                        if store.searchResults.isEmpty {
+                            emptyRow("暂无可用知识库")
+                        } else {
+                            ForEach(store.searchResults) { base in
+                                libraryRow(base, caption: base.subscribed ? "市场 · 已订阅" : "市场")
+                                    .onAppear {
+                                        Task { await store.loadMoreSearchResultsIfNeeded(currentID: base.id) }
+                                    }
+                            }
+                        }
+
                         marketplaceSectionHeader("已订阅")
                         if store.library.subscribed.isEmpty {
                             emptyRow("暂未订阅知识库")

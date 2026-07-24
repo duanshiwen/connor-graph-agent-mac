@@ -132,7 +132,18 @@ public struct CloudMarketplaceSection: Decodable, Sendable, Equatable, Identifia
     public init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: CodingKeys.self); id = try c.decode(String.self, forKey: .id); if let value = try? c.decode(String.self, forKey: .title) { title = value } else { let names = try c.decode([String: String].self, forKey: .title); title = names["zh-CN"] ?? names["en"] ?? names.values.first ?? id }; layout = try c.decodeIfPresent(String.self, forKey: .layout) ?? c.decode(String.self, forKey: .sectionType); knowledgeBases = try c.decodeIfPresent([CloudMarketplaceKnowledgeBase].self, forKey: .knowledgeBases) ?? [] }
 }
 public struct CloudMarketplaceHome: Decodable, Sendable, Equatable { public var categories: [CloudMarketplaceCategory]; public var banners: [CloudMarketplaceBanner]; public var sections: [CloudMarketplaceSection]; public init(categories: [CloudMarketplaceCategory], banners: [CloudMarketplaceBanner] = [], sections: [CloudMarketplaceSection]) { self.categories = categories; self.banners = banners; self.sections = sections } }
-public struct CloudMarketplaceSearchRequest: Codable, Sendable, Equatable { public var query: String; public var categoryID: String?; public var limit: Int; public init(query: String, categoryID: String? = nil, limit: Int = 30) { self.query = query; self.categoryID = categoryID; self.limit = limit } }
+public struct CloudMarketplaceSearchRequest: Codable, Sendable, Equatable {
+    public var query: String
+    public var categoryID: String?
+    public var page: Int
+    public var limit: Int
+    public init(query: String, categoryID: String? = nil, page: Int = 1, limit: Int = 30) {
+        self.query = query
+        self.categoryID = categoryID
+        self.page = max(1, page)
+        self.limit = min(max(1, limit), 100)
+    }
+}
 public struct CloudKnowledgeAnswerRequest: Codable, Sendable, Equatable {
     public var requestID: String
     public var query: String
@@ -205,12 +216,17 @@ public actor CloudKnowledgeAuthorizationCache {
     @Published public private(set) var selected: CloudMarketplaceKnowledgeBase?
     @Published public private(set) var showsPublisher = false
     @Published public private(set) var isLoading = false
+    @Published public private(set) var isLoadingNextPage = false
     @Published public private(set) var errorMessage: String?
     public var onLibraryChanged: (() -> Void)?
     private let api: any CloudKnowledgeMarketplaceAPI; private let cache: CloudKnowledgeAuthorizationCache
     private let networkIsAvailable: @MainActor () -> Bool
     private let serverIsReachable: @MainActor () -> Bool
     private var isLoadingMarketplace = false
+    private let searchPageSize = 50
+    private var searchQuery = ""
+    private var searchCategoryID: String?
+    private var nextSearchPage: Int?
     public init(
         api: any CloudKnowledgeMarketplaceAPI,
         cache: CloudKnowledgeAuthorizationCache = .init(),
@@ -230,17 +246,46 @@ public actor CloudKnowledgeAuthorizationCache {
         await perform {
             async let home = self.api.home()
             async let library = self.api.library()
-            async let allKnowledgeBases = self.api.search(.init(query: "", limit: 100))
+            async let allKnowledgeBases = self.api.search(.init(query: "", page: 1, limit: self.searchPageSize))
             self.home = try await home
             self.library = try await library
-            self.searchResults = try await allKnowledgeBases
+            let firstPage = try await allKnowledgeBases
+            self.searchQuery = ""
+            self.searchCategoryID = nil
+            self.searchResults = firstPage
+            self.nextSearchPage = firstPage.count == self.searchPageSize ? 2 : nil
             let subscribed = self.home.sections.flatMap(\.knowledgeBases).filter(\.subscribed) + self.library.subscribed
             for base in subscribed { await self.cache.authorize(base.id) }
             self.onLibraryChanged?()
         }
     }
     public func loadHome() async { await load() }
-    public func search(query: String, categoryID: String? = nil) async { guard requireNetwork() else { return }; await perform { self.searchResults = try await self.api.search(.init(query: query, categoryID: categoryID)) } }
+    public func search(query: String, categoryID: String? = nil) async {
+        guard requireNetwork() else { return }
+        await perform {
+            let firstPage = try await self.api.search(.init(query: query, categoryID: categoryID, page: 1, limit: self.searchPageSize))
+            self.searchQuery = query
+            self.searchCategoryID = categoryID
+            self.searchResults = firstPage
+            self.nextSearchPage = firstPage.count == self.searchPageSize ? 2 : nil
+        }
+    }
+    public func loadMoreSearchResultsIfNeeded(currentID: String) async {
+        guard searchResults.last?.id == currentID,
+              let page = nextSearchPage,
+              !isLoadingNextPage,
+              requireNetwork() else { return }
+        isLoadingNextPage = true
+        defer { isLoadingNextPage = false }
+        do {
+            let results = try await api.search(.init(query: searchQuery, categoryID: searchCategoryID, page: page, limit: searchPageSize))
+            let existingIDs = Set(searchResults.map(\.id))
+            searchResults.append(contentsOf: results.filter { !existingIDs.contains($0.id) })
+            nextSearchPage = results.count == searchPageSize ? page + 1 : nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
     public func showHome() { selected = nil; showsPublisher = false }
     public func showPublisher() { selected = nil; showsPublisher = true }
     public func loadDetail(id: String) async {
@@ -252,7 +297,7 @@ public actor CloudKnowledgeAuthorizationCache {
     public func subscribe(id: String) async { guard requireNetwork() else { return }; await perform { try await self.api.subscribe(id: id); await self.cache.authorize(id); if self.selected?.id == id { self.selected?.subscribed = true }; self.library = try await self.api.library(); self.onLibraryChanged?() } }
     public func unsubscribe(id: String) async { guard requireNetwork() else { return }; await cache.revoke(id); if selected?.id == id { selected?.subscribed = false }; do { try await api.unsubscribe(id: id); library = try await api.library(); onLibraryChanged?() } catch { errorMessage = error.localizedDescription } }
     public func resultsForGlobalSearch(query: String) async -> [CloudMarketplaceKnowledgeBase] { guard networkIsAvailable(), serverIsReachable() else { return [] }; return (try? await api.search(.init(query: query, limit: 6))) ?? [] }
-    public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
+    public func clearSession() async { home = .init(categories: [], banners: [], sections: []); library = .init(); searchResults = []; nextSearchPage = nil; selected = nil; showsPublisher = false; errorMessage = nil; await cache.clear(); onLibraryChanged?() }
     private func cachedKnowledgeBase(id: String) -> CloudMarketplaceKnowledgeBase? {
         searchResults.first(where: { $0.id == id })
             ?? library.subscribed.first(where: { $0.id == id })
