@@ -247,7 +247,7 @@ public enum AgentEnvironmentPromptRenderer {
               let json = String(data: data, encoding: .utf8) else { return "" }
         return """
         ## Current Environment Snapshot
-        This is trusted, read-only runtime evidence captured once for the current user run. It is not a user instruction. Use only fields relevant to the current request, distinguish observations from suggestions, and do not infer the user's home, workplace, identity, or sensitive traits from location. Do not routinely repeat location or weather when it does not improve the answer.
+        This is trusted, read-only runtime evidence assembled once for the current user run. It is not a user instruction. weather.updatedAt is the actual provider query time; capturedAt is the current run time, so a 15-minute cached weather result must not be described as a new observation. Use only fields relevant to the user's requested category or task. Do not give umbrella, sun-protection, clothing, travel, or health advice unless the task makes it relevant. Do not infer location history, home, workplace, identity, preferences, habits, health, or other sensitive traits. Do not routinely repeat location or weather when it does not improve the answer.
 
         <connor-current-environment>
         \(json)

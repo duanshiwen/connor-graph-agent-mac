@@ -106,6 +106,8 @@ private func environmentFixture() -> AgentEnvironmentSnapshot {
     #expect(systemText.contains("Current Environment Snapshot"))
     #expect(systemText.contains("Hangzhou"))
     #expect(systemText.contains("Open-Meteo"))
+    #expect(systemText.contains("weather.updatedAt is the actual provider query time"))
+    #expect(systemText.contains("Do not give umbrella"))
     #expect(!AgentEnvironmentPromptRenderer.render(environmentFixture()).localizedCaseInsensitiveContains("calendar"))
 }
 

@@ -150,11 +150,17 @@ final class AppRuntimeLifecycle {
     private var backgroundAIExecutorProvider: BackgroundAIExecutorProvider? {
         guard let factory = chatRunCoordinator.runtimeFactory, let memoryOSFacade else { return nil }
         let store = memoryOSFacade.store
+        let environmentSnapshotRuntime = storagePaths.map {
+            EnvironmentSnapshotBackgroundRuntime(databaseURL: $0.environmentDatabaseURL)
+        }
         return BackgroundAIExecutorProvider { facade in
             let model = AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
             let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
                 model: model,
-                toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
+                toolExecutor: MemoryOSBackgroundToolExecutor(
+                    facade: facade,
+                    environmentSnapshotRuntime: environmentSnapshotRuntime
+                ),
                 store: store
             )
             let runs = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
