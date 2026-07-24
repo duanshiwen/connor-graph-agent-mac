@@ -274,6 +274,11 @@ final class GlobalSearchFeatureModel {
         }
     }
 
+    func waitForSessionIndexOperations() async {
+        await sessionIndexBootstrapTask?.value
+        await sessionIndexMutationTask?.value
+    }
+
     func shutdown() {
         guard !isShutdown else { return }
         isShutdown = true
@@ -403,14 +408,9 @@ final class GlobalSearchFeatureModel {
     }
 
     private func searchChatSessions(query: String, limit: Int) async -> [GlobalSearchSessionResult] {
-        if let sessionSearchIndexService,
-           let indexed = try? await sessionSearchIndexService.search(query: query, limit: limit),
-           !indexed.isEmpty {
-            return indexed.map { GlobalSearchSessionResult(id: $0.id, title: $0.title, snippet: $0.snippet, updatedAt: $0.updatedAt, messageCount: $0.messageCount) }
-        }
         let terms = Self.matchTerms(for: query)
         guard !terms.isEmpty else { return [] }
-        return sessionsProvider().compactMap { session -> (GlobalSearchSessionResult, Double)? in
+        let loadedResults = sessionsProvider().compactMap { session -> (GlobalSearchSessionResult, Double)? in
             let titleScore = Self.matchScore(text: session.title, terms: terms, weight: 20)
             var bestMessageScore = 0.0; var bestSnippet = session.messages.last?.content ?? session.title
             for message in session.messages {
@@ -422,6 +422,18 @@ final class GlobalSearchFeatureModel {
             let snippet = titleScore > 0 && bestMessageScore == 0 ? "最近更新：\(session.updatedAt.connorLocalFormatted(date: .medium, time: .short))" : bestSnippet
             return (GlobalSearchSessionResult(id: session.id, title: session.title.isEmpty ? "新对话" : session.title, snippet: snippet, updatedAt: session.updatedAt, messageCount: session.messages.count), total + min(3, Date().timeIntervalSince(session.updatedAt) / -86_400_000))
         }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.updatedAt > $1.0.updatedAt }.prefix(limit).map(\.0)
+
+        guard let sessionSearchIndexService,
+              let indexed = try? await sessionSearchIndexService.search(query: query, limit: limit),
+              !indexed.isEmpty else {
+            return loadedResults
+        }
+        var seen = Set(loadedResults.map(\.id))
+        let indexedResults = indexed.compactMap { result -> GlobalSearchSessionResult? in
+            guard seen.insert(result.id).inserted else { return nil }
+            return GlobalSearchSessionResult(id: result.id, title: result.title, snippet: result.snippet, updatedAt: result.updatedAt, messageCount: result.messageCount)
+        }
+        return Array((loadedResults + indexedResults).prefix(limit))
     }
 
     private static func matchTerms(for query: String) -> [String] {

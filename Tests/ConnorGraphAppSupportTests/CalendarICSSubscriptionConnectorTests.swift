@@ -113,7 +113,8 @@ struct CalendarICSSubscriptionConnectorTests {
         END:VEVENT
         END:VCALENDAR
         """
-        let connector = CalendarICSSubscriptionConnector(fetchICS: { url in
+        let referenceNow = try #require(ISO8601DateFormatter().date(from: "2026-06-24T12:00:00Z"))
+        let connector = CalendarICSSubscriptionConnector(now: { referenceNow }, fetchICS: { url in
             #expect(url.absoluteString == "https://example.com/calendar.ics")
             return ics
         })

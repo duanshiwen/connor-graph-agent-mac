@@ -7,7 +7,7 @@ import ConnorGraphAppSupport
 @MainActor
 @Suite("Sidebar Navigation Performance Regression Tests")
 struct SidebarNavigationPerformanceRegressionTests {
-    @Test func largeFixtureKeepsInitialListWindowsBounded() {
+    @Test func largeFixtureReflectsLoadedSourcePages() {
         let fixture = SidebarNavigationPerformanceFixture.make()
 
         #expect(fixture.sessions.count == 5_000)
@@ -15,9 +15,9 @@ struct SidebarNavigationPerformanceRegressionTests {
         #expect(fixture.rssItems.count == 200)
         #expect(fixture.largeHTML.count >= 500_000)
         #expect(fixture.mailModel.filteredListMessages.count == 500)
-        #expect(fixture.mailModel.visibleListMessages.count == 100)
+        #expect(fixture.mailModel.visibleListMessages.count == 500)
         #expect(fixture.rssModel.visibleItems.count == 200)
-        #expect(fixture.rssModel.visibleWindowItems.count == 50)
+        #expect(fixture.rssModel.visibleWindowItems.count == 200)
     }
 
     @Test func largeSessionMetadataProjectionStaysWithinReleaseBudget() {

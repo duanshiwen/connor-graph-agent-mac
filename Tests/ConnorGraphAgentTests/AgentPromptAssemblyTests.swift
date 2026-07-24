@@ -266,7 +266,8 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Native Personal Source Tools"))
-    #expect(prompt.contains("bounded cached body previews"))
+    #expect(prompt.contains("mail_search_messages_with_body_preview"))
+    #expect(prompt.contains("mail_list_recent_messages_with_body_preview"))
     #expect(prompt.contains("Always pass exact account, identity, message, and draft IDs returned by tools"))
     #expect(prompt.contains("calendar_search_events"))
     #expect(prompt.contains("rss_search_items"))
