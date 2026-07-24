@@ -42,7 +42,7 @@ public struct TaskUpdateScheduledSessionMessageTool: AgentTool {
     public let description = "Update a user or AI scheduled task that creates a session and sends a message. Pass expectedUpdatedAt from tasks_list to prevent overwriting concurrent changes."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "taskID": .string(description: "Exact taskID returned by tasks_list; copy the field without renaming it"),
+        "taskID": .string(description: "Exact taskID returned by tasks_list or a task creation/update result; copy the field without renaming it"),
         "expectedUpdatedAt": .string(description: "Optional current updatedAt ISO-8601 value for optimistic concurrency"),
         "name": .string(description: "Optional replacement task name"),
         "runAt": .string(description: "Optional replacement first run time as ISO-8601"),
@@ -104,7 +104,7 @@ public struct TaskDeleteTool: AgentTool {
     public let description = "Soft-delete a user or AI task. Protected system tasks cannot be deleted."
     public let permission: AgentPermissionCapability = .commitGraphWrite
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "taskID": .string(description: "Exact taskID returned by tasks_list; copy the field without renaming it"),
+        "taskID": .string(description: "Exact taskID returned by tasks_list or a task creation/update result; copy the field without renaming it"),
         "reason": .string(description: "Optional deletion reason")
     ], required: ["taskID"])
     private let repository: AppTaskManagementRepository
