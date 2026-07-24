@@ -115,7 +115,7 @@ struct BrowserAssistedWebToolTests {
             arguments: AgentToolArguments(values: [
                 "query": .string("native"),
                 "engine": .string("duckduckgo"),
-                "max_results": .int(1)
+                "maxResults": .int(1)
             ]),
             context: Self.context()
         )
@@ -181,6 +181,8 @@ struct BrowserAssistedWebToolTests {
         )
 
         #expect(result.contentText == "Authenticated browser content")
+        #expect(result.contentJSON?.contains("\"tabID\":\"tab-browser-fetch\"") == true)
+        #expect(result.contentJSON?.contains("\"tab_id\"") == false)
         #expect(result.contentJSON?.contains(#""engine":"wkwebview""#) == true)
         #expect(result.contentJSON?.contains(#""browserAssisted":true"#) == true)
     }
@@ -197,7 +199,7 @@ struct BrowserAssistedWebToolTests {
             _ = try await tool.execute(
                 arguments: AgentToolArguments(values: [
                     "url": .string("https://example.com/slow-browser"),
-                    "timeout_ms": .int(1_000)
+                    "timeoutMs": .int(1_000)
                 ]),
                 context: Self.context()
             )
@@ -243,8 +245,8 @@ struct BrowserAssistedWebToolTests {
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
                 "url": .string("https://example.com/native"),
-                "render_mode": .string("http"),
-                "extract_mode": .string("markdown")
+                "renderMode": .string("http"),
+                "extractMode": .string("markdown")
             ]),
             context: Self.context()
         )
@@ -268,8 +270,8 @@ struct BrowserAssistedWebToolTests {
             _ = try await tool.execute(
                 arguments: AgentToolArguments(values: [
                     "url": .string("https://example.com/slow"),
-                    "render_mode": .string("http"),
-                    "timeout_ms": .int(1_000)
+                    "renderMode": .string("http"),
+                    "timeoutMs": .int(1_000)
                 ]),
                 context: Self.context()
             )
@@ -314,8 +316,8 @@ struct BrowserAssistedWebToolTests {
         _ = try await tool.execute(
             arguments: AgentToolArguments(values: [
                 "url": .string("https://example.com/protected"),
-                "render_mode": .string("auto"),
-                "timeout_ms": .int(720_000)
+                "renderMode": .string("auto"),
+                "timeoutMs": .int(720_000)
             ]),
             context: Self.context()
         )
@@ -349,8 +351,8 @@ struct BrowserAssistedWebToolTests {
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
                 "url": .string("https://example.com/app"),
-                "render_mode": .string("js"),
-                "extract_mode": .string("markdown")
+                "renderMode": .string("js"),
+                "extractMode": .string("markdown")
             ]),
             context: Self.context()
         )
@@ -397,7 +399,7 @@ struct BrowserAssistedWebToolTests {
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
                 "url": .string("https://example.com/protected"),
-                "render_mode": .string("auto")
+                "renderMode": .string("auto")
             ]),
             context: Self.context()
         )
@@ -429,7 +431,7 @@ struct BrowserAssistedWebToolTests {
             _ = try await tool.execute(
                 arguments: AgentToolArguments(values: [
                     "url": .string("https://example.com/protected"),
-                    "render_mode": .string("http")
+                    "renderMode": .string("http")
                 ]),
                 context: Self.context()
             )
@@ -461,7 +463,7 @@ struct BrowserAssistedWebToolTests {
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
                 "url": .string("https://example.com/challenge"),
-                "render_mode": .string("js")
+                "renderMode": .string("js")
             ]),
             context: Self.context()
         )
@@ -497,7 +499,7 @@ struct BrowserAssistedWebToolTests {
             arguments: AgentToolArguments(values: [
                 "query": .string(query),
                 "engine": .string(engine),
-                "max_results": .int(3)
+                "maxResults": .int(3)
             ]),
             context: Self.context()
         )
@@ -509,6 +511,8 @@ struct BrowserAssistedWebToolTests {
         #expect(recorder.requests.first?.urlString.contains(expectedQueryParameter) == true)
         #expect(result.contentText.contains("built-in browser background runner"))
         #expect(result.contentText.contains("Task ID: task-\(engine)"))
+        #expect(result.contentJSON?.contains("\"tabID\":\"tab-\(engine)\"") == true)
+        #expect(result.contentJSON?.contains("\"tab_id\"") == false)
     }
 
     private struct FakeNativeWebHTTPClient: NativeWebHTTPClient {

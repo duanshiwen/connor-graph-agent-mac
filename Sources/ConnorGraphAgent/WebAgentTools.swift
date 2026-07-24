@@ -92,9 +92,9 @@ public struct BrowserFetchTool: AgentTool {
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "url": .string(description: "The absolute http/https URL to fetch."),
-        "max_chars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
-        "user_agent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0."),
-        "timeout_ms": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
+        "maxChars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
+        "userAgent": .string(description: "Optional User-Agent header for the lightweight fallback. Defaults to ConnorGraphAgent/1.0."),
+        "timeoutMs": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
     ], required: ["url"])
 
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -107,8 +107,8 @@ public struct BrowserFetchTool: AgentTool {
         guard let urlString = arguments.string("url"), let url = URL(string: urlString), ["http", "https"].contains(url.scheme?.lowercased()) else {
             throw AgentToolError.invalidArguments("browser_fetch requires an absolute http/https url")
         }
-        let maxChars = min(max(arguments.int("max_chars") ?? 12_000, 1_000), 50_000)
-        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeout_ms"))
+        let maxChars = min(max(arguments.int("maxChars") ?? arguments.int("max_chars") ?? 12_000, 1_000), 50_000)
+        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeoutMs") ?? arguments.int("timeout_ms"))
         return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
             try await executeWithinDeadline(
                 arguments: arguments,
@@ -149,7 +149,6 @@ public struct BrowserFetchTool: AgentTool {
                     "taskID": result.taskID,
                     "sessionID": result.sessionID,
                     "tabID": result.tabID,
-                    "tab_id": result.tabID,
                     "status": result.status.rawValue,
                     "errorMessage": result.errorMessage as Any,
                     "interventionReason": result.interventionReason as Any,
@@ -181,7 +180,7 @@ public struct BrowserFetchTool: AgentTool {
             }
         }
 
-        let userAgent = arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
+        let userAgent = arguments.string("userAgent") ?? arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
         var request = URLRequest(url: url)
         request.timeoutInterval = TimeInterval(timeoutMilliseconds) / 1_000
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
@@ -378,7 +377,7 @@ public struct NativeWebSearchTool: AgentTool {
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Search query keywords."),
         "engine": .stringEnumeration(values: ["duckduckgo", "bing", "google", "yahoo", "baidu"], description: "Search engine. Defaults to duckduckgo."),
-        "max_results": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
+        "maxResults": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
     ], required: ["query"])
 
     private let browserAssistedSearchHandler: BrowserAssistedSearchHandler?
@@ -397,7 +396,7 @@ public struct NativeWebSearchTool: AgentTool {
             throw AgentToolError.invalidArguments("web_search requires query")
         }
         let engine = (arguments.string("engine") ?? "duckduckgo").lowercased()
-        let maxResults = min(max(arguments.int("max_results") ?? 5, 1), 10)
+        let maxResults = min(max(arguments.int("maxResults") ?? arguments.int("max_results") ?? 5, 1), 10)
 
         if Self.requiresBrowser(engine: engine), let browserAssistedSearchHandler {
             let urlString = Self.searchURLString(query: query, engine: engine)
@@ -433,7 +432,6 @@ public struct NativeWebSearchTool: AgentTool {
                         "taskID": browserResult.taskID,
                         "sessionID": browserResult.sessionID,
                         "tabID": browserResult.tabID,
-                        "tab_id": browserResult.tabID,
                         "url": browserResult.urlString,
                         "status": browserResult.status
                     ]),
@@ -581,10 +579,10 @@ public struct NativeWebFetchTool: AgentTool {
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "url": .string(description: "The absolute URL to fetch."),
-        "extract_mode": .stringEnumeration(values: ["markdown", "text"], description: "Extraction format. Defaults to markdown."),
-        "render_mode": .stringEnumeration(values: ["auto", "http", "js"], description: "Rendering strategy. Defaults to auto."),
-        "wait_until": .stringEnumeration(values: ["load", "domcontentloaded", "networkidle", "commit"], description: "Page readiness condition. Defaults to networkidle."),
-        "timeout_ms": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
+        "extractMode": .stringEnumeration(values: ["markdown", "text"], description: "Extraction format. Defaults to markdown."),
+        "renderMode": .stringEnumeration(values: ["auto", "http", "js"], description: "Rendering strategy. Defaults to auto."),
+        "waitUntil": .stringEnumeration(values: ["load", "domcontentloaded", "networkidle", "commit"], description: "Page readiness condition. Defaults to networkidle."),
+        "timeoutMs": .integer(description: "Total timeout in milliseconds. Defaults to 30000, capped at 60000.")
     ], required: ["url"])
 
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
@@ -602,10 +600,10 @@ public struct NativeWebFetchTool: AgentTool {
         guard let url = arguments.string("url"), !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AgentToolError.invalidArguments("web_fetch requires url")
         }
-        let renderMode = (arguments.string("render_mode") ?? "auto").lowercased()
-        let extractMode = (arguments.string("extract_mode") ?? "markdown").lowercased()
-        let waitUntil = (arguments.string("wait_until") ?? "networkidle").lowercased()
-        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeout_ms"))
+        let renderMode = (arguments.string("renderMode") ?? arguments.string("render_mode") ?? "auto").lowercased()
+        let extractMode = (arguments.string("extractMode") ?? arguments.string("extract_mode") ?? "markdown").lowercased()
+        let waitUntil = (arguments.string("waitUntil") ?? arguments.string("wait_until") ?? "networkidle").lowercased()
+        let timeoutMilliseconds = WebFetchTimeoutPolicy.normalized(arguments.int("timeoutMs") ?? arguments.int("timeout_ms"))
         return try await WebFetchDeadline.run(toolName: name, timeoutMilliseconds: timeoutMilliseconds) {
             try await executeWithinDeadline(
                 url: url,
@@ -704,7 +702,6 @@ public struct NativeWebFetchTool: AgentTool {
             "taskID": browserResult.taskID,
             "sessionID": browserResult.sessionID,
             "tabID": browserResult.tabID,
-            "tab_id": browserResult.tabID,
             "status": browserResult.status.rawValue,
             "errorMessage": browserResult.errorMessage as Any,
             "interventionReason": browserResult.interventionReason as Any,
