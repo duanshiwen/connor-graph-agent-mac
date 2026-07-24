@@ -521,7 +521,12 @@ struct CraftContactsListPane: View {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
-                ContactsRowsScrollView(rows: model.presentation.rows, selectedID: model.selectedContactID, onSelect: { model.selectedContactID = $0 })
+                ContactsRowsScrollView(
+                    rows: model.presentation.rows,
+                    selectedID: model.selectedContactID,
+                    onSelect: { model.selectedContactID = $0 },
+                    onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -532,12 +537,14 @@ private struct ContactsRowsScrollView: View {
     var rows: [NativeContactRowPresentation]
     var selectedID: ContactID?
     var onSelect: (ContactID) -> Void
+    var onLoadMore: (ContactID) -> Void
 
     var body: some View {
         ScrollView {
-            VStack(spacing: AppListCardLayout.spacing) {
+            LazyVStack(spacing: AppListCardLayout.spacing) {
                 ForEach(rows) { row in
                     ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
+                        .onAppear { onLoadMore(row.id) }
                 }
             }
             .padding(.horizontal, AppListCardLayout.horizontalInset)
