@@ -242,6 +242,6 @@ private func nonEmpty(_ raw: String?) -> String? {
 private func result(task: ConnorTaskDefinition, context: AgentToolExecutionContext, toolName: String, text: String) throws -> AgentToolResult {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
-    let json = String(decoding: try encoder.encode(task), as: UTF8.self)
+    let json = String(decoding: try encoder.encode(TaskListItem(task)), as: UTF8.self)
     return AgentToolResult(toolCallID: context.toolCallID, toolName: toolName, contentText: text, contentJSON: json)
 }
