@@ -94,6 +94,7 @@ public struct NativeSessionManager: Sendable {
         permissionMode: AgentPermissionMode = .askToWrite,
         recentMessageLimit: Int = 6,
         memoryOSFacade: AppMemoryOSFacade? = nil,
+        memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
         eventRecorder: AgentEventRecorder? = nil,
         pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
         compressionProvider: AnyLLMProvider? = nil,
@@ -111,7 +112,7 @@ public struct NativeSessionManager: Sendable {
         self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
         self.memoryOSFacade = memoryOSFacade
-        self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
+        self.memoryOSIngestionWriter = memoryOSFacade.map { MemoryOSIngestionWriter(facade: $0, intentNormalizer: memoryOSIntentNormalizer) }
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.compressionProvider = compressionProvider
@@ -132,7 +133,8 @@ public struct NativeSessionManager: Sendable {
             session: session,
             groupID: groupID,
             permissionMode: loopController.configuration.permissionMode,
-            memoryOSFacade: memoryOSFacade
+            memoryOSFacade: memoryOSFacade,
+            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider)))
         )
     }
 

@@ -422,9 +422,13 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         role: String,
         content: String,
         occurredAt: Date,
+        retrievalText: String? = nil,
+        normalizationStatus: MemoryOSIntentNormalizationStatus? = nil,
         metadata: [String: String] = [:]
     ) throws -> MemoryOSIngestionResult {
         let sourceType: MemoryOSSourceType = role == "assistant" ? .assistantMessage : .chatMessage
+        let resolvedRetrievalText = sourceType == .assistantMessage ? (retrievalText ?? content) : retrievalText
+        let resolvedNormalizationStatus = normalizationStatus ?? (sourceType == .assistantMessage ? .notRequired : .failed)
         let result = ingestionService.ingest(MemoryOSIngestionInput(
             sourceType: sourceType,
             sourceID: messageID,
@@ -432,6 +436,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             content: content,
             occurredAt: occurredAt,
             sessionID: sessionID,
+            retrievalText: resolvedRetrievalText,
+            normalizationStatus: resolvedNormalizationStatus,
             metadata: metadata.merging(["source_kind": role == "assistant" ? "assistant_message" : "chat_message"]) { current, _ in current }
         ))
         try repository.save(result)

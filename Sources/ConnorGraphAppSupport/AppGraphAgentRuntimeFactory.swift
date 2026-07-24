@@ -123,13 +123,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         remoteKnowledgeBaseIDs: [String]? = nil,
         allowedMCPToolNames: [String]? = nil
     ) -> NativeSessionManager {
-        NativeSessionManager(
+        let intentProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
+        return NativeSessionManager(
             backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs, allowedMCPToolNames: allowedMCPToolNames)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
             permissionMode: permissionMode,
-            memoryOSFacade: makeMemoryOSFacade()
+            memoryOSFacade: makeMemoryOSFacade(),
+            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider))
         )
     }
 
