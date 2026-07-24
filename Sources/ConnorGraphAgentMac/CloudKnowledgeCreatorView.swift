@@ -334,15 +334,18 @@ struct CloudKnowledgeCreatorView: View {
                 .font(.headline)
                 .foregroundStyle(.green)
             Button("浏览修订历史") { Task { await store.loadHistory() } }
-            ForEach(store.history) { revision in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(revision.title ?? revision.identityID)
-                        .fontWeight(.medium)
-                    Text("\(revision.layer.rawValue) · revision \(revision.revisionNumber)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(revision.text)
-                        .lineLimit(3)
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(store.history) { revision in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(revision.title ?? revision.identityID)
+                            .fontWeight(.medium)
+                        Text("\(revision.layer.rawValue) · revision \(revision.revisionNumber)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(revision.text)
+                            .lineLimit(3)
+                    }
+                    .onAppear { Task { await store.loadMoreHistoryIfNeeded(currentRevisionID: revision.id) } }
                 }
             }
             actionBar {
