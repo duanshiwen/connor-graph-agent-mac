@@ -34,7 +34,7 @@ import ConnorGraphAgent
     #expect(!gated.contains("truncated"))
 }
 
-@Test func toolResultGatePrefersTextContentOverJSONMetadataWhenAvailable() {
+@Test func toolResultGatePreservesTextAndJSONWhenBothAreAvailable() {
     let result = AgentToolResult(
         toolCallID: "call-bash-1",
         toolName: "Bash",
@@ -45,9 +45,39 @@ import ConnorGraphAgent
 
     let gated = gate.gatedContent(for: result)
 
+    #expect(gated.contains("[STRUCTURED RESULT JSON]"))
+    #expect(gated.contains("{\"exitCode\":0,\"truncated\":false}"))
+    #expect(gated.contains("[RESULT TEXT]"))
     #expect(gated.contains("stdout:"))
     #expect(gated.contains("hello"))
-    #expect(gated != "{\"exitCode\":0,\"truncated\":false}")
+}
+
+@Test func toolResultGateExposesOperationReadyFieldsHiddenBySummaryText() {
+    let result = AgentToolResult(
+        toolCallID: "call-list-1",
+        toolName: "example_list",
+        contentText: "Found 2 records.",
+        contentJSON: #"{"nextPage":2,"records":[{"recordID":"record-1"},{"recordID":"record-2"}]}"#
+    )
+
+    let gated = AgentToolResultGate(configuration: .init(maxResultCharacters: 1_024)).gatedContent(for: result)
+
+    #expect(gated.contains("\"recordID\":\"record-1\""))
+    #expect(gated.contains("\"recordID\":\"record-2\""))
+    #expect(gated.contains("\"nextPage\":2"))
+    #expect(gated.contains("Found 2 records."))
+}
+
+@Test func toolResultGateDoesNotDuplicateEquivalentTextAndJSON() {
+    let json = #"{"sessionID":"session-1"}"#
+    let result = AgentToolResult(
+        toolCallID: "call-equal-1",
+        toolName: "session_list_by_status",
+        contentText: json,
+        contentJSON: json
+    )
+
+    #expect(AgentToolResultGate().gatedContent(for: result) == json)
 }
 
 @Test func toolResultGateFallsBackToJSONContentWhenTextIsEmpty() {
