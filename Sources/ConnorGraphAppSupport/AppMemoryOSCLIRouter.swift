@@ -2,8 +2,31 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
+import ConnorGraphAgent
 
 public enum AppMemoryOSCLIRouter {
+    public static func routeAsync(
+        args: [String],
+        inspector: AppMemoryOSCLIInspector,
+        encoder: JSONEncoder,
+        intentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil
+    ) async throws -> String {
+        guard args.first == "ingest-chat" else {
+            return try route(args: args, inspector: inspector, encoder: encoder)
+        }
+        guard let content = try chatContent(args: args), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return try encode(MemoryOSCLIError(error: "missing_chat_content", usage: "connor memory ingest-chat --content <text> [--session-id id] [--message-id id] | --file <path>"), encoder: encoder)
+        }
+        let normalizer = try intentNormalizer ?? makeLiveIntentNormalizer()
+        let result = await inspector.ingestChatMessage(
+            content: content,
+            sessionID: optionValue("--session-id", in: args) ?? "cli-memory-test",
+            messageID: optionValue("--message-id", in: args) ?? "cli-memory-test:\(UUID().uuidString)",
+            intentNormalizer: normalizer
+        )
+        return try encode(result, encoder: encoder)
+    }
+
     public static func route(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         let command = args.first ?? "status"
         switch command {
@@ -55,7 +78,7 @@ public enum AppMemoryOSCLIRouter {
         case "pipeline":
             return try routePipeline(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         default:
-            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|context|l0|l1|l2|l3|l4|search-index|queue|runs|run|pipeline|l1-history"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|ingest-chat|search|context|l0|l1|l2|l3|l4|search-index|queue|runs|run|pipeline|l1-history"), encoder: encoder)
         }
     }
 
@@ -185,10 +208,18 @@ public enum AppMemoryOSCLIRouter {
     private static func routePipeline(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         switch args.first ?? "policy" {
         case "policy": return try encode(inspector.pipelinePolicy(), encoder: encoder)
-        case "plan-l1", "plan-l1-knowledge": return try encode(try inspector.planL1(), encoder: encoder)
+        case "plan-l1", "plan-l1-knowledge":
+            let defaults = MemoryOSL1ProcessingTriggerPolicy()
+            let policy = MemoryOSL1ProcessingTriggerPolicy(
+                minPendingCount: max(1, intOption("--min-pending-count", in: args, default: defaults.minPendingCount)),
+                maxEventsPerBlock: max(1, intOption("--max-events-per-block", in: args, default: defaults.maxEventsPerBlock)),
+                maxTokensPerBlock: max(1, intOption("--max-tokens-per-block", in: args, default: defaults.maxTokensPerBlock)),
+                maxPendingAge: defaults.maxPendingAge
+            )
+            return try encode(try inspector.planL1(policy: policy), encoder: encoder)
         case "debug-run-next":
             return try routePipelineDebugRunNext(args: args, inspector: inspector, encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1|debug-run-next"), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1 [--min-pending-count N] [--max-events-per-block N] [--max-tokens-per-block N]|debug-run-next"), encoder: encoder)
         }
     }
 
@@ -222,6 +253,14 @@ public enum AppMemoryOSCLIRouter {
     }
 
     private static func makeLiveDebugLoopModel() throws -> AgentModelBackgroundToolLoopModel {
+        AgentModelBackgroundToolLoopModel(provider: try makeLiveAgentModelProvider())
+    }
+
+    private static func makeLiveIntentNormalizer() throws -> AnyMemoryOSUserIntentNormalizer {
+        AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: try makeLiveAgentModelProvider()))
+    }
+
+    private static func makeLiveAgentModelProvider() throws -> AnyAgentModelProvider {
         let paths = try AppStoragePaths.live()
         try paths.ensureDirectoryHierarchy()
         let graphStore = try AppGraphBootstrapper(paths: paths).bootstrapStore()
@@ -231,7 +270,7 @@ public enum AppMemoryOSCLIRouter {
             settingsRepository: settingsRepository,
             storagePaths: paths
         )
-        return AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
+        return factory.makeAgentModelProvider()
     }
 
     private static func debugResetFoundationKG() throws -> [String: String] {
@@ -272,6 +311,14 @@ public enum AppMemoryOSCLIRouter {
 
     private static func l2UpdateEntitiesJSON(args: [String]) throws -> String? {
         if let raw = optionValue("--json", in: args) { return raw }
+        if let file = optionValue("--file", in: args) {
+            return try String(contentsOfFile: file, encoding: .utf8)
+        }
+        return nil
+    }
+
+    private static func chatContent(args: [String]) throws -> String? {
+        if let content = optionValue("--content", in: args) { return content }
         if let file = optionValue("--file", in: args) {
             return try String(contentsOfFile: file, encoding: .utf8)
         }
