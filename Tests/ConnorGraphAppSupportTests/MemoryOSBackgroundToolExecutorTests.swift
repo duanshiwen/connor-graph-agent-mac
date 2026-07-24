@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
@@ -56,6 +57,49 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(result.contentText.contains("prov-1"))
         #expect(result.contentJSON.contains("stateless batch"))
         #expect(result.citations == ["prov-1", "span-1"])
+    }
+
+    @Test func readsSparseEnvironmentSnapshotsWithoutNetworkOrReconstruction() async throws {
+        let memoryStore = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try memoryStore.migrate()
+        let environmentURL = temporaryBackgroundToolDatabaseURL("environment-\(UUID().uuidString)")
+        let environmentStore = try await SQLiteEnvironmentStore.open(databaseURL: environmentURL)
+        let region = try #require(AgentEnvironmentRegion.containing(latitude: 30.12345, longitude: 120.98765))
+        let observedAt = try #require(ISO8601DateFormatter().date(from: "2026-07-01T00:00:00Z"))
+        let regionID = try await environmentStore.upsertRegion(
+            region,
+            timeZoneIdentifier: "Asia/Shanghai",
+            administrativeArea: "Zhejiang",
+            locality: "杭州",
+            now: observedAt
+        )
+        try await environmentStore.upsertWeatherPoint(EnvironmentWeatherPoint(
+            regionID: regionID,
+            observedAt: observedAt,
+            dataKind: .currentObservation,
+            provider: "Open-Meteo",
+            temperatureCelsius: 28,
+            fetchedAt: observedAt
+        ))
+        let executor = MemoryOSBackgroundToolExecutor(
+            facade: AppMemoryOSFacade(store: memoryStore),
+            environmentSnapshotRuntime: EnvironmentSnapshotBackgroundRuntime(databaseURL: environmentURL)
+        )
+
+        let result = try executor.execute(
+            .init(
+                id: "environment-read",
+                name: "environment_history_query",
+                argumentsJSON: #"{"place":"杭州","start":"2026-07-01T00:00:00Z","end":"2026-07-01T00:00:00Z","categories":["weather"]}"#
+            ),
+            context: .init(runID: "environment-run", iteration: 1)
+        )
+
+        #expect(result.contentJSON.contains("provider_query_snapshots"))
+        #expect(result.contentJSON.contains("\"continuous_coverage\":false"))
+        #expect(result.contentJSON.contains("\"temperature_celsius\":28"))
+        #expect(result.contentJSON.contains("30.12345") == false)
+        #expect(result.contentText.contains("no missing interval was reconstructed"))
     }
 
     @Test func exposesSeparatedBackgroundContextToolsAndRejectsLegacyTool() throws {

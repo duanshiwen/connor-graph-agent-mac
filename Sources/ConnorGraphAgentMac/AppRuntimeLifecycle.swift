@@ -122,6 +122,17 @@ final class AppRuntimeLifecycle {
     let connorSpeechPlaybackCoordinator: ConnorSpeechPlaybackCoordinator
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
+    private lazy var environmentLocationService = MacCurrentLocationService()
+    private lazy var environmentPersistence = storagePaths.map {
+        EnvironmentSnapshotPersistence(databaseURL: $0.environmentDatabaseURL)
+    }
+    private lazy var environmentProvider = AnyAgentEnvironmentProvider(
+        MacAgentEnvironmentProvider(
+            locationService: environmentLocationService,
+            weatherProvider: OpenMeteoWeatherProvider(),
+            persistence: environmentPersistence
+        )
+    )
     var memoryOSSearchHealthSummary: String?
     private(set) var isMemoryOSSearchIndexRepairing = false
 
@@ -139,11 +150,17 @@ final class AppRuntimeLifecycle {
     private var backgroundAIExecutorProvider: BackgroundAIExecutorProvider? {
         guard let factory = chatRunCoordinator.runtimeFactory, let memoryOSFacade else { return nil }
         let store = memoryOSFacade.store
+        let environmentSnapshotRuntime = storagePaths.map {
+            EnvironmentSnapshotBackgroundRuntime(databaseURL: $0.environmentDatabaseURL)
+        }
         return BackgroundAIExecutorProvider { facade in
             let model = AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
             let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
                 model: model,
-                toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
+                toolExecutor: MemoryOSBackgroundToolExecutor(
+                    facade: facade,
+                    environmentSnapshotRuntime: environmentSnapshotRuntime
+                ),
                 store: store
             )
             let runs = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
@@ -828,7 +845,8 @@ final class AppRuntimeLifecycle {
                             )
                         }
                     }
-                )
+                ),
+                environmentProvider: environmentProvider
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
                 guard let self else { throw CancellationError() }

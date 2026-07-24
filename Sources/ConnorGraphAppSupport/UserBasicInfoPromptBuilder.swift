@@ -14,8 +14,6 @@ public struct UserBasicInfoPromptBuilder: Sendable, Equatable {
             ("语言偏好", preferences.preferredLanguage),
             ("性别", preferences.genderIdentity),
             ("出生日期", preferences.birthDate),
-            ("城市", preferences.city),
-            ("国家/地区", preferences.country),
             ("备注", preferences.notes)
         ]
         let renderedRows = rows

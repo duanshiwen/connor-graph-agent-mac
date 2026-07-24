@@ -40,6 +40,9 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         "memory_os_expand_l4",
         "memory_os_l4_find_entity",
         "memory_os_l4_neighbors",
+        "environment_history_coverage",
+        "environment_history_query",
+        "environment_history_compare",
         "memory_os_l2_update_entities",
         "memory_os_update_current_user_profile",
         "memory_os_l3_update_beliefs",
@@ -48,13 +51,16 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
 
     public var facade: AppMemoryOSFacade
     public var contextToolConfiguration: MemoryOSContextToolConfiguration
+    public var environmentSnapshotRuntime: EnvironmentSnapshotBackgroundRuntime?
 
     public init(
         facade: AppMemoryOSFacade,
-        contextToolConfiguration: MemoryOSContextToolConfiguration = .init()
+        contextToolConfiguration: MemoryOSContextToolConfiguration = .init(),
+        environmentSnapshotRuntime: EnvironmentSnapshotBackgroundRuntime? = nil
     ) {
         self.facade = facade
         self.contextToolConfiguration = contextToolConfiguration
+        self.environmentSnapshotRuntime = environmentSnapshotRuntime
     }
 
     public func execute(_ call: MemoryOSBackgroundToolCall, context: MemoryOSBackgroundToolExecutionContext) throws -> MemoryOSBackgroundToolResult {
@@ -75,6 +81,18 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
         let args = try Arguments(json: call.argumentsJSON)
         switch call.name {
+        case "environment_history_coverage", "environment_history_query", "environment_history_compare":
+            guard let environmentSnapshotRuntime else {
+                throw MemoryOSBackgroundToolExecutionError.toolExecutionFailed("environment snapshot database is unavailable")
+            }
+            let json = try environmentSnapshotRuntime.execute(toolName: call.name, arguments: agentArguments)
+            return MemoryOSBackgroundToolResult(
+                callID: call.id,
+                name: call.name,
+                contentJSON: json,
+                contentText: "Returned only sparse environment snapshots captured at actual provider query times; no missing interval was reconstructed."
+            )
+
         case "memory_os_recent_context", "memory_os_knowledge_context":
             let isRecent = call.name == "memory_os_recent_context"
             let allowedArguments: Set<String> = isRecent
@@ -283,12 +301,35 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         case "memory_os_expand_l4": MemoryOSExpandL4Tool(facade: facade).inputSchema
         case "memory_os_l4_find_entity": MemoryOSL4FindEntityTool(facade: facade).inputSchema
         case "memory_os_l4_neighbors": MemoryOSL4NeighborsTool(facade: facade).inputSchema
+        case "environment_history_coverage", "environment_history_query": Self.environmentHistorySchema(compare: false)
+        case "environment_history_compare": Self.environmentHistorySchema(compare: true)
         case "memory_os_l2_update_entities": MemoryOSL2UpdateEntitiesTool(facade: facade).inputSchema
         case "memory_os_update_current_user_profile": MemoryOSUpdateCurrentUserProfileTool(facade: facade).inputSchema
         case "memory_os_l3_update_beliefs": MemoryOSL3UpdateBeliefsTool(facade: facade).inputSchema
         case "memory_os_l4_update_entities": MemoryOSL4UpdateEntitiesTool(facade: facade).inputSchema
         default: nil
         }
+    }
+
+    private static func environmentHistorySchema(compare: Bool) -> AgentToolInputSchema {
+        let categories = AgentToolInputSchema.array(
+            items: .stringEnumeration(values: EnvironmentHistoryCategory.allCases.map(\.rawValue), description: "Environment category."),
+            description: "One or more environment categories."
+        )
+        if compare {
+            return .closedObject(properties: [
+                "places": .array(items: .string(description: "Explicit recorded place name."), description: "Two to four explicit place names."),
+                "start": .string(description: "Inclusive ISO-8601 start timestamp."),
+                "end": .string(description: "Inclusive ISO-8601 end timestamp."),
+                "categories": categories
+            ], required: ["places", "start", "end", "categories"])
+        }
+        return .closedObject(properties: [
+            "place": .string(description: "Explicit recorded place name; never infer from current location."),
+            "start": .string(description: "Inclusive ISO-8601 start timestamp."),
+            "end": .string(description: "Inclusive ISO-8601 end timestamp."),
+            "categories": categories
+        ], required: ["place", "start", "end", "categories"])
     }
 
     private static func contextRecordPrecedes(_ lhs: MemoryOSContextToolRecord, _ rhs: MemoryOSContextToolRecord, byOccurrence: Bool) -> Bool {

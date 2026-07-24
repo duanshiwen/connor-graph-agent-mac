@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E90000000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */; };
 		51A7E0010000000000000001 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7E0010000000000000011 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift */; };
 		51A7E0010000000000000002 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A7E0010000000000000012 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift */; };
 		6D47A2000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D47A1000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift */; };
@@ -180,6 +181,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift; sourceTree = "<group>"; };
 		51A7E0010000000000000011 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionCoordinator.swift; sourceTree = "<group>"; };
 		51A7E0010000000000000012 /* Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Speech/SessionSpeechTranscriptionController.swift; sourceTree = "<group>"; };
 		6D47A1000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift; sourceTree = "<group>"; };
@@ -375,6 +377,7 @@
 		A00000000000000000000013 = {
 			isa = PBXGroup;
 			children = (
+				E90100000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift */,
 				B00000000000000000000004 /* Tests/XcodeTestBridge */,
 				A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */,
 				A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */,
@@ -690,6 +693,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E90000000000000000000003 /* Sources/ConnorGraphAgentMac/MacEnvironmentRuntime.swift in Sources */,
 				A00000000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift in Sources */,
 				A0000000000000000000002C /* AgentChatView.swift in Sources */,
 				A0000000000000000000002E /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift in Sources */,
@@ -1008,7 +1012,7 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "康纳同学需要访问你的联系人，用于在联系人数据源中显示通讯录并辅助你管理关系上下文。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于在偏好设置中自动填写城市和国家/地区；你也可以手动填写。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "康纳同学会在你发送请求时读取当前位置，用于提供当地时间、实时天气和环境相关支持；不会保存位置轨迹。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "康纳同学需要访问麦克风，用于把当前会话中的语音实时转成文字。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "康纳同学需要使用系统语音识别，把当前会话中的语音实时转成文字。";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1016,7 +1020,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.26;
+				MARKETING_VERSION = 1.0.27;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;
@@ -1046,7 +1050,7 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "康纳同学需要访问你的日历，用于在日历数据源中显示日程并让 AI 帮你理解时间安排。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "康纳同学需要访问你的联系人，用于在联系人数据源中显示通讯录并辅助你管理关系上下文。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于在偏好设置中自动填写城市和国家/地区；你也可以手动填写。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "康纳同学会在你发送请求时读取当前位置，用于提供当地时间、实时天气和环境相关支持；不会保存位置轨迹。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "康纳同学需要访问麦克风，用于把当前会话中的语音实时转成文字。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "康纳同学需要使用系统语音识别，把当前会话中的语音实时转成文字。";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1054,7 +1058,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.26;
+				MARKETING_VERSION = 1.0.27;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac";
 				PRODUCT_NAME = "康纳同学";
 				SDKROOT = macosx;

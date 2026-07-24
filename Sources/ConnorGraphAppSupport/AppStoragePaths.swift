@@ -22,8 +22,10 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var sidecarsDirectory: URL
     public var browserDirectory: URL
     public var searchDirectory: URL
+    public var environmentDirectory: URL
     public var databaseURL: URL
     public var memoryOSDatabaseURL: URL
+    public var environmentDatabaseURL: URL
 
     public init(
         applicationSupportDirectory: URL,
@@ -46,8 +48,10 @@ public struct AppStoragePaths: Sendable, Equatable {
         sidecarsDirectory: URL? = nil,
         browserDirectory: URL? = nil,
         searchDirectory: URL? = nil,
+        environmentDirectory: URL? = nil,
         databaseURL: URL? = nil,
-        memoryOSDatabaseURL: URL? = nil
+        memoryOSDatabaseURL: URL? = nil,
+        environmentDatabaseURL: URL? = nil
     ) {
         self.applicationSupportDirectory = applicationSupportDirectory
         let resolvedConfigDirectory = configDirectory ?? applicationSupportDirectory.appendingPathComponent("config", isDirectory: true)
@@ -76,8 +80,10 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.sidecarsDirectory = sidecarsDirectory ?? applicationSupportDirectory.appendingPathComponent("sidecars", isDirectory: true)
         self.browserDirectory = browserDirectory ?? applicationSupportDirectory.appendingPathComponent("browser", isDirectory: true)
         self.searchDirectory = searchDirectory ?? applicationSupportDirectory.appendingPathComponent("search", isDirectory: true)
+        self.environmentDirectory = environmentDirectory ?? applicationSupportDirectory.appendingPathComponent("environment", isDirectory: true)
         self.databaseURL = databaseURL ?? resolvedGraphDirectory.appendingPathComponent("connor.sqlite")
         self.memoryOSDatabaseURL = memoryOSDatabaseURL ?? resolvedGraphDirectory.appendingPathComponent("memory-os.sqlite")
+        self.environmentDatabaseURL = environmentDatabaseURL ?? self.environmentDirectory.appendingPathComponent("environment.sqlite")
     }
 
     public static func live(fileManager: FileManager = .default) throws -> AppStoragePaths {
@@ -116,7 +122,8 @@ public struct AppStoragePaths: Sendable, Equatable {
             runtimeLogsDirectory,
             sidecarsDirectory,
             browserDirectory,
-            searchDirectory
+            searchDirectory,
+            environmentDirectory
         ]
     }
 
