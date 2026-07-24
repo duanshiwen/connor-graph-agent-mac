@@ -122,6 +122,13 @@ final class AppRuntimeLifecycle {
     let connorSpeechPlaybackCoordinator: ConnorSpeechPlaybackCoordinator
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
+    private lazy var environmentLocationService = MacCurrentLocationService()
+    private lazy var environmentProvider = AnyAgentEnvironmentProvider(
+        MacAgentEnvironmentProvider(
+            locationService: environmentLocationService,
+            weatherProvider: OpenMeteoWeatherProvider()
+        )
+    )
     var memoryOSSearchHealthSummary: String?
     private(set) var isMemoryOSSearchIndexRepairing = false
 
@@ -828,7 +835,8 @@ final class AppRuntimeLifecycle {
                             )
                         }
                     }
-                )
+                ),
+                environmentProvider: environmentProvider
             ))
             self.knowledgeCreatorStore.installGeneration { [weak self] conversationID in
                 guard let self else { throw CancellationError() }

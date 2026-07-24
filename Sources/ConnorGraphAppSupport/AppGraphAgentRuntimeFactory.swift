@@ -52,6 +52,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
     public var browserControlHandler: BrowserControlHandler?
     public var personalityRuntime: ConnorPersonalityRuntime?
+    public var environmentProvider: AnyAgentEnvironmentProvider?
     public var memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration
     public var generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)?
     private let sharedCache: AppGraphAgentRuntimeSharedCache
@@ -73,6 +74,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
         browserControlHandler: BrowserControlHandler? = nil,
         personalityRuntime: ConnorPersonalityRuntime? = nil,
+        environmentProvider: AnyAgentEnvironmentProvider? = nil,
         memoryOSContextToolConfiguration: MemoryOSContextToolConfiguration = .init(),
         generatedMediaProviderResolver: (@Sendable (_ conversationProvider: AnyAgentModelProvider) -> AnyAgentModelProvider?)? = nil
     ) {
@@ -92,6 +94,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
         self.browserControlHandler = browserControlHandler
         self.personalityRuntime = personalityRuntime
+        self.environmentProvider = environmentProvider
         self.memoryOSContextToolConfiguration = memoryOSContextToolConfiguration
         self.generatedMediaProviderResolver = generatedMediaProviderResolver
         self.sharedCache = AppGraphAgentRuntimeSharedCache()
@@ -190,6 +193,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
         var registry = AgentToolRegistry()
+        let environmentStore = environmentProvider.map { _ in AgentEnvironmentSnapshotStore() }
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
         registry.registerSessionStatusTools(repository: sessionRepository, governanceConfig: governanceConfig)
@@ -241,6 +245,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.registerTaskManagementTools(repository: AppTaskManagementRepository(storagePaths: storagePaths))
         }
         registry.registerCurrentTimeTool()
+        if let environmentProvider, let environmentStore {
+            registry.register(GetCurrentEnvironmentTool(provider: environmentProvider, store: environmentStore))
+        }
         let scientificRuntime = ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])
         registry.register(ScienceComputeTool(runtime: scientificRuntime))
         registry.register(ScienceUnitsTool(runtime: scientificRuntime))
@@ -343,7 +350,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             configuration: effectiveConfiguration,
             auditLog: SQLiteAgentAuditLog(store: store),
             eventRecorder: AgentEventRecorder(repository: store),
-            contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID)
+            contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID),
+            environmentProvider: environmentProvider,
+            environmentStore: environmentStore
         )
     }
 

@@ -347,8 +347,8 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(prompt.contains("- 性别：非二元"))
         #expect(prompt.contains("- 出生日期：1990-01-01"))
         #expect(prompt.range(of: "- 性别：非二元")!.lowerBound < prompt.range(of: "- 出生日期：1990-01-01")!.lowerBound)
-        #expect(prompt.contains("- 城市：杭州"))
-        #expect(prompt.contains("- 国家/地区：中国"))
+        #expect(!prompt.contains("- 城市：杭州"))
+        #expect(!prompt.contains("- 国家/地区：中国"))
         #expect(prompt.contains("- 备注：数学公式使用块级 LaTeX。"))
     }
 

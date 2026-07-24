@@ -1,4 +1,5 @@
 import CoreLocation
+import AppKit
 import Foundation
 import Observation
 import ConnorGraphAgent
@@ -128,8 +129,6 @@ final class UserPreferencesFeatureModel {
     var genderIdentityCustomText = ""
     var birthDate = "" { didSet { changed() } }
     var birthDatePickerDate = Date()
-    var city = "" { didSet { changed() } }
-    var country = "" { didSet { changed() } }
     var notes = "" { didSet { changed() } }
     private(set) var connorPersonality = ConnorPersonalitySettings.balancedDefault
     private(set) var connorPersonalityRevision = 0
@@ -146,9 +145,8 @@ final class UserPreferencesFeatureModel {
     private(set) var voiceDraft: ConnorVoiceProfile?
     private(set) var isGeneratingVoice = false
     private(set) var voiceErrorMessage: String?
-    private(set) var locationStatusMessage: String?
+    private(set) var environmentLocationStatusMessage = "尚未检查定位权限。"
 
-    @ObservationIgnored private var locationCoordinator: UserLocationCoordinator?
     @ObservationIgnored var onChanged: () -> Void = {}
     @ObservationIgnored var personalityGenerator: @MainActor (String) async throws -> ConnorPersonalitySettings = { _ in
         throw ConnorPersonalityError.unavailable
@@ -178,8 +176,6 @@ final class UserPreferencesFeatureModel {
         applyLoadedGenderIdentity(preferences.genderIdentity)
         birthDate = preferences.birthDate
         if let date = Self.birthDateFormatter.date(from: preferences.birthDate) { birthDatePickerDate = date }
-        city = preferences.city
-        country = preferences.country
         notes = preferences.notes
         connorPersonality = preferences.connorPersonality
         connorPersonalityRevision = preferences.connorPersonalityRevision
@@ -200,8 +196,6 @@ final class UserPreferencesFeatureModel {
         settings.preferences.preferredLanguage = preferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.genderIdentity = resolvedGenderIdentity.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.birthDate = birthDate.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.preferences.city = city.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.preferences.country = country.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.preferences.connorPersonality = connorPersonality
         settings.preferences.connorPersonalityRevision = connorPersonalityRevision
@@ -220,7 +214,6 @@ final class UserPreferencesFeatureModel {
         if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { displayName = defaults.displayName }
         if timezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { timezone = defaults.timezone }
         if preferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { preferredLanguage = defaults.preferredLanguage }
-        if country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { country = defaults.country }
         return snapshotSignature != before
     }
 
@@ -356,33 +349,33 @@ final class UserPreferencesFeatureModel {
         onChanged()
     }
 
-    func requestLocation() {
-        locationStatusMessage = "正在请求位置权限…"
-        locationCoordinator = UserLocationCoordinator { [weak self] result in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    switch result {
-                    case .success(let placemark):
-                        if let value = placemark.locality ?? placemark.subAdministrativeArea ?? placemark.administrativeArea { self.city = value }
-                        if let value = placemark.country { self.country = value }
-                        self.locationStatusMessage = "位置已更新。"; self.onChanged()
-                    case .failure(let error): self.locationStatusMessage = error.localizedDescription
-                    }
-                    self.locationCoordinator = nil
-                }
-            }
+    func refreshEnvironmentPermissionStatus() {
+        switch CLLocationManager().authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            environmentLocationStatusMessage = "已允许。康纳会在每个用户请求回合获取一次当前位置。"
+        case .notDetermined:
+            environmentLocationStatusMessage = "尚未请求。首次发送消息时，macOS 会显示定位授权。"
+        case .denied:
+            environmentLocationStatusMessage = "已拒绝。环境快照会明确标记位置和天气不可用。"
+        case .restricted:
+            environmentLocationStatusMessage = "此 Mac 限制了定位访问。"
+        @unknown default:
+            environmentLocationStatusMessage = "无法确定定位权限状态。"
         }
-        locationCoordinator?.requestLocation()
     }
 
-    func shutdown() { locationCoordinator = nil }
+    func openLocationPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func shutdown() {}
 
     private func changed() { if !isApplying { onChanged() } }
     private var resolvedGenderIdentity: String {
         genderIdentitySelection == Self.customGenderIdentitySelection ? genderIdentityCustomText : genderIdentitySelection
     }
-    private var snapshotSignature: String { [displayName, timezone, preferredLanguage, country].joined(separator: "\u{1F}") }
+    private var snapshotSignature: String { [displayName, timezone, preferredLanguage].joined(separator: "\u{1F}") }
     private func applyLoadedGenderIdentity(_ value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines); genderIdentity = trimmed
         if trimmed.isEmpty { genderIdentitySelection = ""; genderIdentityCustomText = "" }
@@ -476,14 +469,3 @@ final class PermissionSettingsFeatureModel {
     }
     private func changed() { if !isApplying { onChanged() } }
 }
-
-private final class UserLocationCoordinator: NSObject, CLLocationManagerDelegate {
-    private let manager = CLLocationManager(); private let geocoder = CLGeocoder()
-    private let completion: @Sendable (Result<CLPlacemark, Error>) -> Void
-    init(completion: @escaping @Sendable (Result<CLPlacemark, Error>) -> Void) { self.completion = completion; super.init(); manager.delegate = self; manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers }
-    func requestLocation() { switch manager.authorizationStatus { case .notDetermined: manager.requestWhenInUseAuthorization(); case .authorizedAlways, .authorizedWhenInUse: manager.requestLocation(); default: completion(.failure(LocationPreferenceError.permissionDenied)) } }
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) { if manager.authorizationStatus == .authorizedAlways { manager.requestLocation() } else if manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted { completion(.failure(LocationPreferenceError.permissionDenied)) } }
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) { guard let location = locations.last else { completion(.failure(LocationPreferenceError.locationUnavailable)); return }; geocoder.reverseGeocodeLocation(location) { [completion] placemarks, error in if let error { completion(.failure(error)) } else if let placemark = placemarks?.first { completion(.success(placemark)) } else { completion(.failure(LocationPreferenceError.locationUnavailable)) } } }
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { completion(.failure(error)) }
-}
-private enum LocationPreferenceError: LocalizedError { case permissionDenied, locationUnavailable; var errorDescription: String? { switch self { case .permissionDenied: "定位权限未开启。请在系统设置中允许康纳同学访问位置，或手动填写城市和国家/地区。"; case .locationUnavailable: "暂时无法读取当前位置。你仍可以手动填写城市和国家/地区。" } } }

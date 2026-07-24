@@ -100,6 +100,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     public var auditLog: any AgentAuditLog
     public var eventRecorder: AgentEventRecorder
     public var contextBuilder: AgentContextBuilder?
+    public var environmentProvider: AnyAgentEnvironmentProvider?
+    public var environmentStore: AgentEnvironmentSnapshotStore?
     private let streamCompleteHandler: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)?
     private let cancellationRegistry: AgentLoopCancellationRegistry
     private let approvalRegistry: AgentLoopApprovalRegistry
@@ -112,6 +114,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         auditLog: any AgentAuditLog = InMemoryAgentAuditLog(),
         eventRecorder: AgentEventRecorder = AgentEventRecorder(),
         contextBuilder: AgentContextBuilder? = nil,
+        environmentProvider: AnyAgentEnvironmentProvider? = nil,
+        environmentStore: AgentEnvironmentSnapshotStore? = nil,
         streamComplete: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)? = nil
     ) {
         self.modelProvider = modelProvider
@@ -120,6 +124,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         self.auditLog = auditLog
         self.eventRecorder = eventRecorder
         self.contextBuilder = contextBuilder
+        self.environmentProvider = environmentProvider
+        self.environmentStore = environmentStore
         self.streamCompleteHandler = streamComplete
         self.cancellationRegistry = AgentLoopCancellationRegistry()
         self.approvalRegistry = AgentLoopApprovalRegistry()
@@ -131,7 +137,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         auditLog: any AgentAuditLog = InMemoryAgentAuditLog(),
         eventRecorder: AgentEventRecorder = AgentEventRecorder(),
-        contextBuilder: AgentContextBuilder? = nil
+        contextBuilder: AgentContextBuilder? = nil,
+        environmentProvider: AnyAgentEnvironmentProvider? = nil,
+        environmentStore: AgentEnvironmentSnapshotStore? = nil
     ) {
         self.init(
             modelProvider: modelProvider,
@@ -140,6 +148,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             auditLog: auditLog,
             eventRecorder: eventRecorder,
             contextBuilder: contextBuilder,
+            environmentProvider: environmentProvider,
+            environmentStore: environmentStore,
             streamComplete: nil
         )
     }
@@ -171,7 +181,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
                 let budgetMeter = AgentBudgetMeter(configuration: configuration.budget)
-                let promptAssembly = await buildPromptAssembly(for: request)
+                let environmentSnapshot: AgentEnvironmentSnapshot?
+                if let environmentProvider, let environmentStore {
+                    let snapshot = await environmentProvider.snapshot(for: AgentEnvironmentRequest(
+                        runID: request.runID,
+                        sessionID: request.sessionID
+                    ))
+                    await environmentStore.set(snapshot, forRunID: request.runID)
+                    environmentSnapshot = snapshot
+                } else {
+                    environmentSnapshot = nil
+                }
+                let promptAssembly = await buildPromptAssembly(for: request, environmentSnapshot: environmentSnapshot)
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
@@ -677,13 +698,27 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         continuation.yield(event)
     }
 
-    private func buildPromptAssembly(for request: AgentChatRequest) async -> AgentPromptAssembly {
+    private func buildPromptAssembly(
+        for request: AgentChatRequest,
+        environmentSnapshot: AgentEnvironmentSnapshot?
+    ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
         let appendix = configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines)
         if !appendix.isEmpty {
             assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), appendix]
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
+        }
+        if let environmentSnapshot {
+            let environmentSection = AgentEnvironmentPromptRenderer.render(environmentSnapshot)
+            if !environmentSection.isEmpty {
+                assembly.instruction.text = [
+                    assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    environmentSection
+                ]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+            }
         }
         if let skillInstructions = request.skillInstructions?.trimmingCharacters(in: .whitespacesAndNewlines), !skillInstructions.isEmpty {
             let subordinateSkillSection = """
