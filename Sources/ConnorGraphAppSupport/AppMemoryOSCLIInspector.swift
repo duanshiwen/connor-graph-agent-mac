@@ -250,27 +250,31 @@ public struct AppMemoryOSCLIInspector: Sendable {
         content: String,
         sessionID: String,
         messageID: String,
-        intentNormalizer: AnyMemoryOSUserIntentNormalizer,
+        role: String = "user",
+        intentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
         now: Date = Date()
     ) async -> MemoryOSCLIChatIngestionResult {
-        var retrievalText: String?
-        var normalizationStatus = MemoryOSIntentNormalizationStatus.failed
+        var retrievalText: String? = role == "assistant" ? content : nil
+        var normalizationStatus = role == "assistant" ? MemoryOSIntentNormalizationStatus.notRequired : .failed
         var modelID: String?
         var errorMessage: String?
-        do {
-            let normalization = try await intentNormalizer.normalize(message: content)
-            retrievalText = normalization.retrievalText
-            normalizationStatus = .succeeded
-            modelID = normalization.modelID
-        } catch {
-            errorMessage = String(describing: error)
+        if role == "user" {
+            do {
+                guard let intentNormalizer else { throw MemoryOSUserIntentNormalizerError.missingStructuredOutput }
+                let normalization = try await intentNormalizer.normalize(message: content)
+                retrievalText = normalization.retrievalText
+                normalizationStatus = .succeeded
+                modelID = normalization.modelID
+            } catch {
+                errorMessage = String(describing: error)
+            }
         }
 
         do {
             let ingestion = try AppMemoryOSFacade(store: store, searchKernel: searchKernel).ingestChatMessage(
                 messageID: messageID,
                 sessionID: sessionID,
-                role: "user",
+                role: role,
                 content: content,
                 occurredAt: now,
                 retrievalText: retrievalText,

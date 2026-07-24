@@ -767,6 +767,37 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(result.error?.contains("missingStructuredOutput") == true)
         #expect(row == ["原始指令必须只保存在 L0", "", MemoryOSIntentNormalizationStatus.failed.rawValue])
     }
+
+    @Test func memoryOSCLIIngestChatSupportsAssistantRoleWithoutNormalization() async throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let normalizer = AnyMemoryOSUserIntentNormalizer { _ in
+            Issue.record("Assistant CLI ingestion must not invoke user-intent normalization")
+            throw MemoryOSUserIntentNormalizerError.missingStructuredOutput
+        }
+
+        let output = try await AppMemoryOSCLIRouter.routeAsync(
+            args: ["ingest-chat", "--role", "assistant", "--content", "You have a training session at 17:00.", "--session-id", "cli-role-test", "--message-id", "cli-assistant-message"],
+            inspector: AppMemoryOSCLIInspector(store: store),
+            encoder: memoryOSCLITestEncoder(),
+            intentNormalizer: normalizer
+        )
+        let result = try JSONDecoder().decode(MemoryOSCLIChatIngestionResult.self, from: Data(output.utf8))
+        let row = try #require(try store.query(sql: """
+        SELECT o.source_type, o.content, c.retrieval_text, c.normalization_status, o.metadata_json
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE o.source_id = 'cli-assistant-message'
+        """).first)
+
+        #expect(result.status == "ingested")
+        #expect(result.normalizationStatus == MemoryOSIntentNormalizationStatus.notRequired.rawValue)
+        #expect(result.modelID == nil)
+        #expect(row[0] == MemoryOSSourceType.assistantMessage.rawValue)
+        #expect(row[1] == "You have a training session at 17:00.")
+        #expect(row[2] == "You have a training session at 17:00.")
+        #expect(row[3] == MemoryOSIntentNormalizationStatus.notRequired.rawValue)
+        #expect(row[4].contains("assistant_message"))
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
