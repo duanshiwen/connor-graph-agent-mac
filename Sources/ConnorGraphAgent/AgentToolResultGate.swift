@@ -35,7 +35,7 @@ public struct AgentToolResultGate: Sendable, Equatable {
     }
 
     public func gatedContent(for result: AgentToolResult) -> String {
-        let base = result.contentText.isEmpty ? (result.contentJSON ?? "") : result.contentText
+        let base = modelVisibleContent(for: result)
         let limit = max(0, configuration.perToolCharacterLimits[result.toolName] ?? configuration.maxResultCharacters)
         let isMemoryEvidence = Self.memoryEvidenceToolNames.contains(result.toolName)
         let prefix = isMemoryEvidence
@@ -48,6 +48,22 @@ public struct AgentToolResultGate: Sendable, Equatable {
         let kept = String(payload.prefix(payloadLimit))
         guard configuration.includeTruncationMetadata else { return prefix + kept }
         return prefix + kept + "\n...[truncated tool result: tool=\(result.toolName), kept=\(payloadLimit) chars, original=\(payload.count) chars]"
+    }
+
+    private func modelVisibleContent(for result: AgentToolResult) -> String {
+        guard let json = result.contentJSON?.trimmingCharacters(in: .whitespacesAndNewlines), !json.isEmpty else {
+            return result.contentText
+        }
+        let text = result.contentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return json }
+        guard text != json else { return result.contentText }
+        return """
+        [STRUCTURED RESULT JSON]
+        \(json)
+
+        [RESULT TEXT]
+        \(result.contentText)
+        """
     }
 
 }
