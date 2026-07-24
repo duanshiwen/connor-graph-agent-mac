@@ -2698,6 +2698,10 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.select(sessionID)
     }
 
+    func loadMoreChatSessionsIfNeeded(currentSessionID: String) {
+        chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: currentSessionID)
+    }
+
     private func loadOlderSelectedChatMessages() async -> Int {
         guard let repository = chatSessionRepository,
               let sessionID = chatFeatureModel.sessions.selectedSessionID,
