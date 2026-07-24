@@ -601,6 +601,7 @@ struct CraftSessionListPane: View {
                     LazyVStack(spacing: AppListCardLayout.spacing) {
                         ForEach(visibleSessionRows) { row in
                             sessionRow(row)
+                                .onAppear { sessionActions.loadMoreChatSessionsIfNeeded(currentSessionID: row.id) }
                         }
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
@@ -611,6 +612,9 @@ struct CraftSessionListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: model.sessions.searchQuery) { _, _ in
+            sessionActions.reloadChatSessions(restoreWorkspaceMode: false)
+        }
     }
 
     private func sessionRow(_ row: AgentChatSessionPresentation) -> some View {
@@ -647,13 +651,7 @@ struct CraftSessionListPane: View {
         guard !query.isEmpty else {
             return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
         }
-        let terms = listSearchTerms(for: query)
-        let matchingSessions = terms.isEmpty ? model.sessions.sessions : model.sessions.sessions.filter { session in
-            listSearchTextMatches(session.title, terms: terms) || session.messages.contains {
-                listSearchTextMatches($0.content, terms: terms)
-            }
-        }
-        return matchingSessions.map { model.sessions.rowPresentation(for: $0) }
+        return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
     }
 
     private var sessionEmptyTitle: String {

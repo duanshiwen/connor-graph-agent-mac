@@ -920,6 +920,7 @@ final class AppRuntimeLifecycle {
                 isLoading: { [weak self] in self?.isLoadingSelectedChatSessionDetail ?? false },
                 reloadIfNeeded: { [weak self] in self?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: $0) },
                 reload: { [weak self] in self?.reloadChatSessions(restoreWorkspaceMode: $0) },
+                loadMore: { [weak self] in self?.chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: $0) },
                 new: { [weak self] in self?.newChatSession() },
                 select: { [weak self] in self?.selectChatSession($0) },
                 rename: { [weak self] in self?.renameChatSession($0, title: $1) },
@@ -1321,7 +1322,13 @@ final class AppRuntimeLifecycle {
             if let failureMessage = result.failureMessage { errorMessage = failureMessage }
             return
         }
-        chatSessionCoordinator.installStartupSessions(snapshot.sessions, allSessions: snapshot.allSessions)
+        chatSessionCoordinator.installStartupSessions(
+            snapshot.sessions,
+            allSessions: snapshot.allSessions,
+            nextCursor: snapshot.nextCursor,
+            messageCounts: snapshot.messageCounts,
+            summary: snapshot.summary
+        )
         globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {
@@ -2917,6 +2924,7 @@ final class AppRuntimeLifecycle {
     private func scheduleChatSessionListRefresh(reason: String) {
         guard let chatSessionRepository else { return }
         let filter = chatFeatureModel.sessions.filter
+        let query = chatFeatureModel.sessions.searchQuery
         let existingSessions = chatFeatureModel.sessions.allSessions
         let coordinator = chatSessionListRefreshCoordinator
         Task(priority: .utility) { [weak self] in
@@ -2925,6 +2933,7 @@ final class AppRuntimeLifecycle {
                 let result = try await coordinator.refresh(
                     repository: chatSessionRepository,
                     filter: filter,
+                    query: query,
                     preserving: existingSessions
                 )
                 let elapsed = startedAt.duration(to: ContinuousClock.now)
@@ -2933,6 +2942,9 @@ final class AppRuntimeLifecycle {
                     guard let self, self.chatFeatureModel.sessions.filter == filter else { return }
                     self.chatFeatureModel.sessions.sessions = result.visibleSessions
                     self.chatFeatureModel.sessions.allSessions = result.allSessions
+                    self.chatFeatureModel.sessions.nextPageCursor = result.nextCursor
+                    self.chatFeatureModel.sessions.messageCountsBySessionID = result.messageCounts
+                    self.chatFeatureModel.sessions.applySidebarSummary(result.summary)
                     self.synchronizeSessionReadStates(from: result.allSessions)
                     AppPerformanceLog.chatTurnLogger.info("sessionList.asyncRefresh reason=\(reason, privacy: .public) visible=\(result.visibleSessions.count, privacy: .public) all=\(result.allSessions.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
                 }
@@ -3409,6 +3421,7 @@ extension AppRuntimeLifecycle {
             isLoading: { [weak sessionCoordinator] in sessionCoordinator?.isLoadingSelectedDetail ?? false },
             reloadIfNeeded: { [weak sessionCoordinator] restore in sessionCoordinator?.reloadIfNeeded(restoreWorkspaceMode: restore) },
             reload: { [weak sessionCoordinator] restore in sessionCoordinator?.reload(restoreWorkspaceMode: restore) },
+            loadMore: { [weak sessionCoordinator] in sessionCoordinator?.loadMoreIfNeeded(currentSessionID: $0) },
             new: { [weak model] in model?.newChatSession() },
             select: { [weak sessionCoordinator] in sessionCoordinator?.select($0) },
             rename: { [weak model] in model?.renameChatSession($0, title: $1) },

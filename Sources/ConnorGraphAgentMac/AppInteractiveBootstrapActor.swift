@@ -5,6 +5,9 @@ import ConnorGraphAppSupport
 struct InitialSessionContentSnapshot: Sendable {
     let sessions: [AgentSession]
     let allSessions: [AgentSession]
+    let nextCursor: String?
+    let messageCounts: [String: Int]
+    let summary: AppChatSessionSummary
     let selectedSession: AgentSession?
     let state: AppSessionStateSnapshot?
     let records: [AppSessionRecord]
@@ -50,15 +53,21 @@ actor AppInteractiveBootstrapActor {
     ) -> StartupDomainResult<InitialSessionContentSnapshot> {
         do {
             let sessionsRepository = AppChatSessionRepository(store: repository.store, storagePaths: paths, governanceConfig: governanceConfig)
-            var sessions = try sessionsRepository.loadSessions(filter: .all)
+            var page = try sessionsRepository.loadSessionPage(filter: .all)
+            var sessions = page.sessions
             if sessions.isEmpty {
                 sessions = [try sessionsRepository.createSession()]
+                page = try sessionsRepository.loadSessionPage(filter: .all)
             }
-            let allSessions = try sessionsRepository.loadSessions(filter: .all)
+            let allSessions = sessions
+            let summary = try sessionsRepository.loadSessionSummary()
             guard let selectedSession = sessions.first.flatMap({ try? sessionsRepository.loadSession(id: $0.id) }) else {
                 return .success(InitialSessionContentSnapshot(
                     sessions: sessions,
                     allSessions: allSessions,
+                    nextCursor: page.nextCursor,
+                    messageCounts: page.messageCounts,
+                    summary: summary,
                     selectedSession: nil,
                     state: nil,
                     records: [],
@@ -90,6 +99,9 @@ actor AppInteractiveBootstrapActor {
             return .success(InitialSessionContentSnapshot(
                 sessions: sessions,
                 allSessions: allSessions,
+                nextCursor: page.nextCursor,
+                messageCounts: page.messageCounts,
+                summary: summary,
                 selectedSession: selectedSession,
                 state: state,
                 records: records,

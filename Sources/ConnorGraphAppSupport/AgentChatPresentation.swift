@@ -15,7 +15,7 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     public var isFlagged: Bool
     public var messageCount: Int
 
-    public init(session: AgentSession, now: Date = Date()) {
+    public init(session: AgentSession, messageCount: Int? = nil, now: Date = Date()) {
         self.id = session.id
         self.title = session.title.isEmpty || session.title == "New Chat" ? "新对话" : session.title
         self.relativeUpdatedTime = Self.relativeTime(from: session.updatedAt, to: now)
@@ -25,7 +25,7 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
         self.kind = session.governance.kind
         self.isArchived = session.governance.isArchived
         self.isFlagged = session.governance.isFlagged
-        self.messageCount = session.messages.count
+        self.messageCount = messageCount ?? session.messages.count
     }
 
     private static func relativeTime(from date: Date, to now: Date) -> String {

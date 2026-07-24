@@ -33,7 +33,7 @@ struct ChatSessionRuntimeIntegrationTests {
             encoding: .utf8
         )
         let paneStart = try #require(source.range(of: "struct CraftSessionListPane: View"))
-        let paneEnd = try #require(source.range(of: "\nprivate extension View", range: paneStart.upperBound..<source.endIndex))
+        let paneEnd = try #require(source.range(of: "\nextension View", range: paneStart.upperBound..<source.endIndex))
         let paneSource = source[paneStart.lowerBound..<paneEnd.lowerBound]
 
         #expect(!paneSource.contains("reloadChatSessions()"))
