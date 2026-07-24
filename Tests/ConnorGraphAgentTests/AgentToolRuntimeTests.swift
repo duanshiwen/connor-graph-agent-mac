@@ -185,7 +185,7 @@ private struct ApprovalAwareTool: AgentTool {
     )
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"time_zone":"Asia/Shanghai"}"#),
+        arguments: try AgentToolArguments(json: #"{"timeZone":"Asia/Shanghai"}"#),
         context: context
     )
 
@@ -195,8 +195,9 @@ private struct ApprovalAwareTool: AgentTool {
 
     #expect(result.toolName == "get_current_time")
     #expect(result.contentText.contains("Current time:"))
-    #expect(object["time_zone"] as? String == "Asia/Shanghai")
-    #expect(object["unix_timestamp"] as? Double == 1_781_976_000)
+    #expect(object["timeZone"] as? String == "Asia/Shanghai")
+    #expect(object["time_zone"] == nil)
+    #expect(object["unixTimestamp"] as? Double == 1_781_976_000)
 }
 
 @Test func graphSearchToolReturnsStructuredHitsWithCitations() async throws {
