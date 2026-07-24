@@ -136,10 +136,13 @@ private enum MemoryOSL4RelationPromptGuide {
 public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
     public init() {}
 
-    public func prompt(for events: [MemoryOSCaptureEvent]) -> String {
+    public func prompt(for events: [MemoryOSCaptureEvent], originalContentByProvenanceID: [String: String] = [:]) -> String {
         let packet: [String: Any] = [
             "l1_capture_events": events.map { event in
-                [
+                let safeMetadata = event.metadata.filter { key, _ in
+                    key != "content_preview" && key != "preview"
+                }
+                return [
                     "capture_event_id": event.id,
                     "event_type": event.eventType,
                     "source_kind": event.metadata["source_kind"] ?? event.metadata["source"] ?? event.eventType,
@@ -147,9 +150,9 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
                     "provenance_object_id": event.provenanceObjectID,
                     "span_id": event.metadata["span_id"] ?? "",
                     "title": event.metadata["title"] ?? "",
-                    "content_preview": event.metadata["content_preview"] ?? event.metadata["preview"] ?? "",
+                    "original_content": originalContentByProvenanceID[event.provenanceObjectID] ?? "",
                     "token_estimate": event.tokenEstimate,
-                    "metadata": event.metadata
+                    "metadata": safeMetadata
                 ] as [String: Any]
             }
         ]
@@ -487,7 +490,7 @@ public struct MemoryOSL1UnifiedProjectionJobPlanner: Sendable {
         self.promptBuilder = promptBuilder
     }
 
-    public func planJobs(from events: [MemoryOSCaptureEvent], now: Date = Date()) -> [MemoryOSL1UnifiedProjectionJobDraft] {
+    public func planJobs(from events: [MemoryOSCaptureEvent], originalContentByProvenanceID: [String: String] = [:], now: Date = Date()) -> [MemoryOSL1UnifiedProjectionJobDraft] {
         let pending = events.filter { $0.processingState == .pending }.sorted { $0.occurredAt < $1.occurredAt }
         guard let triggerReason = policy.triggerReason(events: pending, now: now) else { return [] }
         let blocks = chunkEvents(pending)
@@ -496,7 +499,7 @@ public struct MemoryOSL1UnifiedProjectionJobPlanner: Sendable {
                 captureEventIDs: block.map(\.id),
                 provenanceObjectIDs: block.map(\.provenanceObjectID),
                 sourceSpanIDs: block.compactMap { $0.metadata["span_id"] },
-                prompt: promptBuilder.prompt(for: block),
+                prompt: promptBuilder.prompt(for: block, originalContentByProvenanceID: originalContentByProvenanceID),
                 createdAt: now,
                 metadata: [
                     "event_count": String(block.count),

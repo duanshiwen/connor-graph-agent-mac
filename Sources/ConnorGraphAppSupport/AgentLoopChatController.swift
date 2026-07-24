@@ -163,7 +163,8 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             title: "Assistant message",
             content: message.content,
             occurredAt: message.createdAt,
-            sessionID: session.id
+            sessionID: session.id,
+            retrievalText: message.content
         ))
         try memoryOSRepository.save(result)
     }
