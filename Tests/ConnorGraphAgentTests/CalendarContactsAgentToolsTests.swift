@@ -72,6 +72,8 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("calendar-exact-write-id"))
         #expect(!result.contentText.contains("calendar-holidays"))
         #expect(result.contentJSON?.contains("calendar-holidays") == true)
+        let calendars = try #require(try Self.jsonObject(result) as? [[String: Any]])
+        #expect(calendars.first?["calendarID"] as? String == calendars.first?["id"] as? String)
     }
 
     @Test func calendarReadToolReportsWhenNoWritableCalendarExists() async throws {
@@ -99,6 +101,8 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("end: 1970-01-01T01:16:40Z"))
         #expect(result.contentText.contains("Next: call calendar_read with operation get_event"))
         #expect(result.contentJSON?.contains("产品讨论") == true)
+        let events = try #require(try Self.jsonObject(result) as? [[String: Any]])
+        #expect(events.first?["eventID"] as? String == events.first?["id"] as? String)
     }
 
     @Test func calendarAgendaExposesExactOpaqueCandidateIDsWithoutNotes() async throws {
@@ -159,6 +163,10 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("mutationEligibility: eligible"))
         #expect(result.contentText.contains("copy eventID and expectedVersion exactly"))
         #expect(result.contentJSON?.contains("etag-42") == true)
+        let object = try #require(try Self.jsonObject(result) as? [String: Any])
+        #expect(object["eventID"] as? String == "event:opaque/id")
+        #expect(object["calendarID"] as? String == "calendar-work")
+        #expect(object["expectedVersion"] as? String == "W/\"etag-42\"")
     }
 
     @Test func calendarReadGetEventExplainsIneligibleAndMissingEvents() async throws {
@@ -456,6 +464,11 @@ struct CalendarContactsAgentToolsTests {
             toolCallID: toolCallID,
             policyEngine: policy
         )
+    }
+
+    private static func jsonObject(_ result: AgentToolResult) throws -> Any {
+        let json = try #require(result.contentJSON)
+        return try JSONSerialization.jsonObject(with: Data(json.utf8))
     }
 
     private static func expectInvalidArguments(
