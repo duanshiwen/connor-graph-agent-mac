@@ -37,7 +37,8 @@ struct CraftListPaneView: View {
                 CloudKnowledgeMarketplaceListPane(
                     store: graph.knowledgeMarketplace,
                     creatorStore: graph.knowledgeCreator,
-                    sessions: graph.chat.sessions.allSessions
+                    sessions: graph.chat.sessions.allSessions,
+                    sessionActions: graph.chatActions.session
                 )
             case .automation, .scheduledTasks:
                 CraftTaskAutomationListPane(

@@ -921,6 +921,7 @@ final class AppRuntimeLifecycle {
                 reloadIfNeeded: { [weak self] in self?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: $0) },
                 reload: { [weak self] in self?.reloadChatSessions(restoreWorkspaceMode: $0) },
                 loadMore: { [weak self] in self?.chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: $0) },
+                loadPickerPage: { [weak self] in await self?.loadChatSessionPickerPage(cursor: $0) },
                 new: { [weak self] in self?.newChatSession() },
                 select: { [weak self] in self?.selectChatSession($0) },
                 rename: { [weak self] in self?.renameChatSession($0, title: $1) },
@@ -2702,6 +2703,13 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: currentSessionID)
     }
 
+    func loadChatSessionPickerPage(cursor: String?) async -> AppChatSessionPage? {
+        guard let repository = chatSessionRepository else { return nil }
+        return try? await Task.detached(priority: .utility) {
+            try repository.loadSessionPage(filter: .all, cursor: cursor)
+        }.value
+    }
+
     private func loadOlderSelectedChatMessages() async -> Int {
         guard let repository = chatSessionRepository,
               let sessionID = chatFeatureModel.sessions.selectedSessionID,
@@ -3461,6 +3469,7 @@ extension AppRuntimeLifecycle {
             reloadIfNeeded: { [weak sessionCoordinator] restore in sessionCoordinator?.reloadIfNeeded(restoreWorkspaceMode: restore) },
             reload: { [weak sessionCoordinator] restore in sessionCoordinator?.reload(restoreWorkspaceMode: restore) },
             loadMore: { [weak sessionCoordinator] in sessionCoordinator?.loadMoreIfNeeded(currentSessionID: $0) },
+            loadPickerPage: { [weak model] in await model?.loadChatSessionPickerPage(cursor: $0) },
             new: { [weak model] in model?.newChatSession() },
             select: { [weak sessionCoordinator] in sessionCoordinator?.select($0) },
             rename: { [weak model] in model?.renameChatSession($0, title: $1) },
