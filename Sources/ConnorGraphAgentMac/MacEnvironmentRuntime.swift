@@ -149,15 +149,18 @@ final class MacCurrentLocationService: NSObject, @preconcurrency CLLocationManag
 actor MacAgentEnvironmentProvider: AgentEnvironmentProviding {
     private let locationService: MacCurrentLocationService
     private let weatherProvider: any EnvironmentWeatherProviding
+    private let persistence: (any EnvironmentSnapshotPersisting)?
     private let now: @Sendable () -> Date
 
     init(
         locationService: MacCurrentLocationService,
         weatherProvider: any EnvironmentWeatherProviding,
+        persistence: (any EnvironmentSnapshotPersisting)? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.locationService = locationService
         self.weatherProvider = weatherProvider
+        self.persistence = persistence
         self.now = now
     }
 
@@ -165,11 +168,17 @@ actor MacAgentEnvironmentProvider: AgentEnvironmentProviding {
         let location = await locationService.currentLocation()
         let capturedAt = now()
         let timeZone = location.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
-        let weather: AgentEnvironmentWeather
+        let region: AgentEnvironmentRegion?
         if let latitude = location.latitude, let longitude = location.longitude {
+            region = AgentEnvironmentRegion.containing(latitude: latitude, longitude: longitude)
+        } else {
+            region = nil
+        }
+        let weather: AgentEnvironmentWeather
+        if let region {
             weather = await weatherProvider.weather(for: EnvironmentWeatherRequest(
-                latitude: latitude,
-                longitude: longitude,
+                latitude: region.centerLatitude,
+                longitude: region.centerLongitude,
                 refresh: request.refresh
             ))
         } else {
@@ -185,16 +194,17 @@ actor MacAgentEnvironmentProvider: AgentEnvironmentProviding {
         var warnings: [String] = []
         if location.status != .available { warnings.append(location.message ?? "当前位置不可用。") }
         if weather.status != .available { warnings.append(weather.message ?? "当前天气不可用。") }
-        return AgentEnvironmentSnapshot(
+        let snapshot = AgentEnvironmentSnapshot(
             capturedAt: capturedAt,
             location: AgentEnvironmentLocation(
                 status: location.status,
                 locality: location.locality,
                 administrativeArea: location.administrativeArea,
                 country: location.country,
-                latitude: location.latitude,
-                longitude: location.longitude,
-                horizontalAccuracyMeters: location.horizontalAccuracyMeters,
+                gridCellID: region?.gridCellID,
+                latitude: region?.centerLatitude,
+                longitude: region?.centerLongitude,
+                horizontalAccuracyMeters: nil,
                 capturedAt: location.capturedAt,
                 message: location.message
             ),
@@ -202,6 +212,10 @@ actor MacAgentEnvironmentProvider: AgentEnvironmentProviding {
             weather: weather,
             warnings: warnings
         )
+        if let persistence {
+            Task { await persistence.record(snapshot) }
+        }
+        return snapshot
     }
 
     private static func localTime(at date: Date, timeZone: TimeZone) -> AgentEnvironmentLocalTime {

@@ -123,10 +123,14 @@ final class AppRuntimeLifecycle {
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
     private lazy var environmentLocationService = MacCurrentLocationService()
+    private lazy var environmentPersistence = storagePaths.map {
+        EnvironmentSnapshotPersistence(databaseURL: $0.environmentDatabaseURL)
+    }
     private lazy var environmentProvider = AnyAgentEnvironmentProvider(
         MacAgentEnvironmentProvider(
             locationService: environmentLocationService,
-            weatherProvider: OpenMeteoWeatherProvider()
+            weatherProvider: OpenMeteoWeatherProvider(),
+            persistence: environmentPersistence
         )
     )
     var memoryOSSearchHealthSummary: String?
