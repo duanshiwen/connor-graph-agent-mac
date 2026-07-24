@@ -21,6 +21,35 @@ public enum AppSessionStatusUpdateOutcome: Sendable, Equatable {
     case conflict(AgentSession)
 }
 
+public struct AppChatSessionPage: Sendable, Equatable {
+    public var sessions: [AgentSession]
+    public var messageCounts: [String: Int]
+    public var nextCursor: String?
+
+    public init(sessions: [AgentSession], messageCounts: [String: Int], nextCursor: String?) {
+        self.sessions = sessions
+        self.messageCounts = messageCounts
+        self.nextCursor = nextCursor
+    }
+}
+
+public struct AppChatSessionSummary: Sendable, Equatable {
+    public var totalCount: Int
+    public var countsByStatus: [AgentSessionStatus: Int]
+    public var countsByLabelID: [String: Int]
+
+    public init(totalCount: Int = 0, countsByStatus: [AgentSessionStatus: Int] = [:], countsByLabelID: [String: Int] = [:]) {
+        self.totalCount = totalCount
+        self.countsByStatus = countsByStatus
+        self.countsByLabelID = countsByLabelID
+    }
+}
+
+private struct AppChatSessionCursor: Codable {
+    var updatedAt: Date
+    var id: String
+}
+
 public struct AppChatSessionRepository: Sendable {
     public var store: SQLiteGraphKernelStore
     public var storagePaths: AppStoragePaths?
@@ -38,6 +67,43 @@ public struct AppChatSessionRepository: Sendable {
 
     public func loadSessionMetadata(limit: Int = Int.max) throws -> [AgentSession] {
         try store.recentSessionMetadata(limit: limit)
+    }
+
+    public func loadSessionPage(filter: AgentSessionListFilter, query: String = "", limit: Int = 50, cursor: String? = nil) throws -> AppChatSessionPage {
+        let pageSize = min(max(limit, 1), 100)
+        let decodedCursor = try cursor.map(Self.decodeCursor)
+        let status: AgentSessionStatus?
+        let labelID: String?
+        switch filter {
+        case .all: status = nil; labelID = nil
+        case .status(let value): status = value; labelID = nil
+        case .label(let value): status = nil; labelID = value
+        }
+        let rows = try store.sessionMetadataPage(
+            status: status,
+            labelID: labelID,
+            searchText: query.trimmingCharacters(in: .whitespacesAndNewlines),
+            beforeUpdatedAt: decodedCursor?.updatedAt,
+            afterID: decodedCursor?.id,
+            limit: pageSize + 1
+        )
+        let records = Array(rows.prefix(pageSize))
+        let sessions = records.map(\.session)
+        let messageCounts = Dictionary(uniqueKeysWithValues: records.map { ($0.session.id, $0.messageCount) })
+        let nextCursor = rows.count > pageSize ? try sessions.last.map(Self.encodeCursor) : nil
+        return AppChatSessionPage(sessions: sessions, messageCounts: messageCounts, nextCursor: nextCursor)
+    }
+
+    public func loadSessionSummary() throws -> AppChatSessionSummary {
+        let summary = try store.sessionMetadataSummary()
+        let statusCounts = Dictionary(uniqueKeysWithValues: summary.countsByStatusRawValue.compactMap { rawValue, count in
+            AgentSessionStatus(rawValue: rawValue).map { ($0, count) }
+        })
+        return AppChatSessionSummary(
+            totalCount: summary.totalCount,
+            countsByStatus: statusCounts,
+            countsByLabelID: summary.countsByLabelID
+        )
     }
 
     public func loadSessionMessageCounts() throws -> [String: Int] {
@@ -545,5 +611,18 @@ public struct AppChatSessionRepository: Sendable {
 
     public func summarizeSession<Provider: LLMProvider>(id: String, using summarizer: AgentSessionSummarizer<Provider>) async throws -> AgentSessionSummary {
         try await summarizer.summarize(session: AgentSession(id: id))
+    }
+
+    private static func encodeCursor(_ session: AgentSession) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(AppChatSessionCursor(updatedAt: session.updatedAt, id: session.id)).base64EncodedString()
+    }
+
+    private static func decodeCursor(_ raw: String) throws -> AppChatSessionCursor {
+        guard let data = Data(base64Encoded: raw) else { throw CocoaError(.coderReadCorrupt) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(AppChatSessionCursor.self, from: data)
     }
 }

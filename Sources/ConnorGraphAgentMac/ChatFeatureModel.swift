@@ -57,20 +57,23 @@ enum ChatSessionExecutionPresentation: Sendable, Equatable {
 final class ChatSessionListModel {
     var sessions: [AgentSession] = [] {
         didSet {
-            rowPresentationsByID = Dictionary(
-                uniqueKeysWithValues: sessions.map { ($0.id, AgentChatSessionPresentation(session: $0)) }
-            )
-            guard allSessions.isEmpty else { return }
+            rebuildRowPresentations()
+            guard allSessions.isEmpty, !hasAuthoritativeSidebarSummary else { return }
             sidebarSummary = .build(from: sessions)
         }
     }
     var allSessions: [AgentSession] = [] {
         didSet {
+            guard !hasAuthoritativeSidebarSummary else { return }
             sidebarSummary = .build(from: allSessions.isEmpty ? sessions : allSessions)
         }
     }
     private(set) var sidebarSummary = ChatSessionSidebarSummary()
+    private var hasAuthoritativeSidebarSummary = false
     private(set) var rowPresentationsByID: [String: AgentChatSessionPresentation] = [:]
+    var messageCountsBySessionID: [String: Int] = [:] {
+        didSet { rebuildRowPresentations() }
+    }
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var presentedSessionDetailID: String?
@@ -80,10 +83,21 @@ final class ChatSessionListModel {
     var isBackgroundTasksPresented = false
     var filter: AgentSessionListFilter = .all
     var searchQuery = ""
+    var nextPageCursor: String?
+    var isLoadingNextPage = false
     var selectedArtifactDirectories: AgentSessionArtifactDirectories?
 
+    func applySidebarSummary(_ summary: AppChatSessionSummary) {
+        hasAuthoritativeSidebarSummary = true
+        sidebarSummary = ChatSessionSidebarSummary(
+            totalCount: summary.totalCount,
+            countsByStatus: summary.countsByStatus,
+            countsByLabelID: summary.countsByLabelID
+        )
+    }
+
     func rowPresentation(for session: AgentSession) -> AgentChatSessionPresentation {
-        rowPresentationsByID[session.id] ?? AgentChatSessionPresentation(session: session)
+        rowPresentationsByID[session.id] ?? AgentChatSessionPresentation(session: session, messageCount: messageCountsBySessionID[session.id])
     }
 
     func title(for sessionID: String) -> String? {
@@ -95,6 +109,12 @@ final class ChatSessionListModel {
     var isWaitingForSelectedPresentation: Bool {
         guard let selectedSessionID, loadingSessionDetailID == selectedSessionID else { return false }
         return presentedSessionDetailID != selectedSessionID
+    }
+
+    private func rebuildRowPresentations() {
+        rowPresentationsByID = Dictionary(uniqueKeysWithValues: sessions.map {
+            ($0.id, AgentChatSessionPresentation(session: $0, messageCount: messageCountsBySessionID[$0.id]))
+        })
     }
 }
 
