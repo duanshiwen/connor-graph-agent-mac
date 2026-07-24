@@ -141,9 +141,11 @@ final class BrowserFeatureModel {
     @ObservationIgnored private var historyIndexMutationTask: Task<Void, Never>?
     @ObservationIgnored private var historyIndexMutationGeneration: UInt64 = 0
     @ObservationIgnored private var historyIndexRequiresRebuild = false
+    @ObservationIgnored private var nextHistoryCursor: String?
     @ObservationIgnored private var workspaceSessionBinding = BrowserWorkspaceSessionBinding()
     @ObservationIgnored private var isShutdown = false
     @ObservationIgnored private(set) var automationRuntime: BrowserAutomationRuntime!
+    private static let historyPageSize = 50
 
     @ObservationIgnored var sessionContextProvider: () -> SessionContext = {
         SessionContext(selectedSessionID: nil, activeSessionID: "__fallback__", sessionTitlesByID: [:])
@@ -870,8 +872,10 @@ final class BrowserFeatureModel {
 
     func loadHistory() {
         guard let historyStore else { return }
-        historyRecords = historyStore.loadHistory()
-        applyHistoryFilter()
+        let page = historyStore.loadHistoryPage(pageSize: Self.historyPageSize)
+        historyRecords = page.records
+        filteredHistoryRecords = page.records
+        nextHistoryCursor = page.nextCursor
     }
 
     func recordHistory(url: String, title: String, sessionID: String) {
@@ -887,8 +891,7 @@ final class BrowserFeatureModel {
             contentFetchStatus: .pending
         )
         guard let appended = historyStore.appendRecord(record) else { return }
-        historyRecords = historyStore.loadHistory()
-        applyHistoryFilter()
+        loadHistory()
         indexHistoryRecord(appended)
         fetchContent(for: appended)
     }
@@ -904,9 +907,32 @@ final class BrowserFeatureModel {
     func filterHistory(query: String) {
         historySearchQuery = query
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { filteredHistoryRecords = historyRecords }
-        else if let historyStore { filteredHistoryRecords = historyStore.searchHistory(query: trimmed) }
+        if let historyStore {
+            let page = historyStore.loadHistoryPage(query: trimmed, pageSize: Self.historyPageSize)
+            filteredHistoryRecords = page.records
+            if trimmed.isEmpty { historyRecords = page.records }
+            nextHistoryCursor = page.nextCursor
+        }
+        else if trimmed.isEmpty { filteredHistoryRecords = historyRecords }
         else { filteredHistoryRecords = historyRecords.filter { Self.historyRecord($0, matches: trimmed) } }
+    }
+
+    func loadMoreHistoryIfNeeded(currentRecordID: UUID) {
+        guard currentRecordID == filteredHistoryRecords.last?.id,
+              let cursor = nextHistoryCursor,
+              let historyStore else { return }
+        let page = historyStore.loadHistoryPage(
+            cursor: cursor,
+            query: historySearchQuery,
+            pageSize: Self.historyPageSize
+        )
+        let existingIDs = Set(filteredHistoryRecords.map(\.id))
+        let additions = page.records.filter { !existingIDs.contains($0.id) }
+        filteredHistoryRecords.append(contentsOf: additions)
+        if historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            historyRecords = filteredHistoryRecords
+        }
+        nextHistoryCursor = page.nextCursor
     }
 
     func deleteHistoryRecord(_ id: UUID) {
@@ -1086,11 +1112,25 @@ final class BrowserFeatureModel {
 
     private func rebuildHistorySearchIndexIfNeeded() async throws {
         guard let nativeSourceSearchBackend else { return }
-        let records = historyStore?.loadHistory() ?? historyRecords
+        guard let historyStore else {
+            try await nativeSourceSearchBackend.rebuildSource(
+                kind: .browserHistory,
+                sourceInstanceID: nil,
+                documents: historyRecords.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) }
+            )
+            return
+        }
+        var documents: [NativeSearchDocument] = []
+        var cursor: String?
+        repeat {
+            let page = historyStore.loadHistoryPage(cursor: cursor, pageSize: 200)
+            documents.append(contentsOf: page.records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
+            cursor = page.nextCursor
+        } while cursor != nil
         try await nativeSourceSearchBackend.rebuildSource(
             kind: .browserHistory,
             sourceInstanceID: nil,
-            documents: records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) }
+            documents: documents
         )
     }
 
