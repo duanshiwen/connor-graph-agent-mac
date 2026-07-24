@@ -52,7 +52,12 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.memoryOSRepository = memoryOSRepository
         self.memoryOSIngestionService = memoryOSIngestionService
         self.memoryOSFacade = memoryOSFacade
-        self.memoryOSIngestionWriter = memoryOSFacade.map(MemoryOSIngestionWriter.init(facade:))
+        self.memoryOSIngestionWriter = memoryOSFacade.map {
+            MemoryOSIngestionWriter(
+                facade: $0,
+                intentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: AnyAgentModelProvider(loopController.modelProvider)))
+            )
+        }
     }
 
     public func flushMemoryOSIngestion() async throws {
@@ -134,6 +139,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             content: formatter.content(message.content, personReferences: message.personReferences),
             occurredAt: message.createdAt,
             sessionID: session.id,
+            normalizationStatus: .failed,
             metadata: formatter.metadata(personReferences: message.personReferences)
         ))
         try memoryOSRepository.save(result)
