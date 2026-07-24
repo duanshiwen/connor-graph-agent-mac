@@ -150,6 +150,16 @@ public struct CloudKnowledgeUnpublishRequest: Codable, Sendable, Equatable {
     public init(expectedGovernanceVersion: Int, idempotencyKey: UUID = UUID()) { self.expectedGovernanceVersion = expectedGovernanceVersion; self.idempotencyKey = idempotencyKey }
 }
 
+public struct CloudKnowledgeRevisionPage: Sendable, Equatable {
+    public var revisions: [CloudKnowledgeRevisionSummary]
+    public var nextPage: Int?
+
+    public init(revisions: [CloudKnowledgeRevisionSummary], nextPage: Int?) {
+        self.revisions = revisions
+        self.nextPage = nextPage
+    }
+}
+
 public protocol CloudKnowledgeCreatorAPI: Sendable {
     func createKnowledgeBase(_ draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail
     func updateKnowledgeBase(id: String, draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail
@@ -159,6 +169,17 @@ public protocol CloudKnowledgeCreatorAPI: Sendable {
     func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail
     func preview(runID: String) async throws -> CloudKnowledgePreview
     func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary]
+    func revisionPage(knowledgeBaseID: String, page: Int, pageSize: Int) async throws -> CloudKnowledgeRevisionPage
+}
+
+public extension CloudKnowledgeCreatorAPI {
+    func revisionPage(knowledgeBaseID: String, page: Int, pageSize: Int) async throws -> CloudKnowledgeRevisionPage {
+        guard page == 1 else { return CloudKnowledgeRevisionPage(revisions: [], nextPage: nil) }
+        return CloudKnowledgeRevisionPage(
+            revisions: try await revisions(knowledgeBaseID: knowledgeBaseID, limit: pageSize),
+            nextPage: nil
+        )
+    }
 }
 
 public struct CloudKnowledgeCreatorAPIClient: CloudKnowledgeCreatorAPI, Sendable {
@@ -189,7 +210,18 @@ public struct CloudKnowledgeCreatorAPIClient: CloudKnowledgeCreatorAPI, Sendable
     public func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases/\(id)/publish", method: "DELETE", body: request) }
     public func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { try await send("knowledge-bases/\(id)/appeals", method: "POST", body: AppealRequest(statement: statement, governanceActionID: governanceActionID)) }
     public func preview(runID: String) async throws -> CloudKnowledgePreview { try await send("publication-runs/\(runID)/preview") }
-    public func revisions(knowledgeBaseID: String, limit: Int = 100) async throws -> [CloudKnowledgeRevisionSummary] { try await send("knowledge-bases/\(knowledgeBaseID)/revisions?limit=\(max(1, min(limit, 200)))") }
+    public func revisions(knowledgeBaseID: String, limit: Int = 100) async throws -> [CloudKnowledgeRevisionSummary] {
+        try await revisionPage(knowledgeBaseID: knowledgeBaseID, page: 1, pageSize: limit).revisions
+    }
+    public func revisionPage(knowledgeBaseID: String, page: Int, pageSize: Int) async throws -> CloudKnowledgeRevisionPage {
+        let resolvedPage = max(1, page)
+        let resolvedPageSize = max(1, min(pageSize, 200))
+        let revisions: [CloudKnowledgeRevisionSummary] = try await send("knowledge-bases/\(knowledgeBaseID)/revisions?page=\(resolvedPage)&limit=\(resolvedPageSize)")
+        return CloudKnowledgeRevisionPage(
+            revisions: revisions,
+            nextPage: revisions.count == resolvedPageSize ? resolvedPage + 1 : nil
+        )
+    }
     private struct Envelope<T: Decodable>: Decodable { var data: T }
     private struct AppealRequest: Encodable { let statement: String; let governanceActionID: String }
     private func send<T: Decodable>(_ path: String, method: String = "GET") async throws -> T { try await send(path, method: method, bodyData: nil) }
@@ -288,7 +320,8 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
     @Published public private(set) var snapshot: CloudKnowledgeCreatorSnapshot; @Published public private(set) var history: [CloudKnowledgeRevisionSummary] = []; @Published public private(set) var isWorking = false; @Published public private(set) var errorMessage: String?
     @Published public private(set) var publicationHistory: [CloudKnowledgePublicationHistoryEntry]
     @Published public private(set) var currentConversationID: String?
-    private let repository: CloudKnowledgeCreatorSnapshotRepository; private let publicationHistoryRepository: CloudKnowledgePublicationHistoryRepository; private let creatorAPI: (any CloudKnowledgeCreatorAPI)?; private let publicationAPI: (any CloudKnowledgeAPI)?; private var generationTask: Task<Void, Never>?; private var generationDriverID: UUID?; private var localGeneration: CloudKnowledgeLocalGenerationCallback?
+    private let repository: CloudKnowledgeCreatorSnapshotRepository; private let publicationHistoryRepository: CloudKnowledgePublicationHistoryRepository; private let creatorAPI: (any CloudKnowledgeCreatorAPI)?; private let publicationAPI: (any CloudKnowledgeAPI)?; private var generationTask: Task<Void, Never>?; private var generationDriverID: UUID?; private var localGeneration: CloudKnowledgeLocalGenerationCallback?; private var nextHistoryPage: Int?
+    private static let historyPageSize = 50
     public init(repository: CloudKnowledgeCreatorSnapshotRepository = .init(), historyRepository: CloudKnowledgePublicationHistoryRepository? = nil, creatorAPI: (any CloudKnowledgeCreatorAPI)? = nil, publicationAPI: (any CloudKnowledgeAPI)? = nil) {
         self.repository = repository
         self.publicationHistoryRepository = historyRepository ?? .init(fileURL: repository.fileURL.deletingLastPathComponent().appendingPathComponent("publication-history.json"))
@@ -441,7 +474,27 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
             self.persist()
         }
     }
-    public func loadHistory() async { guard let id = snapshot.knowledgeBaseID, let creatorAPI else { return }; await perform { self.history = try await creatorAPI.revisions(knowledgeBaseID: id, limit: 100) } }
+    public func loadHistory() async {
+        guard let id = snapshot.knowledgeBaseID, let creatorAPI else { return }
+        await perform {
+            let page = try await creatorAPI.revisionPage(knowledgeBaseID: id, page: 1, pageSize: Self.historyPageSize)
+            self.history = page.revisions
+            self.nextHistoryPage = page.nextPage
+        }
+    }
+    public func loadMoreHistoryIfNeeded(currentRevisionID: String) async {
+        guard currentRevisionID == history.last?.id,
+              let id = snapshot.knowledgeBaseID,
+              let pageNumber = nextHistoryPage,
+              let creatorAPI,
+              !isWorking else { return }
+        await perform {
+            let page = try await creatorAPI.revisionPage(knowledgeBaseID: id, page: pageNumber, pageSize: Self.historyPageSize)
+            let existingIDs = Set(self.history.map(\.id))
+            self.history.append(contentsOf: page.revisions.filter { !existingIDs.contains($0.id) })
+            self.nextHistoryPage = page.nextPage
+        }
+    }
     public func prepareForNewKnowledgeBase() {
         guard snapshot.stage == .cancelled || snapshot.stage == .completed else { return }
         reset()
@@ -455,7 +508,7 @@ public typealias CloudKnowledgeConflictRecoveryCallback = @Sendable (_ publicati
         try? publicationHistoryRepository.save(publicationHistory)
         if snapshot.clientRunID == id { reset() }
     }
-    public func reset() { generationTask?.cancel(); currentConversationID = nil; snapshot = .init(); history = []; errorMessage = nil; try? repository.clear() }
+    public func reset() { generationTask?.cancel(); currentConversationID = nil; snapshot = .init(); history = []; nextHistoryPage = nil; errorMessage = nil; try? repository.clear() }
     private func persist() { snapshot.updatedAt = Date(); try? repository.save(snapshot); recordCurrentSnapshotInHistory() }
     private func recordCurrentSnapshotInHistory() {
         let hasMeaningfulState = snapshot.knowledgeBaseID != nil || snapshot.runID != nil || !snapshot.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

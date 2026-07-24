@@ -104,7 +104,7 @@ struct AgentChatTurnProcessRow: View {
                             AgentTurnActivitySummaryDetailView(
                                 summary: preparedDetail.summary,
                                 tools: preparedDetail.tools,
-                                isRunning: process.state == .running,
+                                isRunning: process.state == .running && preparedDetail.summary.state != .waitingForPermission,
                                 startedAt: startedAt,
                                 onOpenToolInvocation: onOpenToolInvocation
                             )
@@ -238,7 +238,7 @@ struct AgentChatTurnProcessRow: View {
             Image(systemName: "slash.circle.fill")
                 .foregroundStyle(.orange)
         case .waitingForPermission:
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: "lock.fill")
                 .foregroundStyle(.orange)
         }
     }
@@ -275,7 +275,7 @@ struct AgentTurnActivitySummaryDetailView: View {
             detailLine(icon: "checklist", text: resultText)
 
             if summary.hasPermissionRequest {
-                detailLine(icon: "hand.raised", text: "权限：等待用户确认后继续")
+                detailLine(icon: "lock.fill", text: "当前会话正在等待权限审批，请前往处理", color: .orange)
             }
 
             if let primaryErrorMessage = summary.primaryErrorMessage {

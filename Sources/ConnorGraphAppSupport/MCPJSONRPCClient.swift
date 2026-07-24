@@ -227,18 +227,32 @@ public actor MCPJSONRPCClient<Transport: MCPClientTransport> {
     }
 
     public func listTools() async throws -> [MCPToolDefinition] {
-        let result = try await request(method: "tools/list", params: .object([:]))
-        guard let toolValues = result.objectValue?["tools"]?.arrayValue else {
-            throw MCPJSONRPCClientError.invalidResult("tools/list")
-        }
-        return toolValues.map { value in
-            let object = value.objectValue ?? [:]
-            return MCPToolDefinition(
-                name: object["name"]?.stringValue ?? "",
-                description: object["description"]?.stringValue ?? "",
-                inputSchema: object["inputSchema"] ?? .object([:])
-            )
-        }
+        var tools: [MCPToolDefinition] = []
+        var seenNames: Set<String> = []
+        var seenCursors: Set<String> = []
+        var cursor: String?
+        repeat {
+            let params: MCPJSONValue = cursor.map { .object(["cursor": .string($0)]) } ?? .object([:])
+            let result = try await request(method: "tools/list", params: params)
+            guard let object = result.objectValue,
+                  let toolValues = object["tools"]?.arrayValue else {
+                throw MCPJSONRPCClientError.invalidResult("tools/list")
+            }
+            for value in toolValues {
+                let object = value.objectValue ?? [:]
+                let tool = MCPToolDefinition(
+                    name: object["name"]?.stringValue ?? "",
+                    description: object["description"]?.stringValue ?? "",
+                    inputSchema: object["inputSchema"] ?? .object([:])
+                )
+                if seenNames.insert(tool.name).inserted { tools.append(tool) }
+            }
+            cursor = object["nextCursor"]?.stringValue
+            if let cursor, !seenCursors.insert(cursor).inserted {
+                throw MCPJSONRPCClientError.invalidResult("tools/list nextCursor cycle")
+            }
+        } while cursor != nil
+        return tools
     }
 
     public func callTool(name: String, arguments: MCPJSONValue = .object([:])) async throws -> MCPToolCallResult {

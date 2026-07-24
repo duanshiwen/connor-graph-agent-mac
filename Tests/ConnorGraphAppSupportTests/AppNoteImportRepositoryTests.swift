@@ -6,6 +6,44 @@ import ConnorGraphStore
 
 @Suite("Note import ledger")
 struct AppNoteImportRepositoryTests {
+    @Test("Pages every import job and item with stable tie-break ordering")
+    func pagesAllJobsAndItems() throws {
+        let fixture = try Fixture()
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes", createdAt: timestamp)
+        try fixture.repository.saveSource(source)
+        for index in 0..<137 {
+            let id = String(format: "job-%03d", index)
+            try fixture.repository.saveJob(.init(id: id, sourceID: source.id, status: .completed, createdAt: timestamp, updatedAt: timestamp))
+        }
+        try fixture.repository.saveJob(.init(id: "item-job", sourceID: source.id, status: .completed, createdAt: timestamp, updatedAt: timestamp.addingTimeInterval(-1)))
+        for index in 0..<137 {
+            let id = String(format: "item-%03d", index)
+            try fixture.repository.saveItem(.init(id: id, jobID: "item-job", sourceID: source.id, sourceIdentity: "\(id).md", title: id, status: .completed, rawByteHash: id, normalizedTextHash: id, createdAt: timestamp, updatedAt: timestamp))
+        }
+
+        var jobIDs: [String] = []
+        var jobCursor: String?
+        repeat {
+            let page = try fixture.repository.jobPage(cursor: jobCursor, pageSize: 50)
+            jobIDs += page.jobs.map(\.id)
+            jobCursor = page.nextCursor
+        } while jobCursor != nil
+
+        var itemIDs: [String] = []
+        var itemCursor: String?
+        repeat {
+            let page = try fixture.repository.itemPage(jobID: "item-job", cursor: itemCursor, pageSize: 50)
+            itemIDs += page.items.map(\.id)
+            itemCursor = page.nextCursor
+        } while itemCursor != nil
+
+        #expect(jobIDs == ["item-job"] + (0..<137).map { String(format: "job-%03d", $0) })
+        #expect(Set(jobIDs).count == 138)
+        #expect(itemIDs == (0..<137).map { String(format: "item-%03d", $0) })
+        #expect(Set(itemIDs).count == 137)
+    }
+
     @Test("Batch scan persists items and updates job counters atomically")
     func batchScanPersistsItemsAndUpdatesCounters() throws {
         let fixture = try Fixture()

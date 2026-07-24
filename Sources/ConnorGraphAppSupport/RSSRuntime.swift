@@ -8,6 +8,7 @@ public enum RSSRuntimeError: Error, LocalizedError, Equatable {
     case invalidURL(String)
     case unsupportedFeed(String)
     case parseFailed(String)
+    case invalidCursor
 
     public var errorDescription: String? {
         switch self {
@@ -16,6 +17,7 @@ public enum RSSRuntimeError: Error, LocalizedError, Equatable {
         case .invalidURL(let url): "Invalid RSS URL: \(url)"
         case .unsupportedFeed(let detail): "Unsupported feed: \(detail)"
         case .parseFailed(let detail): "Failed to parse feed: \(detail)"
+        case .invalidCursor: "Invalid RSS pagination cursor"
         }
     }
 }
@@ -34,6 +36,44 @@ public protocol RSSSourceCache: Sendable {
     func upsertItems(_ items: [RSSItemDetail]) async throws -> (inserted: Int, duplicates: Int)
     func updateState(itemIDs: [RSSItemID], transform: @Sendable (RSSItemState) -> RSSItemState) async throws
     func deleteItems(sourceID: RSSSourceID) async throws
+}
+
+public struct RSSItemPageRequest: Sendable, Equatable {
+    public var query: String
+    public var sourceID: RSSSourceID?
+    public var includeHidden: Bool
+    public var pageSize: Int
+    public var cursor: String?
+
+    public init(query: String = "", sourceID: RSSSourceID? = nil, includeHidden: Bool = false, pageSize: Int = 50, cursor: String? = nil) {
+        self.query = query
+        self.sourceID = sourceID
+        self.includeHidden = includeHidden
+        self.pageSize = min(max(pageSize, 1), 100)
+        self.cursor = cursor
+    }
+}
+
+public struct RSSItemPage: Sendable, Equatable {
+    public var items: [RSSItemSummary]
+    public var nextCursor: String?
+
+    public init(items: [RSSItemSummary], nextCursor: String?) {
+        self.items = items
+        self.nextCursor = nextCursor
+    }
+}
+
+public extension RSSSourceCache {
+    func itemPage(_ request: RSSItemPageRequest) async throws -> RSSItemPage {
+        let all = request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? try await listItems(sourceID: request.sourceID, includeHidden: request.includeHidden)
+            : try await searchItems(query: request.query, sourceID: request.sourceID, includeHidden: request.includeHidden)
+        let offset = request.cursor.flatMap(Int.init) ?? 0
+        guard offset >= 0, offset <= all.count else { throw RSSRuntimeError.invalidCursor }
+        let end = min(offset + request.pageSize, all.count)
+        return RSSItemPage(items: Array(all[offset..<end]), nextCursor: end < all.count ? String(end) : nil)
+    }
 }
 
 public protocol RSSAuditLogProtocol: Sendable {
@@ -111,7 +151,10 @@ public actor InMemoryRSSSourceCache: RSSSourceCache {
         items.values.map(\.summary)
             .filter { sourceID == nil || $0.sourceID == sourceID }
             .filter { includeHidden || !$0.state.isHidden }
-            .sorted { $0.publishedAt > $1.publishedAt }
+            .sorted {
+                if $0.publishedAt != $1.publishedAt { return $0.publishedAt > $1.publishedAt }
+                return $0.id.rawValue < $1.id.rawValue
+            }
     }
 }
 
@@ -509,6 +552,19 @@ public struct RSSRuntime: Sendable {
         let items = try await cache.listItems(sourceID: sourceID, includeHidden: includeHidden)
         try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .itemListed, riskClass: .read, redactedSummary: "Listed RSS items; returned \(min(items.count, requestedLimit)) summaries"))
         return Array(items.prefix(requestedLimit))
+    }
+
+    public func listItemsPage(_ request: RSSItemPageRequest, runID: String? = nil, sessionID: String? = nil) async throws -> RSSItemPage {
+        let page = try await cache.itemPage(request)
+        try await auditLog.record(RSSAuditRecord(
+            runID: runID,
+            sessionID: sessionID,
+            sourceID: request.sourceID,
+            kind: request.query.isEmpty ? .itemListed : .itemSearched,
+            riskClass: .read,
+            redactedSummary: "Listed RSS item page; returned \(page.items.count) summaries; hasNext=\(page.nextCursor != nil)"
+        ))
+        return page
     }
 
     public func getItem(id: RSSItemID, includeContent: Bool = false, runID: String? = nil, sessionID: String? = nil) async throws -> RSSItemDetail {

@@ -161,6 +161,18 @@ struct ChatFeatureModelTests {
 
         #expect(model.pendingApprovals == [approval])
         #expect(model.lastResultSummary == "approved")
+        #expect(model.hasPendingApproval(sessionID: "session-1"))
+        #expect(model.hasPendingApproval(sessionID: "other") == false)
+    }
+
+    @Test func awaitingApprovalTakesPriorityOverRunningSessionPresentation() {
+        let presentation = ChatSessionExecutionPresentation.resolve(isSubmitting: true, hasPendingApproval: true)
+
+        #expect(presentation == .awaitingApproval)
+        #expect(presentation.statusText == "请求审批")
+        #expect(presentation.systemImage == "lock.fill")
+        #expect(presentation.helpText == "当前会话正在等待权限审批，请前往处理")
+        #expect(ChatSessionExecutionPresentation.resolve(isSubmitting: true, hasPendingApproval: false) == .running)
     }
 
     @Test func shutdownIsSafeForStateOnlyFeatureModel() {

@@ -74,9 +74,12 @@ public func buildSkillCatalogSummary(from packages: [SkillPackage]) -> String {
 /// Prefer this over injecting the full catalog into the system prompt.
 public struct SkillListTool: AgentTool {
     public let name = "connor_skill_list"
-    public let description = "List all installed skills available for this session. Returns slug, name, description, and tags for each skill. Call this at the start of each conversation to check for available skills."
+    public let description = "List installed skills available for this session in stable slug order. page defaults to 1 and page_size defaults to 50. The response includes page, pageSize, returnedItems, totalItems, totalPages, hasNextPage, nextPage, and skills. When hasNextPage is true, call again with exactly nextPage and the same page_size to retrieve the complete catalog without gaps or duplicates."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.closedObject(properties: [:], required: [])
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "page": .integer(description: "1-based result page. Defaults to 1; use nextPage from the previous response."),
+        "page_size": .integer(description: "Number of skills per page, from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
+    ], required: [])
 
     private let packages: [SkillPackage]
 
@@ -85,21 +88,69 @@ public struct SkillListTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let skills = packages.map { pkg -> [String: Any] in
-            [
-                "slug": pkg.slug.rawValue,
-                "name": pkg.manifest.name,
-                "description": pkg.manifest.description,
-                "tags": pkg.manifest.tags
-            ] as [String: Any]
+        let page = arguments.int("page") ?? 1
+        let pageSize = arguments.int("page_size") ?? 50
+        guard page >= 1 else { throw AgentToolError.invalidArguments("page must be at least 1") }
+        guard (1...100).contains(pageSize) else {
+            throw AgentToolError.invalidArguments("page_size must be between 1 and 100")
         }
-        let data = try JSONSerialization.data(withJSONObject: skills, options: [.sortedKeys])
-        let json = String(decoding: data, as: UTF8.self)
+
+        let sorted = packages.sorted {
+            if $0.slug.rawValue != $1.slug.rawValue { return $0.slug.rawValue < $1.slug.rawValue }
+            return $0.id.rawValue < $1.id.rawValue
+        }
+        let totalItems = sorted.count
+        let totalPages = totalItems == 0 ? 0 : (totalItems + pageSize - 1) / pageSize
+        guard page == 1 || page <= totalPages else {
+            throw AgentToolError.invalidArguments("page \(page) exceeds totalPages \(totalPages)")
+        }
+        let start = min((page - 1) * pageSize, totalItems)
+        let end = min(start + pageSize, totalItems)
+        let skills = sorted[start..<end].map { package in
+            SkillListItem(
+                slug: package.slug.rawValue,
+                name: package.manifest.name,
+                description: package.manifest.description,
+                tags: package.manifest.tags
+            )
+        }
+        let hasNextPage = end < totalItems
+        let response = SkillListPage(
+            page: page,
+            pageSize: pageSize,
+            returnedItems: skills.count,
+            totalItems: totalItems,
+            totalPages: totalPages,
+            hasNextPage: hasNextPage,
+            nextPage: hasNextPage ? page + 1 : nil,
+            skills: skills
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let json = String(decoding: try encoder.encode(response), as: UTF8.self)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Found \(skills.count) installed skill(s): \(skills.compactMap { $0["name"] as? String }.joined(separator: ", ")).",
+            contentText: "Found \(totalItems) installed skill(s); returned page \(page) with \(skills.count) item(s): \(skills.map(\.name).joined(separator: ", ")).",
             contentJSON: json
         )
     }
+}
+
+private struct SkillListItem: Codable {
+    var slug: String
+    var name: String
+    var description: String
+    var tags: [String]
+}
+
+private struct SkillListPage: Codable {
+    var page: Int
+    var pageSize: Int
+    var returnedItems: Int
+    var totalItems: Int
+    var totalPages: Int
+    var hasNextPage: Bool
+    var nextPage: Int?
+    var skills: [SkillListItem]
 }

@@ -15,6 +15,53 @@ public enum AppChatSessionRepositoryError: Error, Equatable, CustomStringConvert
     }
 }
 
+public enum AppSessionStatusUpdateOutcome: Sendable, Equatable {
+    case updated(AgentSession, warning: String?)
+    case unchanged(AgentSession)
+    case conflict(AgentSession)
+}
+
+public struct AppChatSessionPage: Sendable, Equatable {
+    public var sessions: [AgentSession]
+    public var messageCounts: [String: Int]
+    public var nextCursor: String?
+
+    public init(sessions: [AgentSession], messageCounts: [String: Int], nextCursor: String?) {
+        self.sessions = sessions
+        self.messageCounts = messageCounts
+        self.nextCursor = nextCursor
+    }
+}
+
+public struct AppChatSessionSummary: Sendable, Equatable {
+    public var totalCount: Int
+    public var countsByStatus: [AgentSessionStatus: Int]
+    public var countsByLabelID: [String: Int]
+
+    public init(totalCount: Int = 0, countsByStatus: [AgentSessionStatus: Int] = [:], countsByLabelID: [String: Int] = [:]) {
+        self.totalCount = totalCount
+        self.countsByStatus = countsByStatus
+        self.countsByLabelID = countsByLabelID
+    }
+}
+
+public struct AppChatSessionMessagePage: Sendable, Equatable {
+    public var session: AgentSession
+    public var totalMessageCount: Int
+    public var nextBeforePosition: Int?
+
+    public init(session: AgentSession, totalMessageCount: Int, nextBeforePosition: Int?) {
+        self.session = session
+        self.totalMessageCount = totalMessageCount
+        self.nextBeforePosition = nextBeforePosition
+    }
+}
+
+private struct AppChatSessionCursor: Codable {
+    var updatedAt: Date
+    var id: String
+}
+
 public struct AppChatSessionRepository: Sendable {
     public var store: SQLiteGraphKernelStore
     public var storagePaths: AppStoragePaths?
@@ -34,6 +81,43 @@ public struct AppChatSessionRepository: Sendable {
         try store.recentSessionMetadata(limit: limit)
     }
 
+    public func loadSessionPage(filter: AgentSessionListFilter, query: String = "", limit: Int = 50, cursor: String? = nil) throws -> AppChatSessionPage {
+        let pageSize = min(max(limit, 1), 100)
+        let decodedCursor = try cursor.map(Self.decodeCursor)
+        let status: AgentSessionStatus?
+        let labelID: String?
+        switch filter {
+        case .all: status = nil; labelID = nil
+        case .status(let value): status = value; labelID = nil
+        case .label(let value): status = nil; labelID = value
+        }
+        let rows = try store.sessionMetadataPage(
+            status: status,
+            labelID: labelID,
+            searchText: query.trimmingCharacters(in: .whitespacesAndNewlines),
+            beforeUpdatedAt: decodedCursor?.updatedAt,
+            afterID: decodedCursor?.id,
+            limit: pageSize + 1
+        )
+        let records = Array(rows.prefix(pageSize))
+        let sessions = records.map(\.session)
+        let messageCounts = Dictionary(uniqueKeysWithValues: records.map { ($0.session.id, $0.messageCount) })
+        let nextCursor = rows.count > pageSize ? try sessions.last.map(Self.encodeCursor) : nil
+        return AppChatSessionPage(sessions: sessions, messageCounts: messageCounts, nextCursor: nextCursor)
+    }
+
+    public func loadSessionSummary() throws -> AppChatSessionSummary {
+        let summary = try store.sessionMetadataSummary()
+        let statusCounts = Dictionary(uniqueKeysWithValues: summary.countsByStatusRawValue.compactMap { rawValue, count in
+            AgentSessionStatus(rawValue: rawValue).map { ($0, count) }
+        })
+        return AppChatSessionSummary(
+            totalCount: summary.totalCount,
+            countsByStatus: statusCounts,
+            countsByLabelID: summary.countsByLabelID
+        )
+    }
+
     public func loadSessionMessageCounts() throws -> [String: Int] {
         try store.sessionMessageCounts()
     }
@@ -51,6 +135,18 @@ public struct AppChatSessionRepository: Sendable {
 
     public func loadSession(id: String) throws -> AgentSession? {
         try store.session(id: id)
+    }
+
+    public func loadSessionMessagePage(id: String, beforePosition: Int? = nil, limit: Int = 50) throws -> AppChatSessionMessagePage? {
+        guard var session = try store.sessionMetadata(id: id) else { return nil }
+        let page = try store.sessionMessagePage(sessionID: id, beforePosition: beforePosition, limit: limit)
+        session.messages = page.messages
+        let count = try store.sessionMessageCount(id: id) ?? page.messages.count
+        return AppChatSessionMessagePage(
+            session: session,
+            totalMessageCount: count,
+            nextBeforePosition: page.nextBeforePosition
+        )
     }
 
     public func makeNewSession(title: String = "新对话", now: Date = Date()) throws -> AgentSession {
@@ -263,6 +359,48 @@ public struct AppChatSessionRepository: Sendable {
         }
         try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_status_changed", message: "Session status changed to \(statusRaw)", metadata: ["status": statusRaw])
         return updated
+    }
+
+    public func setStatusOptimistically(
+        sessionID: String,
+        statusRaw: String,
+        expectedUpdatedAt: Date? = nil,
+        now: Date = Date()
+    ) throws -> AppSessionStatusUpdateOutcome {
+        guard let current = try loadSession(id: sessionID) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(sessionID)
+        }
+        if current.governance.status.rawValue == statusRaw { return .unchanged(current) }
+        let expected = expectedUpdatedAt ?? current.updatedAt
+        guard expected == current.updatedAt else { return .conflict(current) }
+        let effectiveNow = max(now, current.updatedAt.addingTimeInterval(1))
+        let updated = try store.compareAndSetSessionStatus(
+            sessionID: sessionID,
+            statusRaw: statusRaw,
+            expectedUpdatedAt: expected,
+            updatedAt: effectiveNow
+        )
+        guard updated, let persisted = try loadSession(id: sessionID) else {
+            guard let latest = try loadSession(id: sessionID) else {
+                throw AppChatSessionRepositoryError.sessionNotFound(sessionID)
+            }
+            return .conflict(latest)
+        }
+        let warning: String?
+        do {
+            try appendJournalEvent(
+                runID: UUID().uuidString,
+                sessionID: sessionID,
+                kind: .sessionStatusChanged,
+                action: "session_status_changed",
+                message: "Session status changed to \(statusRaw)",
+                metadata: ["status": statusRaw]
+            )
+            warning = nil
+        } catch {
+            warning = "Status was updated, but the journal event failed: \(error)"
+        }
+        return .updated(persisted, warning: warning)
     }
 
     @discardableResult
@@ -497,5 +635,18 @@ public struct AppChatSessionRepository: Sendable {
 
     public func summarizeSession<Provider: LLMProvider>(id: String, using summarizer: AgentSessionSummarizer<Provider>) async throws -> AgentSessionSummary {
         try await summarizer.summarize(session: AgentSession(id: id))
+    }
+
+    private static func encodeCursor(_ session: AgentSession) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(AppChatSessionCursor(updatedAt: session.updatedAt, id: session.id)).base64EncodedString()
+    }
+
+    private static func decodeCursor(_ raw: String) throws -> AppChatSessionCursor {
+        guard let data = Data(base64Encoded: raw) else { throw CocoaError(.coderReadCorrupt) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(AppChatSessionCursor.self, from: data)
     }
 }

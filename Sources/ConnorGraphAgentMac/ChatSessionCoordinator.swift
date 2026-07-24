@@ -19,12 +19,13 @@ final class ChatSessionCoordinator {
     @ObservationIgnored private var filterChangeGeneration = 0
     @ObservationIgnored private var pendingImportedSessions: [String: AgentSession] = [:]
     @ObservationIgnored private var importedSessionFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
 
     @ObservationIgnored var activeSessionIDProvider: () -> String = { "" }
     @ObservationIgnored var onSelectionWillChange: (String?, String) -> Void = { _, _ in }
     @ObservationIgnored var onSelectionStarted: (String) -> Void = { _ in }
     @ObservationIgnored var onSelectionLoaded: (ChatSessionDetailLoadSnapshot, Int, ContinuousClock.Instant) async -> Void = { _, _, _ in }
-    @ObservationIgnored var onReloadSelectedSession: (AgentSession, Bool) throws -> Void = { _, _ in }
+    @ObservationIgnored var onReloadSelectedSession: (AgentSession, Bool, Int, Int?) throws -> Void = { _, _, _, _ in }
     @ObservationIgnored var onSelectionCleared: () -> Void = {}
     @ObservationIgnored var onSessionsChanged: ([AgentSession]) -> Void = { _ in }
     @ObservationIgnored var onSessionAdded: (AgentSession) -> Void = { _ in }
@@ -40,11 +41,20 @@ final class ChatSessionCoordinator {
         return model.loadingSessionDetailID == selected
     }
 
-    func installStartupSessions(_ sessions: [AgentSession], allSessions: [AgentSession]) {
+    func installStartupSessions(
+        _ sessions: [AgentSession],
+        allSessions: [AgentSession],
+        nextCursor: String? = nil,
+        messageCounts: [String: Int] = [:],
+        summary: AppChatSessionSummary? = nil
+    ) {
         guard !isShutdown else { return }
         hasLoadedInitialSessions = true
         model.sessions = sessions
         model.allSessions = allSessions
+        model.nextPageCursor = nextCursor
+        model.messageCountsBySessionID = messageCounts
+        if let summary { model.applySidebarSummary(summary) }
         onSessionsChanged(allSessions)
     }
 
@@ -58,17 +68,26 @@ final class ChatSessionCoordinator {
         hasLoadedInitialSessions = true
         guard let repository else { return }
         do {
-            var sessions = try repository.loadSessions(filter: model.filter)
+            let page = try repository.loadSessionPage(filter: model.filter, query: model.searchQuery)
+            var sessions = page.sessions
             if sessions.isEmpty, model.filter == .all {
                 sessions = [try repository.createSession()]
             }
             model.sessions = sessions
-            model.allSessions = try repository.loadSessions(filter: .all)
+            model.allSessions = sessions
+            model.messageCountsBySessionID = page.messageCounts
+            model.nextPageCursor = page.nextCursor
+            model.applySidebarSummary(try repository.loadSessionSummary())
             onSessionsChanged(model.allSessions)
             let selectedID = selectedSessionIDVisible(in: sessions)
             model.selectedSessionID = selectedID
-            if let selectedID, let session = try repository.loadSession(id: selectedID) {
-                try onReloadSelectedSession(session, restoreWorkspaceMode)
+            if let selectedID, let messagePage = try repository.loadSessionMessagePage(id: selectedID) {
+                try onReloadSelectedSession(
+                    messagePage.session,
+                    restoreWorkspaceMode,
+                    messagePage.totalMessageCount,
+                    messagePage.nextBeforePosition
+                )
             } else {
                 clearSelection()
             }
@@ -82,23 +101,31 @@ final class ChatSessionCoordinator {
         guard !isShutdown, model.filter != filter else { return }
         _ = restoreWorkspaceMode
         filterChangeGeneration += 1
-        let generation = filterChangeGeneration
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        let measured = AppPerformanceLog.measure {
-            model.filter = filter
-            let projectedSessions = Self.filter(model.allSessions, by: filter)
-            model.sessions = projectedSessions
-            reconcileSelection(visibleSessions: projectedSessions)
-        }
-        AppPerformanceLog.sidebarNavigationLogger.info(
-            "sidebar.filter.commit filter=\(String(describing: filter), privacy: .public) visible=\(self.model.sessions.count, privacy: .public) duration=\(measured.milliseconds, privacy: .public)ms"
-        )
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.filterChangeGeneration == generation, self.model.filter == filter else { return }
-            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
-            AppPerformanceLog.sidebarNavigationLogger.info(
-                "sidebar.filter.firstMainTurn filter=\(String(describing: filter), privacy: .public) visible=\(self.model.sessions.count, privacy: .public) duration=\(elapsed, privacy: .public)ms"
-            )
+        model.filter = filter
+        reload(restoreWorkspaceMode: false)
+    }
+
+    func loadMoreIfNeeded(currentSessionID: String) {
+        guard !isShutdown, model.sessions.last?.id == currentSessionID,
+              let cursor = model.nextPageCursor, !model.isLoadingNextPage,
+              loadMoreTask == nil, let repository else { return }
+        let filter = model.filter
+        let query = model.searchQuery
+        model.isLoadingNextPage = true
+        loadMoreTask = Task { [weak self] in
+            defer { self?.model.isLoadingNextPage = false; self?.loadMoreTask = nil }
+            do {
+                let page = try await Task.detached(priority: .utility) {
+                    try repository.loadSessionPage(filter: filter, query: query, cursor: cursor)
+                }.value
+                guard let self, !self.isShutdown, self.model.filter == filter, self.model.searchQuery == query else { return }
+                let existing = Set(self.model.sessions.map(\.id))
+                let appended = page.sessions.filter { !existing.contains($0.id) }
+                self.model.sessions.append(contentsOf: appended)
+                if filter == .all { self.model.allSessions = self.model.sessions }
+                self.model.messageCountsBySessionID.merge(page.messageCounts) { _, new in new }
+                self.model.nextPageCursor = page.nextCursor
+            } catch { self?.report(error) }
         }
     }
 
@@ -224,6 +251,7 @@ final class ChatSessionCoordinator {
             clearSelection()
         }
         onSessionAdded(session)
+        refreshSidebarSummary()
         errorMessage = nil
         return isVisible
     }
@@ -256,6 +284,7 @@ final class ChatSessionCoordinator {
         let previous = try repository.loadSession(id: sessionID)?.governance.status
         let updated = try repository.setStatus(sessionID: sessionID, status: status)
         replaceInLists(updated)
+        refreshSidebarSummary()
         return (updated, previous)
     }
 
@@ -272,6 +301,7 @@ final class ChatSessionCoordinator {
         }
         let updated = try repository.setLabels(sessionID: sessionID, labels: labels)
         replaceInLists(updated)
+        refreshSidebarSummary()
         return (updated, didRemove)
     }
 
@@ -314,6 +344,7 @@ final class ChatSessionCoordinator {
         model.sessions = Self.filter(model.allSessions, by: model.filter)
         for session in newSessions { onSessionAdded(session) }
         onSessionsChanged(model.allSessions)
+        refreshSidebarSummary()
         errorMessage = nil
     }
 
@@ -327,6 +358,9 @@ final class ChatSessionCoordinator {
         importedSessionFlushTask?.cancel()
         importedSessionFlushTask = nil
         pendingImportedSessions.removeAll()
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        model.isLoadingNextPage = false
         model.loadingSessionDetailID = nil
         model.presentedSessionDetailID = nil
     }
@@ -380,6 +414,11 @@ final class ChatSessionCoordinator {
         let sessions = Array(pendingImportedSessions.values)
         pendingImportedSessions.removeAll()
         installImportedSessions(sessions)
+    }
+
+    private func refreshSidebarSummary() {
+        guard let repository, let summary = try? repository.loadSessionSummary() else { return }
+        model.applySidebarSummary(summary)
     }
 
     private func report(_ error: Error) { report(String(describing: error)) }

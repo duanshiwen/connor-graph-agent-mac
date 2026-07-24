@@ -166,6 +166,7 @@ final class GlobalSearchRuntimeCoordinator {
             switch kind {
             case .chatSessions:
                 chat.sessions.searchQuery = query
+                chatSessions.reloadChatSessions(restoreWorkspaceMode: false)
                 browser.isVisible = false
                 shell.selection = .agentChat
             case .calendar:

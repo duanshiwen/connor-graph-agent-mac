@@ -439,7 +439,7 @@ private struct CalendarSectionScrollView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+            LazyVStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: AppListCardLayout.spacing) {
                         Text(section.title)
@@ -521,7 +521,12 @@ struct CraftContactsListPane: View {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
                     .padding(.top, 80)
             } else {
-                ContactsRowsScrollView(rows: model.presentation.rows, selectedID: model.selectedContactID, onSelect: { model.selectedContactID = $0 })
+                ContactsRowsScrollView(
+                    rows: model.presentation.rows,
+                    selectedID: model.selectedContactID,
+                    onSelect: { model.selectedContactID = $0 },
+                    onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -532,12 +537,14 @@ private struct ContactsRowsScrollView: View {
     var rows: [NativeContactRowPresentation]
     var selectedID: ContactID?
     var onSelect: (ContactID) -> Void
+    var onLoadMore: (ContactID) -> Void
 
     var body: some View {
         ScrollView {
-            VStack(spacing: AppListCardLayout.spacing) {
+            LazyVStack(spacing: AppListCardLayout.spacing) {
                 ForEach(rows) { row in
                     ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
+                        .onAppear { onLoadMore(row.id) }
                 }
             }
             .padding(.horizontal, AppListCardLayout.horizontalInset)
@@ -601,6 +608,7 @@ struct CraftSessionListPane: View {
                     LazyVStack(spacing: AppListCardLayout.spacing) {
                         ForEach(visibleSessionRows) { row in
                             sessionRow(row)
+                                .onAppear { sessionActions.loadMoreChatSessionsIfNeeded(currentSessionID: row.id) }
                         }
                     }
                     .padding(.horizontal, AppListCardLayout.horizontalInset)
@@ -611,6 +619,9 @@ struct CraftSessionListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: model.sessions.searchQuery) { _, _ in
+            sessionActions.reloadChatSessions(restoreWorkspaceMode: false)
+        }
     }
 
     private func sessionRow(_ row: AgentChatSessionPresentation) -> some View {
@@ -618,7 +629,10 @@ struct CraftSessionListPane: View {
             row: row,
             readState: model.sessions.readStates[row.id],
             isSelected: row.id == model.sessions.selectedSessionID,
-            isRunning: rowActions.isSubmitting(row.id),
+            executionState: .resolve(
+                isSubmitting: rowActions.isSubmitting(row.id),
+                hasPendingApproval: model.approvals.hasPendingApproval(sessionID: row.id)
+            ),
             isRegeneratingTitle: model.sessions.regeneratingTitleSessionIDs.contains(row.id),
             hasRunningBackgroundTask: !rowActions.canDelete(row.id),
             labelDefinitions: governanceModel.config.labels,
@@ -644,13 +658,7 @@ struct CraftSessionListPane: View {
         guard !query.isEmpty else {
             return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
         }
-        let terms = listSearchTerms(for: query)
-        let matchingSessions = terms.isEmpty ? model.sessions.sessions : model.sessions.sessions.filter { session in
-            listSearchTextMatches(session.title, terms: terms) || session.messages.contains {
-                listSearchTextMatches($0.content, terms: terms)
-            }
-        }
-        return matchingSessions.map { model.sessions.rowPresentation(for: $0) }
+        return model.sessions.sessions.map { model.sessions.rowPresentation(for: $0) }
     }
 
     private var sessionEmptyTitle: String {
@@ -1492,11 +1500,8 @@ private struct AddTaskAutomationSheet: View {
 struct CraftMailListPane: View {
     @Bindable var model: MailFeatureModel
 
-    private static let visibleMessagesBatchSize = 100
-
     private var presentation: NativeMailBrowserPresentation { model.presentation }
     private var visibleMessages: [MailMessageSummary] { model.visibleListMessages }
-    private var hiddenFilteredMessageCount: Int { model.hiddenFilteredListMessageCount }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1519,7 +1524,9 @@ struct CraftMailListPane: View {
             } else if presentation.mailboxes.isEmpty {
                 ContentUnavailableView("还没有邮箱文件夹", systemImage: "tray", description: Text("账户添加后，康纳同学会在同步完成时显示收件箱和其他文件夹。"))
                     .padding(.top, 80)
-            } else if presentation.messages.isEmpty {
+            } else if presentation.messages.isEmpty
+                        && model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && model.listDirectionFilter == .all {
                 ContentUnavailableView("还没有同步到邮件", systemImage: "envelope.open", description: Text("邮件同步完成后，最近邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else {
@@ -1543,14 +1550,9 @@ struct CraftMailListPane: View {
                                 )
                                 .equatable()
                                 .nativeListRowStyle()
-                            }
-                            if hiddenFilteredMessageCount > 0 {
-                                MailListLoadMoreRow(
-                                    hiddenCount: hiddenFilteredMessageCount,
-                                    batchSize: Self.visibleMessagesBatchSize,
-                                    onLoadMore: model.loadMoreListMessages
-                                )
-                                .nativeListRowStyle()
+                                .onAppear {
+                                    model.loadMoreListMessagesIfNeeded(currentMessageID: message.id)
+                                }
                             }
                         }
                         .listStyle(.plain)
@@ -1636,32 +1638,6 @@ extension MailMessageDirectionFilter {
         case .received: "tray"
         case .sent: "paperplane"
         }
-    }
-}
-
-private struct MailListLoadMoreRow: View, Equatable {
-    var hiddenCount: Int
-    var batchSize: Int
-    var onLoadMore: () -> Void
-
-    nonisolated static func == (lhs: MailListLoadMoreRow, rhs: MailListLoadMoreRow) -> Bool {
-        lhs.hiddenCount == rhs.hiddenCount && lhs.batchSize == rhs.batchSize
-    }
-
-    var body: some View {
-        Button(action: onLoadMore) {
-            VStack(spacing: 4) {
-                Text("显示更多邮件")
-                    .font(AppListTypography.rowCaptionEmphasized)
-                Text("还有 \(hiddenCount) 封，点击继续加载最近 \(min(batchSize, hiddenCount)) 封")
-                    .font(AppListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -3045,7 +3021,7 @@ struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
     var readState: SessionReadState?
     var isSelected: Bool
-    var isRunning: Bool
+    var executionState: ChatSessionExecutionPresentation
     var isRegeneratingTitle: Bool
     var hasRunningBackgroundTask: Bool
     var labelDefinitions: [AgentSessionLabelDefinition]
@@ -3186,7 +3162,13 @@ struct CraftSessionRow: View {
 
     @ViewBuilder
     private var leadingSessionIcon: some View {
-        if isRunning || isRegeneratingTitle {
+        if let systemImage = executionState.systemImage {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 18, height: 18)
+                .help(executionState.helpText ?? "")
+        } else if executionState == .running || isRegeneratingTitle {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 18, height: 18)
@@ -3260,10 +3242,11 @@ struct CraftSessionRow: View {
 
     @ViewBuilder
     private var trailingSessionStatusText: some View {
-        if isRunning {
-            Text("运行中")
+        if let statusText = executionState.statusText {
+            Text(statusText)
                 .font(AppListTypography.rowCaptionEmphasized)
-                .foregroundStyle(activeMetaTextColor)
+                .foregroundStyle(executionState == .awaitingApproval ? .orange : activeMetaTextColor)
+                .help(executionState.helpText ?? "")
         } else if isRegeneratingTitle {
             Text("生成中")
                 .font(AppListTypography.rowCaptionEmphasized)

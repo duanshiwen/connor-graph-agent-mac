@@ -56,6 +56,9 @@ public final class FileBackedMailSourceStore: MailStoreProtocol, @unchecked Send
     public func recentMessages(accountID: MailAccountID?, direction: MailMessageDirectionFilter, limit: Int) async throws -> [MailMessageSummary] {
         try await store.recentMessages(accountID: accountID, direction: direction, limit: limit)
     }
+    public func messagePage(_ request: MailMessagePageRequest) async throws -> MailMessagePage { try await store.messagePage(request) }
+    public func presentationPage(_ request: MailMessagePageRequest) async throws -> (NativeMailBrowserPresentation, String?) { try await store.presentationPage(request) }
+    public func diagnosticCounts() async throws -> MailStoreDiagnosticCounts { try await store.diagnosticCounts() }
     public func searchMessages(query: String, accountID: MailAccountID?, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [MailMessageSummary] {
         try await store.searchMessages(query: query, accountID: accountID, temporalFilter: temporalFilter, temporalSort: temporalSort, limit: limit)
     }

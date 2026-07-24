@@ -60,32 +60,46 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     """)
 }
 
-@Test func personalityProposalCommitsWithoutSecondApproval() async throws {
+@Test func personalityUpdateCommitsInOneCallWithoutApproval() async throws {
     let state = PersonalityTestState()
     var registry = AgentToolRegistry()
     registry.registerConnorPersonalityTools(runtime: personalityRuntime(state), provider: personalityProvider)
 
-    let proposalResult = try await registry.execute(
-        AgentToolCall(name: "personality_propose_update", argumentsJSON: #"{"request":"以后更直接一些","mode":"merge","expected_revision":2}"#),
-        context: personalityContext(approved: [.modelCall])
-    )
-    let proposalJSON = try #require(proposalResult.contentJSON)
-    let proposalObject = try #require(
-        JSONSerialization.jsonObject(with: Data(proposalJSON.utf8)) as? [String: Any]
-    )
-    let proposalID = try #require(proposalObject["proposalID"] as? String)
-    let commitCall = AgentToolCall(
-        name: "personality_commit_proposal",
-        argumentsJSON: "{\"proposal_id\":\"\(proposalID)\"}"
-    )
-
     let committed = try await registry.execute(
-        commitCall,
+        AgentToolCall(
+            name: "personality_update",
+            argumentsJSON: #"{"request":"以后更直接一些","mode":"merge","expected_revision":2}"#
+        ),
         context: personalityContext()
     )
     #expect(committed.contentText.contains("版本 3"))
     #expect(await state.read().snapshotSummary == "温和但更加直接")
     #expect(await state.read().personality.gender == "女性")
+    #expect(registry.definitions.map(\.name).contains("personality_update"))
+    #expect(!registry.definitions.map(\.name).contains("personality_propose_update"))
+    #expect(!registry.definitions.map(\.name).contains("personality_commit_proposal"))
+}
+
+@Test func personalityUpdateDoesNotReportSuccessWhenDurableCommitFails() async throws {
+    let state = PersonalityTestState()
+    let runtime = ConnorPersonalityRuntime(
+        snapshot: { await state.read() },
+        commit: { _ in throw CocoaError(.fileWriteNoPermission) }
+    )
+    let tool = ConnorPersonalityUpdateTool(runtime: runtime, provider: personalityProvider)
+
+    await #expect(throws: CocoaError.self) {
+        try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "request": .string("以后更直接一些"),
+                "mode": .string("merge"),
+                "expected_revision": .int(2)
+            ]),
+            context: personalityContext()
+        )
+    }
+    #expect(await state.read().revision == 2)
+    #expect(await state.read().snapshotSummary == "温和可靠")
 }
 
 @Test func personalityProposalRejectsReadOnlyGenderQuestion() async throws {

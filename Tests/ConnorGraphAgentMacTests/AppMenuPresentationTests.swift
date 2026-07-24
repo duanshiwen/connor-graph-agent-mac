@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ConnorGraphAgentMac
 
@@ -10,7 +11,7 @@ struct AppMenuPresentationTests {
         #expect(AppMenuPresentation.newSessionTitle == "新建会话")
         #expect(AppMenuPresentation.newNoteTitle == "新建笔记")
         #expect(AppMenuPresentation.importNotesTitle == "导入笔记…")
-        #expect(AppMenuPresentation.importCenterTitle == "导入中心…")
+        #expect(AppMenuPresentation.importCenterTitle == "笔记导入中心…")
         #expect(AppMenuPresentation.importSkillsTitle == "导入技能…")
     }
 
@@ -20,5 +21,21 @@ struct AppMenuPresentationTests {
         #expect(AppMenuPresentation.noteImportCenterWindowID == "note-import-center")
         #expect(AppMenuPresentation.noteImportWizardWindowID != AppMenuPresentation.noteImportCenterWindowID)
         #expect(AppMenuPresentation.skillImportWindowID == "skill-import")
+    }
+
+    @Test("Places note import center directly below note import")
+    func noteImportMenuOrder() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let notes = try #require(source.range(of: "Button(AppMenuPresentation.importNotesTitle)"))
+        let center = try #require(source.range(of: "Button(AppMenuPresentation.importCenterTitle)"))
+        let skills = try #require(source.range(of: "Button(AppMenuPresentation.importSkillsTitle)"))
+
+        #expect(notes.lowerBound < center.lowerBound)
+        #expect(center.lowerBound < skills.lowerBound)
     }
 }

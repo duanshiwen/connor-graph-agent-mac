@@ -60,8 +60,27 @@ struct CloudKnowledgePhase6Tests {
         #expect(store.home.banners.map(\.title) == ["本周精选"])
         #expect(store.home.sections.map(\.layout) == ["hero", "grid"])
         #expect(store.searchResults.map(\.id) == ["kb-1"])
-        #expect(await api.searchRequests == [.init(query: "", limit: 100)])
+        #expect(await api.searchRequests == [.init(query: "", page: 1, limit: 50)])
         #expect(await cache.isAuthorized("kb-1"))
+    }
+
+    @Test @MainActor func marketplaceSearchLoadsEveryPageWithoutDuplicates() async throws {
+        let api = MarketplaceFakeAPI()
+        await api.setSearchResultCount(137)
+        let store = CloudKnowledgeMarketplaceStore(api: api)
+
+        await store.search(query: "agent")
+        while let lastID = store.searchResults.last?.id, store.searchResults.count < 137 {
+            await store.loadMoreSearchResultsIfNeeded(currentID: lastID)
+        }
+
+        #expect(store.searchResults.count == 137)
+        #expect(Set(store.searchResults.map(\.id)).count == 137)
+        #expect(await api.searchRequests == [
+            .init(query: "agent", page: 1, limit: 50),
+            .init(query: "agent", page: 2, limit: 50),
+            .init(query: "agent", page: 3, limit: 50)
+        ])
     }
 
     @Test func marketplaceClientRefreshesRejectedAccessTokenAndRetriesDetailOnce() async throws {
@@ -257,9 +276,18 @@ private actor MarketplaceFakeAPI: CloudKnowledgeMarketplaceAPI {
     var contextRequests: [CloudKnowledgeAnswerRequest] = []
     var contextChannels: [CloudKnowledgeSearchChannel] = []
     var contextIsUnreachable = false
+    var searchResultCount = 1
     func home() async throws -> CloudMarketplaceHome { .init(categories: [.init(id: "agent", name: "AI Agent", parentID: nil, icon: nil), .init(id: "economics", name: "经济学", parentID: nil, icon: nil)], banners: [.init(id: "b", title: "本周精选", subtitle: nil, imageURL: nil, actionURL: nil)], sections: [.init(id: "hero", title: "精选", layout: "hero", knowledgeBases: [base]), .init(id: "new", title: "最新", layout: "grid", knowledgeBases: [])]) }
     func categories() async throws -> [CloudMarketplaceCategory] { try await home().categories }
-    func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] { searchRequests.append(request); return [base] }
+    func search(_ request: CloudMarketplaceSearchRequest) async throws -> [CloudMarketplaceKnowledgeBase] {
+        searchRequests.append(request)
+        let start = min((request.page - 1) * request.limit, searchResultCount)
+        let end = min(start + request.limit, searchResultCount)
+        return (start..<end).map { index in
+            .init(id: "kb-\(index + 1)", name: "Connor \(index + 1)", description: "Agent OS", categoryID: "agent", subscriberCount: index, subscribed: index == 0, publicationStatus: "published")
+        }
+    }
+    func setSearchResultCount(_ count: Int) { searchResultCount = count }
     func rejectDetails() { rejectsDetails = true }
     func detail(id: String) async throws -> CloudMarketplaceKnowledgeBase {
         if rejectsDetails { throw CloudKnowledgeError.unauthorized }

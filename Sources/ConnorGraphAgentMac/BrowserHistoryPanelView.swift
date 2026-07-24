@@ -115,6 +115,7 @@ struct BrowserHistoryPanelView: View {
                         } onDelete: {
                             model.deleteHistoryRecord(record.id)
                         }
+                        .onAppear { model.loadMoreHistoryIfNeeded(currentRecordID: record.id) }
                     }
                 }
             }
@@ -136,7 +137,7 @@ struct BrowserHistoryPanelView: View {
 
     private var footerBar: some View {
         HStack {
-            Text("\(model.filteredHistoryRecords.count) 条记录")
+            Text("已加载 \(model.filteredHistoryRecords.count) 条")
                 .font(AppTypography.caption)
                 .foregroundStyle(.tertiary)
             Spacer()

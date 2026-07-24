@@ -39,6 +39,24 @@ struct CloudKnowledgePhase5Tests {
         #expect(revision.recordedAt != nil)
     }
 
+    @Test @MainActor func creatorStorePagesEveryRevisionWithoutDuplicates() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-history-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = CloudKnowledgeCreatorSnapshotRepository(fileURL: root.appendingPathComponent("snapshot.json"))
+        try repository.save(.init(stage: .completed, knowledgeBaseID: "kb-1"))
+        let store = CloudKnowledgeCreatorStore(repository: repository, creatorAPI: PagedRevisionCreatorAPI(count: 137))
+
+        await store.loadHistory()
+        while let lastID = store.history.last?.id {
+            let previousCount = store.history.count
+            await store.loadMoreHistoryIfNeeded(currentRevisionID: lastID)
+            if store.history.count == previousCount { break }
+        }
+
+        #expect(store.history.map(\.id) == (0..<137).map { "revision-\($0)" })
+        #expect(Set(store.history.map(\.id)).count == 137)
+    }
+
     @Test @MainActor func creatorWorkflowPersistsAndRestoresSelectedConversationsAndProgress() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cloud-creator-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -336,6 +354,28 @@ private struct RevisionSummaryContractTransport: ConnorBackendHTTPTransport {
         let json = #"{"code":0,"data":[{"identity_id":"identity-1","revision_id":"revision-1","revision_number":1,"layer":"L3","kind":"reusable_knowledge","stable_key":"orchid-7319-fault-rollback-window","recorded_at":"2026-07-17T06:06:14Z","superseded_at":null,"committed_sequence":1}]}"#
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         return (Data(json.utf8), response)
+    }
+}
+
+private actor PagedRevisionCreatorAPI: CloudKnowledgeCreatorAPI {
+    let values: [CloudKnowledgeRevisionSummary]
+    init(count: Int) {
+        values = (0..<count).map {
+            .init(identityID: "identity-\($0)", revisionID: "revision-\($0)", layer: .l3, text: "", revisionNumber: $0)
+        }
+    }
+    func createKnowledgeBase(_ draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func updateKnowledgeBase(id: String, draft: CloudKnowledgeBaseDraft) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func knowledgeBase(id: String) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func publishKnowledgeBase(id: String, request: CloudKnowledgePublishRequest) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func unpublishKnowledgeBase(id: String, request: CloudKnowledgeUnpublishRequest) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func appealKnowledgeBase(id: String, statement: String, governanceActionID: String) async throws -> CloudKnowledgeBaseDetail { throw CloudKnowledgeError.invalidResponse }
+    func preview(runID: String) async throws -> CloudKnowledgePreview { throw CloudKnowledgeError.invalidResponse }
+    func revisions(knowledgeBaseID: String, limit: Int) async throws -> [CloudKnowledgeRevisionSummary] { Array(values.prefix(limit)) }
+    func revisionPage(knowledgeBaseID: String, page: Int, pageSize: Int) async throws -> CloudKnowledgeRevisionPage {
+        let start = min(values.count, (max(1, page) - 1) * pageSize)
+        let end = min(values.count, start + pageSize)
+        return .init(revisions: Array(values[start..<end]), nextPage: end < values.count ? page + 1 : nil)
     }
 }
 

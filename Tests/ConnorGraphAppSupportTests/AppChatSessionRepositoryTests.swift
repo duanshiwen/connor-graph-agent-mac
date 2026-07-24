@@ -268,3 +268,29 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
     #expect(loaded.messages.map(\.id) == ["user-1", "assistant-1", "user-2", "assistant-2"])
     #expect(loaded.messages.map(\.content) == ["你好", "你好！", "我们会说些什么呢？", "我们可以聊图谱。"])
 }
+
+@Test func appChatRepositoryPagesAllSessionMessagesWithoutGapsOrDuplicates() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let messages = (0..<137).map { index in
+        AgentMessage(id: String(format: "message-%03d", index), role: index.isMultiple(of: 2) ? .user : .assistant, content: "Message \(index)")
+    }
+    try repository.saveSession(AgentSession(id: "paged-session", messages: messages))
+
+    var beforePosition: Int?
+    var loaded: [AgentMessage] = []
+    repeat {
+        let page = try #require(try repository.loadSessionMessagePage(
+            id: "paged-session",
+            beforePosition: beforePosition,
+            limit: 19
+        ))
+        loaded.insert(contentsOf: page.session.messages, at: 0)
+        beforePosition = page.nextBeforePosition
+        #expect(page.totalMessageCount == 137)
+    } while beforePosition != nil
+
+    #expect(loaded.map(\.id) == messages.map(\.id))
+    #expect(Set(loaded.map(\.id)).count == 137)
+}

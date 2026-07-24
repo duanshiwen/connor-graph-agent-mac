@@ -143,6 +143,77 @@ struct NativeRSSSystemTests {
         #expect(restoredItems.first?.title == "Swift Persistence")
     }
 
+    @Test func fileBackedRSSStoragePagesWithoutGapsOrDuplicates() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorRSSPaginationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = FileBackedRSSSourceCache(storageDirectory: root)
+        let sourceID = RSSSourceID(rawValue: "paged-feed")
+        let baseDate = try #require(ISO8601DateFormatter().date(from: "2026-07-01T00:00:00Z"))
+        let items = (0..<135).map { index in
+            RSSItemDetail(
+                summary: RSSItemSummary(
+                    id: RSSItemID(rawValue: String(format: "item-%03d", index)),
+                    sourceID: sourceID,
+                    title: index.isMultiple(of: 3) ? "Matching article \(index)" : "Article \(index)",
+                    publishedAt: baseDate.addingTimeInterval(TimeInterval(-(index / 4))),
+                    snippet: "Body \(index)"
+                ),
+                content: RSSItemContent(plainText: index.isMultiple(of: 3) ? "searchable payload" : "ordinary payload")
+            )
+        }
+        _ = try await cache.upsertItems(items)
+
+        var cursor: String?
+        var loaded: [RSSItemSummary] = []
+        repeat {
+            let page = try await cache.itemPage(RSSItemPageRequest(sourceID: sourceID, pageSize: 23, cursor: cursor))
+            #expect(page.items.count <= 23)
+            loaded.append(contentsOf: page.items)
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        #expect(loaded.count == 135)
+        #expect(Set(loaded.map(\.id)).count == 135)
+        #expect(loaded.map(\.id.rawValue) == items.map(\.id.rawValue))
+
+        cursor = nil
+        var matches: [RSSItemSummary] = []
+        repeat {
+            let page = try await cache.itemPage(RSSItemPageRequest(query: "searchable", sourceID: sourceID, pageSize: 11, cursor: cursor))
+            matches.append(contentsOf: page.items)
+            cursor = page.nextCursor
+        } while cursor != nil
+        #expect(matches.count == 45)
+        #expect(Set(matches.map(\.id)).count == 45)
+    }
+
+    @Test func fileBackedRSSStorageMigratesLegacyJSONBeforePaging() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorRSSMigrationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let sourceID = RSSSourceID(rawValue: "legacy-feed")
+        let items = (0..<12).map { index in
+            RSSItemDetail(summary: RSSItemSummary(
+                id: RSSItemID(rawValue: "legacy-\(index)"),
+                sourceID: sourceID,
+                title: "Legacy \(index)",
+                publishedAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            ))
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(items).write(to: root.appendingPathComponent("items.json"), options: .atomic)
+
+        let cache = FileBackedRSSSourceCache(storageDirectory: root)
+        let first = try await cache.itemPage(RSSItemPageRequest(pageSize: 5))
+        let second = try await cache.itemPage(RSSItemPageRequest(pageSize: 10, cursor: first.nextCursor))
+
+        #expect(first.items.count == 5)
+        #expect(second.items.count == 7)
+        #expect(Set((first.items + second.items).map(\.id)).count == 12)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("items.sqlite").path))
+    }
+
     @Test func presentationFiltersAndDefaults() {
         let runtime = RSSRuntime.fixture()
         let sourceID = RSSSourceID(rawValue: "fixture-rss-source")

@@ -53,6 +53,12 @@ struct AgentChatPermissionRequestCard: View {
                     .background(Color.orange.opacity(0.12), in: Capsule())
                     .foregroundStyle(.orange)
             }
+
+            Spacer(minLength: 0)
+
+            Text("请求审批")
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.orange)
         }
     }
 
@@ -69,6 +75,7 @@ struct AgentChatPermissionRequestCard: View {
                     }
 
                     Label("所在会话：\(approvalPresentation.sessionTitle)", systemImage: "bubble.left.and.bubble.right")
+                    Label("当前会话正在等待权限审批，请前往处理", systemImage: "lock.fill")
                     Text(approvalPresentation.capabilityDescription)
 
                     payloadDisclosure

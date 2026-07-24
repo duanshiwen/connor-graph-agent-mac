@@ -75,9 +75,19 @@ private func temporaryPhaseCStoragePaths(_ name: String = UUID().uuidString) -> 
                     "description": .string("Search external system"),
                     "inputSchema": .object(["type": .string("object")])
                 ])
-            ])
+            ]),
+            "nextCursor": .string("page-2")
         ])),
         MCPJSONRPCMessage(id: .number(3), result: .object([
+            "tools": .array([
+                .object([
+                    "name": .string("write"),
+                    "description": .string("Write external system"),
+                    "inputSchema": .object(["type": .string("object")])
+                ])
+            ])
+        ])),
+        MCPJSONRPCMessage(id: .number(4), result: .object([
             "content": .array([.object(["type": .string("text"), "text": .string("found")])]),
             "isError": .bool(false)
         ]))
@@ -91,10 +101,11 @@ private func temporaryPhaseCStoragePaths(_ name: String = UUID().uuidString) -> 
 
     #expect(initialization.protocolVersion == "2025-06-18")
     #expect(initialization.serverInfo.name == "mock-mcp")
-    #expect(tools.map(\.name) == ["search"])
+    #expect(tools.map(\.name) == ["search", "write"])
     #expect(result.content.first?.text == "found")
     let sentMethods = await transport.sent.compactMap(\.method)
-    #expect(sentMethods == ["initialize", "notifications/initialized", "tools/list", "tools/call"])
+    #expect(sentMethods == ["initialize", "notifications/initialized", "tools/list", "tools/list", "tools/call"])
+    #expect(await transport.sent[3].params?.objectValue?["cursor"]?.stringValue == "page-2")
     #expect(await transport.didClose)
 }
 
