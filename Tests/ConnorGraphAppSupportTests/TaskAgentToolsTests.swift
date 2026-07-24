@@ -35,6 +35,10 @@ struct TaskAgentToolsTests {
         #expect(tasks.count == 1)
         #expect(tasks.first?.origin == .ai)
         #expect(tasks.first?.metadata.createdBySessionID == "session-1")
+        let json = try #require(result.contentJSON)
+        let payload = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect(payload["taskID"] as? String == payload["id"] as? String)
+        #expect(payload["task_id"] == nil)
     }
 
     @Test func aiToolCreatesStatusTriggeredTask() async throws {
