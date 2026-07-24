@@ -67,19 +67,27 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         guard context.allowedToolNames.contains(call.name) else {
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
         }
-        let agentArguments: AgentToolArguments
+        let rawArguments: AgentToolArguments
         do {
-            agentArguments = try AgentToolArguments(json: call.argumentsJSON)
+            rawArguments = try AgentToolArguments(json: call.argumentsJSON)
         } catch {
             throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
         }
+        let normalizedObject: SendableJSONValue
         if let schema = inputSchema(for: call.name) {
-            let issues = schema.argumentValidationIssues(.object(agentArguments.values))
+            normalizedObject = schema.normalizingLegacyPropertyAliases(.object(rawArguments.values))
+            let issues = schema.argumentValidationIssues(normalizedObject)
             guard issues.isEmpty else {
                 throw MemoryOSBackgroundToolExecutionError.invalidArguments(issues.joined(separator: "; "))
             }
+        } else {
+            normalizedObject = .object(rawArguments.values)
         }
-        let args = try Arguments(json: call.argumentsJSON)
+        guard case .object(let normalizedValues) = normalizedObject else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ must be an object")
+        }
+        let agentArguments = AgentToolArguments(values: normalizedValues)
+        let args = Arguments(values: normalizedValues.mapValues(\.jsonCompatibleObject))
         switch call.name {
         case "environment_history_coverage", "environment_history_query", "environment_history_compare":
             guard let environmentSnapshotRuntime else {
@@ -430,6 +438,10 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
 
 private struct Arguments {
     var values: [String: Any]
+
+    init(values: [String: Any]) {
+        self.values = values
+    }
 
     init(json: String) throws {
         guard let data = json.data(using: .utf8) else { throw MemoryOSBackgroundToolExecutionError.invalidArguments("Invalid UTF-8") }
