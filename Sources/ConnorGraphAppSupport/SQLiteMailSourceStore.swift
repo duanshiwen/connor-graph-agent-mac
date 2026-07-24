@@ -22,6 +22,27 @@ public enum SQLiteMailSourceStoreError: Error, Sendable, CustomStringConvertible
     }
 }
 
+private struct MailSQLitePageCursor: Codable {
+    var date: Date
+    var id: String
+
+    func encode() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(self).base64EncodedString()
+    }
+
+    static func decode(_ raw: String) throws -> Self {
+        guard let data = Data(base64Encoded: raw) else {
+            throw SQLiteMailSourceStoreError.decodeFailed("Invalid mail page cursor")
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do { return try decoder.decode(Self.self, from: data) }
+        catch { throw SQLiteMailSourceStoreError.decodeFailed("Invalid mail page cursor") }
+    }
+}
+
 // MARK: - SQLiteMailSourceStore
 
 public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable {
@@ -128,6 +149,9 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_account ON mail_messages(account_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_mailbox ON mail_messages(mailbox_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_date ON mail_messages(date DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_msg_date_page ON mail_messages(date DESC, id ASC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_msg_account_page ON mail_messages(account_id, date DESC, id ASC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_msg_mailbox_page ON mail_messages(mailbox_id, date DESC, id ASC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_msg_uid ON mail_messages(account_id, uid);")
     }
 
@@ -217,26 +241,85 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         return try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)).summary }
     }
 
+    public func messagePage(_ request: MailMessagePageRequest) async throws -> MailMessagePage {
+        let cursor = try request.cursor.map(MailSQLitePageCursor.decode)
+        var sql = """
+            SELECT m.raw_json
+            FROM mail_messages m
+            LEFT JOIN mail_mailboxes b ON m.mailbox_id = b.id
+            WHERE m.is_deleted = 0
+        """
+        if let accountID = request.accountID { sql += " AND m.account_id = '\(esc(accountID.rawValue))'" }
+        if let mailboxID = request.mailboxID { sql += " AND m.mailbox_id = '\(esc(mailboxID.rawValue))'" }
+        switch request.direction {
+        case .all: break
+        case .received: sql += " AND COALESCE(b.role, '') != 'sent'"
+        case .sent: sql += " AND b.role = 'sent'"
+        }
+        let normalized = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalized.isEmpty {
+            let term = escLike(normalized)
+            sql += " AND (m.subject LIKE '%\(term)%' ESCAPE '\\' COLLATE NOCASE OR m.snippet LIKE '%\(term)%' ESCAPE '\\' COLLATE NOCASE OR m.from_email LIKE '%\(term)%' ESCAPE '\\' COLLATE NOCASE OR COALESCE(m.from_name, '') LIKE '%\(term)%' ESCAPE '\\' COLLATE NOCASE OR COALESCE(m.body_plain, '') LIKE '%\(term)%' ESCAPE '\\' COLLATE NOCASE)"
+        }
+        if let cursor {
+            let date = esc(iso8601(cursor.date))
+            sql += " AND (m.date < '\(date)' OR (m.date = '\(date)' AND m.id > '\(esc(cursor.id))'))"
+        }
+        sql += " ORDER BY m.date DESC, m.id ASC LIMIT \(request.pageSize + 1)"
+        let rows = try querySQL(sql)
+        let details = try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)) }
+        let pageDetails = Array(details.prefix(request.pageSize))
+        let nextCursor = details.count > request.pageSize
+            ? try pageDetails.last.map { try MailSQLitePageCursor(date: $0.summary.date, id: $0.id.rawValue).encode() }
+            : nil
+        return MailMessagePage(messages: pageDetails.map(\.summary), nextCursor: nextCursor)
+    }
+
+    public func presentationPage(_ request: MailMessagePageRequest) async throws -> (NativeMailBrowserPresentation, String?) {
+        let accounts = try await listAccounts()
+        let mailboxRows = try querySQL("SELECT raw_json FROM mail_mailboxes ORDER BY path COLLATE NOCASE")
+        let mailboxes = try mailboxRows.map { try decoder.decode(MailMailbox.self, from: Data($0[0].utf8)) }
+        let page = try await messagePage(request)
+        return (NativeMailBrowserPresentation(accounts: accounts, mailboxes: mailboxes, messages: page.messages), page.nextCursor)
+    }
+
+    public func diagnosticCounts() async throws -> MailStoreDiagnosticCounts {
+        let accountCount = Int(try querySQL("SELECT COUNT(*) FROM mail_accounts").first?.first ?? "0") ?? 0
+        let mailboxCount = Int(try querySQL("SELECT COUNT(*) FROM mail_mailboxes").first?.first ?? "0") ?? 0
+        let messageCount = Int(try querySQL("SELECT COUNT(*) FROM mail_messages").first?.first ?? "0") ?? 0
+        let roleRows = try querySQL("SELECT role, COUNT(*) FROM mail_mailboxes GROUP BY role")
+        let roles = Dictionary(uniqueKeysWithValues: roleRows.compactMap { row -> (String, Int)? in
+            guard row.count == 2, let count = Int(row[1]) else { return nil }
+            return (row[0], count)
+        })
+        return MailStoreDiagnosticCounts(accounts: accountCount, mailboxes: mailboxCount, messages: messageCount, mailboxRoles: roles)
+    }
+
     public func searchMessages(query: String, accountID: MailAccountID?, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [MailMessageSummary] {
         let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
-        if let searchService {
-            let allIDs = try allStoredMessageIDs()
-            let allDetails = try loadMessageByIDs(allIDs.map(MailMessageID.init(rawValue:)))
-            try await primeSearchIndexIfNeeded(details: allDetails)
+        if let searchService, hasPrimedSearchIndex {
             let results = try await searchService.search(NativeSearchQuery(text: query, sourceKinds: [.mail], sourceInstanceIDs: accountID.map { Set([$0.rawValue]) }, temporalFilter: temporalFilter, temporalSort: temporalSort, limit: limit, rankingProfile: .recentFirst))
-            let byID = Dictionary(uniqueKeysWithValues: allDetails.map { ($0.id.rawValue, $0.summary) })
-            return results.compactMap { byID[$0.externalID] }
+            var summaries: [MailMessageSummary] = []
+            summaries.reserveCapacity(results.count)
+            for result in results {
+                if let detail = try await message(id: MailMessageID(rawValue: result.externalID)) {
+                    summaries.append(detail.summary)
+                }
+            }
+            return summaries
         }
         // Fallback: SQL query
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var sql = "SELECT raw_json FROM mail_messages WHERE 1=1"
         if let accountID { sql += " AND account_id = '\(esc(accountID.rawValue))'" }
+        if let start = temporalFilter?.start { sql += " AND date >= '\(esc(iso8601(start)))'" }
+        if let end = temporalFilter?.end { sql += " AND date < '\(esc(iso8601(end)))'" }
         if !normalized.isEmpty {
-            let escaped = normalized.replacingOccurrences(of: "'", with: "''")
-            sql += " AND (LOWER(subject) LIKE '%\(escaped)%' OR LOWER(snippet) LIKE '%\(escaped)%' OR LOWER(from_email) LIKE '%\(escaped)%' OR LOWER(COALESCE(from_name,'')) LIKE '%\(escaped)%' OR LOWER(COALESCE(body_plain,'')) LIKE '%\(escaped)%')"
+            let term = escLike(normalized)
+            sql += " AND (LOWER(subject) LIKE '%\(term)%' ESCAPE '\\' OR LOWER(snippet) LIKE '%\(term)%' ESCAPE '\\' OR LOWER(from_email) LIKE '%\(term)%' ESCAPE '\\' OR LOWER(COALESCE(from_name,'')) LIKE '%\(term)%' ESCAPE '\\' OR LOWER(COALESCE(body_plain,'')) LIKE '%\(term)%' ESCAPE '\\')"
         }
         let ascending = temporalSort == .timeAscThenRelevance || temporalSort == .relevanceThenTimeAsc
-        sql += " ORDER BY date \(ascending ? "ASC" : "DESC") LIMIT \(limit)"
+        sql += " ORDER BY date \(ascending ? "ASC" : "DESC"), id ASC LIMIT \(limit)"
         let rows = try querySQL(sql)
         return try rows.map { try decoder.decode(MailMessageDetail.self, from: Data($0[0].utf8)).summary }
     }
@@ -326,9 +409,11 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         return rows.map { $0[0] }
     }
 
-    private func primeSearchIndexIfNeeded(details: [MailMessageDetail]) async throws {
-        guard searchService != nil, !hasPrimedSearchIndex else { return }
-        try await rebuildSearchIndex(details: details)
+    private func escLike(_ value: String) -> String {
+        esc(value)
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
     }
 
     private func repairSearchIndexIfNeeded(details: [MailMessageDetail]) async throws {
@@ -431,5 +516,3 @@ public final class SQLiteMailSourceStore: MailStoreProtocol, @unchecked Sendable
         ISO8601DateFormatter().string(from: date)
     }
 }
-
-
