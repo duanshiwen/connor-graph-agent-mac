@@ -70,6 +70,30 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     #expect((try store.pragmaValue("busy_timeout")) == "5000")
 }
 
+@Test func sqliteMemoryOSStoreMigratesSchemaSixToSafeIntentSchema() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
+    try store.execute("""
+    CREATE TABLE memory_l1_capture_events (
+      id TEXT PRIMARY KEY,
+      provenance_object_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      token_estimate INTEGER NOT NULL DEFAULT 0,
+      processing_state TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}'
+    );
+    """)
+    try store.execute("PRAGMA user_version = 6;")
+
+    try store.migrate()
+
+    let columns = Set(try store.query(sql: "PRAGMA table_info(memory_l1_capture_events);").map { $0[1] })
+    #expect(columns.contains("retrieval_text"))
+    #expect(columns.contains("normalization_status"))
+    #expect(try store.schemaUserVersion() == 7)
+    #expect(try store.tableNames().contains("memory_l1_retrieval_fts"))
+}
+
 @Test func sqliteMemoryOSStoreRoundTripsL0L1L2L3L4Records() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
     try store.migrate()

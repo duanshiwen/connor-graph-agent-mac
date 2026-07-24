@@ -197,7 +197,7 @@ public struct MemoryOSUserIntentNormalizer: MemoryOSUserIntentNormalizing, Senda
         let originalByID = Dictionary(uniqueKeysWithValues: segments.map { ($0.id, $0.content.lowercased()) })
         for item in envelope.items {
             let fields = [item.subject, item.action, item.desiredOutcome] + item.constraints + item.unresolvedReferences
-            guard fields.allSatisfy({ !$0.contains("\n") || !$0.lowercased().contains("system:") }) else {
+            guard !fields.contains(where: containsRoleShapedLanguage) else {
                 throw MemoryOSUserIntentNormalizerError.unsafeStructuredOutput("role-shaped output is not allowed")
             }
             guard item.safetyCategory != "none" || !fields.contains(where: containsControlLanguage) else {
@@ -217,6 +217,15 @@ public struct MemoryOSUserIntentNormalizer: MemoryOSUserIntentNormalizing, Senda
             "ignore previous", "ignore all previous", "system prompt", "developer message", "tool_call",
             "忽略之前", "忽略此前", "系统提示词", "开发者消息", "调用工具"
         ].contains(where: normalized.contains)
+    }
+
+    private static func containsRoleShapedLanguage(_ value: String) -> Bool {
+        value.split(separator: "\n", omittingEmptySubsequences: false).contains { line in
+            let normalized = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return ["system:", "developer:", "assistant:", "tool:", "系统:", "开发者:", "助手:", "工具:"].contains {
+                normalized.hasPrefix($0)
+            }
+        }
     }
 
     private static func render(_ envelope: IntentEnvelope) -> String {

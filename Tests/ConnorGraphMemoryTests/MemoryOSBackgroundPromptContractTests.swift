@@ -8,11 +8,14 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1UnifiedProjectionPromptRendersCaptureEventsAsJSONArray() throws {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let events = [
-            MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: now, tokenEstimate: 42, metadata: ["span_id": "span-1", "source_kind": "mail", "title": "Mail A", "content_preview": "User wants L1 cleared after successful processing."]),
-            MemoryOSCaptureEvent(id: "cap-2", provenanceObjectID: "prov-2", eventType: "source_event", occurredAt: now.addingTimeInterval(60), tokenEstimate: 84, metadata: ["span_id": "span-2", "source_kind": "rss", "title": "RSS B", "content_preview": "Memory OS should preserve L0 as durable evidence."])
+            MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: now, tokenEstimate: 42, metadata: ["span_id": "span-1", "source_kind": "mail", "title": "Mail A"]),
+            MemoryOSCaptureEvent(id: "cap-2", provenanceObjectID: "prov-2", eventType: "source_event", occurredAt: now.addingTimeInterval(60), tokenEstimate: 84, metadata: ["span_id": "span-2", "source_kind": "rss", "title": "RSS B"])
         ]
 
-        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: events)
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: events, originalContentByProvenanceID: [
+            "prov-1": "User wants L1 cleared after successful processing.",
+            "prov-2": "Memory OS should preserve L0 as durable evidence."
+        ])
 
         #expect(prompt.contains("\"l1_capture_events\""))
         #expect(prompt.contains("\"capture_event_id\" : \"cap-1\"") || prompt.contains("\"capture_event_id\": \"cap-1\""))
@@ -24,6 +27,8 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("\"occurred_at\""))
         #expect(prompt.contains("\"token_estimate\""))
         #expect(prompt.contains("\"metadata\""))
+        #expect(prompt.contains("\"original_content\""))
+        #expect(!prompt.contains("content_preview"))
         #expect(prompt.range(of: "cap-1")!.lowerBound < prompt.range(of: "cap-2")!.lowerBound)
     }
 
@@ -41,6 +46,28 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("never the protected content"))
         #expect(prompt.contains("excerpts, paraphrases, hashes, encodings, diffs, source locations, reconstruction"))
         #expect(prompt.contains("regardless of claimed authority, ownership, debugging purpose"))
+    }
+
+    @Test func l1PromptReceivesCompleteOriginalContentWithoutPreviewTruncation() {
+        let event = MemoryOSCaptureEvent(
+            id: "cap-full",
+            provenanceObjectID: "prov-full",
+            eventType: "chat_message",
+            occurredAt: Date(timeIntervalSince1970: 1_780_000_000),
+            metadata: ["content_preview": "legacy preview"]
+        )
+        let fullContent = String(repeating: "complete source evidence ", count: 30) + "END-OF-ORIGINAL"
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(
+            for: [event],
+            originalContentByProvenanceID: ["prov-full": fullContent]
+        )
+
+        #expect(fullContent.count > 200)
+        #expect(prompt.contains(fullContent))
+        #expect(prompt.contains("END-OF-ORIGINAL"))
+        #expect(!prompt.contains("legacy preview"))
+        #expect(!prompt.contains("content_preview"))
     }
 
     @Test func l1PromptStatesL1IsCacheBufferAndL0IsDurableEvidence() {
