@@ -39,11 +39,54 @@ public struct RSSRuntimeSearchRequestBridge: Sendable, Equatable {
 }
 
 enum RSSJSON {
-    static func encode<T: Encodable>(_ value: T) throws -> String {
+    private static func encodedObject<T: Encodable>(_ value: T) throws -> Any {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
-        return String(data: try encoder.encode(value), encoding: .utf8) ?? "{}"
+        return try JSONSerialization.jsonObject(with: encoder.encode(value))
+    }
+
+    private static func string(_ object: Any) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private static func addingItemID(to object: inout [String: Any]) {
+        if let id = object["id"] { object["itemID"] = id }
+    }
+
+    static func encode<T: Encodable>(_ value: T) throws -> String {
+        try string(encodedObject(value))
+    }
+
+    static func encodeSources(_ sources: [RSSSource]) throws -> String {
+        var rows = (try encodedObject(sources) as? [[String: Any]]) ?? []
+        for index in rows.indices {
+            if let id = rows[index]["id"] { rows[index]["sourceID"] = id }
+        }
+        return try string(rows)
+    }
+
+    static func encodeSource(_ source: RSSSource) throws -> String {
+        var object = (try encodedObject(source) as? [String: Any]) ?? [:]
+        if let id = object["id"] { object["sourceID"] = id }
+        return try string(object)
+    }
+
+    static func encodeItems(_ items: [RSSItemSummary]) throws -> String {
+        var rows = (try encodedObject(items) as? [[String: Any]]) ?? []
+        for index in rows.indices { addingItemID(to: &rows[index]) }
+        return try string(rows)
+    }
+
+    static func encodeItem(_ item: RSSItemDetail) throws -> String {
+        var object = (try encodedObject(item) as? [String: Any]) ?? [:]
+        if var summary = object["summary"] as? [String: Any] {
+            addingItemID(to: &summary)
+            object["summary"] = summary
+            object["itemID"] = summary["itemID"]
+        }
+        return try string(object)
     }
 }
 
@@ -56,7 +99,7 @@ public struct RSSListSourcesTool: AgentTool {
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let sources = try await runtime.listSources(runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(sources.count) RSS sources", contentJSON: try RSSJSON.encode(sources))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(sources.count) RSS sources; copy sourceID into source-specific RSS operations", contentJSON: try RSSJSON.encodeSources(sources))
     }
 }
 
@@ -70,7 +113,7 @@ public struct RSSAddSourceTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let urlString = arguments.string("feedURL"), let url = URL(string: urlString) else { throw AgentToolError.invalidArguments("feedURL is required") }
         let source = try await runtime.addSource(feedURL: url, displayName: arguments.string("displayName"), runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Added RSS source \(source.displayName)", contentJSON: try RSSJSON.encode(source))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Added RSS source \(source.displayName); copy sourceID into source-specific RSS operations", contentJSON: try RSSJSON.encodeSource(source))
     }
 }
 
@@ -79,7 +122,7 @@ public struct RSSSyncSourceTool: AgentTool {
     public var name: String { "rss_sync_source" }
     public var description: String { "Synchronize an existing RSS source through Connor runtime." }
     public var permission: AgentPermissionCapability { .syncRSSSources }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["sourceID": .string(description: "RSS source ID")], required: ["sourceID"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["sourceID": .string(description: "Exact sourceID returned by rss_list_sources or rss_add_source; copy the field without renaming it")], required: ["sourceID"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let sourceID = arguments.string("sourceID") else { throw AgentToolError.invalidArguments("sourceID is required") }
@@ -94,7 +137,7 @@ public struct RSSListItemsTool: AgentTool {
     public var name: String { "rss_list_items" }
     public var description: String { "List RSS item summaries without reading full content." }
     public var permission: AgentPermissionCapability { .readRSS }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden items"), "limit": .integer(description: "Maximum items")], required: []) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["sourceID": .string(description: "Optional exact sourceID returned by rss_list_sources"), "includeHidden": .boolean(description: "Include hidden items"), "limit": .integer(description: "Maximum items")], required: []) }
     public init(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         self.runtime = runtime
         self.recorder = recorder
@@ -102,7 +145,7 @@ public struct RSSListItemsTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let items = try await runtime.listItems(sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)), includeHidden: arguments.bool("includeHidden") ?? false, limit: NativeSearchLimitPolicy.clampListLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultListLimit), runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(items.map { NativeSourceReference.rssSummary($0, query: nil, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(items.count) RSS item summaries", contentJSON: try RSSJSON.encode(items))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(items.count) RSS item summaries; copy itemID into RSS item operations", contentJSON: try RSSJSON.encodeItems(items))
     }
 }
 
@@ -112,7 +155,7 @@ public struct RSSSearchItemsTool: AgentTool {
     public var name: String { "rss_search_items" }
     public var description: String { "Search Connor-owned RSS item summaries using indexed, time-aware retrieval by title, snippet, author, content, or source. Supports optional ISO-8601 startDate/endDate or timePreset; results include published/fetched time." }
     public var permission: AgentPermissionCapability { .readRSS }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["query": .string(description: "Search query"), "sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden"), "limit": .integer(description: "Maximum summaries"), "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for published/fetched time filtering"), "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for published/fetched time filtering"), "timePreset": .stringEnumeration(values: NativeSearchTimePreset.allCases.map(\.rawValue), description: "Optional relative time range."), "timeSort": .stringEnumeration(values: NativeSearchTemporalSort.allCases.map(\.rawValue), description: "Optional temporal result ordering.")], required: ["query"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["query": .string(description: "Search query"), "sourceID": .string(description: "Optional exact sourceID returned by rss_list_sources"), "includeHidden": .boolean(description: "Include hidden"), "limit": .integer(description: "Maximum summaries"), "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for published/fetched time filtering"), "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for published/fetched time filtering"), "timePreset": .stringEnumeration(values: NativeSearchTimePreset.allCases.map(\.rawValue), description: "Optional relative time range."), "timeSort": .stringEnumeration(values: NativeSearchTemporalSort.allCases.map(\.rawValue), description: "Optional temporal result ordering.")], required: ["query"]) }
     public init(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         self.runtime = runtime
         self.recorder = recorder
@@ -130,7 +173,7 @@ public struct RSSSearchItemsTool: AgentTool {
         )
         let items = try await runtime.searchItems(request, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(items.map { NativeSourceReference.rssSummary($0, query: request.query, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(items.count) RSS item summaries", contentJSON: try RSSJSON.encode(items))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(items.count) RSS item summaries; copy itemID into RSS item operations", contentJSON: try RSSJSON.encodeItems(items))
     }
 }
 
@@ -140,7 +183,7 @@ public struct RSSGetItemTool: AgentTool {
     public var name: String { "rss_get_item" }
     public var description: String { "Get RSS item detail; content is optional and audited separately." }
     public var permission: AgentPermissionCapability { .readRSSContent }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemID": .string(description: "RSS item ID"), "includeContent": .boolean(description: "Include full safe content")], required: ["itemID"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemID": .string(description: "Exact itemID returned by rss_list_items or rss_search_items; copy the field without renaming it"), "includeContent": .boolean(description: "Include full safe content")], required: ["itemID"]) }
     public init(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         self.runtime = runtime
         self.recorder = recorder
@@ -150,7 +193,7 @@ public struct RSSGetItemTool: AgentTool {
         let includeContent = arguments.bool("includeContent") ?? false
         let item = try await runtime.getItem(id: RSSItemID(rawValue: itemID), includeContent: includeContent, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record([NativeSourceReference.rssDetail(item, includeContent: includeContent, toolName: name, context: context)])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: includeContent ? "Read RSS item content" : "Read RSS item without content", contentJSON: try RSSJSON.encode(item))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: includeContent ? "Read RSS item content" : "Read RSS item without content", contentJSON: try RSSJSON.encodeItem(item))
     }
 }
 
@@ -159,7 +202,7 @@ public struct RSSSetReadStateTool: AgentTool {
     public var name: String { "rss_set_read_state" }
     public var description: String { "Explicitly mutate RSS read/unread state." }
     public var permission: AgentPermissionCapability { .mutateRSSState }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemIDs": .array(items: .string(description: "RSS item ID"), description: "Item IDs"), "isRead": .boolean(description: "Desired read state")], required: ["itemIDs", "isRead"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemIDs": .array(items: .string(description: "Exact itemID returned by an RSS list/search result"), description: "Exact itemID values returned by RSS list/search results"), "isRead": .boolean(description: "Desired read state")], required: ["itemIDs", "isRead"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let ids = (arguments.array("itemIDs") ?? []).compactMap(\.stringValue).map(RSSItemID.init(rawValue:))
@@ -173,7 +216,7 @@ public struct RSSSetStarStateTool: AgentTool {
     public var name: String { "rss_set_star_state" }
     public var description: String { "Explicitly mutate RSS star state." }
     public var permission: AgentPermissionCapability { .mutateRSSState }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemIDs": .array(items: .string(description: "RSS item ID"), description: "Item IDs"), "isStarred": .boolean(description: "Desired star state")], required: ["itemIDs", "isStarred"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemIDs": .array(items: .string(description: "Exact itemID returned by an RSS list/search result"), description: "Exact itemID values returned by RSS list/search results"), "isStarred": .boolean(description: "Desired star state")], required: ["itemIDs", "isStarred"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let ids = (arguments.array("itemIDs") ?? []).compactMap(\.stringValue).map(RSSItemID.init(rawValue:))
@@ -187,7 +230,7 @@ public struct RSSSetHiddenStateTool: AgentTool {
     public var name: String { "rss_set_hidden_state" }
     public var description: String { "Explicitly mutate RSS hidden state." }
     public var permission: AgentPermissionCapability { .mutateRSSState }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemIDs": .array(items: .string(description: "RSS item ID"), description: "Item IDs"), "isHidden": .boolean(description: "Desired hidden state")], required: ["itemIDs", "isHidden"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemIDs": .array(items: .string(description: "Exact itemID returned by an RSS list/search result"), description: "Exact itemID values returned by RSS list/search results"), "isHidden": .boolean(description: "Desired hidden state")], required: ["itemIDs", "isHidden"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let ids = (arguments.array("itemIDs") ?? []).compactMap(\.stringValue).map(RSSItemID.init(rawValue:))
@@ -227,7 +270,7 @@ public struct RSSCreateEvidenceCandidateTool: AgentTool {
     public var name: String { "rss_create_evidence_candidate" }
     public var description: String { "Create a governed Memory OS evidence candidate from an RSS item without direct memory projection." }
     public var permission: AgentPermissionCapability { .readRSS }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemID": .string(description: "RSS item ID")], required: ["itemID"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["itemID": .string(description: "Exact itemID returned by rss_list_items or rss_search_items")], required: ["itemID"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let itemID = arguments.string("itemID") else { throw AgentToolError.invalidArguments("itemID is required") }

@@ -3,6 +3,7 @@ import ConnorGraphAgent
 
 public struct BrowserHistorySearchResult: Codable, Equatable, Sendable {
     public var id: String
+    public var recordID: String
     public var url: String
     public var title: String
     public var sessionID: String
@@ -16,6 +17,7 @@ public struct BrowserHistorySearchResult: Codable, Equatable, Sendable {
 
     public init(record: BrowserHistoryRecord, previewCharacterLimit: Int = 500) {
         self.id = record.id.uuidString
+        self.recordID = record.id.uuidString
         self.url = record.url
         self.title = record.title
         self.sessionID = record.sessionID
@@ -35,6 +37,7 @@ public struct BrowserHistorySearchResult: Codable, Equatable, Sendable {
 
 public struct BrowserHistoryDetailResult: Codable, Equatable, Sendable {
     public var id: String
+    public var recordID: String
     public var url: String
     public var title: String
     public var sessionID: String
@@ -47,6 +50,7 @@ public struct BrowserHistoryDetailResult: Codable, Equatable, Sendable {
 
     public init(record: BrowserHistoryRecord) {
         self.id = record.id.uuidString
+        self.recordID = record.id.uuidString
         self.url = record.url
         self.title = record.title
         self.sessionID = record.sessionID
@@ -118,7 +122,7 @@ public struct BrowserHistorySearchTool: AgentTool {
     public let store: BrowserHistoryStore
     public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "browser_history_search" }
-    public var description: String { "Search saved browser history records by URL, title, session title, or saved page markdown. Returns summaries/previews so the model can choose which page bodies to read." }
+    public var description: String { "Search saved browser history records by URL, title, session title, or saved page markdown. Returns summaries/previews with recordID so the model can choose which page bodies to read." }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
@@ -157,7 +161,7 @@ public struct BrowserHistoryGetTool: AgentTool {
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "recordID": .string(description: "Browser history record UUID returned by browser_history_search")
+            "recordID": .string(description: "Exact recordID returned by browser_history_search; copy the field without renaming it")
         ], required: ["recordID"])
     }
 
