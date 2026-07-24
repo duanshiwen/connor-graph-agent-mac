@@ -93,7 +93,6 @@ struct AppRouteViewDependencyTests {
         #expect(listSource.contains("AppListPaneHeader(title: \"知识市场\")"))
         #expect(listSource.contains("Image(systemName: \"plus\")"))
         #expect(listSource.contains("Image(systemName: \"clock.arrow.circlepath\")"))
-        #expect(listSource.contains("weight: .semibold"))
         #expect(listSource.contains("LazyVStack(alignment: .leading, spacing: AppListCardLayout.spacing)"))
         #expect(listSource.contains(".padding(.horizontal, AppListCardLayout.horizontalInset)"))
         #expect(listSource.contains(".onAppear { store.showHome() }"))

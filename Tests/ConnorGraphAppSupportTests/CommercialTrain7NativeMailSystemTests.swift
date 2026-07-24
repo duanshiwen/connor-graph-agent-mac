@@ -337,7 +337,7 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(registry.permission(named: "mail_send_draft") == .sendMail)
 
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "send", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .askToWrite))
-        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"missing\",\"approved\":false}")
+        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"missing\"}")
         do {
             _ = try await registry.execute(call, context: context)
             Issue.record("Ask mode should require approval before execution")

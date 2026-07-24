@@ -117,7 +117,9 @@ import ConnorGraphStore
         sessionID: "session",
         role: "user",
         content: "Project Lantern says prepare the release.",
-        occurredAt: now
+        occurredAt: now,
+        retrievalText: "Project Lantern says prepare the release.",
+        normalizationStatus: .succeeded
     )
     _ = try facade.ingestChatMessage(
         messageID: "historical-assistant",
@@ -131,7 +133,9 @@ import ConnorGraphStore
         sessionID: "session",
         role: "user",
         content: "What is the Project Lantern status?",
-        occurredAt: now.addingTimeInterval(2)
+        occurredAt: now.addingTimeInterval(2),
+        retrievalText: "What is the Project Lantern status?",
+        normalizationStatus: .succeeded
     )
     let context = AgentToolExecutionContext(
         runID: "run-current-message-filter",
@@ -381,20 +385,19 @@ import ConnorGraphStore
     let node = MemoryOSNode(id: "capacity-node", stableKey: "capacity-node", nodeType: "project", name: "Capacity")
     try store.upsert(node: node)
     try store.upsert(statement: MemoryOSStatement(id: "capacity-record", subjectID: node.id, predicate: "detail", text: "Capacity " + String(repeating: "complete-record-content ", count: 200), confidence: 0.9, evidenceSpanIDs: []))
-    let config = MemoryOSContextToolConfiguration(maxResponseCharacters: 1_024)
-    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store), configuration: config)
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
 
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Capacity complete record"}"#), context: memoryOSToolContext())
     let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
 
-    #expect(payload.pageSize == 1)
+    #expect(payload.pageSize == 40)
     #expect(payload.returnedItems == 1)
     #expect(payload.totalItems == 1)
     #expect(payload.records.first?.recordID == "capacity-record")
     #expect(result.contentText.contains("complete-record-content"))
 }
 
-@Test func memoryOSContextAutomaticallyShrinksPageSizeWithoutLosingRecords() throws {
+@Test func memoryOSContextKeepsConfiguredPageSizeWithoutLosingRecords() throws {
     let records = (0..<85).map { index in
         MemoryOSContextToolRecord(
             recordID: "adaptive-\(index)",
@@ -410,14 +413,14 @@ import ConnorGraphStore
             path: []
         )
     }
-    let configuration = MemoryOSContextToolConfiguration(pageSize: 40, maxResponseCharacters: 5_000)
+    let configuration = MemoryOSContextToolConfiguration(pageSize: 40)
     let first = try MemoryOSLayeredContextSupport.response(query: "Adaptive pagination", page: 1, candidates: records, configuration: configuration)
 
     #expect(first.success)
-    #expect(first.pageSize < 40)
-    #expect(first.pageSize >= 1)
+    #expect(first.pageSize == 40)
+    #expect(first.returnedItems == 40)
     #expect(first.totalItems == 85)
-    #expect(first.totalPages > 1)
+    #expect(first.totalPages == 3)
     #expect(first.nextPage == 2)
 
     var collected = Set(first.records.map(\.recordID))

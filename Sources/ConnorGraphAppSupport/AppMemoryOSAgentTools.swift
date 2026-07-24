@@ -351,22 +351,13 @@ enum MemoryOSLayeredContextSupport {
         guard page >= 1 else {
             return errorResponse(query: query, page: page, pageSize: configuration.pageSize, totalItems: 0, totalPages: 0, reason: "Invalid page \(page): page must be at least 1. Request page 1.")
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
         var unique: [MemoryOSContextToolRecord] = []
         var seen = Set<String>()
         for candidate in candidates where seen.insert(cursorID(for: candidate)).inserted {
             unique.append(candidate)
         }
 
-        let effectivePageSize = (1...configuration.pageSize).reversed().first { size in
-            let pageCount = pageCount(totalItems: unique.count, pageSize: size)
-            return unique.indices.strideChunks(of: size).allSatisfy { range in
-                let records = Array(unique[range])
-                let probe = MemoryOSContextToolResponse(success: true, reason: "Page returned successfully.", query: query, page: range.lowerBound / size + 1, pageSize: size, returnedItems: records.count, totalItems: unique.count, totalPages: pageCount, hasNextPage: range.upperBound < unique.count, nextPage: range.upperBound < unique.count ? range.lowerBound / size + 2 : nil, records: records)
-                return ((try? encoder.encode(probe).count) ?? Int.max) <= configuration.maxResponseCharacters
-            }
-        } ?? 1
+        let effectivePageSize = configuration.pageSize
         let totalPages = pageCount(totalItems: unique.count, pageSize: effectivePageSize)
         let maximumValidPage = max(totalPages, 1)
         guard page <= maximumValidPage else {
@@ -409,14 +400,6 @@ enum MemoryOSLayeredContextSupport {
     private static func pageCount(totalItems: Int, pageSize: Int) -> Int {
         guard totalItems > 0 else { return 0 }
         return (totalItems + pageSize - 1) / pageSize
-    }
-}
-
-private extension Range where Bound == Int {
-    func strideChunks(of size: Int) -> [Range<Int>] {
-        stride(from: lowerBound, to: upperBound, by: size).map { start in
-            start..<Swift.min(start + size, upperBound)
-        }
     }
 }
 
