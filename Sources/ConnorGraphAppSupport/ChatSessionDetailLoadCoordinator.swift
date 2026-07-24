@@ -11,6 +11,8 @@ public struct ChatSessionDetailLoadSnapshot: Sendable, Equatable {
     public var sessionRecords: [AppSessionRecord]
     public var browserState: AppBrowserStateSnapshot?
     public var backgroundTasks: [PersistedSessionBackgroundTask]
+    public var totalMessageCount: Int
+    public var nextMessageBeforePosition: Int?
 
     public init(
         session: AgentSession,
@@ -20,7 +22,9 @@ public struct ChatSessionDetailLoadSnapshot: Sendable, Equatable {
         sessionState: AppSessionStateSnapshot? = nil,
         sessionRecords: [AppSessionRecord] = [],
         browserState: AppBrowserStateSnapshot? = nil,
-        backgroundTasks: [PersistedSessionBackgroundTask] = []
+        backgroundTasks: [PersistedSessionBackgroundTask] = [],
+        totalMessageCount: Int? = nil,
+        nextMessageBeforePosition: Int? = nil
     ) {
         self.session = session
         self.timeline = timeline
@@ -30,6 +34,8 @@ public struct ChatSessionDetailLoadSnapshot: Sendable, Equatable {
         self.sessionRecords = sessionRecords
         self.browserState = browserState
         self.backgroundTasks = backgroundTasks
+        self.totalMessageCount = totalMessageCount ?? session.messages.count
+        self.nextMessageBeforePosition = nextMessageBeforePosition
     }
 }
 
@@ -59,7 +65,8 @@ public struct ChatSessionDetailLoadCoordinator: Sendable {
         activeBackgroundTaskIDs: Set<String> = []
     ) async throws -> ChatSessionDetailLoadSnapshot? {
         try Task.checkCancellation()
-        guard let session = try repository.loadSession(id: sessionID) else { return nil }
+        guard let messagePage = try repository.loadSessionMessagePage(id: sessionID) else { return nil }
+        let session = messagePage.session
         try Task.checkCancellation()
         let timeline = try loadTimeline(repository: repository, sessionID: sessionID)
         try Task.checkCancellation()
@@ -87,7 +94,9 @@ public struct ChatSessionDetailLoadCoordinator: Sendable {
             sessionState: sessionState,
             sessionRecords: sessionRecords,
             browserState: browserState,
-            backgroundTasks: backgroundTasks
+            backgroundTasks: backgroundTasks,
+            totalMessageCount: messagePage.totalMessageCount,
+            nextMessageBeforePosition: messagePage.nextBeforePosition
         )
     }
 

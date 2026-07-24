@@ -213,6 +213,33 @@ struct AppGlobalSearchTests {
         #expect(fixture.runtime.browserFeatureModel.isHistoryPanelVisible)
     }
 
+    @Test func showAllChatSearchPagesThroughEveryMatchingSession() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        for index in 0..<137 {
+            try fixture.repository.saveSession(AgentSession(
+                id: String(format: "search-session-%03d", index),
+                title: "Needle result \(index)",
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(10_000 - index))
+            ))
+        }
+        fixture.runtime.globalSearchFeatureModel.updateQuery("Needle")
+
+        fixture.runtime.globalSearchFeatureModel.showAllResults(kind: .chatSessions)
+
+        #expect(fixture.runtime.selection == .agentChat)
+        #expect(fixture.runtime.chatFeatureModel.sessions.searchQuery == "Needle")
+        #expect(fixture.runtime.chatFeatureModel.sessions.sessions.count == 50)
+        for _ in 0..<10 where fixture.runtime.chatFeatureModel.sessions.sessions.count < 137 {
+            let lastID = try #require(fixture.runtime.chatFeatureModel.sessions.sessions.last?.id)
+            fixture.runtime.loadMoreChatSessionsIfNeeded(currentSessionID: lastID)
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        let loadedIDs = fixture.runtime.chatFeatureModel.sessions.sessions.map(\.id)
+        #expect(loadedIDs.count == 137)
+        #expect(Set(loadedIDs).count == 137)
+    }
+
     @Test func showAllMailCarriesGlobalSearchQueryIntoMailFilter() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

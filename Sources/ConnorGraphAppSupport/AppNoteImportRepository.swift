@@ -2,6 +2,26 @@ import Foundation
 import SQLite3
 import ConnorGraphCore
 
+public struct NoteImportJobPage: Sendable, Equatable {
+    public var jobs: [NoteImportJobRecord]
+    public var nextCursor: String?
+
+    public init(jobs: [NoteImportJobRecord], nextCursor: String?) {
+        self.jobs = jobs
+        self.nextCursor = nextCursor
+    }
+}
+
+public struct NoteImportItemPage: Sendable, Equatable {
+    public var items: [NoteImportItemRecord]
+    public var nextCursor: String?
+
+    public init(items: [NoteImportItemRecord], nextCursor: String?) {
+        self.items = items
+        self.nextCursor = nextCursor
+    }
+}
+
 public enum AppNoteImportRepositoryError: Error, Equatable, CustomStringConvertible {
     case openFailed(String)
     case sqliteFailed(String)
@@ -25,7 +45,7 @@ public enum AppNoteImportRepositoryError: Error, Equatable, CustomStringConverti
 }
 
 public final class AppNoteImportRepository: @unchecked Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
     private static let importedItemStatuses: Set<NoteImportItemStatus> = [
         .completed
     ]
@@ -150,7 +170,9 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_note_import_items_job_identity ON note_import_items(job_id, source_identity);
         CREATE INDEX IF NOT EXISTS idx_note_import_items_source_identity ON note_import_items(source_id, source_identity, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_note_import_items_status ON note_import_items(job_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_note_import_items_job_created ON note_import_items(job_id, created_at, id);
         CREATE INDEX IF NOT EXISTS idx_note_import_jobs_status ON note_import_jobs(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_note_import_jobs_updated ON note_import_jobs(updated_at DESC, id);
         CREATE INDEX IF NOT EXISTS idx_note_import_attempts_item ON note_import_item_attempts(item_id, started_at DESC);
         INSERT OR IGNORE INTO note_import_schema_migrations(version, applied_at) VALUES (1, datetime('now'));
         """)
@@ -165,6 +187,7 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         try addColumnIfNeeded(table: "note_import_items", name: "lease_expires_at", definition: "TEXT")
         try addColumnIfNeeded(table: "note_import_items", name: "source_revision", definition: "TEXT")
         try execute("INSERT OR IGNORE INTO note_import_schema_migrations(version, applied_at) VALUES (2, datetime('now'));")
+        try execute("INSERT OR IGNORE INTO note_import_schema_migrations(version, applied_at) VALUES (3, datetime('now'));")
     }
 
     public func saveSource(_ source: NoteImportSourceRecord) throws {
@@ -207,7 +230,7 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     }
 
     public func jobs(limit: Int = 200) throws -> [NoteImportJobRecord] {
-        try rows(Self.jobSelect + " ORDER BY updated_at DESC LIMIT ?", bindings: [.int(max(1, limit))]).map(decodeJob)
+        try rows(Self.jobSelect + " ORDER BY updated_at DESC, id ASC LIMIT ?", bindings: [.int(max(1, limit))]).map(decodeJob)
     }
 
     public func jobsWithLiveCounts(limit: Int = 200) throws -> [NoteImportJobRecord] {
@@ -216,6 +239,30 @@ public final class AppNoteImportRepository: @unchecked Sendable {
             values[index] = try projectedCounts(for: values[index])
         }
         return values
+    }
+
+    public func jobPage(cursor: String? = nil, pageSize: Int = 50) throws -> NoteImportJobPage {
+        var sql = Self.jobSelect
+        var bindings: [Binding] = []
+        if let cursor {
+            let value = try decodeCursor(NoteImportJobCursor.self, cursor)
+            let timestamp = iso(value.updatedAt)
+            sql += " WHERE (updated_at < ? OR (updated_at = ? AND id > ?))"
+            bindings += [.text(timestamp), .text(timestamp), .text(value.id)]
+        }
+        let size = max(1, pageSize)
+        sql += " ORDER BY updated_at DESC, id ASC LIMIT ?"
+        bindings.append(.int(size + 1))
+        var values = try rows(sql, bindings: bindings).map(decodeJob)
+        let hasNext = values.count > size
+        if hasNext { values.removeLast(values.count - size) }
+        for index in values.indices where !values[index].status.isTerminal {
+            values[index] = try projectedCounts(for: values[index])
+        }
+        return NoteImportJobPage(
+            jobs: values,
+            nextCursor: hasNext ? try values.last.map { try encodeCursor(NoteImportJobCursor(updatedAt: $0.updatedAt, id: $0.id)) } : nil
+        )
     }
 
     public func deleteJob(id: String) throws {
@@ -381,8 +428,29 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         if let statuses, !statuses.isEmpty {
             sql += " AND status IN (" + statuses.map { "'\($0.rawValue)'" }.joined(separator: ",") + ")"
         }
-        sql += " ORDER BY created_at ASC"
+        sql += " ORDER BY created_at ASC, id ASC"
         return try rows(sql, bindings: [.text(jobID)]).map(decodeItem)
+    }
+
+    public func itemPage(jobID: String, cursor: String? = nil, pageSize: Int = 50) throws -> NoteImportItemPage {
+        var sql = Self.itemSelect + " WHERE job_id = ?"
+        var bindings: [Binding] = [.text(jobID)]
+        if let cursor {
+            let value = try decodeCursor(NoteImportItemCursor.self, cursor)
+            let timestamp = iso(value.createdAt)
+            sql += " AND (created_at > ? OR (created_at = ? AND id > ?))"
+            bindings += [.text(timestamp), .text(timestamp), .text(value.id)]
+        }
+        let size = max(1, pageSize)
+        sql += " ORDER BY created_at ASC, id ASC LIMIT ?"
+        bindings.append(.int(size + 1))
+        var values = try rows(sql, bindings: bindings).map(decodeItem)
+        let hasNext = values.count > size
+        if hasNext { values.removeLast(values.count - size) }
+        return NoteImportItemPage(
+            items: values,
+            nextCursor: hasNext ? try values.last.map { try encodeCursor(NoteImportItemCursor(createdAt: $0.createdAt, id: $0.id)) } : nil
+        )
     }
 
     public func transitionItem(id: String, to status: NoteImportItemStatus, now: Date = Date()) throws -> NoteImportItemRecord {
@@ -520,6 +588,16 @@ public final class AppNoteImportRepository: @unchecked Sendable {
     private static let jobSelect = "SELECT id, source_id, status, options_json, discovered_count, imported_count, duplicate_count, failed_count, created_at, updated_at, started_at, completed_at, error_code, error_message, pause_requested_at, cancel_requested_at, last_heartbeat_at, resumed_at, scheduler_version FROM note_import_jobs"
     private static let itemSelect = "SELECT id, job_id, source_id, source_identity, external_id, relative_path, title, status, session_id, raw_byte_hash, normalized_text_hash, source_encoding, encoding_confidence, decoder_version, attempt_count, next_retry_at, last_attempt_at, lease_owner, lease_expires_at, source_revision, error_code, error_message, created_at, updated_at, metadata_json FROM note_import_items"
 
+    private struct NoteImportJobCursor: Codable {
+        var updatedAt: Date
+        var id: String
+    }
+
+    private struct NoteImportItemCursor: Codable {
+        var createdAt: Date
+        var id: String
+    }
+
     private func decodeSource(_ row: [SQLiteValue]) throws -> NoteImportSourceRecord {
         NoteImportSourceRecord(id: row[0].string, kind: NoteImportSourceKind(rawValue: row[1].string) ?? .markdownFolder, displayName: row[2].string, locationBookmark: row[3].data, createdAt: try date(row[4].string), metadata: try decode([String: String].self, row[5].string))
     }
@@ -611,6 +689,14 @@ public final class AppNoteImportRepository: @unchecked Sendable {
 
     private func json<T: Encodable>(_ value: T) throws -> String { String(decoding: try encoder.encode(value), as: UTF8.self) }
     private func decode<T: Decodable>(_ type: T.Type, _ value: String) throws -> T { do { return try decoder.decode(type, from: Data(value.utf8)) } catch { throw AppNoteImportRepositoryError.decodeFailed(String(describing: error)) } }
+    private func encodeCursor<T: Encodable>(_ value: T) throws -> String { try encoder.encode(value).base64EncodedString() }
+    private func decodeCursor<T: Decodable>(_ type: T.Type, _ value: String) throws -> T {
+        guard let data = Data(base64Encoded: value) else {
+            throw AppNoteImportRepositoryError.decodeFailed("Invalid page cursor")
+        }
+        do { return try decoder.decode(type, from: data) }
+        catch { throw AppNoteImportRepositoryError.decodeFailed("Invalid page cursor: \(error)") }
+    }
     private func iso(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

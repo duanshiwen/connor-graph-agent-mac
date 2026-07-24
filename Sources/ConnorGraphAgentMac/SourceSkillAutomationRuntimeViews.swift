@@ -323,6 +323,11 @@ private struct MCPSourceHeroSection: View {
 
 private struct MCPToolCatalogPreview: View {
     var tools: [MCPSourceToolDescriptor]
+    @State private var visibleToolCount = 24
+
+    private var visibleTools: ArraySlice<MCPSourceToolDescriptor> {
+        tools.prefix(visibleToolCount)
+    }
 
     var body: some View {
         if tools.isEmpty {
@@ -330,8 +335,8 @@ private struct MCPToolCatalogPreview: View {
                 .font(AgentChatTypography.meta)
                 .foregroundStyle(.secondary)
         } else {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(tools.prefix(24)) { tool in
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(visibleTools) { tool in
                     VStack(alignment: .leading, spacing: 5) {
                         Text(tool.name)
                             .font(AgentChatTypography.monoMeta.weight(.semibold))
@@ -375,8 +380,13 @@ private struct MCPToolCatalogPreview: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                    .onAppear {
+                        guard tool.id == visibleTools.last?.id, visibleToolCount < tools.count else { return }
+                        visibleToolCount = min(visibleToolCount + 24, tools.count)
+                    }
                 }
             }
+            .onChange(of: tools.map(\.id)) { _, _ in visibleToolCount = 24 }
         }
     }
 

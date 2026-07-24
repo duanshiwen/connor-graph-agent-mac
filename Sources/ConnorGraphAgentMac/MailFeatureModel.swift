@@ -14,19 +14,28 @@ final class MailFeatureModel {
             bodyDisplayCache.removeAll()
             bodyDisplayCacheOrder.removeAll()
             preparedHTMLCache.removeAll()
-            rebuildListProjection(resetWindow: true)
+            rebuildListProjection()
         }
     }
     var searchQuery = "" {
-        didSet { rebuildListProjection(resetWindow: true) }
+        didSet {
+            guard searchQuery != oldValue else { return }
+            rebuildListProjection()
+            reloadForCurrentListFilters()
+        }
     }
     var listDirectionFilter: MailMessageDirectionFilter = .all {
-        didSet { rebuildListProjection(resetWindow: true) }
+        didSet {
+            guard listDirectionFilter != oldValue else { return }
+            rebuildListProjection()
+            reloadForCurrentListFilters()
+        }
     }
     private(set) var filteredListMessages: [MailMessageSummary] = []
     private(set) var visibleListMessages: [MailMessageSummary] = []
     private(set) var visibleListMessageIDs: Set<MailMessageID> = []
     private(set) var listProjectionRevision: UInt64 = 0
+    private(set) var isLoadingNextPage = false
     var selectedAccountID: MailAccountID?
     var selectedMailboxID: MailMailboxID?
     var selectedMessageID: MailMessageID?
@@ -44,7 +53,10 @@ final class MailFeatureModel {
     @ObservationIgnored private let syncServiceFactory: SyncServiceFactory
     @ObservationIgnored private var cacheObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
-    @ObservationIgnored private var visibleListMessageLimit = 100
+    @ObservationIgnored private let listPageSize = 50
+    @ObservationIgnored private var nextListPageCursor: String?
+    @ObservationIgnored private var loadedListQuery = ""
+    @ObservationIgnored private var loadedListDirection: MailMessageDirectionFilter = .all
     @ObservationIgnored private var bodyDisplayCache: [MailMessageID: MailBodyDisplayPresentation] = [:]
     @ObservationIgnored private var bodyDisplayCacheOrder: [MailMessageID] = []
     @ObservationIgnored let preparedHTMLCache = MailHTMLRenderCache(capacity: 8, byteCapacity: 4 * 1_024 * 1_024)
@@ -81,9 +93,18 @@ final class MailFeatureModel {
         reloadGeneration &+= 1
         let generation = reloadGeneration
         do {
-            let loaded = try await store.presentation()
+            let requestedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let requestedDirection = listDirectionFilter
+            let (loaded, nextCursor) = try await store.presentationPage(MailMessagePageRequest(
+                query: requestedQuery,
+                direction: requestedDirection,
+                pageSize: listPageSize
+            ))
             let loadedPreferences = try await reconciledPreferences(accounts: loaded.accounts)
             guard !Task.isCancelled, !isShutdown, generation == reloadGeneration else { return }
+            loadedListQuery = requestedQuery
+            loadedListDirection = requestedDirection
+            nextListPageCursor = nextCursor
             presentation = loaded
             preferences = loadedPreferences
             repairSelection()
@@ -137,13 +158,11 @@ final class MailFeatureModel {
         return query.isEmpty ? presentation.unqueriedMessages(direction: direction) : presentation.messages(accountID: nil, mailboxID: nil, query: query, direction: direction)
     }
 
-    var hiddenFilteredListMessageCount: Int {
-        max(filteredListMessages.count - visibleListMessages.count, 0)
-    }
-
-    func loadMoreListMessages() {
-        visibleListMessageLimit += 100
-        rebuildVisibleListWindow()
+    func loadMoreListMessagesIfNeeded(currentMessageID: MailMessageID) {
+        guard visibleListMessages.last?.id == currentMessageID,
+              nextListPageCursor != nil,
+              !isLoadingNextPage else { return }
+        startOwnedTask { [weak self] in await self?.loadNextListPage() }
     }
 
     func presentAddAccountSheet() { isPresentingAddAccountSheet = true }
@@ -246,17 +265,53 @@ final class MailFeatureModel {
         preparedHTMLCache.removeAll()
     }
 
-    private func rebuildListProjection(resetWindow: Bool) {
-        if resetWindow { visibleListMessageLimit = 100 }
-        filteredListMessages = listMessages(direction: listDirectionFilter)
-        rebuildVisibleListWindow()
+    private func rebuildListProjection() {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query == loadedListQuery, listDirectionFilter == loadedListDirection {
+            filteredListMessages = presentation.messages
+        } else {
+            filteredListMessages = listMessages(direction: listDirectionFilter)
+        }
+        visibleListMessages = filteredListMessages
+        visibleListMessageIDs = Set(filteredListMessages.map(\.id))
+        listProjectionRevision &+= 1
     }
 
-    private func rebuildVisibleListWindow() {
-        let visible = Array(filteredListMessages.prefix(visibleListMessageLimit))
-        visibleListMessages = visible
-        visibleListMessageIDs = Set(visible.map(\.id))
-        listProjectionRevision &+= 1
+    private func reloadForCurrentListFilters() {
+        guard !isShutdown else { return }
+        startOwnedTask { [weak self] in await self?.reload() }
+    }
+
+    private func loadNextListPage() async {
+        guard !isShutdown, !isLoadingNextPage, let cursor = nextListPageCursor, let store else { return }
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let direction = listDirectionFilter
+        guard query == loadedListQuery, direction == loadedListDirection else { return }
+        isLoadingNextPage = true
+        defer { isLoadingNextPage = false }
+        do {
+            let page = try await store.messagePage(MailMessagePageRequest(
+                query: query,
+                direction: direction,
+                pageSize: listPageSize,
+                cursor: cursor
+            ))
+            guard !Task.isCancelled,
+                  query == searchQuery.trimmingCharacters(in: .whitespacesAndNewlines),
+                  direction == listDirectionFilter else { return }
+            let existingIDs = Set(presentation.messages.map(\.id))
+            let appended = page.messages.filter { !existingIDs.contains($0.id) }
+            nextListPageCursor = page.nextCursor
+            presentation = NativeMailBrowserPresentation(
+                accounts: presentation.accounts,
+                mailboxes: presentation.mailboxes,
+                messages: presentation.messages + appended
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            reportFailure("无法加载更多邮件：\(error.localizedDescription)")
+        }
     }
 
     private func cacheBodyDisplay(_ display: MailBodyDisplayPresentation, for messageID: MailMessageID) {

@@ -150,7 +150,7 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
         case .completed: return "已完成"
         case .failed: return "已失败"
         case .cancelled: return "已取消"
-        case .waitingForPermission: return "等待确认"
+        case .waitingForPermission: return "请求审批"
         }
     }
 
@@ -174,7 +174,7 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
             }
             parts.append(compactToolText)
         case .waitingForPermission:
-            parts.append("等待权限确认")
+            parts.append("当前会话正在等待权限审批，请前往处理")
             parts.append(compactToolText)
         case .cancelled:
             parts.append("运行已取消")

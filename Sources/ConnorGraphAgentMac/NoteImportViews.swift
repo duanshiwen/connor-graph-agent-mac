@@ -22,6 +22,8 @@ final class NoteImportViewModel: ObservableObject {
     @Published var runtimeSnapshot = NoteImportRuntimeSnapshot()
     @Published var error: String?
     @Published var searchText = ""
+    @Published private(set) var isLoadingMoreJobs = false
+    @Published private(set) var isLoadingMoreSelectedJobItems = false
 
     let ledger: AppNoteImportRepository?
     let coordinator: NoteImportCoordinator?
@@ -30,6 +32,9 @@ final class NoteImportViewModel: ObservableObject {
     private let activityReader: NoteImportActivityReader?
     private let monitoringInterval: Duration
     private var monitoringTask: Task<Void, Never>?
+    private var nextJobsCursor: String?
+    private var nextSelectedJobItemsCursor: String?
+    private static let pageSize = 50
 
     init(
         ledger: AppNoteImportRepository? = nil,
@@ -177,13 +182,18 @@ final class NoteImportViewModel: ObservableObject {
         guard let activityReader else { return false }
         do {
             let monitoredJobID = selectedJobID
-            let snapshot = try await activityReader.jobs()
-            let itemSnapshot: [NoteImportItemRecord]? = if let monitoredJobID {
-                try await activityReader.changedItems(jobID: monitoredJobID)
+            let jobPage = try await activityReader.jobPage(pageSize: max(Self.pageSize, jobs.count))
+            let itemPage: NoteImportItemPage? = if let monitoredJobID {
+                try await activityReader.itemPage(
+                    jobID: monitoredJobID,
+                    pageSize: max(Self.pageSize, selectedJobItems.count)
+                )
             } else { nil }
-            if snapshot != jobs { jobs = snapshot }
-            if selectedJobID == monitoredJobID, let itemSnapshot {
-                selectedJobItems = itemSnapshot
+            if jobPage.jobs != jobs { jobs = jobPage.jobs }
+            nextJobsCursor = jobPage.nextCursor
+            if selectedJobID == monitoredJobID, let itemPage {
+                if selectedJobItems != itemPage.items { selectedJobItems = itemPage.items }
+                nextSelectedJobItemsCursor = itemPage.nextCursor
             }
             await refreshRuntimeSnapshot()
             return hasDynamicallyChangingJobs
@@ -196,20 +206,23 @@ final class NoteImportViewModel: ObservableObject {
     func reloadJobs(selecting jobID: String? = nil, reloadSelectedItems: Bool = true) async {
         guard let activityReader else { return }
         do {
-            let jobSnapshot = try await activityReader.jobs()
+            let jobPage = try await activityReader.jobPage(pageSize: max(Self.pageSize, jobs.count))
+            let jobSnapshot = jobPage.jobs
             let sourceSnapshot = try await activityReader.sourceNames()
             let preferredID = jobID ?? selectedJobID
             let targetID = preferredID.flatMap { preferred in
                 jobSnapshot.contains(where: { $0.id == preferred }) ? preferred : nil
             } ?? jobSnapshot.first?.id
-            let itemSnapshot: [NoteImportItemRecord]? = if reloadSelectedItems, let targetID {
-                try await activityReader.items(jobID: targetID)
+            let itemPage: NoteImportItemPage? = if reloadSelectedItems, let targetID {
+                try await activityReader.itemPage(jobID: targetID, pageSize: Self.pageSize)
             } else { nil }
             if jobs != jobSnapshot { jobs = jobSnapshot }
+            nextJobsCursor = jobPage.nextCursor
             if sourceNamesByID != sourceSnapshot { sourceNamesByID = sourceSnapshot }
             selectedJobID = targetID
-            if let itemSnapshot, selectedJobID == targetID, selectedJobItems != itemSnapshot {
-                selectedJobItems = itemSnapshot
+            if let itemPage, selectedJobID == targetID {
+                if selectedJobItems != itemPage.items { selectedJobItems = itemPage.items }
+                nextSelectedJobItemsCursor = itemPage.nextCursor
             }
             if hasDynamicallyChangingJobs { startJobMonitoring() }
         } catch { self.error = userFacing(error) }
@@ -219,23 +232,58 @@ final class NoteImportViewModel: ObservableObject {
         if selectedJobID != id { selectedJobID = id }
         guard let id else {
             selectedJobItems = []
+            nextSelectedJobItemsCursor = nil
             return
         }
         guard let activityReader else {
             selectedJobItems = []
+            nextSelectedJobItemsCursor = nil
             return
         }
         do {
-            let items = try await activityReader.items(jobID: id)
+            let page = try await activityReader.itemPage(jobID: id, pageSize: Self.pageSize)
             try Task.checkCancellation()
             guard selectedJobID == id else { return }
-            selectedJobItems = items
+            selectedJobItems = page.items
+            nextSelectedJobItemsCursor = page.nextCursor
         } catch is CancellationError {
             return
         } catch {
             guard selectedJobID == id else { return }
             self.error = userFacing(error)
         }
+    }
+
+    func loadMoreJobsIfNeeded(currentJobID: String) async {
+        guard currentJobID == jobs.last?.id,
+              !isLoadingMoreJobs,
+              let cursor = nextJobsCursor,
+              let activityReader else { return }
+        isLoadingMoreJobs = true
+        defer { isLoadingMoreJobs = false }
+        do {
+            let page = try await activityReader.jobPage(cursor: cursor, pageSize: Self.pageSize)
+            let existingIDs = Set(jobs.map(\.id))
+            jobs.append(contentsOf: page.jobs.filter { !existingIDs.contains($0.id) })
+            nextJobsCursor = page.nextCursor
+        } catch { self.error = userFacing(error) }
+    }
+
+    func loadMoreSelectedJobItemsIfNeeded(currentItemID: String) async {
+        guard currentItemID == selectedJobItems.last?.id,
+              let jobID = selectedJobID,
+              !isLoadingMoreSelectedJobItems,
+              let cursor = nextSelectedJobItemsCursor,
+              let activityReader else { return }
+        isLoadingMoreSelectedJobItems = true
+        defer { isLoadingMoreSelectedJobItems = false }
+        do {
+            let page = try await activityReader.itemPage(jobID: jobID, cursor: cursor, pageSize: Self.pageSize)
+            guard selectedJobID == jobID else { return }
+            let existingIDs = Set(selectedJobItems.map(\.id))
+            selectedJobItems.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
+            nextSelectedJobItemsCursor = page.nextCursor
+        } catch { self.error = userFacing(error) }
     }
 
     func recoverPersistedJobs() async {

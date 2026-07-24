@@ -58,6 +58,27 @@ struct ChatSessionDetailLoadCoordinatorTests {
         #expect(snapshot == nil)
     }
 
+    @Test func loadReadsOnlyRecentMessagePageForLongSession() async throws {
+        let store = try SQLiteGraphKernelStore(path: temporaryDatabaseURL().path)
+        try store.migrate()
+        let repository = AppChatSessionRepository(store: store)
+        let messages = (0..<137).map { index in
+            AgentMessage(id: "message-\(index)", role: .user, content: "Message \(index)")
+        }
+        try repository.saveSession(AgentSession(id: "long-session", messages: messages))
+
+        let snapshot = try #require(await ChatSessionDetailLoadCoordinator().load(
+            repository: repository,
+            sessionID: "long-session"
+        ))
+
+        #expect(snapshot.session.messages.count == 50)
+        #expect(snapshot.session.messages.first?.id == "message-87")
+        #expect(snapshot.session.messages.last?.id == "message-136")
+        #expect(snapshot.totalMessageCount == 137)
+        #expect(snapshot.nextMessageBeforePosition == 87)
+    }
+
     @Test func cancelledLoadStopsBeforeReadingSessionDetail() async throws {
         let store = try SQLiteGraphKernelStore(path: temporaryDatabaseURL().path)
         try store.migrate()

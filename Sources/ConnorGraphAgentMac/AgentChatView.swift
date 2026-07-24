@@ -414,7 +414,8 @@ private struct AgentChatSessionListView: View {
                         let row = AgentChatSessionPresentation(session: session)
                         AgentChatSessionRow(
                             row: row,
-                            isSelected: session.id == model.sessions.selectedSessionID
+                            isSelected: session.id == model.sessions.selectedSessionID,
+                            hasPendingApproval: model.approvals.hasPendingApproval(sessionID: session.id)
                         ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
@@ -436,16 +437,17 @@ private struct AgentChatSessionListView: View {
 private struct AgentChatSessionRow: View {
     var row: AgentChatSessionPresentation
     var isSelected: Bool
+    var hasPendingApproval: Bool
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    Image(systemName: row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message"))
+                    Image(systemName: hasPendingApproval ? "lock.fill" : (row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message")))
                         .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(row.isFlagged ? .orange : (isSelected ? ConnorCraftPalette.accent : .secondary))
+                        .foregroundStyle(hasPendingApproval || row.isFlagged ? .orange : (isSelected ? ConnorCraftPalette.accent : .secondary))
                         .frame(width: 16)
                     Text(row.title)
                         .font(isSelected ? AgentChatTypography.sessionTitleEmphasis : AgentChatTypography.sessionTitle)
@@ -460,6 +462,11 @@ private struct AgentChatSessionRow: View {
                     Text(row.relativeUpdatedTime)
                         .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
+                    if hasPendingApproval {
+                        Text("请求审批")
+                            .font(AgentChatTypography.micro.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
                 }
                 if !row.labels.isEmpty {
                     FlowLikeChips(values: row.labels.prefix(3).map(\.id))
@@ -475,6 +482,7 @@ private struct AgentChatSessionRow: View {
         }
         .buttonStyle(.plain)
         .contentShape(Capsule())
+        .help(hasPendingApproval ? "当前会话正在等待权限审批，请前往处理" : "")
     }
 }
 
@@ -521,6 +529,7 @@ private struct AgentChatConversationView: View {
 
     private var hasOlderMessages: Bool {
         visibleMessageLimit < model.run.transcript.count
+            || model.run.nextMessageBeforePosition != nil
     }
 
     private var expandedApproval: AgentPendingApproval? {
@@ -676,16 +685,31 @@ private struct AgentChatConversationView: View {
 
         let previousLimit = visibleMessageLimit
         let nextLimit = min(model.run.transcript.count, previousLimit + Self.messagePageSize)
-        guard nextLimit > previousLimit else { return }
-
-        isLoadingOlderMessages = true
         let anchorItemID = dataSetID.namespacedElementID(firstVisibleItemID)
         chatViewportController.prepareForPrepend(anchorItemID: anchorItemID)
-        pendingPrependCorrection = PendingPrependCorrection(
-            previousFirstItemID: anchorItemID,
-            addedMessageCount: nextLimit - previousLimit
-        )
-        visibleMessageLimit = nextLimit
+        if nextLimit > previousLimit {
+            isLoadingOlderMessages = true
+            pendingPrependCorrection = PendingPrependCorrection(
+                previousFirstItemID: anchorItemID,
+                addedMessageCount: nextLimit - previousLimit
+            )
+            visibleMessageLimit = nextLimit
+            return
+        }
+
+        guard model.run.nextMessageBeforePosition != nil else { return }
+        isLoadingOlderMessages = true
+        Task { @MainActor in
+            let addedCount = await model.run.loadOlderMessages()
+            guard addedCount > 0 else {
+                isLoadingOlderMessages = false
+                return
+            }
+            pendingPrependCorrection = PendingPrependCorrection(
+                previousFirstItemID: anchorItemID,
+                addedMessageCount: addedCount
+            )
+        }
     }
 
     private func initialActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation]? {

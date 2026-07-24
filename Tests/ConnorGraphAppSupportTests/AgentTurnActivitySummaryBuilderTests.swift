@@ -138,9 +138,9 @@ import ConnorGraphCore
     let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
 
     #expect(summary.state == .waitingForPermission)
-    #expect(summary.statusText == "等待确认")
+    #expect(summary.statusText == "请求审批")
     #expect(summary.hasPermissionRequest)
-    #expect(summary.subtitle == "等待权限确认 · 未调用工具")
+    #expect(summary.subtitle == "当前会话正在等待权限审批，请前往处理 · 未调用工具")
 }
 
 @Test func localizesRegisteredToolFamiliesAndFutureToolFallbacks() {

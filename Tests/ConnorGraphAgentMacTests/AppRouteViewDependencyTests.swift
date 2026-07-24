@@ -100,7 +100,7 @@ struct AppRouteViewDependencyTests {
         #expect(!listSource.contains("title: \"市场首页\""))
         #expect(listSource.contains("Color(nsColor: .windowBackgroundColor)"))
         #expect(listSource.contains(".sheet(isPresented: $isPresentingCreator)"))
-        #expect(listSource.contains("CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions) { knowledgeBaseID in"))
+        #expect(listSource.contains("loadSessionPage: { await sessionActions.loadChatSessionPickerPage(cursor: $0) }"))
         #expect(listSource.contains("isPresentingCreator = false"))
         #expect(listSource.contains("await store.load()"))
         #expect(listSource.contains("await store.loadDetail(id: knowledgeBaseID)"))
@@ -110,6 +110,26 @@ struct AppRouteViewDependencyTests {
         #expect(listSource.contains("creatorStore.prepareForNewKnowledgeBase()"))
         #expect(listSource.contains("KnowledgePublicationHistoryView(store: creatorStore)"))
         #expect(!listSource.contains("store.showPublisher()"))
+    }
+
+    @Test func knowledgeCreatorPagesEveryConversationInsteadOfCappingAtOneHundred() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "CloudKnowledgeCreatorView.swift"), encoding: .utf8)
+
+        #expect(!source.contains("sessions.prefix(100)"))
+        #expect(source.contains("ForEach(pickerSessions)"))
+        #expect(source.contains("loadNextSessionPage()"))
+        #expect(source.contains("nextSessionPageCursor = page.nextCursor"))
+    }
+
+    @Test func calendarListLazilyCreatesEventSections() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let start = try #require(source.range(of: "private struct CalendarSectionScrollView: View"))
+        let tail = source[start.lowerBound...]
+        let end = try #require(tail.range(of: "private struct CalendarEventButton: View"))
+        let implementation = tail[..<end.lowerBound]
+
+        #expect(implementation.contains("LazyVStack(alignment: .leading, spacing: AppShellLayout.spaceM)"))
+        #expect(!implementation.contains("\n            VStack(alignment: .leading, spacing: AppShellLayout.spaceM)"))
     }
 
     @Test func listPaneHeadersCenterTitlesIndependentlyFromTrailingActions() throws {

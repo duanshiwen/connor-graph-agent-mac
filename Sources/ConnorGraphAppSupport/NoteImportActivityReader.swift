@@ -9,27 +9,17 @@ import ConnorGraphCore
 /// boundary consumed by UI code.
 public actor NoteImportActivityReader {
     private let ledger: AppNoteImportRepository
-    private var itemSnapshots: [String: [NoteImportItemRecord]] = [:]
 
     public init(ledger: AppNoteImportRepository) {
         self.ledger = ledger
     }
 
-    public func jobs(limit: Int = 200) throws -> [NoteImportJobRecord] {
-        try ledger.jobsWithLiveCounts(limit: limit)
+    public func jobPage(cursor: String? = nil, pageSize: Int = 50) throws -> NoteImportJobPage {
+        try ledger.jobPage(cursor: cursor, pageSize: pageSize)
     }
 
-    public func items(jobID: String) throws -> [NoteImportItemRecord] {
-        let values = try ledger.items(jobID: jobID)
-        itemSnapshots[jobID] = values
-        return values
-    }
-
-    public func changedItems(jobID: String) throws -> [NoteImportItemRecord]? {
-        let values = try ledger.items(jobID: jobID)
-        guard itemSnapshots[jobID] != values else { return nil }
-        itemSnapshots[jobID] = values
-        return values
+    public func itemPage(jobID: String, cursor: String? = nil, pageSize: Int = 50) throws -> NoteImportItemPage {
+        try ledger.itemPage(jobID: jobID, cursor: cursor, pageSize: pageSize)
     }
 
     public func sourceNames() throws -> [String: String] {

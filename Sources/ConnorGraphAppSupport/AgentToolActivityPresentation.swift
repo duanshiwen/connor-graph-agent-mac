@@ -42,7 +42,7 @@ public enum AgentToolDisplayNameResolver {
         "connor_skill_create": "创建技能", "connor_skill_update": "更新技能", "connor_skill_delete": "删除技能",
         "session_get_status": "查看会话状态", "session_set_status": "更新会话状态", "session_list_statuses": "查看可用会话状态",
         "personality_get_current": "查看康纳同学性格", "personality_propose_update": "生成人格变更提议", "personality_commit_proposal": "应用人格变更",
-        "tasks_list": "查看任务", "tasks_create_scheduled_session_message": "创建定时会话任务", "tasks_create_session_status_message": "创建状态触发任务",
+        "tasks_list": "查看任务", "tasks_create_scheduled_session_message": "创建定时会话任务", "tasks_create_session_status_message": "创建状态触发任务", "tasks_update_scheduled_session_message": "修改定时会话任务", "tasks_delete": "删除任务",
         "contact_search": "搜索联系人", "contact_create_draft": "创建联系人草稿", "contact_commit_draft": "保存联系人",
         "contacts_read": "读取联系人", "contacts_write": "更新联系人",
         "calendar_search_events": "搜索日程", "calendar_read": "读取日历", "calendar_write": "更新日历",

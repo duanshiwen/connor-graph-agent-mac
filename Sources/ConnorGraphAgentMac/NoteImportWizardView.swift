@@ -154,7 +154,7 @@ struct NoteImportWizardView: View {
                 Divider()
                 confirmationRow("AI 处理", model.options.llmMode == .automatic ? "自动，最多并行 \(model.options.llmConcurrency) 项" : "关闭", "sparkles")
             }.background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
-            Label("导入会在后台继续。你可以关闭此窗口，并在“导入中心”查看、暂停或取消任务。", systemImage: "clock.arrow.circlepath")
+            Label("导入会在后台继续。你可以关闭此窗口，并在“笔记导入中心”查看、暂停或取消任务。", systemImage: "clock.arrow.circlepath")
                 .foregroundStyle(.secondary)
         }
     }

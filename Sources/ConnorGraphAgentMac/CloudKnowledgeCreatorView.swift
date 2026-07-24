@@ -5,11 +5,15 @@ import ConnorGraphAppSupport
 struct CloudKnowledgeCreatorView: View {
     @ObservedObject var store: CloudKnowledgeCreatorStore
     var sessions: [AgentSession]
+    var loadSessionPage: ((String?) async -> AppChatSessionPage?)?
     var onPublished: ((String) -> Void)? = nil
     @State private var draft = CloudKnowledgeBaseDraft()
     @State private var appealStatement = ""
     @State private var creatorTermsAccepted = false
     @State private var isPresentingPublishingAgreement = false
+    @State private var pickerSessions: [AgentSession] = []
+    @State private var nextSessionPageCursor: String?
+    @State private var isLoadingSessionPage = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +37,7 @@ struct CloudKnowledgeCreatorView: View {
         .onAppear {
             draft = store.snapshot.draft
             Task {
+                await loadInitialSessionPageIfNeeded()
                 await store.refreshLatestKnowledgeBaseDetail()
                 if (store.snapshot.stage == .validating && store.snapshot.validationIssues.isEmpty)
                     || store.snapshot.stage == .preview {
@@ -138,7 +143,7 @@ struct CloudKnowledgeCreatorView: View {
             Divider()
 
             List {
-                ForEach(sessions.prefix(100)) { session in
+                ForEach(pickerSessions) { session in
                     Toggle(isOn: conversationSelection(for: session.id)) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(session.title)
@@ -151,6 +156,10 @@ struct CloudKnowledgeCreatorView: View {
                         .padding(.vertical, 3)
                     }
                     .toggleStyle(.checkbox)
+                    .onAppear {
+                        guard session.id == pickerSessions.last?.id else { return }
+                        Task { await loadNextSessionPage() }
+                    }
                 }
             }
             .listStyle(.inset)
@@ -171,6 +180,31 @@ struct CloudKnowledgeCreatorView: View {
                     .disabled(store.snapshot.selectedConversationIDs.isEmpty)
             }
         }
+    }
+
+    private func loadInitialSessionPageIfNeeded() async {
+        guard pickerSessions.isEmpty else { return }
+        guard let loadSessionPage else {
+            pickerSessions = sessions
+            return
+        }
+        isLoadingSessionPage = true
+        defer { isLoadingSessionPage = false }
+        guard let page = await loadSessionPage(nil) else { return }
+        pickerSessions = page.sessions
+        nextSessionPageCursor = page.nextCursor
+    }
+
+    private func loadNextSessionPage() async {
+        guard !isLoadingSessionPage,
+              let cursor = nextSessionPageCursor,
+              let loadSessionPage else { return }
+        isLoadingSessionPage = true
+        defer { isLoadingSessionPage = false }
+        guard let page = await loadSessionPage(cursor) else { return }
+        let existingIDs = Set(pickerSessions.map(\.id))
+        pickerSessions.append(contentsOf: page.sessions.filter { !existingIDs.contains($0.id) })
+        nextSessionPageCursor = page.nextCursor
     }
 
     private var confirmation: some View {
@@ -300,15 +334,18 @@ struct CloudKnowledgeCreatorView: View {
                 .font(.headline)
                 .foregroundStyle(.green)
             Button("浏览修订历史") { Task { await store.loadHistory() } }
-            ForEach(store.history) { revision in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(revision.title ?? revision.identityID)
-                        .fontWeight(.medium)
-                    Text("\(revision.layer.rawValue) · revision \(revision.revisionNumber)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(revision.text)
-                        .lineLimit(3)
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(store.history) { revision in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(revision.title ?? revision.identityID)
+                            .fontWeight(.medium)
+                        Text("\(revision.layer.rawValue) · revision \(revision.revisionNumber)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(revision.text)
+                            .lineLimit(3)
+                    }
+                    .onAppear { Task { await store.loadMoreHistoryIfNeeded(currentRevisionID: revision.id) } }
                 }
             }
             actionBar {

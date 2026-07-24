@@ -7,6 +7,8 @@ import ConnorGraphCore
     var isLoadingSelectedChatSessionDetail: Bool { get }
     func reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: Bool)
     func reloadChatSessions(restoreWorkspaceMode: Bool)
+    func loadMoreChatSessionsIfNeeded(currentSessionID: String)
+    func loadChatSessionPickerPage(cursor: String?) async -> AppChatSessionPage?
     func newChatSession()
     func selectChatSession(_ sessionID: String)
     func renameChatSession(_ sessionID: String, title: String)
@@ -79,6 +81,7 @@ extension ChatRunCommanding {
 @MainActor protocol ChatApprovalCommanding: AnyObject {
     var activeChatPendingApprovals: [AgentPendingApproval] { get }
     func reloadPendingApprovals()
+    func loadMorePendingApprovalsIfNeeded(currentApprovalID: String)
     func approvePendingApproval(_ approval: AgentPendingApproval)
     func denyPendingApproval(_ approval: AgentPendingApproval)
     func cancelPendingApproval(_ approval: AgentPendingApproval)
@@ -146,6 +149,8 @@ final class ClosureChatSessionPort: ChatSessionCommanding {
     let isLoading: () -> Bool
     let reloadIfNeededAction: (Bool) -> Void
     let reloadAction: (Bool) -> Void
+    let loadMoreAction: (String) -> Void
+    let loadPickerPageAction: (String?) async -> AppChatSessionPage?
     let newAction: () -> Void
     let selectAction: (String) -> Void
     let renameAction: (String, String) -> Void
@@ -156,6 +161,8 @@ final class ClosureChatSessionPort: ChatSessionCommanding {
     var isLoadingSelectedChatSessionDetail: Bool { isLoading() }
     func reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: Bool) { reloadIfNeededAction(restoreWorkspaceMode) }
     func reloadChatSessions(restoreWorkspaceMode: Bool) { reloadAction(restoreWorkspaceMode) }
+    func loadMoreChatSessionsIfNeeded(currentSessionID: String) { loadMoreAction(currentSessionID) }
+    func loadChatSessionPickerPage(cursor: String?) async -> AppChatSessionPage? { await loadPickerPageAction(cursor) }
     func newChatSession() { newAction() }
     func selectChatSession(_ sessionID: String) { selectAction(sessionID) }
     func renameChatSession(_ sessionID: String, title: String) { renameAction(sessionID, title) }
@@ -163,8 +170,8 @@ final class ClosureChatSessionPort: ChatSessionCommanding {
     func setSelectedSessionStatus(_ status: AgentSessionStatus) { statusAction(status) }
     func toggleSelectedSessionFlag() { flagAction() }
     func toggleSelectedSessionLabel(_ labelID: String) { labelAction(labelID) }
-    init(isLoading: @escaping () -> Bool, reloadIfNeeded: @escaping (Bool) -> Void, reload: @escaping (Bool) -> Void, new: @escaping () -> Void, select: @escaping (String) -> Void, rename: @escaping (String, String) -> Void, filter: @escaping (AgentSessionListFilter, Bool) -> Void, status: @escaping (AgentSessionStatus) -> Void, flag: @escaping () -> Void, label: @escaping (String) -> Void) {
-        self.isLoading = isLoading; reloadIfNeededAction = reloadIfNeeded; reloadAction = reload; newAction = new; selectAction = select; renameAction = rename; filterAction = filter; statusAction = status; flagAction = flag; labelAction = label
+    init(isLoading: @escaping () -> Bool, reloadIfNeeded: @escaping (Bool) -> Void, reload: @escaping (Bool) -> Void, loadMore: @escaping (String) -> Void, loadPickerPage: @escaping (String?) async -> AppChatSessionPage?, new: @escaping () -> Void, select: @escaping (String) -> Void, rename: @escaping (String, String) -> Void, filter: @escaping (AgentSessionListFilter, Bool) -> Void, status: @escaping (AgentSessionStatus) -> Void, flag: @escaping () -> Void, label: @escaping (String) -> Void) {
+        self.isLoading = isLoading; reloadIfNeededAction = reloadIfNeeded; reloadAction = reload; loadMoreAction = loadMore; loadPickerPageAction = loadPickerPage; newAction = new; selectAction = select; renameAction = rename; filterAction = filter; statusAction = status; flagAction = flag; labelAction = label
     }
 }
 

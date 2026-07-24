@@ -80,6 +80,9 @@ struct AgentPendingApprovalReviewView: View {
                         }
                     }
                     .padding(.vertical, 8)
+                    .onAppear {
+                        chatActions.approval.loadMorePendingApprovalsIfNeeded(currentApprovalID: approval.id)
+                    }
                 }
             }
 

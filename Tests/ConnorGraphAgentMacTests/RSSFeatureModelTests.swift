@@ -144,33 +144,48 @@ private func waitUntil(
 }
 
 @MainActor
-@Test func rssFeatureUsesBoundedFirstFrameWindowAndExpandsInBatches() throws {
+@Test func rssFeatureLoadsEveryItemThroughStablePages() async throws {
     let (source, _) = makeRSSFixture()
-    let items = (0..<200).map { index in
-        RSSItemSummary(
-            id: RSSItemID(rawValue: "item-\(index)"),
+    let baseDate = try #require(ISO8601DateFormatter().date(from: "2026-07-01T00:00:00Z"))
+    let items = (0..<130).map { index in
+        RSSItemDetail(summary: RSSItemSummary(
+            id: RSSItemID(rawValue: String(format: "item-%03d", index)),
             sourceID: source.id,
-            title: "Article \(index)",
+            title: index.isMultiple(of: 2) ? "Even article \(index)" : "Odd article \(index)",
+            publishedAt: baseDate.addingTimeInterval(TimeInterval(-index)),
             snippet: "Body \(index)"
-        )
+        ))
     }
     let model = RSSFeatureModel(runtime: RSSRuntime(
         repository: InMemoryRSSSourceRepository(sources: [source]),
-        cache: InMemoryRSSSourceCache(items: [])
+        cache: InMemoryRSSSourceCache(items: items)
     ))
 
-    model.presentation = NativeRSSBrowserPresentation(sources: [source], items: items)
-    #expect(model.visibleItems.count == 200)
+    await model.reload()
     #expect(model.visibleWindowItems.count == 50)
 
     model.loadMoreVisibleItemsIfNeeded(currentItemID: items[10].id)
+    await model.waitForPendingOperations()
     #expect(model.visibleWindowItems.count == 50)
 
-    model.loadMoreVisibleItemsIfNeeded(currentItemID: try #require(model.visibleWindowItems.last?.id))
+    let firstPageEnd = try #require(model.visibleWindowItems.last?.id)
+    model.loadMoreVisibleItemsIfNeeded(currentItemID: firstPageEnd)
+    model.loadMoreVisibleItemsIfNeeded(currentItemID: firstPageEnd)
+    await model.waitForPendingOperations()
     #expect(model.visibleWindowItems.count == 100)
 
-    model.searchQuery = "Article 1"
-    #expect(model.visibleWindowItems.count == min(50, model.visibleItems.count))
+    model.loadMoreVisibleItemsIfNeeded(currentItemID: try #require(model.visibleWindowItems.last?.id))
+    await model.waitForPendingOperations()
+    #expect(model.visibleWindowItems.count == 130)
+    #expect(Set(model.visibleWindowItems.map(\.id)).count == 130)
+
+    model.searchQuery = "Even article"
+    await model.waitForPendingOperations()
+    #expect(model.visibleWindowItems.count == 50)
+    model.loadMoreVisibleItemsIfNeeded(currentItemID: try #require(model.visibleWindowItems.last?.id))
+    await model.waitForPendingOperations()
+    #expect(model.visibleWindowItems.count == 65)
+    #expect(Set(model.visibleWindowItems.map(\.id)).count == 65)
 }
 
 @MainActor

@@ -5,6 +5,26 @@ import ConnorGraphAppSupport
 
 @Suite("SQLite Person Profile Store Tests")
 struct SQLitePersonProfileStoreTests {
+    @Test func profilePagesReturnEveryRowInStableOrder() async throws {
+        let store = try makeStore()
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        for index in 0..<137 {
+            let id = String(format: "person-%03d", index)
+            _ = try await store.upsert(.init(id: ContactID(rawValue: id), displayName: id, createdAt: timestamp, updatedAt: timestamp))
+        }
+
+        var ids: [ContactID] = []
+        var cursor: String?
+        repeat {
+            let page = try await store.loadProfilePage(cursor: cursor, pageSize: 50)
+            ids += page.profiles.map(\.id)
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        #expect(ids == (0..<137).map { ContactID(rawValue: String(format: "person-%03d", $0)) })
+        #expect(Set(ids).count == 137)
+    }
+
     @Test func newDatabaseLoadsEmptyProfiles() async throws {
         let store = try makeStore()
 

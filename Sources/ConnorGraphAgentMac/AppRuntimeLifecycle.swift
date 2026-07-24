@@ -822,24 +822,9 @@ final class AppRuntimeLifecycle {
                     commit: { [weak self] proposal in
                         try await MainActor.run {
                             guard let self else { throw ConnorPersonalityError.unavailable }
-                            let previousPersonality = self.userPreferencesModel.connorPersonality
-                            let previousRevision = self.userPreferencesModel.connorPersonalityRevision
-                            try self.userPreferencesModel.applyApprovedPersonality(
+                            return try self.commitPersonality(
                                 proposal.after,
                                 expectedRevision: proposal.expectedRevision
-                            )
-                            do {
-                                try self.runtimeSettingsCoordinator.saveImmediately(snapshot: self.runtimeSettingsSnapshot())
-                            } catch {
-                                self.userPreferencesModel.restorePersonalityAfterFailedCommit(
-                                    previousPersonality,
-                                    revision: previousRevision
-                                )
-                                throw error
-                            }
-                            return ConnorPersonalitySnapshot(
-                                personality: self.userPreferencesModel.connorPersonality,
-                                revision: self.userPreferencesModel.connorPersonalityRevision
                             )
                         }
                     }
@@ -935,6 +920,8 @@ final class AppRuntimeLifecycle {
                 isLoading: { [weak self] in self?.isLoadingSelectedChatSessionDetail ?? false },
                 reloadIfNeeded: { [weak self] in self?.reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode: $0) },
                 reload: { [weak self] in self?.reloadChatSessions(restoreWorkspaceMode: $0) },
+                loadMore: { [weak self] in self?.chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: $0) },
+                loadPickerPage: { [weak self] in await self?.loadChatSessionPickerPage(cursor: $0) },
                 new: { [weak self] in self?.newChatSession() },
                 select: { [weak self] in self?.selectChatSession($0) },
                 rename: { [weak self] in self?.renameChatSession($0, title: $1) },
@@ -1130,13 +1117,20 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.onSelectionLoaded = { [weak self] snapshot, generation, startedAt in
             await self?.applySelectedChatSessionSnapshot(snapshot, generation: generation, startedAt: startedAt)
         }
-        chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode in
+        chatFeatureModel.run.loadOlderMessages = { [weak self] in
+            await self?.loadOlderSelectedChatMessages() ?? 0
+        }
+        chatSessionCoordinator.onReloadSelectedSession = { [weak self] session, shouldRestoreWorkspaceMode, totalMessageCount, nextBeforePosition in
             guard let self, let repository = self.chatSessionRepository else { return }
             let sessionID = session.id
             try self.loadSessionCapsule(sessionID: sessionID)
             try self.chatBackgroundTaskCoordinator.load(sessionID: sessionID)
             chatRunCoordinator.installManager(self.makeNativeSessionManager(for: session), fallbackSession: session)
             self.replaceSelectedChatTranscript(session.messages)
+            self.chatRunCoordinator.configureTranscriptPagination(
+                totalCount: totalMessageCount,
+                nextBeforePosition: nextBeforePosition
+            )
             self.restoreChatInputDraft(for: sessionID)
             self.refreshSelectedSubmittingState()
             if self.chatRunCoordinator.timeline(sessionID: sessionID) == nil {
@@ -1336,7 +1330,13 @@ final class AppRuntimeLifecycle {
             if let failureMessage = result.failureMessage { errorMessage = failureMessage }
             return
         }
-        chatSessionCoordinator.installStartupSessions(snapshot.sessions, allSessions: snapshot.allSessions)
+        chatSessionCoordinator.installStartupSessions(
+            snapshot.sessions,
+            allSessions: snapshot.allSessions,
+            nextCursor: snapshot.nextCursor,
+            messageCounts: snapshot.messageCounts,
+            summary: snapshot.summary
+        )
         globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {
@@ -1362,6 +1362,10 @@ final class AppRuntimeLifecycle {
         chatBackgroundTaskCoordinator.install(snapshot.backgroundTasks, sessionID: sessionID)
         chatRunCoordinator.installManager(makeNativeSessionManager(for: session), fallbackSession: session)
         replaceSelectedChatTranscript(session.messages)
+        chatRunCoordinator.configureTranscriptPagination(
+            totalCount: snapshot.selectedSessionTotalMessageCount,
+            nextBeforePosition: snapshot.selectedSessionNextMessageBeforePosition
+        )
         restoreChatInputDraft(for: sessionID)
         refreshSelectedSubmittingState()
         chatRunCoordinator.applyPresentation(timeline: snapshot.timeline, summary: snapshot.latestSummary, sessionID: sessionID)
@@ -2001,6 +2005,34 @@ final class AppRuntimeLifecycle {
         settings.workspace.recentWorkspacePaths = workspaceSettingsModel.recentPaths
         userPreferencesModel.apply(to: &settings)
         return settings
+    }
+
+    private func commitPersonality(
+        _ personality: ConnorPersonalitySettings,
+        expectedRevision: Int
+    ) throws -> ConnorPersonalitySnapshot {
+        guard userPreferencesModel.connorPersonalityRevision == expectedRevision else {
+            throw ConnorPersonalityProposalError.revisionConflict(
+                expected: expectedRevision,
+                actual: userPreferencesModel.connorPersonalityRevision
+            )
+        }
+        let snapshot = ConnorPersonalitySnapshot(
+            personality: personality,
+            revision: expectedRevision + 1
+        )
+        var settings = runtimeSettingsSnapshot()
+        settings.preferences.connorPersonality = snapshot.personality
+        settings.preferences.connorPersonalityRevision = snapshot.revision
+        try runtimeSettingsCoordinator.commitPersonality(
+            snapshot: settings,
+            expectedRevision: expectedRevision
+        )
+        try userPreferencesModel.applyApprovedPersonality(
+            snapshot.personality,
+            expectedRevision: expectedRevision
+        )
+        return snapshot
     }
 
     private func handleRuntimeSettingsSaved(_ settings: AgentRuntimeSettings) {
@@ -2667,6 +2699,37 @@ final class AppRuntimeLifecycle {
         chatSessionCoordinator.select(sessionID)
     }
 
+    func loadMoreChatSessionsIfNeeded(currentSessionID: String) {
+        chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: currentSessionID)
+    }
+
+    func loadChatSessionPickerPage(cursor: String?) async -> AppChatSessionPage? {
+        guard let repository = chatSessionRepository else { return nil }
+        return try? await Task.detached(priority: .utility) {
+            try repository.loadSessionPage(filter: .all, cursor: cursor)
+        }.value
+    }
+
+    private func loadOlderSelectedChatMessages() async -> Int {
+        guard let repository = chatSessionRepository,
+              let sessionID = chatFeatureModel.sessions.selectedSessionID,
+              let beforePosition = chatFeatureModel.run.nextMessageBeforePosition
+        else { return 0 }
+        do {
+            let page = try await Task.detached(priority: .utility) {
+                try repository.loadSessionMessagePage(id: sessionID, beforePosition: beforePosition)
+            }.value
+            guard let page, chatFeatureModel.sessions.selectedSessionID == sessionID else { return 0 }
+            return chatRunCoordinator.prependTranscript(
+                page.session.messages,
+                nextBeforePosition: page.nextBeforePosition
+            )
+        } catch {
+            errorMessage = String(describing: error)
+            return 0
+        }
+    }
+
     private func applySelectedChatSessionSnapshot(
         _ snapshot: ChatSessionDetailLoadSnapshot,
         generation: Int,
@@ -2700,6 +2763,10 @@ final class AppRuntimeLifecycle {
             manager: nil,
             timeline: snapshot.timeline,
             summary: snapshot.latestSummary
+        )
+        chatRunCoordinator.configureTranscriptPagination(
+            totalCount: snapshot.totalMessageCount,
+            nextBeforePosition: snapshot.nextMessageBeforePosition
         )
         restoreChatInputDraft(for: session.id)
         chatFeatureModel.sessions.selectedArtifactDirectories = snapshot.artifactDirectories
@@ -2904,6 +2971,7 @@ final class AppRuntimeLifecycle {
     private func scheduleChatSessionListRefresh(reason: String) {
         guard let chatSessionRepository else { return }
         let filter = chatFeatureModel.sessions.filter
+        let query = chatFeatureModel.sessions.searchQuery
         let existingSessions = chatFeatureModel.sessions.allSessions
         let coordinator = chatSessionListRefreshCoordinator
         Task(priority: .utility) { [weak self] in
@@ -2912,6 +2980,7 @@ final class AppRuntimeLifecycle {
                 let result = try await coordinator.refresh(
                     repository: chatSessionRepository,
                     filter: filter,
+                    query: query,
                     preserving: existingSessions
                 )
                 let elapsed = startedAt.duration(to: ContinuousClock.now)
@@ -2920,6 +2989,9 @@ final class AppRuntimeLifecycle {
                     guard let self, self.chatFeatureModel.sessions.filter == filter else { return }
                     self.chatFeatureModel.sessions.sessions = result.visibleSessions
                     self.chatFeatureModel.sessions.allSessions = result.allSessions
+                    self.chatFeatureModel.sessions.nextPageCursor = result.nextCursor
+                    self.chatFeatureModel.sessions.messageCountsBySessionID = result.messageCounts
+                    self.chatFeatureModel.sessions.applySidebarSummary(result.summary)
                     self.synchronizeSessionReadStates(from: result.allSessions)
                     AppPerformanceLog.chatTurnLogger.info("sessionList.asyncRefresh reason=\(reason, privacy: .public) visible=\(result.visibleSessions.count, privacy: .public) all=\(result.allSessions.count, privacy: .public) duration=\(milliseconds, privacy: .public)ms")
                 }
@@ -3396,6 +3468,8 @@ extension AppRuntimeLifecycle {
             isLoading: { [weak sessionCoordinator] in sessionCoordinator?.isLoadingSelectedDetail ?? false },
             reloadIfNeeded: { [weak sessionCoordinator] restore in sessionCoordinator?.reloadIfNeeded(restoreWorkspaceMode: restore) },
             reload: { [weak sessionCoordinator] restore in sessionCoordinator?.reload(restoreWorkspaceMode: restore) },
+            loadMore: { [weak sessionCoordinator] in sessionCoordinator?.loadMoreIfNeeded(currentSessionID: $0) },
+            loadPickerPage: { [weak model] in await model?.loadChatSessionPickerPage(cursor: $0) },
             new: { [weak model] in model?.newChatSession() },
             select: { [weak sessionCoordinator] in sessionCoordinator?.select($0) },
             rename: { [weak model] in model?.renameChatSession($0, title: $1) },

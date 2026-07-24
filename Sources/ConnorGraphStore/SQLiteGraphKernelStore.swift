@@ -1,5 +1,37 @@
 import Foundation
 import SQLite3
+
+public struct AgentSessionMetadataRecord: Sendable, Equatable {
+    public var session: AgentSession
+    public var messageCount: Int
+
+    public init(session: AgentSession, messageCount: Int) {
+        self.session = session
+        self.messageCount = messageCount
+    }
+}
+
+public struct AgentSessionMetadataSummary: Sendable, Equatable {
+    public var totalCount: Int
+    public var countsByStatusRawValue: [String: Int]
+    public var countsByLabelID: [String: Int]
+
+    public init(totalCount: Int, countsByStatusRawValue: [String: Int], countsByLabelID: [String: Int]) {
+        self.totalCount = totalCount
+        self.countsByStatusRawValue = countsByStatusRawValue
+        self.countsByLabelID = countsByLabelID
+    }
+}
+
+public struct AgentSessionMessagePage: Sendable, Equatable {
+    public var messages: [AgentMessage]
+    public var nextBeforePosition: Int?
+
+    public init(messages: [AgentMessage], nextBeforePosition: Int?) {
+        self.messages = messages
+        self.nextBeforePosition = nextBeforePosition
+    }
+}
 import ConnorGraphCore
 import ConnorGraphCore
 import ConnorGraphMemory
@@ -149,6 +181,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_graph_anomalies_graph_status",
         "idx_graph_jobs_v3_runnable",
         "idx_agent_sessions_updated",
+        "idx_agent_sessions_updated_page",
         "idx_agent_sessions_governance",
         "idx_session_background_tasks_session",
         "idx_session_background_tasks_status",
@@ -156,6 +189,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_agent_audit_events_run",
         "idx_agent_pending_approvals_run",
         "idx_agent_pending_approvals_status",
+        "idx_agent_pending_approvals_status_page",
         "idx_session_pending_plans_session",
         "idx_session_pending_plans_status",
         "idx_session_branch_records_source",
@@ -387,7 +421,29 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try addColumnIfMissing(table: "agent_sessions", column: "deleted_at", definition: "TEXT")
         try addColumnIfMissing(table: "agent_sessions", column: "read_state_json", definition: "TEXT NOT NULL DEFAULT '{}'")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated_page ON agent_sessions(updated_at DESC, id ASC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_governance ON agent_sessions(deleted_at, is_archived, status, updated_at DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_session_messages (
+            session_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            message_id TEXT NOT NULL,
+            message_json TEXT NOT NULL,
+            PRIMARY KEY (session_id, position)
+        );
+        """)
+        try execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_session_messages_id ON agent_session_messages(session_id, message_id);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_session_messages_page ON agent_session_messages(session_id, position DESC);")
+        try execute("""
+        INSERT OR IGNORE INTO agent_session_messages (session_id, position, message_id, message_json)
+        SELECT session.id, CAST(message.key AS INTEGER), json_extract(message.value, '$.id'), message.value
+        FROM agent_sessions AS session, json_each(session.messages_json) AS message
+        WHERE json_extract(message.value, '$.id') IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM agent_session_messages AS existing
+              WHERE existing.session_id = session.id
+          )
+        """)
         try execute("""
         CREATE TABLE IF NOT EXISTS session_background_tasks (
             id TEXT PRIMARY KEY,
@@ -460,6 +516,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_run ON agent_pending_approvals(run_id, created_at);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_status ON agent_pending_approvals(status, created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_status_page ON agent_pending_approvals(status, created_at, id);")
         try execute("""
         CREATE TABLE IF NOT EXISTS session_pending_plans (
             id TEXT PRIMARY KEY,
@@ -707,12 +764,42 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             deleted_at = COALESCE(excluded.deleted_at, agent_sessions.deleted_at),
             read_state_json = excluded.read_state_json
         """)
+        var messageStatements = ["DELETE FROM agent_session_messages WHERE session_id = \(quote(session.id))"]
+        if !session.messages.isEmpty {
+            let values = session.messages.enumerated().map { position, message in
+                "(\(quote(session.id)), \(position), \(quote(message.id)), \(quote(json(message))))"
+            }.joined(separator: ",")
+            messageStatements.append("INSERT INTO agent_session_messages (session_id, position, message_id, message_json) VALUES \(values)")
+        }
+        try execute(messageStatements.joined(separator: ";"))
     }
 
     public func session(id: String) throws -> AgentSession? {
         let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions WHERE id = \(quote(id))")
         guard let row = rows.first else { return nil }
         return try decodeSession(row)
+    }
+
+    public func sessionMetadata(id: String) throws -> AgentSession? {
+        let rows = try query(sql: "SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json FROM agent_sessions WHERE id = \(quote(id))")
+        guard let row = rows.first else { return nil }
+        return try decodeSessionMetadata(row)
+    }
+
+    public func sessionMessagePage(sessionID: String, beforePosition: Int? = nil, limit: Int = 50) throws -> AgentSessionMessagePage {
+        let boundedLimit = min(max(limit, 1), 100)
+        let beforeClause = beforePosition.map { "AND position < \($0)" } ?? ""
+        let rows = try query(sql: """
+        SELECT position, message_json
+        FROM agent_session_messages
+        WHERE session_id = \(quote(sessionID)) \(beforeClause)
+        ORDER BY position DESC
+        LIMIT \(boundedLimit + 1)
+        """)
+        let selectedRows = Array(rows.prefix(boundedLimit))
+        let messages = try selectedRows.reversed().map { try decode(AgentMessage.self, $0[1]) }
+        let nextCursor = rows.count > boundedLimit ? selectedRows.last.flatMap { Int($0[0]) } : nil
+        return AgentSessionMessagePage(messages: messages, nextBeforePosition: nextCursor)
     }
 
     public func recentSessions(limit: Int = 50, includeArchived: Bool = true, includeDeleted: Bool = false) throws -> [AgentSession] {
@@ -733,10 +820,70 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             .map(decodeSessionMetadata)
     }
 
+    public func sessionMetadataPage(
+        status: AgentSessionStatus? = nil,
+        labelID: String? = nil,
+        searchText: String? = nil,
+        beforeUpdatedAt: Date? = nil,
+        afterID: String? = nil,
+        limit: Int = 50
+    ) throws -> [AgentSessionMetadataRecord] {
+        var conditions = ["deleted_at IS NULL"]
+        if let status { conditions.append("status = \(quote(status.rawValue))") }
+        if let labelID {
+            conditions.append("EXISTS (SELECT 1 FROM json_each(agent_sessions.labels_json) WHERE json_extract(json_each.value, '$.id') = \(quote(labelID)))")
+        }
+        if let searchText, !searchText.isEmpty {
+            let pattern = quote("%\(searchText)%")
+            conditions.append("(title LIKE \(pattern) COLLATE NOCASE OR messages_json LIKE \(pattern) COLLATE NOCASE)")
+        }
+        if let beforeUpdatedAt, let afterID {
+            let updatedAt = quote(iso(beforeUpdatedAt))
+            conditions.append("(updated_at < \(updatedAt) OR (updated_at = \(updatedAt) AND id > \(quote(afterID))))")
+        }
+        let boundedLimit = min(max(limit, 1), 101)
+        return try query(sql: """
+        SELECT id, title, created_at, updated_at, status, kind, labels_json, is_archived, is_flagged, archived_at, deleted_at, read_state_json, message_count
+        FROM agent_sessions
+        WHERE \(conditions.joined(separator: " AND "))
+        ORDER BY updated_at DESC, id ASC
+        LIMIT \(boundedLimit)
+        """).map { row in
+            AgentSessionMetadataRecord(session: try decodeSessionMetadata(Array(row.dropLast())), messageCount: Int(row.last ?? "0") ?? 0)
+        }
+    }
+
     public func sessionMessageCounts(includeDeleted: Bool = false) throws -> [String: Int] {
         let whereClause = includeDeleted ? "" : "WHERE deleted_at IS NULL"
         let rows = try query(sql: "SELECT id, message_count FROM agent_sessions \(whereClause)")
         return Dictionary(uniqueKeysWithValues: rows.map { ($0[0], Int($0[1]) ?? 0) })
+    }
+
+    public func sessionMessageCount(id: String) throws -> Int? {
+        try query(sql: "SELECT message_count FROM agent_sessions WHERE id = \(quote(id)) LIMIT 1")
+            .first?.first.flatMap(Int.init)
+    }
+
+    public func sessionMetadataSummary() throws -> AgentSessionMetadataSummary {
+        let totalCount = Int(try query(sql: "SELECT COUNT(*) FROM agent_sessions WHERE deleted_at IS NULL").first?.first ?? "0") ?? 0
+        let countsByStatus = Dictionary(uniqueKeysWithValues: try query(sql: """
+        SELECT status, COUNT(*)
+        FROM agent_sessions
+        WHERE deleted_at IS NULL
+        GROUP BY status
+        """).map { ($0[0], Int($0[1]) ?? 0) })
+        let countsByLabelID = Dictionary(uniqueKeysWithValues: try query(sql: """
+        SELECT json_extract(label.value, '$.id'), COUNT(*)
+        FROM agent_sessions, json_each(agent_sessions.labels_json) AS label
+        WHERE agent_sessions.deleted_at IS NULL
+          AND json_extract(label.value, '$.id') IS NOT NULL
+        GROUP BY json_extract(label.value, '$.id')
+        """).map { ($0[0], Int($0[1]) ?? 0) })
+        return AgentSessionMetadataSummary(
+            totalCount: totalCount,
+            countsByStatusRawValue: countsByStatus,
+            countsByLabelID: countsByLabelID
+        )
     }
 
     public func sessions(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, includeDeleted: Bool = false, limit: Int = 100) throws -> [AgentSession] {
@@ -756,6 +903,24 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SET status = \(quote(governance.status.rawValue)), labels_json = \(quote(json(governance.labels))), is_archived = \(governance.isArchived ? 1 : 0), is_flagged = \(governance.isFlagged ? 1 : 0), archived_at = \(quote(governance.archivedAt.map(iso))), deleted_at = \(quote(governance.deletedAt.map(iso))), updated_at = \(quote(iso(updatedAt)))
         WHERE id = \(quote(sessionID))
         """)
+    }
+
+    public func compareAndSetSessionStatus(
+        sessionID: String,
+        statusRaw: String,
+        expectedUpdatedAt: Date,
+        updatedAt: Date = Date()
+    ) throws -> Bool {
+        try withDatabaseLock {
+            try execute("""
+            UPDATE agent_sessions
+            SET status = \(quote(statusRaw)), updated_at = \(quote(iso(updatedAt)))
+            WHERE id = \(quote(sessionID))
+              AND deleted_at IS NULL
+              AND updated_at = \(quote(iso(expectedUpdatedAt)))
+            """)
+            return sqlite3_changes(db) == 1
+        }
     }
 
     public func updateSessionReadState(sessionID: String, readState: SessionReadState) throws {
@@ -966,6 +1131,29 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try query(sql: """
         SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
         FROM agent_pending_approvals WHERE status = \(quote(status.rawValue)) ORDER BY created_at ASC LIMIT \(limit)
+        """).map(decodePendingApproval)
+    }
+
+    public func pendingApprovalPage(
+        status: AgentPendingApprovalStatus = .pending,
+        afterCreatedAt: Date? = nil,
+        afterID: String? = nil,
+        limit: Int = 50
+    ) throws -> [AgentPendingApproval] {
+        let boundedLimit = min(max(limit, 1), 101)
+        let cursorClause: String
+        if let afterCreatedAt, let afterID {
+            let createdAt = quote(iso(afterCreatedAt))
+            cursorClause = " AND (created_at > \(createdAt) OR (created_at = \(createdAt) AND id > \(quote(afterID))))"
+        } else {
+            cursorClause = ""
+        }
+        return try query(sql: """
+        SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
+        FROM agent_pending_approvals
+        WHERE status = \(quote(status.rawValue))\(cursorClause)
+        ORDER BY created_at ASC, id ASC
+        LIMIT \(boundedLimit)
         """).map(decodePendingApproval)
     }
 

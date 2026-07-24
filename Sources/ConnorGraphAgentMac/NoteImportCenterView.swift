@@ -19,7 +19,7 @@ struct NoteImportCenterView: View {
                 if !issueJobs.isEmpty { Section("需要处理") { ForEach(issueJobs) { jobRow($0) } } }
                 if !completedJobs.isEmpty { Section("已完成") { ForEach(completedJobs) { jobRow($0) } } }
             }
-            .navigationTitle("导入中心")
+            .navigationTitle("笔记导入中心")
             .contentMargins(.top, 6, for: .scrollContent)
             .frame(minWidth: 260)
         } detail: {
@@ -56,7 +56,7 @@ struct NoteImportCenterView: View {
                 Task { await model.deleteJob(id: id) }
             }
         } message: { Text("只会删除导入过程记录和暂存数据，已经导入的笔记会保留。") }
-        .alert("导入中心", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("好") { model.error = nil } } message: { Text(model.error ?? "") }
+        .alert("笔记导入中心", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("好") { model.error = nil } } message: { Text(model.error ?? "") }
     }
 
     private var activeJobs: [NoteImportJobRecord] {
@@ -94,6 +94,7 @@ struct NoteImportCenterView: View {
         }
         .buttonStyle(.plain)
         .listRowBackground(selectedJobID == job.id ? Color.accentColor.opacity(0.14) : Color.clear)
+        .onAppear { Task { await model.loadMoreJobsIfNeeded(currentJobID: job.id) } }
         .contextMenu {
             if job.status.isTerminal {
                 Button("删除导入记录", systemImage: "trash", role: .destructive) {
@@ -121,7 +122,11 @@ struct NoteImportCenterView: View {
                 jobProgress(job)
                 HStack(spacing: 24) { metric("已发现", job.discoveredCount); metric("已导入", job.importedCount); metric("重复", job.duplicateCount); metric("失败", job.failedCount) }
                 Table(model.selectedJobItems) {
-                    TableColumn("笔记") { Text($0.title).lineLimit(1) }
+                    TableColumn("笔记") { item in
+                        Text(item.title)
+                            .lineLimit(1)
+                            .onAppear { Task { await model.loadMoreSelectedJobItemsIfNeeded(currentItemID: item.id) } }
+                    }
                     TableColumn("路径") { Text($0.relativePath ?? "—").foregroundStyle(.secondary).lineLimit(1) }
                     TableColumn("状态") { Label($0.status.displayName, systemImage: $0.status.systemImage).foregroundStyle($0.status.tint) }.width(120)
                     TableColumn("问题") { Text($0.errorMessage ?? "—").foregroundStyle($0.errorMessage == nil ? Color.secondary : Color.red).lineLimit(1) }

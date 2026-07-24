@@ -6,6 +6,9 @@ public enum AppTaskManagementError: Error, Equatable, CustomStringConvertible {
     case cannotStopProtectedSystemTask(String)
     case cannotRestoreProtectedSystemTask(String)
     case cannotDeleteProtectedSystemTask(String)
+    case cannotUpdateProtectedSystemTask(String)
+    case unsupportedScheduledSessionMessageTask(String)
+    case taskVersionConflict(String)
     case invalidTaskID(String)
 
     public var description: String {
@@ -14,6 +17,9 @@ public enum AppTaskManagementError: Error, Equatable, CustomStringConvertible {
         case .cannotStopProtectedSystemTask(let id): "cannotStopProtectedSystemTask: \(id)"
         case .cannotRestoreProtectedSystemTask(let id): "cannotRestoreProtectedSystemTask: \(id)"
         case .cannotDeleteProtectedSystemTask(let id): "cannotDeleteProtectedSystemTask: \(id)"
+        case .cannotUpdateProtectedSystemTask(let id): "cannotUpdateProtectedSystemTask: \(id)"
+        case .unsupportedScheduledSessionMessageTask(let id): "unsupportedScheduledSessionMessageTask: \(id)"
+        case .taskVersionConflict(let id): "taskVersionConflict: \(id)"
         case .invalidTaskID(let id): "invalidTaskID: \(id)"
         }
     }
@@ -94,10 +100,11 @@ public struct AppTaskManagementRepository: Sendable {
         try validateID(task.id)
         var tasks = try loadTasks(includeDeleted: true)
         var normalized = task
-        normalized.updatedAt = Date()
         if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            normalized.updatedAt = nextVersion(after: tasks[index].updatedAt)
             tasks[index] = normalized
         } else {
+            normalized.updatedAt = Date()
             tasks.append(normalized)
         }
         try write(tasks: tasks)
@@ -148,6 +155,41 @@ public struct AppTaskManagementRepository: Sendable {
         task.updatedAt = Date()
         try saveTask(task)
         try appendEventLine(["event": "task.deleted", "taskID": id, "reason": reason ?? ""])
+        return task
+    }
+
+    @discardableResult
+    public func updateScheduledSessionMessageTask(
+        id: String,
+        expectedUpdatedAt: Date? = nil,
+        mutation: (inout ConnorTaskDefinition) throws -> Void
+    ) throws -> ConnorTaskDefinition {
+        guard var task = try loadTask(id: id), task.lifecycle.status != .deleted else {
+            throw AppTaskManagementError.taskNotFound(id)
+        }
+        if task.origin == .system && task.metadata.isProtectedSystemTask {
+            throw AppTaskManagementError.cannotUpdateProtectedSystemTask(id)
+        }
+        guard task.trigger.kind == .scheduled,
+              task.target.targetKind == "session.ai",
+              task.target.targetID == "new",
+              task.target.operationName == "createSessionAndSendMessage" else {
+            throw AppTaskManagementError.unsupportedScheduledSessionMessageTask(id)
+        }
+        if let expectedUpdatedAt, !sameStoredInstant(task.updatedAt, expectedUpdatedAt) {
+            throw AppTaskManagementError.taskVersionConflict(id)
+        }
+        try mutation(&task)
+        try task.validateUserCreatableTemplate()
+        var tasks = try loadTasks(includeDeleted: true)
+        guard let index = tasks.firstIndex(where: { $0.id == id }),
+              expectedUpdatedAt == nil || sameStoredInstant(tasks[index].updatedAt, expectedUpdatedAt!) else {
+            throw AppTaskManagementError.taskVersionConflict(id)
+        }
+        task.updatedAt = nextVersion(after: tasks[index].updatedAt)
+        tasks[index] = task
+        try write(tasks: tasks)
+        try appendEventLine(["event": "task.definition.updated", "taskID": id])
         return task
     }
 
@@ -254,5 +296,13 @@ public struct AppTaskManagementRepository: Sendable {
         guard id.range(of: pattern, options: .regularExpression) != nil else {
             throw AppTaskManagementError.invalidTaskID(id)
         }
+    }
+
+    private func sameStoredInstant(_ lhs: Date, _ rhs: Date) -> Bool {
+        ISO8601DateFormatter().string(from: lhs) == ISO8601DateFormatter().string(from: rhs)
+    }
+
+    private func nextVersion(after previous: Date) -> Date {
+        max(Date(), previous.addingTimeInterval(1))
     }
 }

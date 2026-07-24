@@ -22,25 +22,58 @@ struct ChatSessionSidebarSummary: Sendable, Equatable {
     }
 }
 
+enum ChatSessionExecutionPresentation: Sendable, Equatable {
+    case idle
+    case running
+    case awaitingApproval
+
+    static func resolve(isSubmitting: Bool, hasPendingApproval: Bool) -> Self {
+        if hasPendingApproval { return .awaitingApproval }
+        return isSubmitting ? .running : .idle
+    }
+
+    var statusText: String? {
+        switch self {
+        case .idle: nil
+        case .running: "运行中"
+        case .awaitingApproval: "请求审批"
+        }
+    }
+
+    var systemImage: String? {
+        switch self {
+        case .idle, .running: nil
+        case .awaitingApproval: "lock.fill"
+        }
+    }
+
+    var helpText: String? {
+        self == .awaitingApproval ? "当前会话正在等待权限审批，请前往处理" : nil
+    }
+}
+
 @MainActor
 @Observable
 final class ChatSessionListModel {
     var sessions: [AgentSession] = [] {
         didSet {
-            rowPresentationsByID = Dictionary(
-                uniqueKeysWithValues: sessions.map { ($0.id, AgentChatSessionPresentation(session: $0)) }
-            )
-            guard allSessions.isEmpty else { return }
+            rebuildRowPresentations()
+            guard allSessions.isEmpty, !hasAuthoritativeSidebarSummary else { return }
             sidebarSummary = .build(from: sessions)
         }
     }
     var allSessions: [AgentSession] = [] {
         didSet {
+            guard !hasAuthoritativeSidebarSummary else { return }
             sidebarSummary = .build(from: allSessions.isEmpty ? sessions : allSessions)
         }
     }
     private(set) var sidebarSummary = ChatSessionSidebarSummary()
+    private var hasAuthoritativeSidebarSummary = false
     private(set) var rowPresentationsByID: [String: AgentChatSessionPresentation] = [:]
+    var messageCountsBySessionID: [String: Int] = [:] {
+        didSet { rebuildRowPresentations() }
+    }
     var selectedSessionID: String?
     var loadingSessionDetailID: String?
     var presentedSessionDetailID: String?
@@ -50,10 +83,21 @@ final class ChatSessionListModel {
     var isBackgroundTasksPresented = false
     var filter: AgentSessionListFilter = .all
     var searchQuery = ""
+    var nextPageCursor: String?
+    var isLoadingNextPage = false
     var selectedArtifactDirectories: AgentSessionArtifactDirectories?
 
+    func applySidebarSummary(_ summary: AppChatSessionSummary) {
+        hasAuthoritativeSidebarSummary = true
+        sidebarSummary = ChatSessionSidebarSummary(
+            totalCount: summary.totalCount,
+            countsByStatus: summary.countsByStatus,
+            countsByLabelID: summary.countsByLabelID
+        )
+    }
+
     func rowPresentation(for session: AgentSession) -> AgentChatSessionPresentation {
-        rowPresentationsByID[session.id] ?? AgentChatSessionPresentation(session: session)
+        rowPresentationsByID[session.id] ?? AgentChatSessionPresentation(session: session, messageCount: messageCountsBySessionID[session.id])
     }
 
     func title(for sessionID: String) -> String? {
@@ -65,6 +109,12 @@ final class ChatSessionListModel {
     var isWaitingForSelectedPresentation: Bool {
         guard let selectedSessionID, loadingSessionDetailID == selectedSessionID else { return false }
         return presentedSessionDetailID != selectedSessionID
+    }
+
+    private func rebuildRowPresentations() {
+        rowPresentationsByID = Dictionary(uniqueKeysWithValues: sessions.map {
+            ($0.id, AgentChatSessionPresentation(session: $0, messageCount: messageCountsBySessionID[$0.id]))
+        })
     }
 }
 
@@ -92,6 +142,9 @@ final class ChatComposerModel {
 final class ChatRunModel {
     var transcript: [AgentMessage] = []
     var transcriptRevision = 0
+    var totalTranscriptMessageCount = 0
+    var nextMessageBeforePosition: Int?
+    @ObservationIgnored var loadOlderMessages: () async -> Int = { 0 }
     var lastContext: AgentContext?
     var lastPromptInspection: AgentChatPromptInspection?
     var submittingSessionIDs: Set<String> = []
@@ -107,6 +160,12 @@ final class ChatRunModel {
 final class ChatApprovalModel {
     var pendingApprovals: [AgentPendingApproval] = []
     var lastResultSummary: String?
+    var isLoadingNextPage = false
+    var nextPageCursor: String?
+
+    func hasPendingApproval(sessionID: String) -> Bool {
+        pendingApprovals.contains { $0.sessionID == sessionID }
+    }
 }
 
 @MainActor
