@@ -50,7 +50,7 @@ public actor EnvironmentSnapshotPersistence: EnvironmentSnapshotPersisting {
         let fetchedAt = weather.updatedAt ?? snapshot.capturedAt
         try await store.upsertWeatherPoint(EnvironmentWeatherPoint(
             regionID: regionID,
-            observedAt: snapshot.capturedAt,
+            observedAt: fetchedAt,
             dataKind: .currentObservation,
             provider: provider,
             condition: weather.condition,
@@ -63,31 +63,5 @@ public actor EnvironmentSnapshotPersistence: EnvironmentSnapshotPersisting {
             fetchedAt: fetchedAt,
             expiresAt: weather.expiresAt
         ))
-
-        guard let timeZone = TimeZone(identifier: snapshot.localTime.timeZoneIdentifier) else { return }
-        for hourly in weather.hourlyForecast {
-            guard let observedAt = Self.date(fromLocalTimestamp: hourly.localTime, timeZone: timeZone) else { continue }
-            try await store.upsertWeatherPoint(EnvironmentWeatherPoint(
-                regionID: regionID,
-                observedAt: observedAt,
-                dataKind: .forecast,
-                provider: provider,
-                temperatureCelsius: hourly.temperatureCelsius,
-                precipitationProbabilityPercent: hourly.precipitationProbabilityPercent,
-                weatherCode: hourly.weatherCode,
-                sourceURL: weather.sourceURL,
-                fetchedAt: fetchedAt,
-                expiresAt: weather.expiresAt
-            ))
-        }
-    }
-
-    private static func date(fromLocalTimestamp value: String, timeZone: TimeZone) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
-        return formatter.date(from: value)
     }
 }
