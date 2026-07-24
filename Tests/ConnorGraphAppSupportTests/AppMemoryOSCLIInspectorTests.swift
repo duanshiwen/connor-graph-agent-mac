@@ -535,6 +535,22 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("\"observability\""))
     }
 
+    @Test func liveCLIInspectorSupportsIsolatedMemoryOSDatabase() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root.appendingPathComponent("app", isDirectory: true))
+        let databaseURL = root.appendingPathComponent("isolated/memory-os.sqlite")
+
+        let inspector = try AppMemoryOSCLIRouter.makeLiveInspector(
+            storagePaths: paths,
+            environment: ["CONNOR_MEMORY_OS_DATABASE_PATH": databaseURL.path]
+        )
+
+        #expect(inspector.databasePath == databaseURL.standardizedFileURL.path)
+        #expect(FileManager.default.fileExists(atPath: databaseURL.path))
+        #expect(try inspector.status().databasePath == databaseURL.standardizedFileURL.path)
+    }
+
     @Test func memoryOSCLIInspectorStatusReportsGracefulAcceptanceMetrics() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let facade = AppMemoryOSFacade(store: store)
