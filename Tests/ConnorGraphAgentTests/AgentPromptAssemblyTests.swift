@@ -54,6 +54,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_get_status"))
     #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(assembly.instruction.text.contains("Follow `nextPage` with the same page size until `hasNextPage` is false"))
+    #expect(assembly.instruction.text.contains("current profile is loaded completely"))
     #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }

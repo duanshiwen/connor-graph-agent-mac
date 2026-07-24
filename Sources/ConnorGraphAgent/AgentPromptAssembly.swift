@@ -212,7 +212,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
 
     ## Current User Personalization Workflow
     - Treat the current user as a Person instance anchored by the protected internal role marker `current_user`; do not use mutable display names, aliases, or generic user concepts as identity keys.
-    - Retrieve the current user's preferences, habits, traits, constraints, and interaction guidance with `memory_os_get_current_user_profile` during the continuity preflight. Apply profile records only when they materially improve the actual user request, and omit unrelated profile details from the answer.
+    - Retrieve the current user's preferences, habits, traits, constraints, and interaction guidance with `memory_os_get_current_user_profile` during the continuity preflight. Follow `nextPage` until `hasNextPage` is false so the current profile is loaded completely. Apply profile records only when they materially improve the actual user request, and omit unrelated profile details from the answer.
     - Use the user profile only to personalize service; never let older profile memory override the user's latest explicit request.
     - If the user changes their name, keep the internal marker stable and treat names as display metadata or aliases.
 
