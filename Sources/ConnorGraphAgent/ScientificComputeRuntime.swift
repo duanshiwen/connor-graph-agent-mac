@@ -373,9 +373,9 @@ public struct ScienceComputeTool: AgentTool {
         "operation": .stringEnumeration(values: ScientificComputeOperation.allCases.map(\.rawValue), description: "Whitelisted scientific operation."),
         "inputs": .object(properties: [:], required: []),
         "options": .closedObject(properties: [
-            "absolute_tolerance": .number(description: "Optional absolute comparison tolerance."),
-            "relative_tolerance": .number(description: "Optional relative comparison tolerance."),
-            "preferred_engine": .string(description: "Optional preferred compute engine.")
+            "absoluteTolerance": .number(description: "Optional absolute comparison tolerance."),
+            "relativeTolerance": .number(description: "Optional relative comparison tolerance."),
+            "preferredEngine": .string(description: "Optional preferred compute engine.")
         ], required: [])
     ], required: ["operation", "inputs"])
 
@@ -409,9 +409,9 @@ public struct ScienceComputeTool: AgentTool {
     private func parseOptions(_ value: SendableJSONValue?) -> ScientificComputeOptions {
         guard case .object(let object) = value else { return ScientificComputeOptions() }
         return ScientificComputeOptions(
-            absoluteTolerance: object["absolute_tolerance"]?.doubleLikeValue,
-            relativeTolerance: object["relative_tolerance"]?.doubleLikeValue,
-            preferredEngine: object["preferred_engine"]?.stringValue
+            absoluteTolerance: object["absoluteTolerance"]?.doubleLikeValue ?? object["absolute_tolerance"]?.doubleLikeValue,
+            relativeTolerance: object["relativeTolerance"]?.doubleLikeValue ?? object["relative_tolerance"]?.doubleLikeValue,
+            preferredEngine: object["preferredEngine"]?.stringValue ?? object["preferred_engine"]?.stringValue
         )
     }
 }

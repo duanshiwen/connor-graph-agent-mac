@@ -10,15 +10,15 @@ public struct EditImageAgentTool: AgentTool {
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "prompt": .string(description: "A complete instruction describing the requested image edit."),
-        "attachment_id": .string(description: "The Connor session attachment ID of the source image.")
-    ], required: ["prompt", "attachment_id"])
-    public let inputExamples: [[String: SendableJSONValue]] = [["prompt": .string("Make the scene look like sunrise while preserving composition"), "attachment_id": .string("attachment-id")]]
+        "attachmentID": .string(description: "The Connor session attachment ID of the source image.")
+    ], required: ["prompt", "attachmentID"])
+    public let inputExamples: [[String: SendableJSONValue]] = [["prompt": .string("Make the scene look like sunrise while preserving composition"), "attachmentID": .string("attachment-id")]]
     public var provider: AnyAgentModelProvider; public var ingestionService: GeneratedMediaIngestionService; public var attachmentStore: AppSessionAttachmentStore
     public init(provider: AnyAgentModelProvider, ingestionService: GeneratedMediaIngestionService, attachmentStore: AppSessionAttachmentStore) { self.provider = provider; self.ingestionService = ingestionService; self.attachmentStore = attachmentStore }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let prompt = arguments.string("prompt")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""; guard !prompt.isEmpty else { throw EditImageAgentToolError.emptyPrompt }
-        let attachmentID = arguments.string("attachment_id")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""; guard !attachmentID.isEmpty else { throw EditImageAgentToolError.missingAttachment }
+        let attachmentID = (arguments.string("attachmentID") ?? arguments.string("attachment_id"))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""; guard !attachmentID.isEmpty else { throw EditImageAgentToolError.missingAttachment }
         guard provider.capabilities.generatedMediaCapabilities.contains(.imageEditing) else { throw EditImageAgentToolError.providerDoesNotSupportEditing }
         let manifest = try attachmentStore.loadManifest(sessionID: context.sessionID, attachmentID: attachmentID); guard manifest.kind == .image else { throw EditImageAgentToolError.attachmentIsNotImage }
         let reference = manifest.messageRef

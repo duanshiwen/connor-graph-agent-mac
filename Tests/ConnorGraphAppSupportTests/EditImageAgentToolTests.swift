@@ -15,7 +15,7 @@ private func editImageContext(sessionID: String = "session-edit") -> AgentToolEx
     let outputData = Data([4, 5, 6]); let recorder = EditImageRequestRecorder()
     let provider = AnyAgentModelProvider(modelID: "editable-image", capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: false, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: true, generatedMediaCapabilities: [.imageInput, .imageGeneration, .imageEditing]), complete: { _ in AgentModelResponse(text: "unused") }, generateMedia: { request in AsyncThrowingStream { continuation in Task { await recorder.record(request); let url = root.appendingPathComponent("edited.png"); do { try outputData.write(to: url); continuation.yield(.completed(AgentGeneratedMediaArtifact(temporaryFileURL: url, mimeType: "image/png", byteCount: Int64(outputData.count), generationMetadata: AgentAttachmentGenerationMetadata(providerID: "test-editor", modelID: "editable-image")))); continuation.finish() } catch { continuation.finish(throwing: error) } } } })
     let tool = EditImageAgentTool(provider: provider, ingestionService: GeneratedMediaIngestionService(store: store), attachmentStore: store)
-    let result = try await tool.execute(arguments: AgentToolArguments(values: ["prompt": .string("Make it warmer"), "attachment_id": .string(source.id)]), context: editImageContext())
+    let result = try await tool.execute(arguments: AgentToolArguments(values: ["prompt": .string("Make it warmer"), "attachmentID": .string(source.id)]), context: editImageContext())
 
     let request = await recorder.request; #expect(request?.imageAction == .edit); #expect(request?.inputAttachments == [source.messageRef]); #expect(request?.prompt == "Make it warmer")
     let payload = try JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: Data(try #require(result.contentJSON).utf8)); #expect(payload.attachment.id != source.id); #expect(payload.attachment.kind == AgentAttachmentKind.image)
@@ -27,7 +27,7 @@ private func editImageContext(sessionID: String = "session-edit") -> AgentToolEx
     let tool = EditImageAgentTool(provider: provider, ingestionService: GeneratedMediaIngestionService(store: store), attachmentStore: store)
     do {
         _ = try await tool.execute(
-            arguments: AgentToolArguments(values: ["prompt": .string("edit"), "attachment_id": .string("/tmp/forbidden.png")]),
+            arguments: AgentToolArguments(values: ["prompt": .string("edit"), "attachmentID": .string("/tmp/forbidden.png")]),
             context: editImageContext(sessionID: "session")
         )
         Issue.record("Expected capability rejection")

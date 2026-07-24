@@ -6,7 +6,7 @@ public struct GetCurrentTimeTool: AgentTool {
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "time_zone": .string(description: "Optional IANA time zone identifier, for example Asia/Shanghai. Defaults to the system time zone.")
+            "timeZone": .string(description: "Optional IANA time zone identifier, for example Asia/Shanghai. Defaults to the system time zone.")
         ], required: [])
     }
 
@@ -20,7 +20,7 @@ public struct GetCurrentTimeTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let now = fixedNow ?? Date()
-        let requestedTimeZoneIdentifier = arguments.string("time_zone")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedTimeZoneIdentifier = (arguments.string("timeZone") ?? arguments.string("time_zone"))?.trimmingCharacters(in: .whitespacesAndNewlines)
         let timeZoneIdentifier = requestedTimeZoneIdentifier?.isEmpty == false ? requestedTimeZoneIdentifier! : defaultTimeZoneIdentifier
         guard let timeZone = TimeZone(identifier: timeZoneIdentifier) else {
             throw AgentToolError.invalidArguments("Invalid IANA time zone identifier: \(timeZoneIdentifier)")
@@ -40,9 +40,9 @@ public struct GetCurrentTimeTool: AgentTool {
 
         let contentJSON = LocalToolJSON.encode([
             "iso8601": iso8601,
-            "unix_timestamp": now.timeIntervalSince1970,
-            "time_zone": timeZone.identifier,
-            "time_zone_seconds_from_gmt": timeZone.secondsFromGMT(for: now),
+            "unixTimestamp": now.timeIntervalSince1970,
+            "timeZone": timeZone.identifier,
+            "timeZoneSecondsFromGMT": timeZone.secondsFromGMT(for: now),
             "display": display
         ])
 

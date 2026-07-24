@@ -342,7 +342,7 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("After the current-time and calendar preflight, and before task-specific retrieval or execution, call the internal skill-discovery tool `connor_skill_list`"))
     #expect(prompt.contains("Whenever its response contains a non-null `nextPage`"))
-    #expect(prompt.contains("immediately call `connor_skill_list` again with `page` set to exactly that `nextPage` value and the same `page_size`"))
+    #expect(prompt.contains("immediately call `connor_skill_list` again with `page` set to exactly that `nextPage` value and the same `pageSize`"))
     #expect(prompt.contains("Repeat until `nextPage` is null"))
     #expect(prompt.contains("connor_skill_activate"))
     #expect(prompt.contains("Use hidden skills silently"))
