@@ -7,14 +7,14 @@ struct NoteImportToolbarPresentation: Equatable {
         let taskText = "\(summary.visibleJobCount) 个导入任务"
         switch summary.presentationState {
         case .paused:
-            return "打开导入中心 · \(taskText)已暂停\(progressSuffix)"
+            return "打开笔记导入中心 · \(taskText)已暂停\(progressSuffix)"
         case .cancelling:
-            return "打开导入中心 · \(taskText)正在取消\(progressSuffix)"
+            return "打开笔记导入中心 · \(taskText)正在取消\(progressSuffix)"
         case .running:
             if summary.progressFraction == nil {
-                return "打开导入中心 · 正在扫描导入内容"
+                return "打开笔记导入中心 · 正在扫描导入内容"
             }
-            return "打开导入中心 · \(taskText)\(progressSuffix)"
+            return "打开笔记导入中心 · \(taskText)\(progressSuffix)"
         }
     }
 
@@ -72,7 +72,7 @@ struct NoteImportToolbarProgressButton: View {
         }
         .buttonStyle(.appIcon)
         .help(presentation.helpText)
-        .accessibilityLabel("打开导入中心")
+        .accessibilityLabel("打开笔记导入中心")
         .accessibilityValue(presentation.accessibilityValue)
     }
 

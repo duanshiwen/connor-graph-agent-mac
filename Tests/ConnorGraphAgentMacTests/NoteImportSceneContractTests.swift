@@ -7,8 +7,8 @@ struct NoteImportSceneContractTests {
     @Test("Import center uses a singleton Window scene")
     func importCenterIsSingleton() throws {
         let source = try appSource()
-        #expect(source.contains("Window(\"导入中心\", id: AppMenuPresentation.noteImportCenterWindowID)"))
-        #expect(!source.contains("WindowGroup(\"导入中心\", id: AppMenuPresentation.noteImportCenterWindowID)"))
+        #expect(source.contains("Window(\"笔记导入中心\", id: AppMenuPresentation.noteImportCenterWindowID)"))
+        #expect(!source.contains("WindowGroup(\"笔记导入中心\", id: AppMenuPresentation.noteImportCenterWindowID)"))
     }
 
     @Test("Import wizard uses a singleton Window scene")

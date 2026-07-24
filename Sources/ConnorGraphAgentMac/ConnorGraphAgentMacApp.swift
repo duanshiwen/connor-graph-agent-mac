@@ -17,7 +17,7 @@ enum AppMenuPresentation {
     static let newSessionTitle = "新建会话"
     static let newNoteTitle = "新建笔记"
     static let importNotesTitle = "导入笔记…"
-    static let importCenterTitle = "导入中心…"
+    static let importCenterTitle = "笔记导入中心…"
     static let importSkillsTitle = "导入技能…"
     static let noteImportWizardWindowID = "note-import-wizard"
     static let noteImportCenterWindowID = "note-import-center"
@@ -142,7 +142,7 @@ struct ConnorGraphAgentMacApp: App {
         }
         .defaultSize(width: 720, height: 560)
 
-        Window("导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
+        Window("笔记导入中心", id: AppMenuPresentation.noteImportCenterWindowID) {
             NoteImportCenterView(model: root.noteImportModel)
                 .appFormTheme()
         }
@@ -188,13 +188,13 @@ private struct NoteImportFileCommands: Commands {
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
 
+            Button(AppMenuPresentation.importCenterTitle) {
+                openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
+            }
+
             Button(AppMenuPresentation.importSkillsTitle) {
                 root.graph.skills.prepareSkillImport()
                 openWindow(id: AppMenuPresentation.skillImportWindowID)
-            }
-
-            Button(AppMenuPresentation.importCenterTitle) {
-                openWindow(id: AppMenuPresentation.noteImportCenterWindowID)
             }
         }
     }
