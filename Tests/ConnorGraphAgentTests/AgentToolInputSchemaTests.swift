@@ -129,6 +129,30 @@ import ConnorGraphAgent
     #expect(properties["task_id"] == nil)
 }
 
+@Test func agentToolRegistryNormalizesLegacyAliasesBeforePreflightAndApproval() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(LegacyAliasLifecycleTestTool())
+    let context = AgentToolExecutionContext(
+        runID: "run",
+        sessionID: "session",
+        groupID: "group",
+        userPrompt: "test lifecycle aliases",
+        toolCallID: "call",
+        policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+    )
+
+    do {
+        _ = try await registry.execute(
+            AgentToolCall(name: "legacy_alias_lifecycle_test", argumentsJSON: #"{"task_id":"task-1"}"#),
+            context: context
+        )
+        Issue.record("Expected approval to be required")
+    } catch AgentToolError.permissionNeedsApproval(let request) {
+        #expect(request.payloadJSON.contains(#""taskID":"task-1""#))
+        #expect(!request.payloadJSON.contains("task_id"))
+    }
+}
+
 private struct InvalidSchemaTestTool: AgentTool {
     let name = "invalid_schema_test"
     let description = "Invalid schema test tool"
@@ -154,6 +178,27 @@ private struct LegacyAliasTestTool: AgentTool {
 
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: arguments.string("taskID") ?? "missing")
+    }
+}
+
+private struct LegacyAliasLifecycleTestTool: AgentTool {
+    let name = "legacy_alias_lifecycle_test"
+    let description = "Legacy alias lifecycle test tool"
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["taskID": .string(description: "Task ID")],
+        required: ["taskID"]
+    )
+    let permission = AgentPermissionCapability.editWorkspaceFile
+
+    func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
+        let arguments = try AgentToolArguments(json: call.argumentsJSON)
+        guard arguments.string("taskID") == "task-1" else {
+            throw AgentToolError.invalidArguments("preflight did not receive normalized taskID")
+        }
+    }
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "unused")
     }
 }
 
