@@ -343,7 +343,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(result.hits.count == 1)
         #expect(result.hits[0].layer == "L1")
         #expect(result.hits[0].id == "event-1")
-        #expect(result.hits[0].content == "诗闻正在测试 Connor Memory OS CLI。")
+        #expect(result.hits[0].content == "历史用户意图：用户当时在测试 Connor Memory OS CLI。")
     }
 
     @Test func memoryOSCLIInspectorSearchesAcrossL3AndL4() throws {
@@ -798,7 +798,7 @@ private func seedMemoryOSCLIInspectorFixture(store: SQLiteMemoryOSStore, now: Da
     try store.upsert(provenance: object)
     let span = MemoryOSProvenanceSpan(id: "span-1", provenanceObjectID: object.id, startOffset: 0, endOffset: 18, text: "Connor Memory OS CLI", metadata: ["kind": "title"])
     try store.upsert(span: span)
-    let event = MemoryOSCaptureEvent(id: "event-1", provenanceObjectID: object.id, eventType: "chat_message", occurredAt: now, tokenEstimate: 12, processingState: .pending, metadata: ["source": "test"])
+    let event = MemoryOSCaptureEvent(id: "event-1", provenanceObjectID: object.id, eventType: "chat_message", occurredAt: now, tokenEstimate: 12, processingState: .pending, retrievalText: "历史用户意图：用户当时在测试 Connor Memory OS CLI。", normalizationStatus: .succeeded, metadata: ["source": "test"])
     try store.upsert(captureEvent: event)
 
     let node = MemoryOSNode(id: "node-1", stableKey: "node:connor", nodeType: "project", name: "Connor Memory OS", summary: "Memory system", createdAt: now, updatedAt: now)

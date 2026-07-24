@@ -107,3 +107,7 @@ func userIntentNormalizerRendersHighRiskContentAtSafeHighLevel(_ category: Strin
     #expect(requests[0].messages.count == 2)
     #expect(requests[0].messages[1].content.contains("historical_user_message_segments"))
 }
+
+@Test func userIntentNormalizerAllowsSlowModelStartupByDefault() {
+    #expect(MemoryOSUserIntentNormalizer.defaultTimeoutSeconds == 60)
+}

@@ -42,6 +42,7 @@ public enum MemoryOSUserIntentNormalizerError: Error, Sendable, Equatable {
 
 public struct MemoryOSUserIntentNormalizer: MemoryOSUserIntentNormalizing, Sendable {
     public static let promptVersion = 1
+    public static let defaultTimeoutSeconds: Double = 60
     private static let toolName = "record_historical_user_intent"
 
     private struct InputSegment: Codable, Sendable, Equatable {
@@ -68,7 +69,7 @@ public struct MemoryOSUserIntentNormalizer: MemoryOSUserIntentNormalizing, Senda
     public var provider: AnyAgentModelProvider
     public var timeoutSeconds: Double
 
-    public init(provider: AnyAgentModelProvider, timeoutSeconds: Double = 6) {
+    public init(provider: AnyAgentModelProvider, timeoutSeconds: Double = MemoryOSUserIntentNormalizer.defaultTimeoutSeconds) {
         self.provider = provider
         self.timeoutSeconds = max(1, timeoutSeconds)
     }

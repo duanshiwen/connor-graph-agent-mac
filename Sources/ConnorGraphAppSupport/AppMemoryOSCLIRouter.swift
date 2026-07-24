@@ -17,7 +17,7 @@ public enum AppMemoryOSCLIRouter {
         guard let content = try chatContent(args: args), !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return try encode(MemoryOSCLIError(error: "missing_chat_content", usage: "connor memory ingest-chat --content <text> [--session-id id] [--message-id id] [--normalization-timeout-seconds N] | --file <path>"), encoder: encoder)
         }
-        let timeoutSeconds = max(1, doubleOption("--normalization-timeout-seconds", in: args, default: 6))
+        let timeoutSeconds = max(1, doubleOption("--normalization-timeout-seconds", in: args, default: MemoryOSUserIntentNormalizer.defaultTimeoutSeconds))
         let normalizer = try intentNormalizer ?? makeLiveIntentNormalizer(timeoutSeconds: timeoutSeconds)
         let result = await inspector.ingestChatMessage(
             content: content,
