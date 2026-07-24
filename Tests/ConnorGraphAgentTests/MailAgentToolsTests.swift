@@ -17,6 +17,29 @@ struct MailAgentToolsTests {
         #expect(names.contains("mail_send_draft"))
     }
 
+    @Test func mailToolOutputsExposeOperationReadyIDFields() async throws {
+        let runtime = RecordingMailRuntime()
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail, .readMailBody, .createMailDraft])
+
+        let accountsResult = try await MailListAccountsTool(runtime: runtime).execute(arguments: try AgentToolArguments(json: "{}"), context: context)
+        let accounts = try #require(try jsonObject(accountsResult) as? [[String: Any]])
+        #expect(accounts.first?["accountID"] as? String == accounts.first?["id"] as? String)
+        let identities = try #require(accounts.first?["identities"] as? [[String: Any]])
+        #expect(identities.first?["identityID"] as? String == identities.first?["id"] as? String)
+
+        let messagesResult = try await MailSearchMessagesTool(runtime: runtime).execute(arguments: try AgentToolArguments(json: #"{"query":"invoice"}"#), context: context)
+        let messages = try #require(try jsonObject(messagesResult) as? [[String: Any]])
+        #expect(messages.first?["messageID"] as? String == messages.first?["id"] as? String)
+
+        let previewsResult = try await MailSearchMessagesWithBodyPreviewTool(runtime: runtime).execute(arguments: try AgentToolArguments(json: #"{"query":"invoice"}"#), context: context)
+        let previews = try #require(try jsonObject(previewsResult) as? [[String: Any]])
+        #expect(previews.first?["messageID"] as? String == "account-INBOX-1")
+
+        let draftResult = try await MailCreateDraftTool(runtime: runtime).execute(arguments: try AgentToolArguments(json: #"{"to":["alice@example.com"],"subject":"Hello","body":"Body"}"#), context: context)
+        let draft = try #require(try jsonObject(draftResult) as? [String: Any])
+        #expect(draft["draftID"] as? String == draft["id"] as? String)
+    }
+
     @Test func bodyPreviewToolsRequireBodyReadPermissionAndDocumentPreviewLimits() {
         let recentTool = MailListRecentMessagesWithBodyPreviewTool(runtime: RecordingMailRuntime())
         let searchTool = MailSearchMessagesWithBodyPreviewTool(runtime: RecordingMailRuntime())
@@ -272,7 +295,7 @@ struct MailAgentToolsTests {
         }
 
         #expect(required == ["draftID"])
-        #expect(draftIDDescription.contains("Exact MailDraft.id"))
+        #expect(draftIDDescription.contains("Exact draftID"))
         #expect(draftIDDescription.contains("mail_create_draft"))
         #expect(draftIDDescription.contains("current session permission policy"))
         #expect(draftIDDescription.contains("Do not ask the user"))
@@ -308,9 +331,8 @@ struct MailAgentToolsTests {
                 Issue.record("Expected pseudo messageID \(pseudoID) to be rejected with actionable guidance")
             } catch AgentToolError.invalidArguments(let message) {
                 #expect(message.contains("exact messageID"))
-                #expect(message.contains("MailMessageSummary"))
                 #expect(message.contains("pseudo ID"))
-                #expect(message.contains("summary's id"))
+                #expect(message.contains("result's messageID"))
                 #expect(message.contains(pseudoID))
             } catch {
                 Issue.record("Unexpected error for \(pseudoID): \(error)")
@@ -326,7 +348,7 @@ struct MailAgentToolsTests {
             return
         }
 
-        #expect(description.contains("Exact MailMessageSummary.id"))
+        #expect(description.contains("Exact messageID"))
         #expect(description.contains("mail_search_messages"))
         #expect(description.contains("mail_list_recent_messages"))
         #expect(description.contains("Do not pass result numbers"))
@@ -340,7 +362,7 @@ struct MailAgentToolsTests {
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "search mail", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [.readMail])
         let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"query\":\"invoice\"}"), context: context)
 
-        #expect(result.contentText.contains("summary's id"))
+        #expect(result.contentText.contains("result's messageID"))
         #expect(result.contentText.contains("mail_get_message"))
         #expect(result.contentText.contains("read state unchanged"))
     }
@@ -394,6 +416,11 @@ struct MailAgentToolsTests {
         _ = try await tool.execute(arguments: arguments, context: approved)
         #expect(await runtime.lastSendApproved == true)
     }
+}
+
+private func jsonObject(_ result: AgentToolResult) throws -> Any {
+    let json = try #require(result.contentJSON)
+    return try JSONSerialization.jsonObject(with: Data(json.utf8))
 }
 
 private actor RecordingMailRuntime: AgentMailRuntime {

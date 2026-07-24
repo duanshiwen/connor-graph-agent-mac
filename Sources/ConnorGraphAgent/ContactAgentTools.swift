@@ -12,6 +12,16 @@ enum ContactJSON {
         let data = try encoder.encode(value)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
+
+    static func encodeDraft(_ draft: ContactMutationDraft) throws -> String {
+        let data = try encoder.encode(draft)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+        object["draftID"] = object["id"]
+        let output = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: output, encoding: .utf8) ?? "{}"
+    }
 }
 
 public protocol AgentContactRuntime: Sendable {
@@ -176,7 +186,7 @@ public struct ContactCreateDraftTool: AgentTool {
         guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
         let record = ContactRecord(id: ContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
         let draft = try await runtime.createDraft(record: record)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created contact draft \(draft.id); not committed", contentJSON: try ContactJSON.encode(draft))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created contact draft \(draft.id); copy draftID into contact_commit_draft", contentJSON: try ContactJSON.encodeDraft(draft))
     }
 }
 
@@ -185,12 +195,12 @@ public struct ContactCommitDraftTool: AgentTool {
     public var name: String { "contact_commit_draft" }
     public var description: String { "Commit a contact mutation draft after approval." }
     public var permission: AgentPermissionCapability { .mutateContacts }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Draft ID"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Exact draftID returned by contact_create_draft; copy the field without renaming it"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
         let draft = try await runtime.commitDraft(id: draftID, approved: arguments.bool("approved") ?? false)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try ContactJSON.encode(draft))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try ContactJSON.encodeDraft(draft))
     }
 }
 
