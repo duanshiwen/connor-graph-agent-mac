@@ -8,6 +8,7 @@ struct CloudKnowledgeMarketplaceListPane: View {
     @ObservedObject var connectivity: AppNetworkConnectivity = .shared
     @ObservedObject var backendConnectivity: AppBackendConnectivity = .shared
     var sessions: [AgentSession]
+    let sessionActions: any ChatSessionCommanding
     @State private var isPresentingCreator = false
     @State private var isPresentingPublicationHistory = false
 
@@ -111,7 +112,11 @@ struct CloudKnowledgeMarketplaceListPane: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
                 Divider()
-                CloudKnowledgeCreatorView(store: creatorStore, sessions: sessions) { knowledgeBaseID in
+                CloudKnowledgeCreatorView(
+                    store: creatorStore,
+                    sessions: sessions,
+                    loadSessionPage: { await sessionActions.loadChatSessionPickerPage(cursor: $0) }
+                ) { knowledgeBaseID in
                     isPresentingCreator = false
                     Task {
                         await store.load()
