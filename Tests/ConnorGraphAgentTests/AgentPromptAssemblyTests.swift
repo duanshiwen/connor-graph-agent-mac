@@ -55,6 +55,8 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(assembly.instruction.text.contains("session_list_by_status"))
     #expect(assembly.instruction.text.contains("session_batch_set_status"))
+    #expect(assembly.instruction.text.contains("`sessions[].sessionID` unchanged"))
+    #expect(assembly.instruction.text.contains("`session_batch_set_status.updates[].sessionID`"))
     #expect(assembly.instruction.text.contains("strongly prefer calling it once near the start of every new user run"))
     #expect(assembly.instruction.text.contains("Skip this model-initiated call only after positively determining"))
     #expect(assembly.instruction.text.contains("default `refresh: false`"))

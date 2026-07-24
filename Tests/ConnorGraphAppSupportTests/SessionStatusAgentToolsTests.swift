@@ -95,6 +95,10 @@ import ConnorGraphStore
         let object = try resultJSONObject(result)
         let sessions = try #require(object["sessions"] as? [[String: Any]])
         #expect(sessions.allSatisfy { $0["sessionID"] as? String != nil && $0["session_id"] == nil })
+        let modelContent = AgentToolResultGate().gatedContent(for: result)
+        #expect(modelContent.contains("\"sessions\""))
+        #expect(modelContent.contains("\"sessionID\""))
+        #expect(modelContent.contains("session-page-\(4 - collected.count)"))
         collected.append(contentsOf: sessions.compactMap { $0["sessionID"] as? String })
         #expect(object["totalItems"] as? Int == 5)
         #expect(object["totalPages"] as? Int == 3)
@@ -120,6 +124,7 @@ import ConnorGraphStore
     let json = try #require(result.contentJSON)
     let statuses = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
     #expect(statuses.allSatisfy { $0["status"] as? String == $0["id"] as? String })
+    #expect(AgentToolResultGate().gatedContent(for: result) == json)
 }
 
 @Test func sessionBatchSetStatusReportsPartialSuccessConflictsAndIdempotency() async throws {
