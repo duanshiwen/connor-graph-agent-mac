@@ -425,17 +425,15 @@ struct CalendarContactsAgentToolsTests {
         #expect(writeTool.description.contains("never guess IDs from display names"))
 
         guard case .closedObject(let readProperties, _) = readTool.inputSchema,
-              case .string(let readIDDescription) = readProperties["id"],
+              case .string(let readIDDescription) = readProperties["person_id"],
               case .closedObject(let writeProperties, _) = writeTool.inputSchema,
-              case .string(let writeIDDescription) = writeProperties["id"] else {
-            Issue.record("Expected contacts tools to expose object schemas with id descriptions")
+              case .string(let writeIDDescription) = writeProperties["person_id"] else {
+            Issue.record("Expected contacts tools to expose object schemas with person_id descriptions")
             return
         }
 
-        #expect(readIDDescription.contains("person_id from Referenced People"))
-        #expect(readIDDescription.contains("do not infer"))
-        #expect(writeIDDescription.contains("person_id from Referenced People"))
-        #expect(writeIDDescription.contains("never inferred"))
+        #expect(readIDDescription.contains("copy the field without renaming it"))
+        #expect(writeIDDescription.contains("copy the field without renaming it"))
     }
 
     @Test func registryRegistersCalendarContactsAndTimeTools() {
