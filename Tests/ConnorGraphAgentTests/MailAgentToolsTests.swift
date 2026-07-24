@@ -38,6 +38,13 @@ struct MailAgentToolsTests {
         let draftResult = try await MailCreateDraftTool(runtime: runtime).execute(arguments: try AgentToolArguments(json: #"{"to":["alice@example.com"],"subject":"Hello","body":"Body"}"#), context: context)
         let draft = try #require(try jsonObject(draftResult) as? [String: Any])
         #expect(draft["draftID"] as? String == draft["id"] as? String)
+
+        guard case .closedObject(let draftProperties, _) = MailCreateDraftTool(runtime: runtime).inputSchema,
+              case .string(let replyMessageDescription) = draftProperties["messageID"] else {
+            Issue.record("Expected mail_create_draft to accept operation-ready messageID")
+            return
+        }
+        #expect(replyMessageDescription.contains("copy the field without renaming it"))
     }
 
     @Test func bodyPreviewToolsRequireBodyReadPermissionAndDocumentPreviewLimits() {

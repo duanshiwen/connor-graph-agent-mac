@@ -451,7 +451,8 @@ public struct MailCreateDraftTool: AgentTool {
             "subject": .string(description: "Subject"),
             "body": .string(description: "Plain-text body"),
             "htmlBody": .string(description: "Optional HTML body"),
-            "inReplyToMessageID": .string(description: "Optional source message ID for replies"),
+            "messageID": .string(description: "Optional exact messageID returned by a mail list/search result; copy the field without renaming it when creating a reply draft"),
+            "inReplyToMessageID": .string(description: "Legacy reply source message ID accepted for compatibility. Prefer messageID."),
             "attachmentIDs": .array(items: .string(description: "Attachment ID"), description: "Attachment IDs"),
             "intentSummary": .string(description: "Short user intent summary for auditing")
         ], required: ["to", "subject", "body"])
@@ -535,7 +536,7 @@ public struct MailCreateDraftTool: AgentTool {
         let bcc = Self.addresses(arguments.array("bcc"))
         let replyTo = Self.addresses(arguments.array("replyTo"))
         let attachmentIDs = (arguments.array("attachmentIDs") ?? []).compactMap(\.stringValue).map(MailAttachmentID.init(rawValue:))
-        let inReplyToMessageID = arguments.string("inReplyToMessageID").map(MailMessageID.init(rawValue:))
+        let inReplyToMessageID = (arguments.string("messageID") ?? arguments.string("inReplyToMessageID")).map(MailMessageID.init(rawValue:))
         let draft = try await runtime.createDraft(accountID: resolved.account.id, identityID: resolved.identity.id, to: to, cc: cc, bcc: bcc, replyTo: replyTo, subject: arguments.string("subject") ?? "", body: arguments.string("body") ?? "", htmlBody: arguments.string("htmlBody"), inReplyToMessageID: inReplyToMessageID, attachmentIDs: attachmentIDs, intentSummary: arguments.string("intentSummary"), runID: context.runID, sessionID: context.sessionID)
         let draftID = draft.id.rawValue
         return AgentToolResult(
