@@ -143,6 +143,23 @@ import ConnorGraphAgent
     #expect(failed?.detail?.contains("Calendar 'default' was not found") == true)
 }
 
+@Test func classifiesLegacyCalendarIDsBeforeRegistryNormalization() {
+    let classifier = AgentToolActivityClassifier()
+    let write = AgentToolCall(
+        id: "calendar-write-legacy",
+        name: "calendar_write",
+        argumentsJSON: #"{"operation":"delete_event","event_id":"event-legacy"}"#
+    )
+    let read = AgentToolCall(
+        id: "calendar-read-legacy",
+        name: "calendar_read",
+        argumentsJSON: #"{"operation":"list_events","calendar_id":"calendar-legacy"}"#
+    )
+
+    #expect(classifier.activity(forRequestedCall: write)?.target == "event-legacy")
+    #expect(classifier.activity(forRequestedCall: read)?.target == "calendar-legacy")
+}
+
 @Test func failedResultUsesErrorSeverityAndXmarkIcon() {
     let failure = AgentToolFailure(
         runID: "run",

@@ -166,9 +166,27 @@ public struct AgentToolActivityClassifier: Sendable {
             case "delete_event": title = "Calendar: Delete Event"
             default: title = "Calendar: Write"
             }
-            return ToolDescriptor(semanticKind: .calendar, title: title, target: string(arguments["calendarID"]) ?? string(arguments["eventID"]), subtitle: operation, icon: "calendar.badge.plus")
+            return ToolDescriptor(
+                semanticKind: .calendar,
+                title: title,
+                target: string(arguments["calendarID"])
+                    ?? string(arguments["calendar_id"])
+                    ?? string(arguments["eventID"])
+                    ?? string(arguments["event_id"]),
+                subtitle: operation,
+                icon: "calendar.badge.plus"
+            )
         case "calendar_read", "calendar_search_events":
-            return ToolDescriptor(semanticKind: .calendar, title: "Calendar: Read", target: string(arguments["calendarID"]) ?? string(arguments["eventID"]), subtitle: string(arguments["operation"]), icon: "calendar")
+            return ToolDescriptor(
+                semanticKind: .calendar,
+                title: "Calendar: Read",
+                target: string(arguments["calendarID"])
+                    ?? string(arguments["calendar_id"])
+                    ?? string(arguments["eventID"])
+                    ?? string(arguments["event_id"]),
+                subtitle: string(arguments["operation"]),
+                icon: "calendar"
+            )
         default:
             if let mcp = mcpDescriptor(rawToolName) { return mcp }
             if rawToolName.localizedCaseInsensitiveContains("browser") {
