@@ -702,6 +702,32 @@ import ConnorGraphStore
     #expect(json.contains("entity-b"))
 }
 
+@Test func memoryOSGraphToolsExposeOperationReadyNodeIDs() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    try store.upsert(entity: MemoryOSEntity(id: "entity-elasticity", stableKey: "economics:elasticity", entityType: "concept", name: "Elasticity"))
+
+    let findTool = MemoryOSL4FindEntityTool(facade: facade)
+    let result = try await findTool.execute(
+        arguments: AgentToolArguments(json: #"{"text":"Elasticity","limit":10}"#),
+        context: memoryOSToolContext()
+    )
+    let payload = try memoryOSToolJSON(result)
+    let nodes = try #require(payload["nodes"] as? [[String: Any]])
+    let node = try #require(nodes.first)
+    #expect(node["id"] as? String == "entity-elasticity")
+    #expect(node["entityID"] as? String == "entity-elasticity")
+    #expect(node["classEntityID"] as? String == "entity-elasticity")
+
+    let neighborProperties = try #require(MemoryOSL4NeighborsTool(facade: facade).inputSchema.jsonObject["properties"] as? [String: Any])
+    let entitySchema = try #require(neighborProperties["entityID"] as? [String: Any])
+    #expect((entitySchema["description"] as? String)?.contains("copy the field without renaming it") == true)
+    let instanceProperties = try #require(MemoryOSL4InstancesTool(facade: facade).inputSchema.jsonObject["properties"] as? [String: Any])
+    let classIDsSchema = try #require(instanceProperties["classEntityIDs"] as? [String: Any])
+    #expect((classIDsSchema["description"] as? String)?.contains("classEntityID") == true)
+}
+
 private func memoryOSToolJSON(_ result: AgentToolResult) throws -> [String: Any] {
     let contentJSON = try #require(result.contentJSON)
     return try #require(JSONSerialization.jsonObject(with: Data(contentJSON.utf8)) as? [String: Any])

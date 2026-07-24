@@ -789,7 +789,7 @@ public struct MemoryOSL2FindStatementsTool: AgentTool {
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "text": .string(description: "Optional text query over statement text, subject/object ids, or predicate."),
-        "subjectID": .string(description: "Optional L2 subject node id."),
+        "subjectID": .string(description: "Optional exact subjectID returned on an L2 node by memory_os_l2_find_statements; copy the field without renaming it."),
         "predicates": .array(items: .string(description: "Optional predicate filter."), description: "Optional predicate filters."),
         "limit": .integer(description: "Maximum statement edges. Defaults to 50.")
     ], required: [])
@@ -829,7 +829,7 @@ public struct MemoryOSL3ExpandBeliefTool: AgentTool {
     public let description = "Expand Memory OS L3 statement nodes. L3 no longer stores supporting L2 evidence edges; related_object_names are durable L4 concept names/aliases only."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "beliefID": .string(description: "Optional L3 statement/belief id."),
+        "beliefID": .string(description: "Optional exact beliefID returned on an L3 node by memory_os_l3_expand_belief; copy the field without renaming it."),
         "domain": .string(description: "Optional discipline domain filter."),
         "text": .string(description: "Optional text query over statement only."),
         "limit": .integer(description: "Maximum L3 statement nodes. Defaults to 20.")
@@ -926,7 +926,7 @@ public struct MemoryOSL4NeighborsTool: AgentTool {
     public let description = "Query outgoing, incoming, or both-direction L4 graph neighbors for a known entity id. Use this for relationship questions after resolving the entity."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "entityID": .string(description: "L4 entity id to traverse from."),
+        "entityID": .string(description: "Exact entityID returned on an L4 node by memory_os_l4_find_entity or another L4 graph result; copy the field without renaming it."),
         "direction": .stringEnumeration(values: ["outgoing", "incoming", "both"], description: "Traversal direction. Defaults to both."),
         "predicates": .array(items: .string(description: "Optional predicate id filter."), description: "Optional predicate filters."),
         "limit": .integer(description: "Maximum edge count. Defaults to 100.")
@@ -965,7 +965,7 @@ private enum MemoryOSL4GraphToolPayload {
         var payload = extra
         payload["nodeCount"] = subgraph.nodes.count
         payload["edgeCount"] = subgraph.edges.count
-        payload["nodes"] = subgraph.nodes.map { ["id": $0.id, "layer": $0.layer.rawValue, "kind": $0.kind, "title": $0.title, "summary": $0.summary, "metadata": $0.metadata] as [String: Any] }
+        payload["nodes"] = renderNodes(subgraph.nodes)
         payload["edges"] = subgraph.edges.map { ["id": $0.id, "layer": $0.layer.rawValue, "sourceID": $0.sourceID, "targetID": $0.targetID, "predicate": $0.predicate, "evidenceRefs": $0.evidenceRefs, "confidence": $0.confidence as Any, "validAt": $0.validAt as Any, "metadata": $0.metadata] as [String: Any] }
         payload["evidenceRefs"] = subgraph.evidenceRefs
         payload["provenanceRefs"] = subgraph.provenanceRefs
@@ -977,6 +977,24 @@ private enum MemoryOSL4GraphToolPayload {
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(data: data, encoding: .utf8) ?? "{}"
     }
+
+    static func renderNodes(_ nodes: [MemoryOSGraphNode]) -> [[String: Any]] {
+        nodes.map { node in
+            var row: [String: Any] = ["id": node.id, "layer": node.layer.rawValue, "kind": node.kind, "title": node.title, "summary": node.summary, "metadata": node.metadata]
+            switch node.layer {
+            case .l2:
+                row["subjectID"] = node.id
+            case .l3:
+                row["beliefID"] = node.id
+            case .l4:
+                row["entityID"] = node.id
+                row["classEntityID"] = node.id
+            case .l0, .l1:
+                break
+            }
+            return row
+        }
+    }
 }
 
 public struct MemoryOSL4InstancesTool: AgentTool {
@@ -984,7 +1002,7 @@ public struct MemoryOSL4InstancesTool: AgentTool {
     public let description = "Query Memory OS L4 graph for instances of one or more class entities using controlled L4 predicates such as INSTANCE_OF. Use this for list/all/which/有哪些/所有/列出 class membership questions after resolving the class entity id; unlike memory_os_search, this returns graph-structured instance edges."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "classEntityIDs": .array(items: .string(description: "L4 class entity id such as wikidata:Q6256 or wikidata:Q3624078."), description: "Class entity ids to enumerate instances for."),
+        "classEntityIDs": .array(items: .string(description: "Exact classEntityID returned on an L4 node by memory_os_l4_find_entity or another L4 graph result; copy each value without renaming it."), description: "Class entity IDs to enumerate. Wrap one or more exact classEntityID values returned by L4 graph results in this array."),
         "predicates": .array(items: .string(description: "Controlled L4 predicate raw value, usually INSTANCE_OF for instance-of."), description: "Optional predicates. Defaults to INSTANCE_OF."),
         "limit": .integer(description: "Maximum instance edges. Defaults to 100, capped at 1000.")
     ], required: ["classEntityIDs"])
@@ -1007,9 +1025,7 @@ public struct MemoryOSL4InstancesTool: AgentTool {
             "predicates": effectivePredicates,
             "nodeCount": subgraph.nodes.count,
             "edgeCount": subgraph.edges.count,
-            "nodes": subgraph.nodes.map { node in
-                ["id": node.id, "layer": node.layer.rawValue, "kind": node.kind, "title": node.title, "summary": node.summary, "metadata": node.metadata] as [String: Any]
-            },
+            "nodes": MemoryOSL4GraphToolPayload.renderNodes(subgraph.nodes),
             "edges": subgraph.edges.map { edge in
                 ["id": edge.id, "layer": edge.layer.rawValue, "sourceID": edge.sourceID, "targetID": edge.targetID, "predicate": edge.predicate, "evidenceRefs": edge.evidenceRefs, "confidence": edge.confidence as Any, "validAt": edge.validAt as Any, "metadata": edge.metadata] as [String: Any]
             },
