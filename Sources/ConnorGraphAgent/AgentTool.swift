@@ -571,10 +571,18 @@ public struct AgentToolRegistry: Sendable {
             throw AgentToolError.invalidArguments("$ must be an object")
         }
         let arguments = AgentToolArguments(values: normalizedValues)
-        try await tool.preflight(call: call, context: context)
+        guard let normalizedData = try? JSONSerialization.data(
+            withJSONObject: normalizedValues.mapValues(\.jsonCompatibleObject),
+            options: [.sortedKeys]
+        ), let normalizedJSON = String(data: normalizedData, encoding: .utf8) else {
+            throw AgentToolError.invalidArguments("$ could not be normalized to JSON")
+        }
+        var normalizedCall = call
+        normalizedCall.argumentsJSON = normalizedJSON
+        try await tool.preflight(call: normalizedCall, context: context)
         var executionContext = context
         if !context.approvedCapabilities.contains(tool.permission) {
-            let approvalPayloadJSON = await tool.approvalPayloadJSON(for: call, context: context)
+            let approvalPayloadJSON = await tool.approvalPayloadJSON(for: normalizedCall, context: context)
             let decision = await context.policyEngine.evaluate(
                 capability: tool.permission,
                 runID: context.runID,
