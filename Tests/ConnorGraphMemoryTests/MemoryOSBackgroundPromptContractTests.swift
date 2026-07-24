@@ -267,6 +267,19 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Use only when the fact is future-useful operational memory and no other category fits"))
     }
 
+    @Test func l1BackgroundCatalogProvidesEnvironmentContextWithoutProfileInference() {
+        let tools = MemoryOSBackgroundToolCatalog.l1UnifiedProjectionTools()
+        let names = tools.map(\.name)
+        let section = MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L1 cached event processing")
+
+        #expect(names.contains("environment_history_coverage"))
+        #expect(names.contains("environment_history_query"))
+        #expect(names.contains("environment_history_compare"))
+        #expect(section.contains("sparse snapshots"))
+        #expect(section.contains("never backfill missing intervals"))
+        #expect(section.contains("cannot establish user location, preference, habit, health, home, workplace or causation"))
+    }
+
     @Test func l1PromptDefinesCurrentUserAndOtherPersonBoundary() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 

@@ -614,6 +614,12 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(names.contains("browser_fetch"))
     #expect(names.contains("connor_skill_list"))
     #expect(names.contains("connor_skill_activate"))
+    #expect(names.contains("environment_history_coverage"))
+    #expect(names.contains("environment_history_query"))
+    #expect(names.contains("environment_history_compare"))
+    #expect(controller.configuration.instructionAppendix.contains("15-minute cache"))
+    #expect(controller.configuration.instructionAppendix.contains("never describe cached evidence as a new observation"))
+    #expect(controller.configuration.instructionAppendix.contains("correlation is not causation"))
     #expect(!names.contains("memory_os_context"))
 
     // Write tools and low-level primitives should NOT be in conversation runtime
