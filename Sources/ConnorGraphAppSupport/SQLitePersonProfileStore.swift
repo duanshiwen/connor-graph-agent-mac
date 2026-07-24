@@ -2,8 +2,19 @@ import Foundation
 import SQLite3
 import ConnorGraphCore
 
+public struct PersonProfilePage: Sendable, Equatable {
+    public var profiles: [PersonProfile]
+    public var nextCursor: String?
+
+    public init(profiles: [PersonProfile], nextCursor: String?) {
+        self.profiles = profiles
+        self.nextCursor = nextCursor
+    }
+}
+
 public protocol PersonProfileStore: Sendable {
     func loadProfiles(includeInactive: Bool) async throws -> [PersonProfile]
+    func loadProfilePage(includeInactive: Bool, cursor: String?, pageSize: Int) async throws -> PersonProfilePage
     func searchProfiles(query: String, includeInactive: Bool) async throws -> [PersonProfile]
     func profile(id: ContactID) async throws -> PersonProfile?
     func upsert(_ profile: PersonProfile) async throws -> PersonProfile
@@ -62,6 +73,39 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
     public func loadProfiles(includeInactive: Bool = false) async throws -> [PersonProfile] {
         try queue.sync {
             try loadProfilesInternal(includeInactive: includeInactive)
+        }
+    }
+
+    public func loadProfilePage(includeInactive: Bool = false, cursor: String? = nil, pageSize: Int = 50) async throws -> PersonProfilePage {
+        try queue.sync {
+            let decodedCursor = try cursor.map(decodePageCursor)
+            let statusClause = includeInactive ? "" : "status IN ('active', 'pending') AND "
+            let cursorClause: String
+            if let decodedCursor {
+                let updatedAt = escape(decodedCursor.updatedAt)
+                let displayName = escape(decodedCursor.normalizedDisplayName)
+                let id = escape(decodedCursor.id)
+                cursorClause = """
+                    (updated_at < '\(updatedAt)'
+                    OR (updated_at = '\(updatedAt)' AND normalized_display_name > '\(displayName)')
+                    OR (updated_at = '\(updatedAt)' AND normalized_display_name = '\(displayName)' AND id > '\(id)')) AND
+                    """
+            } else {
+                cursorClause = ""
+            }
+            let size = max(1, pageSize)
+            var profiles = try queryJSONProfiles(sql: """
+                SELECT raw_json FROM person_profiles
+                WHERE \(statusClause)\(cursorClause) 1 = 1
+                ORDER BY updated_at DESC, normalized_display_name ASC, id ASC
+                LIMIT \(size + 1);
+                """)
+            let hasNext = profiles.count > size
+            if hasNext { profiles.removeLast(profiles.count - size) }
+            return PersonProfilePage(
+                profiles: profiles,
+                nextCursor: hasNext ? try profiles.last.map { try encodePageCursor($0) } : nil
+            )
         }
     }
 
@@ -244,6 +288,8 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
         try execute("CREATE INDEX IF NOT EXISTS idx_person_profiles_display_name ON person_profiles(normalized_display_name);", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_person_profiles_org ON person_profiles(organization_name);", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_person_profiles_updated_at ON person_profiles(updated_at DESC);", db: db)
+        try execute("CREATE INDEX IF NOT EXISTS idx_person_profiles_page ON person_profiles(updated_at DESC, normalized_display_name, id);", db: db)
+        try execute("CREATE INDEX IF NOT EXISTS idx_person_profiles_active_page ON person_profiles(updated_at DESC, normalized_display_name, id) WHERE status IN ('active', 'pending');", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_person_aliases_person_id ON person_profile_aliases(person_id);", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_person_aliases_normalized ON person_profile_aliases(normalized_alias);", db: db)
         try execute("CREATE INDEX IF NOT EXISTS idx_person_emails_person_id ON person_profile_emails(person_id);", db: db)
@@ -265,9 +311,9 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
     private func loadProfilesInternal(includeInactive: Bool) throws -> [PersonProfile] {
         let sql: String
         if includeInactive {
-            sql = "SELECT raw_json FROM person_profiles ORDER BY updated_at DESC, display_name ASC;"
+            sql = "SELECT raw_json FROM person_profiles ORDER BY updated_at DESC, normalized_display_name ASC, id ASC;"
         } else {
-            sql = "SELECT raw_json FROM person_profiles WHERE status IN ('active', 'pending') ORDER BY updated_at DESC, display_name ASC;"
+            sql = "SELECT raw_json FROM person_profiles WHERE status IN ('active', 'pending') ORDER BY updated_at DESC, normalized_display_name ASC, id ASC;"
         }
         return try queryJSONProfiles(sql: sql)
     }
@@ -503,6 +549,28 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
 
     private func escape(_ value: String) -> String {
         value.replacingOccurrences(of: "'", with: "''")
+    }
+
+    private struct PageCursor: Codable {
+        var updatedAt: String
+        var normalizedDisplayName: String
+        var id: String
+    }
+
+    private func encodePageCursor(_ profile: PersonProfile) throws -> String {
+        try encoder.encode(PageCursor(
+            updatedAt: isoString(profile.updatedAt),
+            normalizedDisplayName: normalize(profile.displayName),
+            id: profile.id.rawValue
+        )).base64EncodedString()
+    }
+
+    private func decodePageCursor(_ value: String) throws -> PageCursor {
+        guard let data = Data(base64Encoded: value) else {
+            throw SQLitePersonProfileStoreError.sqlite("Invalid person profile page cursor")
+        }
+        do { return try decoder.decode(PageCursor.self, from: data) }
+        catch { throw SQLitePersonProfileStoreError.sqlite("Invalid person profile page cursor: \(error)") }
     }
 
     private func isoString(_ date: Date) -> String {

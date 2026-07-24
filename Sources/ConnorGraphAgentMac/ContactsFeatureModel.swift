@@ -37,6 +37,9 @@ final class ContactsFeatureModel {
     @ObservationIgnored private var profileStoreReloadGeneration: UInt64 = 0
     @ObservationIgnored private var ownedTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShutdown = false
+    @ObservationIgnored private var nextProfilesCursor: String?
+    @ObservationIgnored private var isLoadingMoreProfiles = false
+    private static let profilePageSize = 50
     @ObservationIgnored var onEvent: ((Event) -> Void)?
 
     init(
@@ -72,11 +75,18 @@ final class ContactsFeatureModel {
         reloadGeneration &+= 1
         let generation = reloadGeneration
         do {
-            async let loadedProfiles = profileStore?.loadProfiles(includeInactive: false)
+            async let loadedProfilePage = profileStore?.loadProfilePage(
+                includeInactive: false,
+                cursor: nil,
+                pageSize: max(Self.profilePageSize, profiles.count)
+            )
             async let loadedRelationships = relationshipStore?.loadRelationships(includeInactive: false)
-            let (profiles, relationships) = try await (loadedProfiles, loadedRelationships)
+            let (profilePage, relationships) = try await (loadedProfilePage, loadedRelationships)
             guard !Task.isCancelled, !isShutdown, generation == reloadGeneration else { return }
-            if let profiles { self.profiles = profiles }
+            if let profilePage {
+                profiles = profilePage.profiles
+                nextProfilesCursor = profilePage.nextCursor
+            }
             if let relationships { self.relationships = relationships }
             rebuildPresentation()
             reportSuccess()
@@ -103,9 +113,14 @@ final class ContactsFeatureModel {
         profileStoreReloadGeneration &+= 1
         let generation = profileStoreReloadGeneration
         do {
-            let profiles = try await profileStore.loadProfiles(includeInactive: false)
+            let page = try await profileStore.loadProfilePage(
+                includeInactive: false,
+                cursor: nil,
+                pageSize: max(Self.profilePageSize, profiles.count)
+            )
             guard !Task.isCancelled, !isShutdown, generation == profileStoreReloadGeneration else { return }
-            self.profiles = profiles
+            profiles = page.profiles
+            nextProfilesCursor = page.nextCursor
             rebuildPresentation()
             reportSuccess()
         } catch is CancellationError {
@@ -113,6 +128,28 @@ final class ContactsFeatureModel {
         } catch {
             guard !isShutdown, generation == profileStoreReloadGeneration else { return }
             reportFailure("无法加载人物档案：\(error.localizedDescription)")
+        }
+    }
+
+    func loadMoreProfilesIfNeeded(currentProfileID: ContactID) async {
+        guard currentProfileID == profiles.last?.id,
+              !isLoadingMoreProfiles,
+              let cursor = nextProfilesCursor,
+              let profileStore else { return }
+        isLoadingMoreProfiles = true
+        defer { isLoadingMoreProfiles = false }
+        do {
+            let page = try await profileStore.loadProfilePage(
+                includeInactive: false,
+                cursor: cursor,
+                pageSize: Self.profilePageSize
+            )
+            let existingIDs = Set(profiles.map(\.id))
+            profiles.append(contentsOf: page.profiles.filter { !existingIDs.contains($0.id) })
+            nextProfilesCursor = page.nextCursor
+            rebuildPresentation()
+        } catch {
+            reportFailure("无法加载更多人物档案：\(error.localizedDescription)")
         }
     }
 
@@ -201,7 +238,12 @@ final class ContactsFeatureModel {
             let existing = draft.id.flatMap { id in profiles.first(where: { $0.id == id }) }
             let profile = draft.makeProfile(existing: existing, now: Date())
             _ = try await profileStore?.upsert(profile)
-            profiles = try await profileStore?.loadProfiles(includeInactive: false) ?? profiles.upserting(profile)
+            if let page = try await profileStore?.loadProfilePage(includeInactive: false, cursor: nil, pageSize: max(Self.profilePageSize, profiles.count)) {
+                profiles = page.profiles
+                nextProfilesCursor = page.nextCursor
+            } else {
+                profiles = profiles.upserting(profile)
+            }
             rebuildPresentation()
             selectedContactID = profile.id
             editingProfileDraft = nil
@@ -215,7 +257,12 @@ final class ContactsFeatureModel {
     func deleteProfile(_ id: ContactID) async {
         do {
             try await profileStore?.markDeleted(id: id, now: Date())
-            profiles = try await profileStore?.loadProfiles(includeInactive: false) ?? profiles.filter { $0.id != id }
+            if let page = try await profileStore?.loadProfilePage(includeInactive: false, cursor: nil, pageSize: max(Self.profilePageSize, profiles.count)) {
+                profiles = page.profiles
+                nextProfilesCursor = page.nextCursor
+            } else {
+                profiles = profiles.filter { $0.id != id }
+            }
             if selectedContactID == id { selectedContactID = profiles.first?.id }
             rebuildPresentation()
             pendingProfileDeletionID = nil
@@ -230,7 +277,12 @@ final class ContactsFeatureModel {
             let now = Date()
             _ = try await profileStore?.merge(sourceID: sourceID, targetID: targetID, now: now)
             try await relationshipStore?.reassignPersonIDForMerge(sourceID: sourceID, targetID: targetID, now: now)
-            profiles = try await profileStore?.loadProfiles(includeInactive: false) ?? profiles.filter { $0.id != sourceID }
+            if let page = try await profileStore?.loadProfilePage(includeInactive: false, cursor: nil, pageSize: max(Self.profilePageSize, profiles.count)) {
+                profiles = page.profiles
+                nextProfilesCursor = page.nextCursor
+            } else {
+                profiles = profiles.filter { $0.id != sourceID }
+            }
             relationships = try await relationshipStore?.loadRelationships(includeInactive: false) ?? relationships
             selectedContactID = targetID
             rebuildPresentation()
@@ -265,6 +317,12 @@ final class ContactsFeatureModel {
             rebuildPresentation()
             await persistProfilesPreservingLegacySemantics()
             guard !Task.isCancelled, !isShutdown else { return false }
+            if let profileStore {
+                let page = try await profileStore.loadProfilePage(includeInactive: false, cursor: nil, pageSize: Self.profilePageSize)
+                profiles = page.profiles
+                nextProfilesCursor = page.nextCursor
+                rebuildPresentation()
+            }
             syncMessage = "已同步系统通讯录：\(records.count) 个人物档案"
             onEvent?(.settingsMessageChanged(syncMessage))
             reportSuccess()
