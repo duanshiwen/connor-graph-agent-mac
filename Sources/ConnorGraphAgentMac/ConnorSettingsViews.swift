@@ -94,7 +94,10 @@ struct ConnorSettingsDetailView: View {
                     case .shortcuts:
                         SettingsShortcutsSection(model: graph.inputSettings)
                     case .preferences:
-                        SettingsPreferencesSection(model: graph.userPreferences)
+                        SettingsPreferencesSection(
+                            model: graph.userPreferences,
+                            aiConnections: graph.aiConnections
+                        )
                     }
                 }
                 .frame(maxWidth: SettingsListLayout.contentMaxWidth)

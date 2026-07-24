@@ -102,3 +102,35 @@ private struct InvalidSchemaTestTool: AgentTool {
     #expect(schema["required"] as? [String] == ["operation"])
     #expect(schema["additionalProperties"] as? Bool == false)
 }
+
+@Test func closedAgentToolInputSchemaRejectsUnknownAndInvalidArguments() throws {
+    let schema = AgentToolInputSchema.closedObject(
+        properties: [
+            "query": .string(description: "Query"),
+            "page": .integer(description: "Page")
+        ],
+        required: ["query"]
+    )
+
+    let issues = schema.argumentValidationIssues(.object([
+        "query": .string("memory"),
+        "page": .string("two"),
+        "limit": .int(10)
+    ]))
+
+    #expect(issues == ["$.limit is not supported", "$.page must be an integer"])
+}
+
+@Test func openAgentToolInputSchemaStillAllowsExtensiblePayloads() throws {
+    let schema = AgentToolInputSchema.object(
+        properties: ["operation": .string(description: "Operation")],
+        required: ["operation"]
+    )
+
+    let issues = schema.argumentValidationIssues(.object([
+        "operation": .string("custom"),
+        "providerExtension": .string("value")
+    ]))
+
+    #expect(issues.isEmpty)
+}

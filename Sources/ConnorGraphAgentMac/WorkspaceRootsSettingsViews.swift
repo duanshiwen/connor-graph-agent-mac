@@ -249,7 +249,9 @@ struct SettingsShortcutsSection: View {
 
 struct SettingsPreferencesSection: View {
     @Bindable var model: UserPreferencesFeatureModel
+    @Bindable var aiConnections: AIConnectionsFeatureModel
     @State private var showsPersonalityResetConfirmation = false
+    @State private var showsAdvancedVoiceSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -416,11 +418,182 @@ struct SettingsPreferencesSection: View {
                     Text("已保存的自定义性格会被清除，康纳同学将恢复默认对话风格。")
                 }
             }
+            SettingsGroup(title: "康纳同学的声音") {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("音色性别")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text("默认跟随主人格；也可手动覆盖性别或展开高级配置。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Picker(
+                            "音色性别",
+                            selection: Binding(
+                                get: { model.connorVoiceGenderSelection },
+                                set: { model.setConnorVoiceGenderSelection($0) }
+                            )
+                        ) {
+                            ForEach(ConnorVoiceGenderSelection.allCases) { selection in
+                                Text(selection.displayName).tag(selection)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 260)
+                    }
+
+                    Divider()
+
+                    DisclosureGroup(isExpanded: $showsAdvancedVoiceSettings) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(model.connorVoiceProfile == nil
+                                 ? "默认根据主人格生成音色。填写独立描述并应用后，音色将不再受人格表达风格影响。"
+                                 : "当前已应用独立音色；主人格变化不会覆盖这份音色方案。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("描述你希望的音色")
+                                    .font(SettingsListTypography.rowTitleSelected)
+                                TextEditor(text: $model.voiceRequest)
+                                    .font(SettingsListTypography.rowTitle)
+                                    .frame(minHeight: 100)
+                                    .appFormTextEditor()
+                                    .disabled(model.isGeneratingVoice)
+                                HStack {
+                                    if model.isGeneratingVoice {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                        Text("正在分析并补充…")
+                                            .font(SettingsListTypography.rowCaption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button {
+                                        Task { await model.generateVoiceDraft() }
+                                    } label: {
+                                        Label(model.voiceDraft == nil ? "AI 分析" : "重新生成", systemImage: "sparkles")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(model.isGeneratingVoice || model.voiceRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                }
+                            }
+
+                            if let error = model.voiceErrorMessage {
+                                Label(error, systemImage: "exclamationmark.triangle.fill")
+                                    .font(SettingsListTypography.rowCaption)
+                                    .foregroundStyle(.red)
+                            }
+
+                            if let draft = model.voiceDraft {
+                                Divider()
+                                ConnorVoiceProfilePreview(title: "待应用的 AI 分析结果", profile: draft)
+                                HStack {
+                                    Spacer()
+                                    Button("取消") { model.cancelVoiceDraft() }
+                                        .buttonStyle(.bordered)
+                                    Button {
+                                        model.confirmVoiceDraft()
+                                    } label: {
+                                        Label("应用音色", systemImage: "checkmark")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+                            }
+
+                            if let profile = model.connorVoiceProfile {
+                                Divider()
+                                ConnorVoiceProfilePreview(title: "当前已生效的独立音色", profile: profile)
+                                HStack {
+                                    Spacer()
+                                    Button {
+                                        model.resetVoiceToFollowPersonality()
+                                    } label: {
+                                        Label("恢复跟随人格", systemImage: "arrow.counterclockwise")
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                        .padding(.top, 12)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("高级音色配置")
+                                    .font(SettingsListTypography.rowTitleSelected)
+                                Text(model.connorVoiceProfile == nil ? "当前跟随人格" : "已启用独立音色")
+                                    .font(SettingsListTypography.rowCaption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    Toggle(isOn: $model.automaticallyReadsReplies) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("回复后自动朗读")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text(aiConnections.isXiaomiMiMOSpeechAvailable
+                                 ? "康纳同学完成回复后自动播放语音。"
+                                 : aiConnections.hasXiaomiMiMOConnection
+                                    ? "已检测到 MiMo；请检查此连接是否已保存有效的 API Key。"
+                                    : "需要先添加带有效 API Key 的 Xiaomi MiMo 连接，按量付费与 Token Plan 均可。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(!aiConnections.isXiaomiMiMOSpeechAvailable)
+                }
+            }
             SettingsGroup(title: "备注") {
                 TextEditor(text: $model.notes)
                     .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
                     .appFormTextEditor()
+            }
+        }
+    }
+}
+
+private struct ConnorVoiceProfilePreview: View {
+    let title: String
+    let profile: ConnorVoiceProfile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(SettingsListTypography.rowTitleSelected)
+            voiceRow("总体音色", profile.summary)
+            voiceRow("听感年龄", profile.ageRange)
+            voiceRow("音质共鸣", profile.timbre)
+            voiceRow("表达方式", profile.speakingStyle)
+            voiceRow("语速节奏", profile.pace)
+            voiceRow("发音要求", profile.accent)
+            voiceRow("情绪底色", profile.emotionalTone)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func voiceRow(_ label: String, _ value: String) -> some View {
+        if !value.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(label)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 64, alignment: .leading)
+                Text(value)
+                    .font(SettingsListTypography.rowTitle)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

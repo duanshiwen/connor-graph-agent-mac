@@ -370,7 +370,7 @@ struct CalendarContactsAgentToolsTests {
         var deniedContactWrite = false
         do {
             _ = try await writeTool.execute(
-                arguments: try AgentToolArguments(json: "{\"operation\":\"create_contact\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":false}"),
+                arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":false}"),
                 context: Self.context(toolCallID: "call-contacts-write-denied")
             )
         } catch AgentToolError.permissionDenied(_) {
@@ -379,11 +379,11 @@ struct CalendarContactsAgentToolsTests {
         #expect(deniedContactWrite)
 
         let created = try await writeTool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"create_contact\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":true}"),
+            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"email\":\"alice@example.com\",\"name\":\"Alice\",\"approved\":true}"),
             context: Self.context(toolCallID: "call-contacts-write-approved")
         )
         #expect(created.toolName == "contacts_write")
-        #expect(created.contentText.contains("Created approved contact"))
+        #expect(created.contentText.contains("Created approved person"))
     }
 
     @Test func contactsToolsDocumentStructuredPersonReferenceIDs() {
@@ -396,9 +396,9 @@ struct CalendarContactsAgentToolsTests {
         #expect(writeTool.description.contains("Referenced People"))
         #expect(writeTool.description.contains("never guess IDs from display names"))
 
-        guard case .object(let readProperties, _) = readTool.inputSchema,
+        guard case .closedObject(let readProperties, _) = readTool.inputSchema,
               case .string(let readIDDescription) = readProperties["id"],
-              case .object(let writeProperties, _) = writeTool.inputSchema,
+              case .closedObject(let writeProperties, _) = writeTool.inputSchema,
               case .string(let writeIDDescription) = writeProperties["id"] else {
             Issue.record("Expected contacts tools to expose object schemas with id descriptions")
             return

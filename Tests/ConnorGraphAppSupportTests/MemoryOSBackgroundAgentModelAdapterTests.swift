@@ -1,9 +1,10 @@
 import Foundation
 import Testing
 import ConnorGraphAgent
-import ConnorGraphAppSupport
+@testable import ConnorGraphAppSupport
 import ConnorGraphCore
 import ConnorGraphMemory
+import ConnorGraphStore
 
 @Suite("Memory OS Background Agent Model Adapter Tests")
 struct MemoryOSBackgroundAgentModelAdapterTests {
@@ -48,7 +49,7 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
                 MemoryOSBackgroundToolDescriptor(
                     name: "memory_os_search",
                     description: "Search Memory OS.",
-                    inputSchemaJSON: "{\"query\":\"string\",\"limit\":\"number\"}",
+                    inputSchemaJSON: "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Search query.\"},\"limit\":{\"type\":\"integer\",\"description\":\"Maximum hits.\"}},\"required\":[\"query\"],\"additionalProperties\":false}",
                     usagePolicy: "Use before emitting knowledge."
                 )
             ]
@@ -89,6 +90,43 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
 
         #expect(response.assistantText == "{\"artifactType\":\"memory.l1.unified_projection\"}")
     }
+
+    @Test func backgroundDescriptorsMatchExecutorToolSchemas() throws {
+        let store = try SQLiteMemoryOSStore(path: ":memory:")
+        try store.migrate()
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        var seenNames: Set<String> = []
+        let descriptors = (
+            MemoryOSBackgroundToolCatalog.l1UnifiedProjectionTools() + MemoryOSBackgroundToolCatalog.l2ToKnowledgeTools()
+        ).filter { seenNames.insert($0.name).inserted }
+        for descriptor in descriptors {
+            guard let executionSchema = executor.inputSchema(for: descriptor.name) else { continue }
+            let advertisedSchema = AgentModelBackgroundToolLoopModel.agentToolDefinition(descriptor).inputSchema
+            let advertisedShape = try contractShapeJSON(advertisedSchema.jsonObject)
+            let executionShape = try contractShapeJSON(executionSchema.jsonObject)
+            #expect(advertisedShape == executionShape, "Schema mismatch for \(descriptor.name): advertised=\(advertisedShape) execution=\(executionShape)")
+        }
+    }
+}
+
+private func contractShapeJSON(_ value: Any) throws -> String {
+    func shape(_ value: Any) -> Any {
+        if let dictionary = value as? [String: Any] {
+            return dictionary.reduce(into: [String: Any]()) { result, entry in
+                guard entry.key != "description" else { return }
+                if entry.key == "enum", let values = entry.value as? [String] {
+                    result[entry.key] = values.sorted()
+                    return
+                }
+                result[entry.key] = shape(entry.value)
+            }
+        }
+        if let array = value as? [Any] { return array.map(shape) }
+        return value
+    }
+    let data = try JSONSerialization.data(withJSONObject: shape(value), options: [.sortedKeys])
+    return String(decoding: data, as: UTF8.self)
 }
 
 private actor AgentModelRequestRecorder {

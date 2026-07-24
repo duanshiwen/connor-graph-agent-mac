@@ -135,7 +135,7 @@ public struct MailListAccountsTool: AgentTool {
     public var name: String { "mail_list_accounts" }
     public var description: String { "List Connor-owned mail accounts. Built-in mail reads are allowed and audited." }
     public var permission: AgentPermissionCapability { .readMail }
-    public var inputSchema: AgentToolInputSchema { .object(properties: [:], required: []) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: [:], required: []) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let accounts = try await runtime.listAccounts(runID: context.runID, sessionID: context.sessionID)
@@ -151,14 +151,14 @@ public struct MailSearchMessagesTool: AgentTool {
     public var description: String { "Search Connor-owned mail summaries using indexed, time-aware retrieval without marking messages as read. Supports optional ISO-8601 startDate/endDate or timePreset; results include message date/time." }
     public var permission: AgentPermissionCapability { .readMail }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "query": .string(description: "Search query"),
             "accountID": .string(description: "Optional account ID"),
             "limit": .integer(description: "Maximum summaries"),
             "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for sent/received time filtering"),
             "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for sent/received time filtering"),
-            "timePreset": .string(description: "Optional time preset such as today, last7Days, last30Days, thisWeek, lastMonth"),
-            "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance")
+            "timePreset": .stringEnumeration(values: NativeSearchTimePreset.allCases.map(\.rawValue), description: "Optional relative time range."),
+            "timeSort": .stringEnumeration(values: NativeSearchTemporalSort.allCases.map(\.rawValue), description: "Optional temporal result ordering.")
         ], required: ["query"])
     }
     public init(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
@@ -166,13 +166,12 @@ public struct MailSearchMessagesTool: AgentTool {
         self.recorder = recorder
     }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let formatter = ISO8601DateFormatter()
         let request = MailRuntimeSearchRequestBridge(
             query: arguments.string("query") ?? "",
             accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
             limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
-            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
-            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            startDate: try arguments.iso8601Date("startDate"),
+            endDate: try arguments.iso8601Date("endDate"),
             timePreset: arguments.string("timePreset"),
             timeSort: arguments.string("timeSort")
         )
@@ -189,9 +188,9 @@ public struct MailListRecentMessagesTool: AgentTool {
     public var description: String { "List recent Connor-owned mail summaries across all accounts by newest sent/received time, without reading bodies or mutating read state. Supports optional account and direction filters." }
     public var permission: AgentPermissionCapability { .readMail }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts; omit to search all mail accounts"),
-            "direction": .string(description: "Optional direction filter: all, received, or sent. Defaults to all, mixing received and sent mail by newest time."),
+            "direction": .stringEnumeration(values: AgentMailMessageDirectionFilter.allCases.map(\.rawValue), description: "Optional direction filter. Defaults to all, mixing received and sent mail by newest time."),
             "limit": .integer(description: "Maximum recent mail summaries to return")
         ], required: [])
     }
@@ -238,14 +237,14 @@ public struct MailSearchMessagesWithBodyPreviewTool: AgentTool {
     public var description: String { "Search Connor-owned mail and return bounded cached body previews for each result without mutating read state. Requires mail body read permission." }
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "query": .string(description: "Search query; cached body text is included in search where available"),
             "accountID": .string(description: "Optional account ID"),
             "limit": .integer(description: "Maximum results"),
             "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for sent/received time filtering"),
             "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for sent/received time filtering"),
-            "timePreset": .string(description: "Optional time preset such as today, last7Days, last30Days, thisWeek, lastMonth"),
-            "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance"),
+            "timePreset": .stringEnumeration(values: NativeSearchTimePreset.allCases.map(\.rawValue), description: "Optional relative time range."),
+            "timeSort": .stringEnumeration(values: NativeSearchTemporalSort.allCases.map(\.rawValue), description: "Optional temporal result ordering."),
             "bodyPreviewMaxChars": .integer(description: "Maximum cached body preview characters per message; clamped between 200 and 2000; defaults to 1200")
         ], required: ["query"])
     }
@@ -254,13 +253,12 @@ public struct MailSearchMessagesWithBodyPreviewTool: AgentTool {
         self.recorder = recorder
     }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let formatter = ISO8601DateFormatter()
         let request = MailRuntimeSearchRequestBridge(
             query: arguments.string("query") ?? "",
             accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
             limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
-            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
-            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            startDate: try arguments.iso8601Date("startDate"),
+            endDate: try arguments.iso8601Date("endDate"),
             timePreset: arguments.string("timePreset"),
             timeSort: arguments.string("timeSort")
         )
@@ -278,9 +276,9 @@ public struct MailListRecentMessagesWithBodyPreviewTool: AgentTool {
     public var description: String { "List recent Connor-owned mail across accounts with bounded cached body previews, without mutating read state. Requires mail body read permission." }
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts; omit to search all mail accounts"),
-            "direction": .string(description: "Optional direction filter: all, received, or sent. Defaults to all, mixing received and sent mail by newest time."),
+            "direction": .stringEnumeration(values: AgentMailMessageDirectionFilter.allCases.map(\.rawValue), description: "Optional direction filter. Defaults to all, mixing received and sent mail by newest time."),
             "limit": .integer(description: "Maximum recent mail results to return"),
             "bodyPreviewMaxChars": .integer(description: "Maximum cached body preview characters per message; clamped between 200 and 2000; defaults to 1200")
         ], required: [])
@@ -318,7 +316,7 @@ public struct MailGetMessageTool: AgentTool {
     public var description: String { "Get a mail message; body is optional and read state is never mutated by default." }
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "messageID": .string(description: "Exact MailMessageSummary.id returned by mail_search_messages or mail_list_recent_messages. Do not pass result numbers, invented pseudo IDs such as 'message1' or 'msg1', or IMAP UIDs."),
             "includeBody": .boolean(description: "Whether to include body")
         ], required: ["messageID"])
@@ -364,7 +362,7 @@ public struct MailSetReadStateTool: AgentTool {
     public var description: String { "Explicitly mutate read/unread state for messages." }
     public var permission: AgentPermissionCapability { .mutateMailState }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "messageIDs": .array(items: .string(description: "Message ID"), description: "Message IDs"),
             "isRead": .boolean(description: "Desired read state")
         ], required: ["messageIDs", "isRead"])
@@ -384,7 +382,7 @@ public struct MailCreateDraftTool: AgentTool {
     public var description: String { "Create a governed mail draft without sending. The returned MailDraft.id is the exact draftID to pass to mail_send_draft when requesting the native send-approval card; never ask the user to provide this ID." }
     public var permission: AgentPermissionCapability { .createMailDraft }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
             "identityID": .string(description: "Optional exact MailIdentity.id from the selected account. Omit, empty, or pass default to use the Settings default send identity; never invent identity IDs."),
             "to": .array(items: .string(description: "Email address"), description: "Recipients"),
@@ -495,7 +493,7 @@ public struct MailSendDraftTool: AgentTool {
     public var name: String { "mail_send_draft" }
     public var description: String { "Send an existing mail draft through the current session permission policy. Ask mode presents native Compose approval; Execute mode sends immediately. Use the exact MailDraft.id returned by mail_create_draft and do not replace this tool with a natural-language confirmation." }
     public var permission: AgentPermissionCapability { .sendMail }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Exact MailDraft.id returned by mail_create_draft. Do not ask the user to provide this ID; pass the ID from the prior tool result to send through the current session permission policy.")], required: ["draftID"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Exact MailDraft.id returned by mail_create_draft. Do not ask the user to provide this ID; pass the ID from the prior tool result to send through the current session permission policy.")], required: ["draftID"]) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         guard let args = try? AgentToolArguments(json: call.argumentsJSON), let draftID = args.string("draftID"), let payload = try? await runtime.sendApprovalBridgePayload(draftID: MailDraftID(rawValue: draftID)) else {

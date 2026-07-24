@@ -117,6 +117,71 @@ public extension AgentToolInputSchema {
             return issues
         }
     }
+
+    func argumentValidationIssues(_ value: SendableJSONValue, path: String = "$") -> [String] {
+        switch (self, value) {
+        case (.string, .string), (.integer, .int), (.number, .int), (.number, .double), (.boolean, .bool):
+            return []
+        case let (.stringEnumeration(values, _), .string(value)):
+            return values.contains(value) ? [] : ["\(path) must be one of: \(values.joined(separator: ", "))"]
+        case let (.array(items, _), .array(values)):
+            return values.enumerated().flatMap { index, value in
+                items.argumentValidationIssues(value, path: "\(path)[\(index)]")
+            }
+        case let (.object(properties, required), .object(values)):
+            return Self.objectArgumentValidationIssues(
+                properties: properties,
+                required: required,
+                values: values,
+                rejectsUnknownProperties: false,
+                path: path
+            )
+        case let (.closedObject(properties, required), .object(values)):
+            return Self.objectArgumentValidationIssues(
+                properties: properties,
+                required: required,
+                values: values,
+                rejectsUnknownProperties: true,
+                path: path
+            )
+        case (.nullable, .null):
+            return []
+        case let (.nullable(wrapped), value):
+            return wrapped.argumentValidationIssues(value, path: path)
+        default:
+            return ["\(path) must be \(expectedTypeDescription)"]
+        }
+    }
+
+    private static func objectArgumentValidationIssues(
+        properties: [String: AgentToolInputSchema],
+        required: [String],
+        values: [String: SendableJSONValue],
+        rejectsUnknownProperties: Bool,
+        path: String
+    ) -> [String] {
+        var issues = required.filter { values[$0] == nil }.sorted().map { "\(path).\($0) is required" }
+        if rejectsUnknownProperties {
+            issues += Set(values.keys).subtracting(properties.keys).sorted().map { "\(path).\($0) is not supported" }
+        }
+        for key in Set(values.keys).intersection(properties.keys).sorted() {
+            issues += properties[key]!.argumentValidationIssues(values[key]!, path: "\(path).\(key)")
+        }
+        return issues
+    }
+
+    private var expectedTypeDescription: String {
+        switch self {
+        case .string: "a string"
+        case .stringEnumeration: "a supported string value"
+        case .integer: "an integer"
+        case .number: "a number"
+        case .boolean: "a boolean"
+        case .array: "an array"
+        case .object, .closedObject: "an object"
+        case .nullable(let wrapped): "null or \(wrapped.expectedTypeDescription)"
+        }
+    }
 }
 
 public struct AgentToolDefinition: Sendable, Equatable {
@@ -167,6 +232,14 @@ public struct AgentToolArguments: Sendable, Equatable {
     public func array(_ key: String) -> [SendableJSONValue]? {
         if case .array(let value) = values[key] { return value }
         return nil
+    }
+
+    public func iso8601Date(_ key: String) throws -> Date? {
+        guard let value = string(key) else { return nil }
+        guard let date = ISO8601DateFormatter().date(from: value) else {
+            throw AgentToolError.invalidArguments("\(key) must be a valid ISO-8601 timestamp")
+        }
+        return date
     }
 }
 
@@ -452,6 +525,12 @@ public struct AgentToolRegistry: Sendable {
         guard let tool = tools[call.name] else {
             throw AgentToolError.unknownTool(call.name)
         }
+        let arguments = try AgentToolArguments(json: call.argumentsJSON)
+        let argumentObject = SendableJSONValue.object(arguments.values)
+        let argumentIssues = tool.inputSchema.argumentValidationIssues(argumentObject)
+        guard argumentIssues.isEmpty else {
+            throw AgentToolError.invalidArguments(argumentIssues.joined(separator: "; "))
+        }
         try await tool.preflight(call: call, context: context)
         var executionContext = context
         if !context.approvedCapabilities.contains(tool.permission) {
@@ -479,7 +558,6 @@ public struct AgentToolRegistry: Sendable {
                 throw AgentToolError.permissionDenied(decision.reason)
             }
         }
-        let arguments = try AgentToolArguments(json: call.argumentsJSON)
         var result = try await tool.execute(arguments: arguments, context: executionContext)
         result.runID = context.runID
         result.sessionID = context.sessionID

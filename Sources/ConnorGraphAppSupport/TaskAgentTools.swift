@@ -6,7 +6,7 @@ public struct TaskListTool: AgentTool {
     public let name = "tasks_list"
     public let description = "List Connor task definitions, including system, user, and AI tasks."
     public let permission: AgentPermissionCapability = .readSession
-    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [:], required: [])
     private let repository: AppTaskManagementRepository
 
     public init(repository: AppTaskManagementRepository) {
@@ -26,7 +26,7 @@ public struct TaskCreateScheduledSessionMessageTool: AgentTool {
     public let name = "tasks_create_scheduled_session_message"
     public let description = "Create an AI task that creates a new session at a specific time or on a daily/weekly/monthly schedule, then sends a message to AI. This does not allow arbitrary scripts or external actions."
     public let permission: AgentPermissionCapability = .commitGraphWrite
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "name": .string(description: "Task name"),
         "runAt": .string(description: "First run time as ISO-8601 timestamp"),
         "recurrence": .string(description: "once, daily, weekly, or monthly"),
@@ -64,7 +64,7 @@ public struct TaskCreateSessionStatusMessageTool: AgentTool {
     public let name = "tasks_create_session_status_message"
     public let description = "Create an AI task that runs when a session changes to a specific status, then sends a message to AI in that session. This is the only event-triggered task template available."
     public let permission: AgentPermissionCapability = .commitGraphWrite
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "name": .string(description: "Task name"),
         "toStatus": .string(description: "Target session status ID, e.g. done"),
         "message": .string(description: "Message to send to AI when the status is reached"),

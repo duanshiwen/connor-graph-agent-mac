@@ -174,7 +174,7 @@ public struct ConnorSkillCreateTool: AgentTool {
     public let name = "connor_skill_create"
     public let description = "Create or overwrite a Connor skill package in the user skills directory. Use this when the user asks to add a skill; do not merely say the skill was added."
     public let permission: AgentPermissionCapability = .writeWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "slug": .string(description: "Kebab-case skill slug, for example go-expert."),
         "name": .string(description: "Human-readable skill name."),
         "description": .string(description: "When and why this skill should be used."),
@@ -216,7 +216,7 @@ public struct ConnorSkillUpdateTool: AgentTool {
     public let name = "connor_skill_update"
     public let description = "Update an existing user Connor skill package by slug. Use this when the user asks to edit or refine a skill."
     public let permission: AgentPermissionCapability = .writeWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "slug": .string(description: "Existing user skill slug to update."),
         "name": .string(description: "Optional replacement skill name."),
         "description": .string(description: "Optional replacement description."),
@@ -254,7 +254,7 @@ public struct ConnorSkillDeleteTool: AgentTool {
     public let name = "connor_skill_delete"
     public let description = "Delete an existing user Connor skill package by slug. Use only after the user explicitly asks to delete a skill."
     public let permission: AgentPermissionCapability = .writeWorkspaceFile
-    public let inputSchema = AgentToolInputSchema.object(properties: [
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "slug": .string(description: "Existing user skill slug to delete.")
     ], required: ["slug"])
 

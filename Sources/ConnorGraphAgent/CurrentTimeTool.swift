@@ -5,7 +5,7 @@ public struct GetCurrentTimeTool: AgentTool {
     public var description: String { "Get the current system date and time. Use this instead of guessing whenever the user asks about the current date, current time, today, now, or time-sensitive information." }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
+        .closedObject(properties: [
             "time_zone": .string(description: "Optional IANA time zone identifier, for example Asia/Shanghai. Defaults to the system time zone.")
         ], required: [])
     }

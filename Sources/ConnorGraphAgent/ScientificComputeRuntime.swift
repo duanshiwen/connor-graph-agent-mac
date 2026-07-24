@@ -1,7 +1,7 @@
 import Foundation
 import ConnorGraphCore
 
-public enum ScientificComputeOperation: String, Codable, Sendable, Equatable {
+public enum ScientificComputeOperation: String, Codable, Sendable, Equatable, CaseIterable {
     case add
     case subtract
     case multiply
@@ -369,10 +369,14 @@ public struct ScienceComputeTool: AgentTool {
     public let name = "science_compute"
     public let description = "Run deterministic, governed scientific computations such as arithmetic, comparison, units, statistics, and small linear algebra."
     public let permission: AgentPermissionCapability = .computeScientific
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "operation": .string(description: "Whitelisted scientific operation, e.g. add, compare, unit_convert, summary, solve_linear_system."),
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "operation": .stringEnumeration(values: ScientificComputeOperation.allCases.map(\.rawValue), description: "Whitelisted scientific operation."),
         "inputs": .object(properties: [:], required: []),
-        "options": .object(properties: [:], required: [])
+        "options": .closedObject(properties: [
+            "absolute_tolerance": .number(description: "Optional absolute comparison tolerance."),
+            "relative_tolerance": .number(description: "Optional relative comparison tolerance."),
+            "preferred_engine": .string(description: "Optional preferred compute engine.")
+        ], required: [])
     ], required: ["operation", "inputs"])
 
     private let runtime: ScientificComputeRuntime
