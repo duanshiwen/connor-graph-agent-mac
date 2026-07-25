@@ -525,6 +525,7 @@ struct CraftContactsListPane: View {
                 ContactsRowsScrollView(
                     rows: model.presentation.rows,
                     selectedID: model.selectedContactID,
+                    imageURL: { model.imageURLs(for: $0).first },
                     onSelect: { model.selectedContactID = $0 },
                     onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
                 )
@@ -537,6 +538,7 @@ struct CraftContactsListPane: View {
 private struct ContactsRowsScrollView: View {
     var rows: [NativeContactRowPresentation]
     var selectedID: ContactID?
+    var imageURL: (ContactID) -> URL?
     var onSelect: (ContactID) -> Void
     var onLoadMore: (ContactID) -> Void
 
@@ -544,7 +546,12 @@ private struct ContactsRowsScrollView: View {
         ScrollView {
             LazyVStack(spacing: AppListCardLayout.spacing) {
                 ForEach(rows) { row in
-                    ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
+                    ContactRowButton(
+                        row: row,
+                        imageURL: imageURL(row.id),
+                        isSelected: row.id == selectedID,
+                        onSelect: { onSelect(row.id) }
+                    )
                         .onAppear { onLoadMore(row.id) }
                 }
             }
@@ -557,12 +564,15 @@ private struct ContactsRowsScrollView: View {
 
 private struct ContactRowButton: View {
     var row: NativeContactRowPresentation
+    var imageURL: URL?
     var isSelected: Bool
     var onSelect: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 8) {
+                ContactProfileThumbnail(imageURL: imageURL, displayName: row.displayName)
+
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(row.displayName)
                         .font(AppListTypography.rowTitle)
@@ -580,6 +590,31 @@ private struct ContactRowButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("打开人物详情")
+    }
+}
+
+private struct ContactProfileThumbnail: View {
+    var imageURL: URL?
+    var displayName: String
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.accentColor.opacity(0.14))
+            if let imageURL, let image = NSImage(contentsOf: imageURL) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(displayName.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init) ?? "?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(AppShellColors.hairline, lineWidth: 1))
+        .accessibilityHidden(true)
     }
 }
 
