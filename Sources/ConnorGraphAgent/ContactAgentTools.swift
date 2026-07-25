@@ -63,6 +63,8 @@ public protocol AgentContactRuntime: Sendable {
     func getPerson(id: ContactID) async throws -> PersonProfile?
     func createPerson(_ profile: PersonProfile, approved: Bool) async throws -> PersonProfile
     func updatePerson(id: ContactID, update: PersonProfileDraft, approved: Bool) async throws -> PersonProfile
+    func addPersonImages(id: ContactID, sessionID: String, attachmentIDs: [String], approved: Bool) async throws -> PersonProfile
+    func removeAllPersonImages(id: ContactID, approved: Bool) async throws -> PersonProfile
     func deletePerson(id: ContactID, approved: Bool) async throws -> PersonProfile
     func mergePeople(sourceID: ContactID, targetID: ContactID, approved: Bool) async throws -> PersonProfile
 }
@@ -145,6 +147,19 @@ public actor InMemoryAgentContactRuntime: AgentContactRuntime {
         return updated
     }
 
+    public func addPersonImages(id: ContactID, sessionID: String, attachmentIDs: [String], approved: Bool) async throws -> PersonProfile {
+        guard approved else { throw AgentToolError.permissionDenied("Person profile image write approval required") }
+        throw AgentToolError.invalidArguments("Person image attachments are unavailable in this runtime")
+    }
+
+    public func removeAllPersonImages(id: ContactID, approved: Bool) async throws -> PersonProfile {
+        guard approved else { throw AgentToolError.permissionDenied("Person profile image write approval required") }
+        guard let index = people.firstIndex(where: { $0.id == id }) else { throw AgentToolError.invalidArguments("Unknown person") }
+        people[index].imageRelativePaths = nil
+        people[index].updatedAt = Date()
+        return people[index]
+    }
+
     public func deletePerson(id: ContactID, approved: Bool) async throws -> PersonProfile {
         guard approved else { throw AgentToolError.permissionDenied("Person profile delete approval required") }
         guard let index = people.firstIndex(where: { $0.id == id }) else { throw AgentToolError.invalidArguments("Unknown person") }
@@ -165,6 +180,7 @@ public actor InMemoryAgentContactRuntime: AgentContactRuntime {
         target.emails = mergeEmails(target.emails + source.emails)
         target.phones = mergePhones(target.phones + source.phones)
         target.addresses = mergeAddresses(target.addresses + source.addresses)
+        target.imageRelativePaths = Array(Set((target.imageRelativePaths ?? []) + (source.imageRelativePaths ?? []))).sorted()
         target.updatedAt = Date()
         people[targetIndex] = target
         people[sourceIndex].status = .merged
@@ -280,6 +296,7 @@ private func summarizePerson(_ person: PersonProfile?) -> String {
     if let notes = person.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
         lines.append("notes: \(String(notes.prefix(500)))")
     }
+    lines.append("image_count: \(person.imageRelativePaths?.count ?? 0)")
     return lines.joined(separator: "\n")
 }
 
@@ -326,11 +343,11 @@ public struct ContactsReadTool: AgentTool {
 public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
-    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. For update/delete/merge, copy exact personID values from Referenced People or prior contacts_read results; never guess IDs from display names." }
+    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, add_person_images, remove_all_person_images, delete_person, merge_people. To add one or more images from the current user message, call add_person_images with the exact personID and exact image attachmentIDs shown in User Attachments. Images are optional and new images are appended. For update/delete/image/merge operations, never guess IDs from display names." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "operation": .stringEnumeration(values: ["create_person", "update_person", "delete_person", "merge_people"], description: "Write operation."),
+            "operation": .stringEnumeration(values: ["create_person", "update_person", "add_person_images", "remove_all_person_images", "delete_person", "merge_people"], description: "Write operation."),
             "personID": .string(description: "Exact personID returned by contacts_read or Referenced People; copy the field and value unchanged for update_person or delete_person."),
             "id": .string(description: "Legacy Person ID accepted for compatibility. Prefer personID; never infer IDs from display name"),
             "sourceID": .string(description: "For merge_people, copy the source person's exact personID returned by contacts_read into this field"),
@@ -340,6 +357,7 @@ public struct ContactsWriteTool: AgentTool {
             "organization": .string(description: "Organization"),
             "jobTitle": .string(description: "Job title"),
             "notes": .string(description: "Notes"),
+            "attachmentIDs": .array(items: .string(description: "Exact image attachmentID"), description: "For add_person_images, one or more exact image IDs from User Attachments in the current user message. Copy them unchanged; never pass local file paths or invent IDs."),
             "approved": .boolean(description: "Explicit approval")
         ], required: ["operation", "approved"])
     }
@@ -373,6 +391,21 @@ public struct ContactsWriteTool: AgentTool {
             if let email = arguments.string("email") { draft.emails = [ContactEmailAddress(email: email)] }
             let updated = try await runtime.updatePerson(id: ContactID(rawValue: id), update: draft, approved: approved)
             return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Updated person \(updated.id.rawValue)", contentJSON: try ContactJSON.encodePerson(updated))
+        case "add_person_images":
+            guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") else { throw AgentToolError.invalidArguments("personID is required") }
+            let attachmentIDs = (arguments.array("attachmentIDs") ?? arguments.array("attachment_ids") ?? []).compactMap(\.stringValue)
+            guard !attachmentIDs.isEmpty else { throw AgentToolError.invalidArguments("attachmentIDs must contain at least one image ID") }
+            let updated = try await runtime.addPersonImages(
+                id: ContactID(rawValue: id),
+                sessionID: context.sessionID,
+                attachmentIDs: attachmentIDs,
+                approved: approved
+            )
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Added \(attachmentIDs.count) image(s) for person \(updated.id.rawValue)", contentJSON: try ContactJSON.encodePerson(updated))
+        case "remove_all_person_images":
+            guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") else { throw AgentToolError.invalidArguments("personID is required") }
+            let updated = try await runtime.removeAllPersonImages(id: ContactID(rawValue: id), approved: approved)
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Removed all images for person \(updated.id.rawValue)", contentJSON: try ContactJSON.encodePerson(updated))
         case "delete_person":
             guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") else { throw AgentToolError.invalidArguments("personID is required") }
             let deleted = try await runtime.deletePerson(id: ContactID(rawValue: id), approved: approved)

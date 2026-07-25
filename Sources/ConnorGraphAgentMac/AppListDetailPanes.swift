@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -2239,6 +2240,7 @@ private extension CalendarAttendeeResponseStatus {
 
 struct ContactsSourceSettingsView: View {
     @Bindable var model: ContactsFeatureModel
+    @State private var imageImportPersonID: ContactID?
 
     var body: some View {
         Group {
@@ -2247,10 +2249,21 @@ struct ContactsSourceSettingsView: View {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                         PersonProfileDetailHero(
                             row: selected,
+                            imageURL: model.imageURLs(for: selected.id).first,
+                            onChooseImage: { imageImportPersonID = selected.id },
                             onEdit: { model.presentEditProfile(selected.id) },
                             onAddRelationship: { model.presentNewRelationshipEditor(sourcePersonID: selected.id) },
                             onDelete: { model.pendingProfileDeletionID = selected.id }
                         )
+
+                        let imageURLs = model.imageURLs(for: selected.id)
+                        if !imageURLs.isEmpty {
+                            PersonProfilePhotoGallery(imageURLs: imageURLs) { imageURL in
+                                Task { @MainActor in
+                                    await model.removeProfileImage(at: imageURL, for: selected.id)
+                                }
+                            }
+                        }
 
                         PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
                             VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
@@ -2317,6 +2330,19 @@ struct ContactsSourceSettingsView: View {
         } message: {
             Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
         }
+        .fileImporter(
+            isPresented: Binding(
+                get: { imageImportPersonID != nil },
+                set: { if !$0 { imageImportPersonID = nil } }
+            ),
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: true
+        ) { result in
+            guard let personID = imageImportPersonID else { return }
+            imageImportPersonID = nil
+            guard case .success(let urls) = result, !urls.isEmpty else { return }
+            Task { @MainActor in await model.addProfileImages(from: urls, for: personID) }
+        }
     }
 
     private var selectedContactRow: NativeContactRowPresentation? {
@@ -2375,21 +2401,42 @@ private struct RelationshipEditorSheet: View {
 
 private struct PersonProfileDetailHero: View {
     var row: NativeContactRowPresentation
+    var imageURL: URL?
+    var onChooseImage: () -> Void
     var onEdit: () -> Void
     var onAddRelationship: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
-            ZStack {
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.14))
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 24, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color.accentColor)
+            VStack(spacing: AppShellLayout.spaceS) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    if let imageURL, let image = NSImage(contentsOf: imageURL) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                            .font(.system(size: 36, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                .frame(width: 112, height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                        .stroke(AppShellColors.hairline, lineWidth: 1)
+                )
+
+                Button(action: onChooseImage) {
+                    Label("添加图片", systemImage: "photo.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .frame(width: 56, height: 56)
 
             VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
                 Text(row.displayName)
@@ -2442,7 +2489,7 @@ private struct PersonProfileDetailHero: View {
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
                 .stroke(AppShellColors.hairline, lineWidth: 1)
         )
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var statusTitle: String {
@@ -2459,6 +2506,43 @@ private struct PersonProfileDetailHero: View {
             return .blue
         case .deleted:
             return .red
+        }
+    }
+}
+
+private struct PersonProfilePhotoGallery: View {
+    var imageURLs: [URL]
+    var onRemove: (URL) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 120, maximum: 180), spacing: AppShellLayout.spaceM)
+    ]
+
+    var body: some View {
+        PersonProfileInfoSection(title: "照片（\(imageURLs.count)）", systemImage: "photo.on.rectangle.angled") {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: AppShellLayout.spaceM) {
+                ForEach(imageURLs, id: \.path) { imageURL in
+                    if let image = NSImage(contentsOf: imageURL) {
+                        ZStack(alignment: .topTrailing) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(minHeight: 120)
+                                .aspectRatio(1, contentMode: .fill)
+                                .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+
+                            Button(role: .destructive) { onRemove(imageURL) } label: {
+                                Image(systemName: "trash")
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("移除这张图片")
+                            .padding(AppShellLayout.spaceS)
+                        }
+                    }
+                }
+            }
         }
     }
 }

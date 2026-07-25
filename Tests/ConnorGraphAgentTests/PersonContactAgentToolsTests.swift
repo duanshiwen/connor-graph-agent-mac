@@ -97,6 +97,19 @@ struct PersonContactAgentToolsTests {
         #expect(afterDelete.contentText.contains("Found 0 people"))
     }
 
+    @Test func contactsWriteSchemaDocumentsOptionalPersonImages() throws {
+        let tool = ContactsWriteTool(runtime: InMemoryAgentContactRuntime())
+        let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+        let operation = try #require(properties["operation"] as? [String: Any])
+        let operations = try #require(operation["enum"] as? [String])
+        let attachments = try #require(properties["attachmentIDs"] as? [String: Any])
+
+        #expect(operations.contains("add_person_images"))
+        #expect(operations.contains("remove_all_person_images"))
+        #expect(attachments["type"] as? String == "array")
+        #expect((attachments["description"] as? String)?.contains("one or more exact image IDs") == true)
+    }
+
     private static func context(toolCallID: String) -> AgentToolExecutionContext {
         let audit = InMemoryAgentAuditLog()
         let policy = AgentPolicyEngine(permissionMode: .allowAll, auditLog: audit)

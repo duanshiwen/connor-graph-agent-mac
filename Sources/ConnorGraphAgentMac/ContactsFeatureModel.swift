@@ -30,6 +30,7 @@ final class ContactsFeatureModel {
 
     @ObservationIgnored private let profileStore: (any PersonProfileStore)?
     @ObservationIgnored private let relationshipStore: (any PersonRelationshipStore)?
+    @ObservationIgnored private let imageStore: PersonProfileImageStore?
     @ObservationIgnored private let systemContactsLoader: SystemContactsLoader
     @ObservationIgnored private let notificationCenter: NotificationCenter
     @ObservationIgnored private var profileStoreObserver: NSObjectProtocol?
@@ -45,6 +46,7 @@ final class ContactsFeatureModel {
     init(
         profileStore: (any PersonProfileStore)?,
         relationshipStore: (any PersonRelationshipStore)?,
+        imageStore: PersonProfileImageStore? = nil,
         systemContactsLoader: @escaping SystemContactsLoader = {
             try await ContactsSystemAdapter.fetchSystemContacts()
         },
@@ -52,6 +54,7 @@ final class ContactsFeatureModel {
     ) {
         self.profileStore = profileStore
         self.relationshipStore = relationshipStore
+        self.imageStore = imageStore
         self.systemContactsLoader = systemContactsLoader
         self.notificationCenter = notificationCenter
         if let profileStore {
@@ -226,6 +229,60 @@ final class ContactsFeatureModel {
         guard let profile = profiles.first(where: { $0.id == id }) else { return }
         editingProfileDraft = PersonProfileDraft(profile: profile)
         isPresentingProfileEditor = true
+    }
+
+    func imageURLs(for id: ContactID) -> [URL] {
+        guard let imageStore else { return [] }
+        let relativePaths = profiles.first(where: { $0.id == id })?.imageRelativePaths ?? []
+        return relativePaths.compactMap { imageStore.imageURL(for: $0) }
+    }
+
+    func addProfileImages(from sourceURLs: [URL], for id: ContactID) async {
+        guard let imageStore, var profile = profiles.first(where: { $0.id == id }) else { return }
+        guard !sourceURLs.isEmpty else { return }
+        var newPaths: [String] = []
+        do {
+            for sourceURL in sourceURLs {
+                let accessed = sourceURL.startAccessingSecurityScopedResource()
+                defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+                newPaths.append(try imageStore.importImage(at: sourceURL, personID: id))
+            }
+            var seen: Set<String> = []
+            let combined = (profile.imageRelativePaths ?? []) + newPaths
+            let uniquePaths = combined.filter { !$0.isEmpty && seen.insert($0).inserted }
+            profile.imageRelativePaths = uniquePaths.isEmpty ? nil : uniquePaths
+            profile.updatedAt = Date()
+            do {
+                _ = try await profileStore?.upsert(profile)
+                profiles = profiles.upserting(profile)
+                rebuildPresentation()
+                reportSuccess()
+            } catch {
+                for path in newPaths { try? imageStore.removeImage(at: path) }
+                throw error
+            }
+        } catch {
+            for path in newPaths { try? imageStore.removeImage(at: path) }
+            reportFailure("无法保存人物图片：\(error.localizedDescription)")
+        }
+    }
+
+    func removeProfileImage(at imageURL: URL, for id: ContactID) async {
+        guard let imageStore, var profile = profiles.first(where: { $0.id == id }) else { return }
+        let previousPaths = profile.imageRelativePaths ?? []
+        guard let pathToRemove = previousPaths.first(where: { imageStore.imageURL(for: $0) == imageURL }) else { return }
+        do {
+            let remaining = previousPaths.filter { $0 != pathToRemove }
+            profile.imageRelativePaths = remaining.isEmpty ? nil : remaining
+            profile.updatedAt = Date()
+            _ = try await profileStore?.upsert(profile)
+            try? imageStore.removeImage(at: pathToRemove)
+            profiles = profiles.upserting(profile)
+            rebuildPresentation()
+            reportSuccess()
+        } catch {
+            reportFailure("无法移除人物图片：\(error.localizedDescription)")
+        }
     }
 
     func saveProfileDraft(_ draft: PersonProfileDraft) async {

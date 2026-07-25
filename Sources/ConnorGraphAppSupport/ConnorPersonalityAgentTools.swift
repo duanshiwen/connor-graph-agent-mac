@@ -90,24 +90,44 @@ public struct ConnorPersonalityRuntime: Sendable {
 
 public enum ConnorPersonalitySafetyPolicy {
     public static func validatePersistentMutationIntent(_ userPrompt: String) throws {
-        let compact = userPrompt.lowercased().replacingOccurrences(of: " ", with: "")
-        let mutationSignals = [
-            "以后", "今后", "从现在开始", "一直", "永久", "设为", "设置为", "设置成", "改为", "改成",
-            "调成", "调整为", "调整成", "变为", "变成", "调整人格", "调整性格", "修改人格", "修改性格",
-            "更新人格", "更新性格", "恢复默认性格", "恢复默认人格",
-            "fromnowon", "always", "setyour", "changeyour", "updateyourpersonality", "resetyourpersonality"
+        let compact = userPrompt.lowercased().filter { !$0.isWhitespace }
+        let persistentSignals = [
+            "以后", "今后", "从现在开始", "一直", "永久", "长期", "默认", "保存到人格", "写入人格",
+            "fromnowon", "always", "permanently", "bydefault", "saveas"
         ]
         let questionSignals = [
             "你是", "你属于", "你的性别", "什么性别", "男生还是女生", "男性还是女性", "是什么", "吗", "呢", "?", "？",
             "areyou", "whatisyour", "whichgender"
         ]
-        let personalityTargets = ["人格", "性格", "沟通风格", "说话风格", "语气", "personality", "communicationstyle", "tone"]
-        let changeRequests = ["能不能", "可不可以", "可以把", "请把", "麻烦把", "couldyou", "canyou", "please"]
-        let desiredDirections = ["更", "再", "一点", "more", "less"]
-        let hasMutationIntent = mutationSignals.contains(where: compact.contains)
-            || (personalityTargets.contains(where: compact.contains)
-                && changeRequests.contains(where: compact.contains)
-                && desiredDirections.contains(where: compact.contains))
+        let personalityTargets = [
+            "人格", "性格", "沟通风格", "说话风格", "交流风格", "表达风格", "语气",
+            "personality", "communicationstyle", "speakingstyle", "tone"
+        ]
+        let requestSignals = [
+            "把", "将", "给我", "能不能", "可不可以", "可以", "请", "麻烦", "希望你", "想让你", "能让", "请让",
+            "couldyou", "canyou", "please", "iwantyou", "i'dlikeyou"
+        ]
+        let mutationSignals = [
+            "更", "再", "一点", "设为", "设置", "改为", "改成", "改变", "调成", "调整", "变为", "变成", "变得",
+            "修改", "更新", "恢复", "重置", "采用", "more", "less", "set", "change", "adjust", "update", "reset", "adopt"
+        ]
+        let directPersonalityMutations = [
+            "调整人格", "调整性格", "修改人格", "修改性格", "更新人格", "更新性格",
+            "恢复默认性格", "恢复默认人格", "重置性格", "重置人格",
+            "updateyourpersonality", "changeyourpersonality", "resetyourpersonality"
+        ]
+        let completedChangeQuestions = [
+            "了吗", "了么", "过吗", "过么", "是否已经", "有没有变", "是不是已经",
+            "didyou", "haveyou", "hasyour"
+        ]
+        let hasPersonalityTarget = personalityTargets.contains(where: compact.contains)
+        let asksForChange = requestSignals.contains(where: compact.contains)
+            && mutationSignals.contains(where: compact.contains)
+        let describesCompletedChange = completedChangeQuestions.contains(where: compact.contains)
+        let hasMutationIntent = (persistentSignals.contains(where: compact.contains)
+            && mutationSignals.contains(where: compact.contains))
+            || (!describesCompletedChange && directPersonalityMutations.contains(where: compact.contains))
+            || (!describesCompletedChange && hasPersonalityTarget && asksForChange)
         if questionSignals.contains(where: compact.contains),
            !hasMutationIntent {
             throw ConnorPersonalityProposalError.explicitPersistentRequestRequired
@@ -252,10 +272,10 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
 /// one invocation so a runtime rebuild cannot orphan an in-memory proposal ID.
 public struct ConnorPersonalityUpdateTool: AgentTool {
     public let name = "personality_update"
-    public let description = "Generate, validate, and durably apply a persistent personality update for 康纳同学 in one call. Use only when the latest user message explicitly asks for a lasting change. This call does not require a second confirmation in ask-to-write mode; read-only sessions reject it."
+    public let description = "Generate, validate, and durably apply a persistent personality update for 康纳同学 in one call. Use when the latest user message asks to change personality settings, including polite question forms such as '能把你的人格变得更主动一点吗？'; the user does not need to include words like 'permanently' or '以后' when the personality-setting target is explicit. This call does not require a second confirmation in ask-to-write mode; read-only sessions reject it."
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "request": .string(description: "User's persistent personality request. Use an empty string only for reset."),
+        "request": .string(description: "A faithful, self-contained statement of the personality change requested in the latest user message. Do not add a persistence keyword the user did not say. Use an empty string only for reset."),
         "mode": .stringEnumeration(
             values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue),
             description: "Update mode: merge preserves current fields not changed by the request; replace generates a complete replacement; reset restores the default personality and requires an empty request."

@@ -142,6 +142,34 @@ struct ContactsFeatureModelTests {
         #expect(fixture.model.presentation.rows.map(\.id) == [profile.id])
     }
 
+    @Test func profileImageIsOptionalAndCanBeAddedAndRemoved() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let id = ContactID(rawValue: "person-image")
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: id, displayName: "有头像的人"))
+        await fixture.model.reload()
+        #expect(fixture.model.imageURLs(for: id).isEmpty)
+
+        let firstSourceURL = fixture.root.appendingPathComponent("first.png")
+        let secondSourceURL = fixture.root.appendingPathComponent("second.jpg")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: firstSourceURL)
+        try Data([0xFF, 0xD8, 0xFF]).write(to: secondSourceURL)
+        await fixture.model.addProfileImages(from: [firstSourceURL, secondSourceURL], for: id)
+
+        let storedURLs = fixture.model.imageURLs(for: id)
+        #expect(storedURLs.count == 2)
+        #expect(storedURLs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+        #expect(storedURLs.allSatisfy { $0.deletingLastPathComponent().lastPathComponent == id.rawValue })
+        #expect(fixture.model.profiles.first?.imageRelativePaths?.count == 2)
+
+        await fixture.model.removeProfileImage(at: storedURLs[0], for: id)
+        #expect(fixture.model.imageURLs(for: id).count == 1)
+        await fixture.model.removeProfileImage(at: storedURLs[1], for: id)
+        #expect(fixture.model.imageURLs(for: id).isEmpty)
+        #expect(fixture.model.profiles.first?.imageRelativePaths == nil)
+        #expect(storedURLs.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+    }
+
     private func makeFixture(
         systemLoader: @escaping ContactsFeatureModel.SystemContactsLoader = { [] }
     ) throws -> Fixture {
@@ -154,6 +182,7 @@ struct ContactsFeatureModelTests {
         let model = ContactsFeatureModel(
             profileStore: profileStore,
             relationshipStore: relationshipStore,
+            imageStore: PersonProfileImageStore(applicationSupportDirectory: root),
             systemContactsLoader: systemLoader
         )
         return Fixture(root: root, profileStore: profileStore, model: model)

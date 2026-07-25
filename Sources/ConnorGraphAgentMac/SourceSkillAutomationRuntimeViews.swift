@@ -515,7 +515,7 @@ struct SkillRuntimePanelView: View {
             } else {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+                    .background(AppShellColors.detailBackground)
             }
         }
     }
@@ -571,11 +571,14 @@ private struct SkillManagerDetailView: View {
                     SkillInstructionsPreview(skillID: card.id, instructions: card.instructions)
                 }
             }
-            .padding(AgentChatLayout.spaceXL)
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .padding(.vertical, AgentChatLayout.spaceL)
             .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+        .background(AppShellColors.detailBackground)
     }
 
     private func displayPath(_ path: String) -> String {
@@ -617,7 +620,7 @@ private struct SkillManagerEmptyDetailView: View {
         }
         .padding(AgentChatLayout.spaceXL)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+        .background(AppShellColors.detailBackground)
     }
 }
 

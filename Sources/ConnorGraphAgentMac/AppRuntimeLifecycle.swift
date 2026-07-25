@@ -601,6 +601,7 @@ final class AppRuntimeLifecycle {
         self.contactsFeatureModel = ContactsFeatureModel(
             profileStore: resolvedContactsProfileStore,
             relationshipStore: resolvedContactsRelationshipStore,
+            imageStore: storagePaths.map { PersonProfileImageStore(storagePaths: $0) },
             systemContactsLoader: contactsSystemLoader
         )
         let nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = injectedNativeSourceSearchBackend ?? {

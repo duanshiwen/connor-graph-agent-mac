@@ -67,15 +67,17 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
     public var displayName: String
     public var primaryEmail: String?
     public var organizationName: String?
+    public var imageRelativePaths: [String]?
     public var subtitle: String
     public var status: PersonProfileStatus?
     public var accessibilityLabel: String
 
-    public init(id: ContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil, subtitle: String? = nil, status: PersonProfileStatus? = nil) {
+    public init(id: ContactID, displayName: String, primaryEmail: String? = nil, organizationName: String? = nil, imageRelativePaths: [String]? = nil, subtitle: String? = nil, status: PersonProfileStatus? = nil) {
         self.id = id
         self.displayName = displayName
         self.primaryEmail = primaryEmail
         self.organizationName = organizationName
+        self.imageRelativePaths = imageRelativePaths
         self.subtitle = subtitle ?? primaryEmail ?? organizationName ?? "暂无联系方式"
         self.status = status
         self.accessibilityLabel = "查看人物档案，\(displayName)，\(self.subtitle)"
@@ -105,6 +107,7 @@ public struct NativeContactRowPresentation: Sendable, Equatable, Identifiable {
             displayName: profile.displayName,
             primaryEmail: profile.emails.first?.email,
             organizationName: profile.organizationName,
+            imageRelativePaths: profile.imageRelativePaths,
             subtitle: profile.contactSubtitle,
             status: profile.status
         )
