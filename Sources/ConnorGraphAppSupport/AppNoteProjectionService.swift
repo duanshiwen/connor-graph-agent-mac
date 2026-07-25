@@ -39,6 +39,9 @@ public struct AppNoteProjectionService: NoteProjectionSynchronizing, Sendable {
             externalID: existing?.externalID, relativePath: existing?.relativePath,
             sourceCreatedAt: existing?.sourceCreatedAt
         ))
+        if let projected = try repository.note(sessionID: session.id) {
+            try NoteSearchService(repository: repository).index(projected)
+        }
     }
 
     public func remove(sessionID: String, deletedAt: Date = Date()) throws {
