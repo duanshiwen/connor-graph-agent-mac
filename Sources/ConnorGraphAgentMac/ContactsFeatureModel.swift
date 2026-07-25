@@ -3,6 +3,24 @@ import Observation
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
+struct ContactImageImporterState: Equatable {
+    var isPresented = false
+    private(set) var targetPersonID: ContactID?
+
+    mutating func present(for personID: ContactID) {
+        targetPersonID = personID
+        isPresented = true
+    }
+
+    mutating func consumeTargetPersonID() -> ContactID? {
+        defer {
+            targetPersonID = nil
+            isPresented = false
+        }
+        return targetPersonID
+    }
+}
+
 @MainActor
 @Observable
 final class ContactsFeatureModel {

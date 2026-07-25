@@ -2275,7 +2275,7 @@ private extension CalendarAttendeeResponseStatus {
 
 struct ContactsSourceSettingsView: View {
     @Bindable var model: ContactsFeatureModel
-    @State private var imageImportPersonID: ContactID?
+    @State private var imageImporter = ContactImageImporterState()
 
     var body: some View {
         Group {
@@ -2292,7 +2292,7 @@ struct ContactsSourceSettingsView: View {
                         let imageURLs = model.imageURLs(for: selected.id)
                         PersonProfilePhotoGallery(
                             imageURLs: imageURLs,
-                            onAdd: { imageImportPersonID = selected.id }
+                            onAdd: { imageImporter.present(for: selected.id) }
                         ) { imageURL in
                             Task { @MainActor in
                                 await model.removeProfileImage(at: imageURL, for: selected.id)
@@ -2365,15 +2365,11 @@ struct ContactsSourceSettingsView: View {
             Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
         }
         .fileImporter(
-            isPresented: Binding(
-                get: { imageImportPersonID != nil },
-                set: { if !$0 { imageImportPersonID = nil } }
-            ),
+            isPresented: $imageImporter.isPresented,
             allowedContentTypes: [.image],
             allowsMultipleSelection: true
         ) { result in
-            guard let personID = imageImportPersonID else { return }
-            imageImportPersonID = nil
+            guard let personID = imageImporter.consumeTargetPersonID() else { return }
             guard case .success(let urls) = result, !urls.isEmpty else { return }
             Task { @MainActor in await model.addProfileImages(from: urls, for: personID) }
         }
@@ -2534,6 +2530,28 @@ private struct PersonProfilePhotoGallery: View {
                                 .frame(minHeight: 120)
                                 .aspectRatio(1, contentMode: .fill)
                                 .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+
+                            Button(role: .destructive) { onRemove(imageURL) } label: {
+                                Image(systemName: "trash")
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("移除这张图片")
+                            .padding(AppShellLayout.spaceS)
+                        }
+                    } else {
+                        ZStack(alignment: .topTrailing) {
+                            VStack(spacing: AppShellLayout.spaceS) {
+                                Image(systemName: "photo.badge.exclamationmark")
+                                    .font(.system(size: 24, weight: .medium))
+                                Text("图片无法读取")
+                                    .font(AgentChatTypography.meta)
+                            }
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 120)
+                            .aspectRatio(1, contentMode: .fit)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
 
                             Button(role: .destructive) { onRemove(imageURL) } label: {
                                 Image(systemName: "trash")
