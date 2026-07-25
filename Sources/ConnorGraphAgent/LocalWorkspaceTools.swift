@@ -187,7 +187,7 @@ public struct LocalGrepTool: AgentTool {
 
 public struct LocalBashTool: AgentTool {
     public let name = "Bash"
-    public let description = "Execute a non-interactive shell command in the configured local workspace with policy classification, timeout, stdout/stderr capture, and output truncation."
+    public let description = "Execute a focused non-interactive shell command in the configured local workspace with conservative policy classification, timeout, stdout/stderr capture, and output truncation. Prefer dedicated Read, LS, Glob, Grep, Write, Edit, and MultiEdit tools when they express the operation directly. Build, test, formatter, package-manager, and script commands may write caches or artifacts and therefore require workspace-write permission even when they primarily verify code."
     public let permission: AgentPermissionCapability = .runReadOnlyShellCommand
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "command": .string(description: "Shell command to execute."),
@@ -435,15 +435,30 @@ struct LocalShellExecution: Sendable, Equatable {
 
 enum LocalShellExecutor {
     static func run(command: String, workingDirectory: URL, timeoutSeconds: Int, maxOutputBytes: Int) async throws -> LocalShellExecution {
+        let captureDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-shell-capture-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: captureDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: captureDirectory) }
+
+        let stdoutURL = captureDirectory.appendingPathComponent("stdout")
+        let stderrURL = captureDirectory.appendingPathComponent("stderr")
+        guard FileManager.default.createFile(atPath: stdoutURL.path, contents: nil),
+              FileManager.default.createFile(atPath: stderrURL.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
+        let stderrHandle = try FileHandle(forWritingTo: stderrURL)
+        defer {
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
         process.currentDirectoryURL = workingDirectory
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
+        process.standardOutput = stdoutHandle
+        process.standardError = stderrHandle
 
         try process.run()
 
@@ -462,8 +477,10 @@ enum LocalShellExecutor {
         if Date().timeIntervalSince(startedAt) >= timeoutInterval + timeoutLeeway {
             throw LocalWorkspacePolicyError.commandTimedOut(command)
         }
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        try stdoutHandle.close()
+        try stderrHandle.close()
+        let stdoutData = try Data(contentsOf: stdoutURL)
+        let stderrData = try Data(contentsOf: stderrURL)
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
         let truncatedStdout = truncate(stdout, maxBytes: maxOutputBytes)
@@ -480,9 +497,11 @@ enum LocalShellExecutor {
     private static func truncate(_ text: String, maxBytes: Int) -> (text: String, truncated: Bool) {
         let bytes = Array(text.utf8)
         guard bytes.count > maxBytes else { return (text, false) }
-        let prefix = Data(bytes.prefix(maxBytes))
-        let truncated = String(data: prefix, encoding: .utf8) ?? String(decoding: bytes.prefix(maxBytes), as: UTF8.self)
-        return (truncated + "\n[truncated to \(maxBytes) bytes]", true)
+        let headCount = max(maxBytes / 2, 0)
+        let tailCount = max(maxBytes - headCount, 0)
+        let head = String(decoding: bytes.prefix(headCount), as: UTF8.self)
+        let tail = String(decoding: bytes.suffix(tailCount), as: UTF8.self)
+        return (head + "\n[truncated to \(maxBytes) bytes; middle omitted]\n" + tail, true)
     }
 }
 

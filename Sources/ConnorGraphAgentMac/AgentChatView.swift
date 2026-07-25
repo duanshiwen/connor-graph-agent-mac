@@ -303,7 +303,7 @@ private struct AgentBackgroundTaskOverlay: View {
         Group {
             if tasks.isEmpty {
                 ContentUnavailableView("暂无后台任务", systemImage: "tray", description: Text("当前会话还没有后台任务。"))
-                    .frame(minHeight: 260)
+                    .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {

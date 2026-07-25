@@ -50,6 +50,10 @@ public struct AgentTurnActivitySummaryPresentation: Sendable, Equatable {
     public var primaryErrorMessage: String?
     public var eventCount: Int
 
+    public var isWaitingForPermission: Bool {
+        state == .waitingForPermission
+    }
+
     public init(
         state: AgentTurnActivitySummaryState,
         turnNumber: Int,
