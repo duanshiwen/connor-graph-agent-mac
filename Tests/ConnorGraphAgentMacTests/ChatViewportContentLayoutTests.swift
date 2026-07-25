@@ -32,7 +32,7 @@ struct ChatViewportContentLayoutTests {
         #expect(!source.contains("requestPendingInitialAnchorNow"))
     }
 
-    @Test func viewportScrollingIsControlledOnlyByExplicitStateMachineCommands() throws {
+    @Test func viewportDefaultsToBottomWhileStateMachineControlsSubsequentScrolling() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -40,7 +40,7 @@ struct ChatViewportContentLayoutTests {
             .appendingPathComponent("Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
-        #expect(!source.contains(".defaultScrollAnchor(.bottom)"))
+        #expect(source.contains(".defaultScrollAnchor(.bottom)"))
         #expect(source.contains("controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)"))
         #expect(source.contains("controller.isPinnedToBottom"))
     }
