@@ -197,6 +197,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
         registry.registerSessionStatusTools(repository: sessionRepository, governanceConfig: governanceConfig)
+        registry.registerNoteReadTools(repository: AppNoteRepository(store: store))
         if let personalityRuntime {
             registry.registerConnorPersonalityTools(runtime: personalityRuntime, provider: modelProvider)
         }
