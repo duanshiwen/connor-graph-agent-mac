@@ -314,6 +314,15 @@ public struct AppChatSessionRepository: Sendable {
         try? noteProjection?.remove(sessionID: sessionID, deletedAt: deletedAt)
     }
 
+    @discardableResult
+    public func restoreDeletedSession(sessionID: String, now: Date = Date()) throws -> AgentSession {
+        guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        try store.restoreSession(id: sessionID, restoredAt: now)
+        guard let restored = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        synchronizeNoteBestEffort(restored)
+        return restored
+    }
+
     private func synchronizeNoteBestEffort(_ session: AgentSession, origin: NoteOriginKind = .native) {
         try? noteProjection?.synchronize(session: session, origin: origin)
     }

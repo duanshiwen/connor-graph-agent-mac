@@ -154,10 +154,30 @@ public struct NoteSearchHit: Codable, Sendable, Equatable {
     public var originKind: NoteOriginKind
     public var sourceKind: String?
     public var projectionStatus: NoteProjectionStatus
+
+    public init(noteID: String, sessionID: String, title: String, snippet: String, matchedTerms: [String], relevance: Double, createdAt: Date, updatedAt: Date, originKind: NoteOriginKind, sourceKind: String?, projectionStatus: NoteProjectionStatus) {
+        self.noteID = noteID
+        self.sessionID = sessionID
+        self.title = title
+        self.snippet = snippet
+        self.matchedTerms = matchedTerms
+        self.relevance = relevance
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.originKind = originKind
+        self.sourceKind = sourceKind
+        self.projectionStatus = projectionStatus
+    }
 }
 
 public struct NoteSearchPage: Codable, Sendable, Equatable {
     public var records: [NoteSearchHit]
     public var totalItems: Int
     public var health: NoteSearchHealthStatus
+
+    public init(records: [NoteSearchHit], totalItems: Int, health: NoteSearchHealthStatus) {
+        self.records = records
+        self.totalItems = totalItems
+        self.health = health
+    }
 }
