@@ -207,6 +207,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didRequestClaimCorrection = false
                 var didRequestResearchCorrection = false
                 var promotedSkillIdentifiers = Set<String>()
+                let currentTimePreflightPolicy = AgentCurrentTimePreflightPolicy()
+                var didAttemptCurrentTime = false
+                let continuityPreflightPolicy = AgentContinuityPreflightPolicy()
+                var invokedContinuityToolNames = Set<String>()
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -278,6 +282,23 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         if modelResponse.toolCalls.isEmpty {
+                            if currentTimePreflightPolicy.requiresAttempt(
+                                availableTools: toolRegistry.definitions,
+                                didAttempt: didAttemptCurrentTime
+                            ) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: currentTimePreflightPolicy.correctionInstruction()))
+                                continue
+                            }
+                            let missingContinuityTools = continuityPreflightPolicy.missingToolNames(
+                                availableTools: toolRegistry.definitions,
+                                invokedToolNames: invokedContinuityToolNames
+                            )
+                            if let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                continue
+                            }
                             if evidencePolicy.requiresWebResearch(request.userMessage),
                                !didRequestResearchCorrection,
                                let correction = AgentExternalResearchAnswerValidator().correctionInstruction(
@@ -334,10 +355,49 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         var calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
+                        var isCurrentTimePreflightBatch = false
+                        if currentTimePreflightPolicy.requiresAttempt(
+                            availableTools: toolRegistry.definitions,
+                            didAttempt: didAttemptCurrentTime
+                        ) {
+                            guard let currentTimeCall = calls.first(where: {
+                                $0.name == AgentCurrentTimePreflightPolicy.requiredToolName
+                            }) else {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: currentTimePreflightPolicy.correctionInstruction()))
+                                continue
+                            }
+                            // Record the attempt before execution so a real tool failure does
+                            // not block continuity retrieval or unrelated task work.
+                            didAttemptCurrentTime = true
+                            isCurrentTimePreflightBatch = true
+                            calls = [currentTimeCall]
+                        }
+                        let missingContinuityTools = continuityPreflightPolicy.missingToolNames(
+                            availableTools: toolRegistry.definitions,
+                            invokedToolNames: invokedContinuityToolNames
+                        )
+                        if !isCurrentTimePreflightBatch && !missingContinuityTools.isEmpty {
+                            let continuityCalls = calls.filter {
+                                AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
+                            }
+                            if continuityCalls.isEmpty,
+                               let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                continue
+                            }
+                            // Let the model observe continuity results before it chooses or
+                            // repeats task-specific calls that may depend on personal context.
+                            calls = continuityCalls
+                        }
                         for index in calls.indices {
                             calls[index].runID = run.id
                             calls[index].sessionID = run.sessionID
                         }
+                        invokedContinuityToolNames.formUnion(
+                            calls.map(\.name).filter(AgentContinuityPreflightPolicy.requiredToolNames.contains)
+                        )
                         logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
 
                         messages.append(AgentModelMessage(
@@ -393,7 +453,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             if batchResult.result.error == nil {
                                 consecutiveToolResultErrors = 0
-                            } else {
+                            } else if batchResult.call.name != AgentCurrentTimePreflightPolicy.requiredToolName {
                                 consecutiveToolResultErrors += 1
                             }
                             messages.append(AgentModelMessage(
@@ -402,6 +462,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
+                        }
+
+                        let stillMissingContinuityTools = continuityPreflightPolicy.missingToolNames(
+                            availableTools: toolRegistry.definitions,
+                            invokedToolNames: invokedContinuityToolNames
+                        )
+                        if let correction = continuityPreflightPolicy.correctionInstruction(for: stillMissingContinuityTools) {
+                            messages.append(AgentModelMessage(role: .system, content: correction))
                         }
 
                         let reachedToolErrorLimit = configuration.maxConsecutiveToolResultErrors > 0

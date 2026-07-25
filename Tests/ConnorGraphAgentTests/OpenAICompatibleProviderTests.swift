@@ -148,7 +148,7 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     let requestJSON = try #require(client.captured?.body)
     let requestText = String(data: requestJSON, encoding: .utf8) ?? ""
     #expect(requestText.contains("gpt-test"))
-    #expect(requestText.contains("You are 康纳同学 (Connor), a personal AI assistant for everyday work and life."))
+    #expect(requestText.contains("You are 康纳同学 (Connor), a general-purpose personal Agent with persistent memory and a user-configurable personality."))
     #expect(requestText.contains("Connor Graph Agent") == false)
     #expect(requestText.contains("How should memory work?"))
     #expect(!requestText.contains("Graph memory context"))
