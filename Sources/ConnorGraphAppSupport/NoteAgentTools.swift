@@ -32,7 +32,7 @@ public struct NoteSearchToolResponse: Codable, Sendable, Equatable {
 
 public struct NoteSearchTool: AgentTool {
     public let name = "note_search"
-    public let description = "Search the independent local Note index using compact topic keywords, entity names, or a subject phrase. Results are summary-level candidates, never full-note evidence. Copy an exact records[].noteID into note_get when full content is needed. An empty query explicitly pages through all indexed Notes. startDate is inclusive and endDate is exclusive over the Note Session's source updated time. page is a 1-based JSON integer and defaults to 1; follow exact nextPage values without changing filters. The response always includes the complete pagination envelope and index health."
+    public let description = "Search the independent local Note index using compact topic keywords, entity names, or a subject phrase. Results are summary-level candidates, never full-note evidence. Copy an exact records[].noteID into note_get when full content is needed. An empty query explicitly pages through all indexed Notes. startDate is inclusive and endDate is exclusive over the Note Session's source updated time. page is a 1-based JSON integer and defaults to 1; follow exact nextPage values without changing filters. The response always includes the complete pagination envelope and index health. pageSize is runtime-controlled response metadata, not an input parameter."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "query": .string(description: "Compact lexical topic/entity terms. Pass an empty string for an explicit all-Note query."),
