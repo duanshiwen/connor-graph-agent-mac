@@ -100,8 +100,9 @@ struct AgentMarkdownPreviewText: View {
 
     private var documentLoadID: String {
         let contentID = AgentMarkdownDocumentCompiler.stableFingerprint(markdown)
-        guard let persistentCacheContext else { return contentID }
-        return "\(persistentCacheContext.sessionID)|\(persistentCacheContext.messageID)|\(contentID)"
+        let expansionID = "deferred:\(allowsDeferredPreview)"
+        guard let persistentCacheContext else { return "\(contentID)|\(expansionID)" }
+        return "\(persistentCacheContext.sessionID)|\(persistentCacheContext.messageID)|\(contentID)|\(expansionID)"
     }
 
     private func renderWindow(for document: AgentMarkdownCompiledDocument) -> AgentMarkdownCompiledRenderWindow {
@@ -144,20 +145,12 @@ struct AgentMarkdownPreviewText: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             case .deferredPreview:
-                VStack(alignment: .leading, spacing: 7) {
-                    inlineText(lightweightInlineRendered, font: font, nativeFont: bodyNSFont)
-                        .lineLimit(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("内容较长，已先显示轻量预览以保持界面响应。")
-                        .font(secondaryFont)
-                        .foregroundStyle(.secondary)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+                deferredPreviewView(statusText: "内容较长，已先显示轻量预览以保持界面响应。")
             case .compiledDocument:
                 if let loadedDocument, loadedDocument.source == markdown {
                     compiledDocumentView(loadedDocument)
+                } else if markdown.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold {
+                    deferredPreviewView(statusText: "正在展开完整内容…", showsProgress: true)
                 } else {
                     Color.clear
                         .frame(height: bodyPointSize ?? 17)
@@ -180,6 +173,27 @@ struct AgentMarkdownPreviewText: View {
             guard !Task.isCancelled, document.source == markdown else { return }
             loadedDocument = document
         }
+    }
+
+    private func deferredPreviewView(statusText: String, showsProgress: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            inlineText(lightweightInlineRendered, font: font, nativeFont: bodyNSFont)
+                .lineLimit(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                if showsProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .frame(width: 12, height: 12)
+                }
+                Text(statusText)
+                    .font(secondaryFont)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
     }
 
     private func compiledDocumentView(_ document: AgentMarkdownCompiledDocument) -> some View {
