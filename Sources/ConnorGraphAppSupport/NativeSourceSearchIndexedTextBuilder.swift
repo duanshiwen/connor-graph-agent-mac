@@ -2,16 +2,23 @@ import Foundation
 import ConnorGraphCore
 
 public enum NativeSourceSearchIndexedTextBuilder {
+    public static func searchableText(title: String, summary: String = "", body: String) -> String {
+        searchableText(parts: [title, summary, body])
+    }
+
     public static func searchableText(for document: NativeSearchDocument) -> String {
-        let rawParts = [
+        searchableText(parts: [
             document.title,
             document.summary,
             document.participants.joined(separator: " "),
             document.location ?? "",
             document.body ?? "",
             document.metadata.values.joined(separator: " ")
-        ]
-        let raw = rawParts
+        ])
+    }
+
+    private static func searchableText(parts: [String]) -> String {
+        let raw = parts
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: " ")
         let cjk = cjkIndexTerms(in: raw).joined(separator: " ")

@@ -687,6 +687,21 @@ final class AppRuntimeLifecycle {
             let chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
             self.chatSessionRepository = chatSessionRepository
             self.activityTimelineCacheWriter = ActivityTimelineCacheWriter(persistor: chatSessionRepository)
+            let noteRepository = AppNoteRepository(store: repository.store)
+            Task.detached(priority: .utility) {
+                let projectionReconciler = NoteProjectionReconciler(repository: noteRepository)
+                var projectionResult = await projectionReconciler.reconcile()
+                while projectionResult.hasMore && projectionResult.failed == 0 && !Task.isCancelled {
+                    await Task.yield()
+                    projectionResult = await projectionReconciler.reconcile()
+                }
+                let indexReconciler = NoteIndexReconciler(repository: noteRepository)
+                var indexResult = await indexReconciler.reconcile()
+                while indexResult.hasMore && indexResult.failed == 0 && !Task.isCancelled {
+                    await Task.yield()
+                    indexResult = await indexReconciler.reconcile()
+                }
+            }
         }
         if startupMode == .deferred || injectedMemoryOSStore != nil || injectedMemoryOSFacade != nil || injectedMemoryOSInitializationError != nil {
             self.memoryOSStore = injectedMemoryOSStore

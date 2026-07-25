@@ -66,11 +66,13 @@ public struct AppChatSessionRepository: Sendable {
     public var store: SQLiteGraphKernelStore
     public var storagePaths: AppStoragePaths?
     public var governanceConfig: AppSessionGovernanceConfig
+    public var noteProjection: (any NoteProjectionSynchronizing)?
 
-    public init(store: SQLiteGraphKernelStore, storagePaths: AppStoragePaths? = nil, governanceConfig: AppSessionGovernanceConfig = .default) {
+    public init(store: SQLiteGraphKernelStore, storagePaths: AppStoragePaths? = nil, governanceConfig: AppSessionGovernanceConfig = .default, noteProjection: (any NoteProjectionSynchronizing)? = nil, noteProjectionEnabled: Bool = true) {
         self.store = store
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
+        self.noteProjection = noteProjection ?? (noteProjectionEnabled ? AppNoteProjectionService(repository: AppNoteRepository(store: store)) : nil)
     }
 
     public func loadRecentSessions(limit: Int = 50, includeArchived: Bool = true) throws -> [AgentSession] {
@@ -166,6 +168,7 @@ public struct AppChatSessionRepository: Sendable {
     @discardableResult
     public func persistNewSession(_ session: AgentSession) throws -> AgentSessionArtifactDirectories? {
         try store.upsertSession(session)
+        synchronizeNoteBestEffort(session)
         return try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
     }
 
@@ -196,7 +199,9 @@ public struct AppChatSessionRepository: Sendable {
             }
             existing.governance.kind = .note
             existing.updatedAt = max(existing.updatedAt, createdAt)
-            return try saveSession(existing)
+            let saved = try saveSession(existing)
+            synchronizeNoteBestEffort(saved, origin: .imported)
+            return saved
         }
         var governance = AgentSessionGovernanceMetadata.default
         governance.kind = .note
@@ -210,6 +215,7 @@ public struct AppChatSessionRepository: Sendable {
         )
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+        synchronizeNoteBestEffort(session, origin: .imported)
         return session
     }
 
@@ -250,6 +256,7 @@ public struct AppChatSessionRepository: Sendable {
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
         try prewarmMarkdownRenderCacheIfNeeded(for: session, previousMessageCount: previousMessageCount)
+        synchronizeNoteBestEffort(session)
         return session
     }
 
@@ -289,6 +296,7 @@ public struct AppChatSessionRepository: Sendable {
         session.title = title
         session.updatedAt = now
         try store.upsertSession(session)
+        synchronizeNoteBestEffort(session)
         try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_title_changed", message: "Session title changed", metadata: ["title": title])
         return session
     }
@@ -301,7 +309,22 @@ public struct AppChatSessionRepository: Sendable {
         guard !hasActiveBackgroundTasks else {
             throw AppChatSessionRepositoryError.sessionHasRunningBackgroundTasks(sessionID)
         }
-        try store.deleteSession(id: sessionID)
+        let deletedAt = Date()
+        try store.deleteSession(id: sessionID, deletedAt: deletedAt)
+        try? noteProjection?.remove(sessionID: sessionID, deletedAt: deletedAt)
+    }
+
+    @discardableResult
+    public func restoreDeletedSession(sessionID: String, now: Date = Date()) throws -> AgentSession {
+        guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        try store.restoreSession(id: sessionID, restoredAt: now)
+        guard let restored = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        synchronizeNoteBestEffort(restored)
+        return restored
+    }
+
+    private func synchronizeNoteBestEffort(_ session: AgentSession, origin: NoteOriginKind = .native) {
+        try? noteProjection?.synchronize(session: session, origin: origin)
     }
 
     public func loadBackgroundTasks(sessionID: String, limit: Int? = nil) throws -> [PersistedSessionBackgroundTask] {

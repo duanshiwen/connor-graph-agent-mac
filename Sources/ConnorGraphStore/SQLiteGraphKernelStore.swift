@@ -161,6 +161,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "graph_anomalies",
         "graph_jobs_v3",
         "agent_sessions",
+        "notes",
+        "note_projection_tombstones",
+        "note_projection_claims",
+        "note_search_docs",
+        "note_search_fts",
         "session_background_tasks",
         "agent_runs",
         "agent_events",
@@ -183,6 +188,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_agent_sessions_updated",
         "idx_agent_sessions_updated_page",
         "idx_agent_sessions_governance",
+        "idx_notes_source_message",
+        "idx_notes_projection_queue",
         "idx_session_background_tasks_session",
         "idx_session_background_tasks_status",
         "idx_agent_events_run",
@@ -434,6 +441,80 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_session_messages_id ON agent_session_messages(session_id, message_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_session_messages_page ON agent_session_messages(session_id, position DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL UNIQUE,
+            source_message_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            source_updated_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            index_version INTEGER NOT NULL DEFAULT 0,
+            projection_status TEXT NOT NULL DEFAULT 'pending',
+            indexed_at TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            next_retry_at TEXT,
+            last_error_code TEXT,
+            origin_kind TEXT NOT NULL DEFAULT 'native',
+            import_item_id TEXT,
+            import_source_id TEXT,
+            source_kind TEXT,
+            source_identity TEXT,
+            external_id TEXT,
+            relative_path TEXT,
+            source_created_at TEXT,
+            lease_owner TEXT,
+            lease_expires_at TEXT
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_notes_source_message ON notes(source_message_id);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_notes_projection_queue ON notes(projection_status, next_retry_at, lease_expires_at, updated_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_notes_index_version ON notes(index_version, indexed_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_notes_import_item ON notes(import_item_id) WHERE import_item_id IS NOT NULL;")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS note_projection_tombstones (
+            note_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL UNIQUE,
+            deleted_at TEXT NOT NULL
+        );
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS note_projection_claims (
+            session_id TEXT PRIMARY KEY,
+            lease_owner TEXT NOT NULL,
+            lease_expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_note_projection_claims_expiry ON note_projection_claims(lease_expires_at);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS note_search_docs (
+            note_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            origin_kind TEXT NOT NULL,
+            source_kind TEXT,
+            projection_status TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            index_version INTEGER NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_note_search_docs_updated ON note_search_docs(updated_at DESC, note_id ASC);")
+        try execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS note_search_fts USING fts5(
+            note_id UNINDEXED,
+            title,
+            body,
+            indexed_text,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
+        """)
         try execute("""
         INSERT OR IGNORE INTO agent_session_messages (session_id, position, message_id, message_json)
         SELECT session.id, CAST(message.key AS INTEGER), json_extract(message.value, '$.id'), message.value
@@ -937,6 +1018,246 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SET deleted_at = COALESCE(deleted_at, \(quote(iso(deletedAt)))), updated_at = \(quote(iso(deletedAt)))
         WHERE id = \(quote(id));
         """)
+    }
+
+    public func restoreSession(id: String, restoredAt: Date = Date()) throws {
+        try execute("""
+        UPDATE agent_sessions SET deleted_at = NULL, updated_at = \(quote(iso(restoredAt)))
+        WHERE id = \(quote(id));
+        """)
+    }
+
+    // MARK: - Note Projection
+
+    public func upsertNote(_ note: NoteRecord) throws {
+        try execute("""
+        INSERT INTO notes
+        (id, session_id, source_message_id, title, body, content_hash, source_updated_at, created_at, updated_at,
+         index_version, projection_status, indexed_at, failure_count, next_retry_at, last_error_code, origin_kind,
+         import_item_id, import_source_id, source_kind, source_identity, external_id, relative_path, source_created_at,
+         lease_owner, lease_expires_at)
+        VALUES (\(quote(note.id)), \(quote(note.sessionID)), \(quote(note.sourceMessageID)), \(quote(note.title)),
+         \(quote(note.body)), \(quote(note.contentHash)), \(quote(iso(note.sourceUpdatedAt))), \(quote(iso(note.createdAt))),
+         \(quote(iso(note.updatedAt))), \(note.indexVersion), \(quote(note.projectionStatus.rawValue)),
+         \(quote(note.indexedAt.map(iso))), \(note.failureCount), \(quote(note.nextRetryAt.map(iso))),
+         \(quote(note.lastErrorCode)), \(quote(note.originKind.rawValue)), \(quote(note.importItemID)),
+         \(quote(note.importSourceID)), \(quote(note.sourceKind)), \(quote(note.sourceIdentity)), \(quote(note.externalID)),
+         \(quote(note.relativePath)), \(quote(note.sourceCreatedAt.map(iso))), \(quote(note.leaseOwner)),
+         \(quote(note.leaseExpiresAt.map(iso))))
+        ON CONFLICT(session_id) DO UPDATE SET
+          source_message_id=excluded.source_message_id, title=excluded.title, body=excluded.body,
+          content_hash=excluded.content_hash, source_updated_at=excluded.source_updated_at, updated_at=excluded.updated_at,
+          index_version=excluded.index_version, projection_status=excluded.projection_status, indexed_at=excluded.indexed_at,
+          failure_count=excluded.failure_count, next_retry_at=excluded.next_retry_at, last_error_code=excluded.last_error_code,
+          origin_kind=excluded.origin_kind, import_item_id=COALESCE(excluded.import_item_id, notes.import_item_id),
+          import_source_id=COALESCE(excluded.import_source_id, notes.import_source_id),
+          source_kind=COALESCE(excluded.source_kind, notes.source_kind),
+          source_identity=COALESCE(excluded.source_identity, notes.source_identity),
+          external_id=COALESCE(excluded.external_id, notes.external_id),
+          relative_path=COALESCE(excluded.relative_path, notes.relative_path),
+          source_created_at=COALESCE(excluded.source_created_at, notes.source_created_at),
+          lease_owner=excluded.lease_owner, lease_expires_at=excluded.lease_expires_at;
+        DELETE FROM note_projection_tombstones WHERE session_id = \(quote(note.sessionID));
+        """)
+    }
+
+    public func note(id: String) throws -> NoteRecord? {
+        try noteRows(whereClause: "id = \(quote(id))", limit: 1).first
+    }
+
+    public func note(sessionID: String) throws -> NoteRecord? {
+        try noteRows(whereClause: "session_id = \(quote(sessionID))", limit: 1).first
+    }
+
+    public func notes(ids: [String]) throws -> [NoteRecord] {
+        guard !ids.isEmpty else { return [] }
+        return try noteRows(whereClause: "id IN (\(ids.map(quote).joined(separator: ",")))", limit: ids.count)
+    }
+
+    public func deleteNote(sessionID: String, deletedAt: Date = Date()) throws {
+        try execute("""
+        INSERT OR REPLACE INTO note_projection_tombstones(note_id, session_id, deleted_at)
+        SELECT id, session_id, \(quote(iso(deletedAt))) FROM notes WHERE session_id = \(quote(sessionID));
+        DELETE FROM note_search_fts WHERE note_id IN (SELECT note_id FROM note_search_docs WHERE session_id = \(quote(sessionID)));
+        DELETE FROM note_search_docs WHERE session_id = \(quote(sessionID));
+        DELETE FROM notes WHERE session_id = \(quote(sessionID));
+        """)
+    }
+
+    public func isNoteDeleted(id: String) throws -> Bool {
+        try !query(sql: "SELECT 1 FROM note_projection_tombstones WHERE note_id = \(quote(id)) LIMIT 1").isEmpty
+    }
+
+    public func attachNoteImportMetadata(sessionID: String, metadata: NoteImportProjectionMetadata) throws {
+        try execute("""
+        UPDATE notes SET origin_kind = 'imported', import_item_id = \(quote(metadata.itemID)),
+          import_source_id = \(quote(metadata.sourceID)), source_kind = \(quote(metadata.sourceKind)),
+          source_identity = \(quote(metadata.sourceIdentity)), external_id = \(quote(metadata.externalID)),
+          relative_path = \(quote(metadata.relativePath)), source_created_at = \(quote(metadata.sourceCreatedAt.map(iso))),
+          index_version = 0, indexed_at = NULL, projection_status = 'projected'
+        WHERE session_id = \(quote(sessionID));
+        """)
+    }
+
+    public func noteProjectionCandidates(afterSessionID: String? = nil, limit: Int = 25) throws -> [NoteProjectionCandidate] {
+        let cursor = afterSessionID.map { "AND s.id > \(quote($0))" } ?? ""
+        return try query(sql: """
+        SELECT s.id, s.title, m.message_id, m.message_json, s.created_at, s.updated_at
+        FROM agent_sessions s
+        JOIN agent_session_messages m ON m.session_id = s.id AND m.position = 0
+        LEFT JOIN notes n ON n.session_id = s.id
+        WHERE s.kind = 'note' AND s.deleted_at IS NULL \(cursor)
+          AND (n.session_id IS NULL OR n.source_message_id != m.message_id OR n.title != s.title
+               OR n.source_updated_at != s.updated_at OR n.projection_status IN ('failed', 'cleanup_required'))
+        ORDER BY s.id ASC LIMIT \(min(max(limit, 1), 100))
+        """).map { row in
+            NoteProjectionCandidate(
+                sessionID: row[0], title: row[1], sourceMessageID: row[2], messageJSON: row[3],
+                createdAt: try date(row[4]), updatedAt: try date(row[5])
+            )
+        }
+    }
+
+    public func claimNoteProjection(sessionID: String, owner: String, now: Date = Date(), leaseDuration: TimeInterval = 120) throws -> Bool {
+        try withDatabaseLock {
+            try execute("""
+            INSERT INTO note_projection_claims(session_id, lease_owner, lease_expires_at, updated_at)
+            VALUES (\(quote(sessionID)), \(quote(owner)), \(quote(iso(now.addingTimeInterval(leaseDuration)))), \(quote(iso(now))))
+            ON CONFLICT(session_id) DO UPDATE SET lease_owner=excluded.lease_owner,
+              lease_expires_at=excluded.lease_expires_at, updated_at=excluded.updated_at
+            WHERE note_projection_claims.lease_expires_at <= \(quote(iso(now))) OR note_projection_claims.lease_owner = \(quote(owner));
+            """)
+            return sqlite3_changes(db) == 1
+        }
+    }
+
+    public func releaseNoteProjection(sessionID: String, owner: String) throws {
+        try execute("DELETE FROM note_projection_claims WHERE session_id = \(quote(sessionID)) AND lease_owner = \(quote(owner));")
+    }
+
+    public func orphanedNoteSessionIDs(limit: Int = 25) throws -> [String] {
+        try query(sql: """
+        SELECT n.session_id FROM notes n LEFT JOIN agent_sessions s ON s.id = n.session_id
+        WHERE s.id IS NULL OR s.deleted_at IS NOT NULL OR s.kind != 'note'
+        ORDER BY n.session_id ASC LIMIT \(min(max(limit, 1), 100))
+        """).compactMap(\.first)
+    }
+
+    public func notesNeedingIndex(version: Int, limit: Int = 25) throws -> [NoteRecord] {
+        try noteRows(whereClause: "projection_status != 'failed' AND (index_version != \(version) OR indexed_at IS NULL OR id NOT IN (SELECT note_id FROM note_search_docs)) ORDER BY updated_at ASC", limit: min(max(limit, 1), 100))
+    }
+
+    public func upsertNoteSearchDocument(_ note: NoteRecord, indexedText: String, indexVersion: Int, indexedAt: Date = Date()) throws {
+        try withDatabaseLock {
+            try execute("BEGIN IMMEDIATE;")
+            do {
+                try execute("""
+                INSERT INTO note_search_docs(note_id, session_id, title, body, created_at, updated_at, origin_kind,
+                  source_kind, projection_status, content_hash, index_version)
+                VALUES (\(quote(note.id)), \(quote(note.sessionID)), \(quote(note.title)), \(quote(note.body)),
+                  \(quote(iso(note.createdAt))), \(quote(iso(note.sourceUpdatedAt))), \(quote(note.originKind.rawValue)),
+                  \(quote(note.sourceKind)), 'indexed', \(quote(note.contentHash)), \(indexVersion))
+                ON CONFLICT(note_id) DO UPDATE SET session_id=excluded.session_id, title=excluded.title, body=excluded.body,
+                  created_at=excluded.created_at, updated_at=excluded.updated_at, origin_kind=excluded.origin_kind,
+                  source_kind=excluded.source_kind, projection_status=excluded.projection_status,
+                  content_hash=excluded.content_hash, index_version=excluded.index_version;
+                DELETE FROM note_search_fts WHERE note_id = \(quote(note.id));
+                INSERT INTO note_search_fts(note_id, title, body, indexed_text)
+                  VALUES (\(quote(note.id)), \(quote(note.title)), \(quote(note.body)), \(quote(indexedText)));
+                UPDATE notes SET index_version = \(indexVersion), projection_status = 'indexed',
+                  indexed_at = \(quote(iso(indexedAt))), updated_at = \(quote(iso(indexedAt))),
+                  failure_count = 0, next_retry_at = NULL, last_error_code = NULL
+                WHERE id = \(quote(note.id));
+                """)
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
+    public func searchNotes(matchQuery: String?, matchedTerms: [String], startDate: Date?, endDate: Date?, originKind: NoteOriginKind?, page: Int, pageSize: Int) throws -> NoteSearchPage {
+        var filters: [String] = []
+        if let startDate { filters.append("d.updated_at >= \(quote(iso(startDate)))") }
+        if let endDate { filters.append("d.updated_at < \(quote(iso(endDate)))") }
+        if let originKind { filters.append("d.origin_kind = \(quote(originKind.rawValue))") }
+        let whereFilter = filters.isEmpty ? "" : " AND " + filters.joined(separator: " AND ")
+        let countSQL: String
+        let rowsSQL: String
+        let offset = (page - 1) * pageSize
+        if let matchQuery, !matchQuery.isEmpty {
+            countSQL = "SELECT COUNT(*) FROM note_search_fts f JOIN note_search_docs d ON d.note_id=f.note_id WHERE note_search_fts MATCH \(quote(matchQuery))\(whereFilter)"
+            rowsSQL = """
+            SELECT d.note_id, d.session_id, d.title, snippet(note_search_fts, 2, '', '', '...', 32), d.body,
+                   -bm25(note_search_fts, 0.0, 5.0, 1.0, 0.5), d.created_at, d.updated_at,
+                   d.origin_kind, d.source_kind, d.projection_status
+            FROM note_search_fts f JOIN note_search_docs d ON d.note_id=f.note_id
+            WHERE note_search_fts MATCH \(quote(matchQuery))\(whereFilter)
+            ORDER BY bm25(note_search_fts, 0.0, 5.0, 1.0, 0.5) ASC, d.updated_at DESC, d.note_id ASC
+            LIMIT \(pageSize) OFFSET \(offset)
+            """
+        } else {
+            let plainWhere = filters.isEmpty ? "" : " WHERE " + filters.map { $0.replacingOccurrences(of: "d.", with: "") }.joined(separator: " AND ")
+            countSQL = "SELECT COUNT(*) FROM note_search_docs\(plainWhere)"
+            rowsSQL = """
+            SELECT d.note_id, d.session_id, d.title, substr(d.body, 1, 240), d.body, 0, d.created_at, d.updated_at,
+                   d.origin_kind, d.source_kind, d.projection_status
+            FROM note_search_docs d\(filters.isEmpty ? "" : " WHERE " + filters.joined(separator: " AND "))
+            ORDER BY d.updated_at DESC, d.note_id ASC LIMIT \(pageSize) OFFSET \(offset)
+            """
+        }
+        let total = Int(try query(sql: countSQL).first?.first ?? "0") ?? 0
+        let records = try query(sql: rowsSQL).map { row in
+            guard let origin = NoteOriginKind(rawValue: row[8]), let status = NoteProjectionStatus(rawValue: row[10]) else {
+                throw SQLiteGraphKernelStoreError.decodeFailed("Invalid note search row")
+            }
+            return NoteSearchHit(noteID: row[0], sessionID: row[1], title: row[2],
+                snippet: Self.noteSnippet(body: row[4], fallback: row[3], matchedTerms: matchedTerms),
+                matchedTerms: matchedTerms, relevance: Double(row[5]) ?? 0, createdAt: try date(row[6]),
+                updatedAt: try date(row[7]), originKind: origin, sourceKind: nilIfEmpty(row[9]), projectionStatus: status)
+        }
+        let health: NoteSearchHealthStatus = (try notesNeedingIndex(version: 1, limit: 1)).isEmpty ? .available : .backfilling
+        return NoteSearchPage(records: records, totalItems: total, health: health)
+    }
+
+    private static func noteSnippet(body: String, fallback: String, matchedTerms: [String], limit: Int = 240) -> String {
+        guard let range = matchedTerms.lazy.compactMap({ body.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) }).first else {
+            return String(fallback.prefix(limit))
+        }
+        let matchOffset = body.distance(from: body.startIndex, to: range.lowerBound)
+        let startOffset = max(0, matchOffset - limit / 3)
+        let endOffset = min(body.count, startOffset + limit)
+        let start = body.index(body.startIndex, offsetBy: startOffset)
+        let end = body.index(body.startIndex, offsetBy: endOffset)
+        return String(body[start..<end])
+    }
+
+    private func noteRows(whereClause: String, limit: Int) throws -> [NoteRecord] {
+        try query(sql: """
+        SELECT id, session_id, source_message_id, title, body, content_hash, source_updated_at, created_at, updated_at,
+               index_version, projection_status, indexed_at, failure_count, next_retry_at, last_error_code, origin_kind,
+               import_item_id, import_source_id, source_kind, source_identity, external_id, relative_path,
+               source_created_at, lease_owner, lease_expires_at
+        FROM notes WHERE \(whereClause) LIMIT \(max(limit, 0))
+        """).map(decodeNote)
+    }
+
+    private func decodeNote(_ row: [String]) throws -> NoteRecord {
+        guard row.count == 25,
+              let status = NoteProjectionStatus(rawValue: row[10]), let origin = NoteOriginKind(rawValue: row[15]) else {
+            throw SQLiteGraphKernelStoreError.decodeFailed("Invalid note projection row")
+        }
+        func optional(_ index: Int) -> String? { row[index].isEmpty ? nil : row[index] }
+        return NoteRecord(
+            id: row[0], sessionID: row[1], sourceMessageID: row[2], title: row[3], body: row[4], contentHash: row[5],
+            sourceUpdatedAt: try date(row[6]), createdAt: try date(row[7]), updatedAt: try date(row[8]),
+            indexVersion: Int(row[9]) ?? 0, projectionStatus: status, indexedAt: try optionalDate(row[11]),
+            failureCount: Int(row[12]) ?? 0, nextRetryAt: try optionalDate(row[13]), lastErrorCode: optional(14),
+            originKind: origin, importItemID: optional(16), importSourceID: optional(17), sourceKind: optional(18),
+            sourceIdentity: optional(19), externalID: optional(20), relativePath: optional(21),
+            sourceCreatedAt: try optionalDate(row[22]), leaseOwner: optional(23), leaseExpiresAt: try optionalDate(row[24])
+        )
     }
 
     public func upsertSessionBackgroundTask(_ task: PersistedSessionBackgroundTask) throws {

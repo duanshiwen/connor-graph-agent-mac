@@ -36,6 +36,7 @@ public enum AgentToolDisplayNameResolver {
         "bash": "执行终端命令", "write": "写入文件", "edit": "编辑文件", "multiedit": "批量编辑文件",
         "get_current_time": "获取当前时间", "time_analyze_ranges": "分析时间范围",
         "graph_search": "搜索知识图谱", "browser_fetch": "读取浏览器页面", "web_search": "搜索网页", "web_fetch": "读取网页内容",
+        "note_search": "搜索笔记", "note_get": "读取笔记详情",
         "browser_history_search": "搜索浏览历史", "browser_history_get": "读取浏览记录",
         "generate_image": "生成图片", "edit_image": "编辑图片",
         "connor_skill_activate": "启用技能", "connor_skill_list": "查看可用技能", "skill_list": "查看可用技能",

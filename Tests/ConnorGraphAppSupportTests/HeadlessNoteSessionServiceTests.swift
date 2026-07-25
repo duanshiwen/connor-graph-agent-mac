@@ -35,6 +35,7 @@ struct HeadlessNoteSessionServiceTests {
         let session = try await service.createNoteSession(title: "Imported")
         #expect(session.governance.kind == .note)
         #expect(try fixture.repository.loadSession(id: session.id)?.title == "Imported")
+        #expect(try AppNoteRepository(store: fixture.repository.store).note(sessionID: session.id) == nil)
     }
 
     @Test("Creates an imported note with its first message in one operation")
@@ -62,6 +63,16 @@ struct HeadlessNoteSessionServiceTests {
         #expect(loaded.messages.count == 1)
         #expect(loaded.messages[0].content == "# Original note")
         #expect(loaded.messages[0].attachments.map { $0.id } == ["attachment"])
+        let note = try #require(try AppNoteRepository(store: fixture.repository.store).note(sessionID: session.id))
+        #expect(note.body == "# Original note")
+        #expect(note.originKind == .imported)
+        await service.associateImportedNote(sessionID: session.id, metadata: NoteImportProjectionMetadata(
+            itemID: "item", sourceID: "source", sourceKind: "markdown_folder", sourceIdentity: "note.md",
+            relativePath: "note.md", sourceCreatedAt: Date(timeIntervalSince1970: 100)
+        ))
+        let associated = try #require(try AppNoteRepository(store: fixture.repository.store).note(sessionID: session.id))
+        #expect(associated.importItemID == "item")
+        #expect(associated.relativePath == "note.md")
     }
 
     @Test("Persists display prompt while sending augmented note instructions to backend")

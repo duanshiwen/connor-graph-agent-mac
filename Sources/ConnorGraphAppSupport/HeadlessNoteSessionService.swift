@@ -80,6 +80,14 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         )
     }
 
+    public func associateImportedNote(sessionID: String, metadata: NoteImportProjectionMetadata) {
+        let noteRepository = AppNoteRepository(store: repository.store)
+        try? noteRepository.attachImportMetadata(sessionID: sessionID, metadata: metadata)
+        if let note = try? noteRepository.note(sessionID: sessionID) {
+            try? NoteSearchService(repository: noteRepository).index(note)
+        }
+    }
+
     @discardableResult
     public func trimMessagesAfterImportedNote(sessionID: String, messageID: String) throws -> AgentSession {
         try repository.trimMessagesAfterImportedNote(sessionID: sessionID, messageID: messageID)
