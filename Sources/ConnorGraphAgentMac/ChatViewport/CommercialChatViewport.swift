@@ -63,7 +63,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         }
                     )
                 }
-                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
                 .background(
                     GeometryReader { geometry in
