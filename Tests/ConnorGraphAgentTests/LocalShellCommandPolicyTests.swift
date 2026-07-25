@@ -6,8 +6,18 @@ import ConnorGraphAgent
     #expect(LocalShellCommandPolicy.classify("pwd").risk == .readOnly)
     #expect(LocalShellCommandPolicy.classify("git status --short").risk == .readOnly)
     #expect(LocalShellCommandPolicy.classify("mkdir Sources").risk == .workspaceWrite)
+    #expect(LocalShellCommandPolicy.classify("swift test --filter ParserTests").risk == .workspaceWrite)
+    #expect(LocalShellCommandPolicy.classify("xcodebuild test -scheme Connor").risk == .workspaceWrite)
     #expect(LocalShellCommandPolicy.classify("curl https://example.com").risk == .network)
     #expect(LocalShellCommandPolicy.classify("sudo rm -rf /").risk == .destructive)
+}
+
+@Test func shellCommandPolicyDoesNotTrustAReadOnlyLeadingCommand() {
+    #expect(LocalShellCommandPolicy.classify("git status && touch changed.txt").risk == .workspaceWrite)
+    #expect(LocalShellCommandPolicy.classify("git status; curl https://example.com").risk == .network)
+    #expect(LocalShellCommandPolicy.classify("git status && sudo rm -rf /").risk == .destructive)
+    #expect(LocalShellCommandPolicy.classify("git status && unknown-command").risk == .unknown)
+    #expect(LocalShellCommandPolicy.classify("git status > status.txt").risk == .unknown)
 }
 
 @Test func bashToolExecutesReadOnlyCommandInWorkspace() async throws {
@@ -47,6 +57,22 @@ import ConnorGraphAgent
             context: .shellToolTestContext(toolCallID: "bash-timeout")
         )
     }
+}
+
+@Test func bashToolDrainsLargeOutputWithoutDeadlockingAndPreservesTheTail() async throws {
+    let workspace = try makeShellTempWorkspace()
+    let tool = LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace, maxToolOutputBytes: 4_096))
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"command":"printf 'BEGIN\\n'; yes x | head -c 200000; printf '\\nEND\\n'","timeoutSeconds":10}"#),
+        context: .shellToolTestContext(toolCallID: "bash-large-output")
+    )
+
+    #expect(result.error == nil)
+    #expect(result.contentText.contains("BEGIN"))
+    #expect(result.contentText.contains("END"))
+    #expect(result.contentText.contains("middle omitted"))
+    #expect(result.contentJSON?.contains(#""truncated":true"#) == true)
 }
 
 private func makeShellTempWorkspace(_ name: String = UUID().uuidString) throws -> URL {

@@ -109,6 +109,23 @@ import ConnorGraphAgent
     #expect(prompt.contains("Personality may shape presentation"))
 }
 
+@Test func defaultSystemPromptDefinesAProgrammingWorkLoopWithoutAffectingEverydayTasks() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Programming and Precision Work"))
+    #expect(prompt.contains("distinguish whether the user asked to explain, review, diagnose, or change code"))
+    #expect(prompt.contains("but not code changes unless the user also requested a fix or implementation"))
+    #expect(prompt.contains("inspect applicable repository instructions, the current working-tree state"))
+    #expect(prompt.contains("Preserve unrelated user changes"))
+    #expect(prompt.contains("Build a bounded model of the affected behavior with targeted search and selective file reads"))
+    #expect(prompt.contains("complete all logically related edits before verification"))
+    #expect(prompt.contains("run one consolidated final verification pass using the smallest meaningful check"))
+    #expect(prompt.contains("Treat compiler, test, lint, and tool output as ground truth"))
+    #expect(prompt.contains("Never claim that code works, builds, or passes tests without a successful current-run result"))
+    #expect(prompt.contains("Apply this engineering workflow only to code, file, and configuration work"))
+    #expect(prompt.contains("do not impose it on unrelated everyday-assistant tasks"))
+}
+
 @Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
