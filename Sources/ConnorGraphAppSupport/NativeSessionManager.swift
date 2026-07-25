@@ -168,9 +168,10 @@ public struct NativeSessionManager: Sendable {
             guard !displayName.isEmpty || !slug.isEmpty else { return nil }
             return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
         }()
+        let isFirstUserMessage = !session.messages.contains { $0.role == .user }
         let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, personReferences: personReferences, contextSnapshot: activeSkillContextSnapshot)
         try persistSession()
-        try await persistMemoryOSAfterUserMessage(userMessage)
+        try await persistMemoryOSAfterUserMessage(userMessage, isFirstUserMessage: isFirstUserMessage)
 
         let request = AgentChatRequest(
             sessionID: session.id,
@@ -604,7 +605,7 @@ public struct NativeSessionManager: Sendable {
         try sessionRepository.savePendingApproval(approval)
     }
 
-    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) async throws {
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage, isFirstUserMessage: Bool) async throws {
         guard let memoryOSIngestionWriter else { return }
         await memoryOSIngestionWriter.enqueueChatMessage(
             messageID: message.id,
@@ -612,7 +613,9 @@ public struct NativeSessionManager: Sendable {
             role: "user",
             content: message.content,
             occurredAt: message.createdAt,
-            personReferences: message.personReferences
+            personReferences: message.personReferences,
+            sessionKind: session.governance.kind,
+            isFirstUserMessage: isFirstUserMessage
         )
     }
 

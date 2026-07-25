@@ -67,9 +67,10 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     @discardableResult
     public mutating func submit(_ prompt: String, personReferences: [PersonReference] = []) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
+        let isFirstUserMessage = !session.messages.contains { $0.role == .user }
         let userMessage = session.appendUserMessage(prompt, personReferences: personReferences)
         transcript = session.messages
-        try await persistMemoryOSAfterUserMessage(userMessage)
+        try await persistMemoryOSAfterUserMessage(userMessage, isFirstUserMessage: isFirstUserMessage)
         let request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
@@ -118,7 +119,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
-    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) async throws {
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage, isFirstUserMessage: Bool) async throws {
         if let memoryOSIngestionWriter {
             await memoryOSIngestionWriter.enqueueChatMessage(
                 messageID: message.id,
@@ -126,12 +127,15 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 role: "user",
                 content: message.content,
                 occurredAt: message.createdAt,
-                personReferences: message.personReferences
+                personReferences: message.personReferences,
+                sessionKind: session.governance.kind,
+                isFirstUserMessage: isFirstUserMessage
             )
             return
         }
         guard let memoryOSRepository else { return }
         let formatter = MemoryOSPersonReferenceContextFormatter()
+        let bypassesNormalization = session.governance.kind == .note && isFirstUserMessage
         let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
             sourceType: .chatMessage,
             sourceID: message.id,
@@ -139,8 +143,11 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             content: formatter.content(message.content, personReferences: message.personReferences),
             occurredAt: message.createdAt,
             sessionID: session.id,
-            normalizationStatus: .failed,
-            metadata: formatter.metadata(personReferences: message.personReferences)
+            retrievalText: bypassesNormalization ? message.content : nil,
+            normalizationStatus: bypassesNormalization ? .notRequired : .failed,
+            metadata: formatter.metadata(personReferences: message.personReferences).merging(
+                bypassesNormalization ? ["intent_normalization_bypass": "initial_note_message"] : [:]
+            ) { current, _ in current }
         ))
         try memoryOSRepository.save(result)
     }

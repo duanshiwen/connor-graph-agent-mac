@@ -1,6 +1,18 @@
 import Foundation
 import ConnorGraphCore
 
+public struct MemoryOSUserIntentNormalizationPolicy: Sendable {
+    public init() {}
+
+    public func shouldNormalize(
+        role: String,
+        sessionKind: AgentSessionKind,
+        isFirstUserMessage: Bool
+    ) -> Bool {
+        role == "user" && !(sessionKind == .note && isFirstUserMessage)
+    }
+}
+
 public actor MemoryOSIngestionWriter {
     private struct QueuedChatMessage: Sendable {
         var messageID: String
@@ -9,10 +21,13 @@ public actor MemoryOSIngestionWriter {
         var content: String
         var occurredAt: Date
         var personReferences: [PersonReference]
+        var sessionKind: AgentSessionKind
+        var isFirstUserMessage: Bool
     }
 
     private let facade: AppMemoryOSFacade
     private let intentNormalizer: AnyMemoryOSUserIntentNormalizer?
+    private let normalizationPolicy = MemoryOSUserIntentNormalizationPolicy()
     private var queuedMessages: [QueuedChatMessage] = []
     private var isFlushing = false
 
@@ -27,7 +42,9 @@ public actor MemoryOSIngestionWriter {
         role: String,
         content: String,
         occurredAt: Date,
-        personReferences: [PersonReference] = []
+        personReferences: [PersonReference] = [],
+        sessionKind: AgentSessionKind = .chat,
+        isFirstUserMessage: Bool = false
     ) {
         queuedMessages.append(QueuedChatMessage(
             messageID: messageID,
@@ -35,7 +52,9 @@ public actor MemoryOSIngestionWriter {
             role: role,
             content: content,
             occurredAt: occurredAt,
-            personReferences: personReferences
+            personReferences: personReferences,
+            sessionKind: sessionKind,
+            isFirstUserMessage: isFirstUserMessage
         ))
         Task { try? await flush() }
     }
@@ -51,7 +70,11 @@ public actor MemoryOSIngestionWriter {
             var metadata = formatter.metadata(personReferences: message.personReferences)
             var retrievalText: String?
             var normalizationStatus: MemoryOSIntentNormalizationStatus?
-            if message.role == "user" {
+            if normalizationPolicy.shouldNormalize(
+                role: message.role,
+                sessionKind: message.sessionKind,
+                isFirstUserMessage: message.isFirstUserMessage
+            ) {
                 do {
                     guard let intentNormalizer else { throw MemoryOSUserIntentNormalizerError.missingStructuredOutput }
                     let normalization = try await intentNormalizer.normalize(message: message.content)
@@ -63,6 +86,10 @@ public actor MemoryOSIngestionWriter {
                     normalizationStatus = .failed
                     metadata["intent_normalization_error"] = String(describing: error)
                 }
+            } else if message.role == "user" {
+                retrievalText = message.content
+                normalizationStatus = .notRequired
+                metadata["intent_normalization_bypass"] = "initial_note_message"
             }
             _ = try facade.ingestChatMessage(
                 messageID: message.messageID,
