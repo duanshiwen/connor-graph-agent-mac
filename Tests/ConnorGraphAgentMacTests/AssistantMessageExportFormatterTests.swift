@@ -102,6 +102,28 @@ struct AssistantMessageExportFormatterTests {
         #expect(!AgentAssistantMessageExpansionPresentation(message: longUserMessage, isExpanded: false).isAvailable)
     }
 
+    @Test("copy and export payload preserves the complete long reply")
+    func fullContentPayloadPreservesTheCompleteLongReply() {
+        let body = String(
+            repeating: "正文段落\n",
+            count: AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        )
+        let content = "# 开头\n\n\(body)\n完整结尾"
+        let message = presentation(
+            id: "long-reply",
+            role: .assistant,
+            content: content,
+            turnNumber: 1
+        )
+
+        let payload = AssistantMessageFullContentProvider.markdown(for: message)
+
+        #expect(payload == content)
+        #expect(payload.count == content.count)
+        #expect(payload.hasPrefix("# 开头"))
+        #expect(payload.hasSuffix("完整结尾"))
+    }
+
     @Test("only the first message in a note session uses note body presentation")
     func noteBodyPresentationIsLimitedToFirstNoteMessage() {
         #expect(AgentChatMessagePresentationPolicy.isNoteBody(sessionKind: .note, firstMessageID: "first", messageID: "first"))

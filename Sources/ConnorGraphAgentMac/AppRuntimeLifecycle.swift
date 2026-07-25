@@ -229,7 +229,7 @@ final class AppRuntimeLifecycle {
     }
 
     func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation) {
-        let content = message.message.content
+        let content = AssistantMessageFullContentProvider.markdown(for: message)
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -242,7 +242,7 @@ final class AppRuntimeLifecycle {
     }
 
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date = Date()) {
-        let content = message.message.content
+        let content = AssistantMessageFullContentProvider.markdown(for: message)
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let panel = NSSavePanel()
