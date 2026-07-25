@@ -177,6 +177,7 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
             target.organizationName = nonEmpty(target.organizationName) ?? nonEmpty(source.organizationName)
             target.jobTitle = nonEmpty(target.jobTitle) ?? nonEmpty(source.jobTitle)
             target.notes = mergeNotes(primary: target.notes, secondary: source.notes)
+            target.imageRelativePaths = mergeImagePaths(target.imageRelativePaths, source.imageRelativePaths)
             target.memoryEntityID = nonEmpty(target.memoryEntityID) ?? nonEmpty(source.memoryEntityID)
             target.memoryStableKey = nonEmpty(target.memoryStableKey) ?? nonEmpty(source.memoryStableKey)
             target.updatedAt = now
@@ -532,6 +533,13 @@ public final class SQLitePersonProfileStore: PersonProfileStore, @unchecked Send
         default:
             return nil
         }
+    }
+
+    private func mergeImagePaths(_ primary: [String]?, _ secondary: [String]?) -> [String]? {
+        var seen: Set<String> = []
+        let merged = (primary ?? []) + (secondary ?? [])
+        let unique = merged.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return unique.isEmpty ? nil : unique
     }
 
     private func nonEmpty(_ value: String?) -> String? {
