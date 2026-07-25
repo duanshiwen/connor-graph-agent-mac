@@ -78,6 +78,99 @@ import ConnorGraphAgent
     ])
 }
 
+@Test func agentToolInputSchemaRejectsSnakeCasePropertiesAndNormalizesLegacyArguments() {
+    let schema = AgentToolInputSchema.closedObject(
+        properties: [
+            "taskID": .string(description: "Task ID"),
+            "expectedUpdatedAt": .string(description: "Expected update time")
+        ],
+        required: ["taskID"]
+    )
+    #expect(schema.validationIssues(toolName: "camel_tool").isEmpty)
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "task_id": .string("task-1"),
+        "expected_updated_at": .string("2026-07-24T00:00:00Z")
+    ])) == .object([
+        "taskID": .string("task-1"),
+        "expectedUpdatedAt": .string("2026-07-24T00:00:00Z")
+    ]))
+
+    let nestedSchema = AgentToolInputSchema.closedObject(properties: [
+        "updates": .array(items: .closedObject(properties: [
+            "sessionID": .string(description: "Session ID"),
+            "expectedUpdatedAt": .string(description: "Expected update time")
+        ], required: ["sessionID"]), description: "Session updates")
+    ], required: ["updates"])
+    #expect(nestedSchema.normalizingLegacyPropertyAliases(.object([
+        "updates": .array([.object([
+            "session_id": .string("session-1"),
+            "expected_updated_at": .string("2026-07-24T00:00:00Z")
+        ])])
+    ])) == .object([
+        "updates": .array([.object([
+            "sessionID": .string("session-1"),
+            "expectedUpdatedAt": .string("2026-07-24T00:00:00Z")
+        ])])
+    ]))
+
+    let invalid = AgentToolInputSchema.closedObject(
+        properties: ["task_id": .string(description: "Task ID")],
+        required: ["task_id"]
+    )
+    #expect(invalid.validationIssues(toolName: "snake_tool") == [
+        AgentToolSchemaValidationIssue(
+            toolName: "snake_tool",
+            path: "$.properties.task_id",
+            message: "property names exposed to the model must use camelCase"
+        )
+    ])
+}
+
+@Test func agentToolRegistryAcceptsLegacySnakeCaseAliasesWithoutExposingThem() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(LegacyAliasTestTool())
+    let result = try await registry.execute(
+        AgentToolCall(name: "legacy_alias_test", argumentsJSON: #"{"task_id":"task-1"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run",
+            sessionID: "session",
+            groupID: "group",
+            userPrompt: "test aliases",
+            toolCallID: "call",
+            policyEngine: AgentPolicyEngine(permissionMode: .readOnly)
+        )
+    )
+
+    #expect(result.contentText == "task-1")
+    let properties = try #require(registry.definition(named: "legacy_alias_test")?.inputSchema.jsonObject["properties"] as? [String: Any])
+    #expect(properties["taskID"] != nil)
+    #expect(properties["task_id"] == nil)
+}
+
+@Test func agentToolRegistryNormalizesLegacyAliasesBeforePreflightAndApproval() async throws {
+    var registry = AgentToolRegistry()
+    registry.register(LegacyAliasLifecycleTestTool())
+    let context = AgentToolExecutionContext(
+        runID: "run",
+        sessionID: "session",
+        groupID: "group",
+        userPrompt: "test lifecycle aliases",
+        toolCallID: "call",
+        policyEngine: AgentPolicyEngine(permissionMode: .askToWrite)
+    )
+
+    do {
+        _ = try await registry.execute(
+            AgentToolCall(name: "legacy_alias_lifecycle_test", argumentsJSON: #"{"task_id":"task-1"}"#),
+            context: context
+        )
+        Issue.record("Expected approval to be required")
+    } catch AgentToolError.permissionNeedsApproval(let request) {
+        #expect(request.payloadJSON.contains(#""taskID":"task-1""#))
+        #expect(!request.payloadJSON.contains("task_id"))
+    }
+}
+
 private struct InvalidSchemaTestTool: AgentTool {
     let name = "invalid_schema_test"
     let description = "Invalid schema test tool"
@@ -86,6 +179,41 @@ private struct InvalidSchemaTestTool: AgentTool {
         required: ["absent"]
     )
     let permission = AgentPermissionCapability.readSession
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "unused")
+    }
+}
+
+private struct LegacyAliasTestTool: AgentTool {
+    let name = "legacy_alias_test"
+    let description = "Legacy alias test tool"
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["taskID": .string(description: "Task ID")],
+        required: ["taskID"]
+    )
+    let permission = AgentPermissionCapability.readSession
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: arguments.string("taskID") ?? "missing")
+    }
+}
+
+private struct LegacyAliasLifecycleTestTool: AgentTool {
+    let name = "legacy_alias_lifecycle_test"
+    let description = "Legacy alias lifecycle test tool"
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["taskID": .string(description: "Task ID")],
+        required: ["taskID"]
+    )
+    let permission = AgentPermissionCapability.editWorkspaceFile
+
+    func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
+        let arguments = try AgentToolArguments(json: call.argumentsJSON)
+        guard arguments.string("taskID") == "task-1" else {
+            throw AgentToolError.invalidArguments("preflight did not receive normalized taskID")
+        }
+    }
 
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "unused")

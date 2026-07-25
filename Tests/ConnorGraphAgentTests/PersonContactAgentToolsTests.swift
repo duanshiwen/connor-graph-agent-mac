@@ -41,18 +41,20 @@ struct PersonContactAgentToolsTests {
             context: Self.context(toolCallID: "call-list-people-summary")
         )
         #expect(listed.contentText.contains("Found 1 people"))
-        #expect(listed.contentText.contains("person_id: person-zhang-xia"))
-        #expect(listed.contentText.contains("display_name: 张霞"))
+        #expect(listed.contentText.contains("personID: person-zhang-xia"))
+        #expect(listed.contentText.contains("displayName: 张霞"))
         #expect(listed.contentText.contains("status: active"))
         #expect(listed.contentText.contains("段诗闻和段福强的妈妈"))
+        #expect(listed.contentJSON?.contains(#""personID":"person-zhang-xia""#) == true)
+        #expect(listed.contentJSON?.contains(#""person_id""#) == false)
 
         let loaded = try await readTool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"id\":\"person-zhang-xia\"}"),
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"personID\":\"person-zhang-xia\"}"),
             context: Self.context(toolCallID: "call-get-person-summary")
         )
         #expect(loaded.contentText.contains("Loaded person"))
-        #expect(loaded.contentText.contains("person_id: person-zhang-xia"))
-        #expect(loaded.contentText.contains("display_name: 张霞"))
+        #expect(loaded.contentText.contains("personID: person-zhang-xia"))
+        #expect(loaded.contentText.contains("displayName: 张霞"))
     }
 
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
@@ -64,7 +66,7 @@ struct PersonContactAgentToolsTests {
         let readTool = ContactsReadTool(runtime: runtime)
 
         let updated = try await writeTool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"update_person\",\"id\":\"person-a\",\"organization\":\"Connor Labs\",\"approved\":true}"),
+            arguments: try AgentToolArguments(json: "{\"operation\":\"update_person\",\"personID\":\"person-a\",\"organization\":\"Connor Labs\",\"approved\":true}"),
             context: Self.context(toolCallID: "call-update-person")
         )
         #expect(updated.contentJSON?.contains("Connor Labs") == true)
@@ -83,7 +85,7 @@ struct PersonContactAgentToolsTests {
         #expect(searchSource.contentJSON?.contains("person-b") == true)
 
         let deleted = try await writeTool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"delete_person\",\"id\":\"person-b\",\"approved\":true}"),
+            arguments: try AgentToolArguments(json: "{\"operation\":\"delete_person\",\"personID\":\"person-b\",\"approved\":true}"),
             context: Self.context(toolCallID: "call-delete-person")
         )
         #expect(deleted.contentText.contains("Deleted person"))

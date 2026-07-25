@@ -48,6 +48,9 @@ struct BrowserHistoryAgentToolsTests {
         #expect(search.contentText.contains("browser history summaries"))
         #expect(search.contentJSON?.contains("11111111-1111-1111-1111-111111111111") == true)
         #expect(search.contentJSON?.contains("Saved browser page body") == true)
+        let searchJSON = try #require(search.contentJSON)
+        let searchRows = try #require(try JSONSerialization.jsonObject(with: Data(searchJSON.utf8)) as? [[String: Any]])
+        #expect(searchRows.first?["recordID"] as? String == searchRows.first?["id"] as? String)
         var references = await recorder.references
         #expect(references.count == 1)
         #expect(references[0].sourceKind == .browserHistory)
@@ -68,6 +71,9 @@ struct BrowserHistoryAgentToolsTests {
         #expect(get.contentText.contains("saved page markdown"))
         #expect(get.contentJSON?.contains("# Memory OS") == true)
         #expect(get.contentJSON?.contains("contentMarkdown") == true)
+        let getJSON = try #require(get.contentJSON)
+        let getObject = try #require(try JSONSerialization.jsonObject(with: Data(getJSON.utf8)) as? [String: Any])
+        #expect(getObject["recordID"] as? String == getObject["id"] as? String)
         references = await recorder.references
         #expect(references.count == 2)
         #expect(references[1].referenceStrength == .detailRead)

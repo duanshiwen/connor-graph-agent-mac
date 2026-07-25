@@ -34,7 +34,7 @@ import ConnorGraphCore
     #expect(presentation.cc == ["carol@example.com"])
     #expect(presentation.bccCount == 1)
     #expect(presentation.subjectSummary == "主题：Quarterly update")
-    #expect(presentation.securitySummary.contains("Envelope: hash-1"))
+    #expect(presentation.securitySummary.contains("信封摘要：hash-1"))
 }
 
 @Test func mailSendApprovalPresentationFallsBackToDraftOnlyPayload() {

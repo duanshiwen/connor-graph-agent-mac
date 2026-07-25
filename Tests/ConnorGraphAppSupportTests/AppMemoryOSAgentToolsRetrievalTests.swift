@@ -117,7 +117,9 @@ import ConnorGraphStore
         sessionID: "session",
         role: "user",
         content: "Project Lantern says prepare the release.",
-        occurredAt: now
+        occurredAt: now,
+        retrievalText: "Project Lantern says prepare the release.",
+        normalizationStatus: .succeeded
     )
     _ = try facade.ingestChatMessage(
         messageID: "historical-assistant",
@@ -131,7 +133,9 @@ import ConnorGraphStore
         sessionID: "session",
         role: "user",
         content: "What is the Project Lantern status?",
-        occurredAt: now.addingTimeInterval(2)
+        occurredAt: now.addingTimeInterval(2),
+        retrievalText: "What is the Project Lantern status?",
+        normalizationStatus: .succeeded
     )
     let context = AgentToolExecutionContext(
         runID: "run-current-message-filter",
@@ -191,6 +195,26 @@ import ConnorGraphStore
     #expect(result.contentText.contains("Memory OS search returned"))
     #expect(json.contains("\"layer\":\"L1\"") || json.contains("\"layer\":\"L2\""))
     #expect(json.contains("Connor Memory OS"))
+}
+
+@Test func memoryOSSearchAddsLayerSpecificOperationIDs() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 11_000)
+    try store.upsert(belief: MemoryOSBelief(id: "belief-operation-id", statement: "Operation-ready identifiers support reliable tool chaining.", domain: "tooling", createdAt: now, updatedAt: now))
+    try store.upsert(provenance: MemoryOSProvenanceObject(id: "provenance-operation-id", sourceType: .manual, sourceID: "source-operation-id", title: "Operation ID source", content: "Operation-ready identifiers support reliable tool chaining.", occurredAt: now))
+
+    let result = try await MemoryOSSearchTool(facade: facade).execute(
+        arguments: AgentToolArguments(json: #"{"query":"operation-ready identifiers","layers":["L0","L3"],"limit":10}"#),
+        context: memoryOSToolContext()
+    )
+    let payload = try memoryOSToolJSON(result)
+    let hits = try #require(payload["hits"] as? [[String: Any]])
+    let belief = try #require(hits.first { $0["recordID"] as? String == "belief-operation-id" })
+    let provenance = try #require(hits.first { $0["recordID"] as? String == "provenance-operation-id" })
+    #expect(belief["beliefID"] as? String == "belief-operation-id")
+    #expect(provenance["provenanceObjectID"] as? String == "provenance-operation-id")
 }
 
 @Test func memoryOSRecentAndKnowledgeContextToolsReturnDifferentSemantics() async throws {
@@ -284,14 +308,30 @@ import ConnorGraphStore
     #expect(!focusedPayload.records.contains { $0.recordID == "outside-range" })
 }
 
-@Test func memoryOSContextToolsRequireTimeBoundsWhenQueryIsEmpty() async throws {
+@Test func memoryOSContextToolsSupportUnboundedEmptyQueryPagination() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
-    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
-
-    await #expect(throws: AgentToolError.self) {
-        try await tool.execute(arguments: AgentToolArguments(json: #"{"query":""}"#), context: memoryOSToolContext())
+    let now = Date(timeIntervalSince1970: 40_000)
+    for index in 0..<3 {
+        let nodeID = "unbounded-node-\(index)"
+        try store.upsert(node: MemoryOSNode(id: nodeID, stableKey: nodeID, nodeType: "project", name: "Unbounded \(index)"))
+        try store.upsert(statement: MemoryOSStatement(id: "unbounded-statement-\(index)", subjectID: nodeID, predicate: "status", text: "Unbounded memory \(index)", confidence: 0.9, validAt: now.addingTimeInterval(Double(index)), committedAt: now.addingTimeInterval(Double(index)), evidenceSpanIDs: []))
     }
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store), configuration: .init(pageSize: 2))
+
+    let first = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"","page":1}"#), context: memoryOSToolContext())
+    let second = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"","page":2}"#), context: memoryOSToolContext())
+    let firstPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(first.contentJSON).utf8))
+    let secondPayload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(second.contentJSON).utf8))
+
+    #expect(firstPayload.success)
+    #expect(firstPayload.query.isEmpty)
+    #expect(firstPayload.totalItems == 3)
+    #expect(firstPayload.returnedItems == 2)
+    #expect(firstPayload.nextPage == 2)
+    #expect(secondPayload.returnedItems == 1)
+    #expect(secondPayload.nextPage == nil)
+    #expect(Set(firstPayload.records.map(\.recordID)).isDisjoint(with: secondPayload.records.map(\.recordID)))
 }
 
 @Test func memoryOSRecentContextReturnsSequentialCompletePages() async throws {
@@ -345,20 +385,19 @@ import ConnorGraphStore
     let node = MemoryOSNode(id: "capacity-node", stableKey: "capacity-node", nodeType: "project", name: "Capacity")
     try store.upsert(node: node)
     try store.upsert(statement: MemoryOSStatement(id: "capacity-record", subjectID: node.id, predicate: "detail", text: "Capacity " + String(repeating: "complete-record-content ", count: 200), confidence: 0.9, evidenceSpanIDs: []))
-    let config = MemoryOSContextToolConfiguration(maxResponseCharacters: 1_024)
-    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store), configuration: config)
+    let tool = MemoryOSRecentContextTool(facade: AppMemoryOSFacade(store: store))
 
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Capacity complete record"}"#), context: memoryOSToolContext())
     let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
 
-    #expect(payload.pageSize == 1)
+    #expect(payload.pageSize == 40)
     #expect(payload.returnedItems == 1)
     #expect(payload.totalItems == 1)
     #expect(payload.records.first?.recordID == "capacity-record")
     #expect(result.contentText.contains("complete-record-content"))
 }
 
-@Test func memoryOSContextAutomaticallyShrinksPageSizeWithoutLosingRecords() throws {
+@Test func memoryOSContextKeepsConfiguredPageSizeWithoutLosingRecords() throws {
     let records = (0..<85).map { index in
         MemoryOSContextToolRecord(
             recordID: "adaptive-\(index)",
@@ -374,14 +413,14 @@ import ConnorGraphStore
             path: []
         )
     }
-    let configuration = MemoryOSContextToolConfiguration(pageSize: 40, maxResponseCharacters: 5_000)
+    let configuration = MemoryOSContextToolConfiguration(pageSize: 40)
     let first = try MemoryOSLayeredContextSupport.response(query: "Adaptive pagination", page: 1, candidates: records, configuration: configuration)
 
     #expect(first.success)
-    #expect(first.pageSize < 40)
-    #expect(first.pageSize >= 1)
+    #expect(first.pageSize == 40)
+    #expect(first.returnedItems == 40)
     #expect(first.totalItems == 85)
-    #expect(first.totalPages > 1)
+    #expect(first.totalPages == 3)
     #expect(first.nextPage == 2)
 
     var collected = Set(first.records.map(\.recordID))
@@ -700,6 +739,32 @@ import ConnorGraphStore
     #expect(result.contentText.contains("L4 expansion returned"))
     #expect(json.contains("l4-stmt-1"))
     #expect(json.contains("entity-b"))
+}
+
+@Test func memoryOSGraphToolsExposeOperationReadyNodeIDs() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    try store.upsert(entity: MemoryOSEntity(id: "entity-elasticity", stableKey: "economics:elasticity", entityType: "concept", name: "Elasticity"))
+
+    let findTool = MemoryOSL4FindEntityTool(facade: facade)
+    let result = try await findTool.execute(
+        arguments: AgentToolArguments(json: #"{"text":"Elasticity","limit":10}"#),
+        context: memoryOSToolContext()
+    )
+    let payload = try memoryOSToolJSON(result)
+    let nodes = try #require(payload["nodes"] as? [[String: Any]])
+    let node = try #require(nodes.first)
+    #expect(node["id"] as? String == "entity-elasticity")
+    #expect(node["entityID"] as? String == "entity-elasticity")
+    #expect(node["classEntityID"] as? String == "entity-elasticity")
+
+    let neighborProperties = try #require(MemoryOSL4NeighborsTool(facade: facade).inputSchema.jsonObject["properties"] as? [String: Any])
+    let entitySchema = try #require(neighborProperties["entityID"] as? [String: Any])
+    #expect((entitySchema["description"] as? String)?.contains("copy the field without renaming it") == true)
+    let instanceProperties = try #require(MemoryOSL4InstancesTool(facade: facade).inputSchema.jsonObject["properties"] as? [String: Any])
+    let classIDsSchema = try #require(instanceProperties["classEntityIDs"] as? [String: Any])
+    #expect((classIDsSchema["description"] as? String)?.contains("classEntityID") == true)
 }
 
 private func memoryOSToolJSON(_ result: AgentToolResult) throws -> [String: Any] {

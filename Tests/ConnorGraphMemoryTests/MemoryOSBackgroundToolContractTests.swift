@@ -45,14 +45,19 @@ struct MemoryOSBackgroundToolContractTests {
         #expect(readRecord.usagePolicy.contains("summary-level context is insufficient"))
         let recent = try #require(tools.first { $0.name == "memory_os_recent_context" })
         #expect(recent.inputSchemaJSON.contains("startDate"))
-        #expect(recent.inputSchemaJSON.contains("empty means all records in the supplied range"))
+        #expect(recent.inputSchemaJSON.contains("omit or pass an empty string for all records"))
         #expect(recent.inputSchemaJSON.contains("page"))
         #expect(!recent.inputSchemaJSON.contains("limit"))
         #expect(recent.usagePolicy.contains("hasNextPage"))
+        #expect(recent.inputSchemaJSON.contains("JSON integer page"))
+        #expect(recent.usagePolicy.contains("exact JSON integer"))
+        #expect(recent.usagePolicy.contains("unfiltered all-history scan"))
         let knowledge = try #require(tools.first { $0.name == "memory_os_knowledge_context" })
         #expect(knowledge.inputSchemaJSON.contains("page"))
         #expect(!knowledge.inputSchemaJSON.contains("limit"))
         #expect(knowledge.usagePolicy.contains("totalPages"))
+        #expect(knowledge.inputSchemaJSON.contains("JSON integer graph depth"))
+        #expect(knowledge.usagePolicy.contains("keep query, time bounds, and depth unchanged"))
     }
 }
 

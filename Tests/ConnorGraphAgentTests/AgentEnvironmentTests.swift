@@ -132,6 +132,11 @@ private func environmentFixture() -> AgentEnvironmentSnapshot {
     let result = try await tool.execute(arguments: AgentToolArguments(), context: context)
 
     #expect(await provider.requestCount == 0)
+    #expect(tool.description.contains("Strongly prefer calling this tool once near the start of every user run"))
+    #expect(tool.description.contains("refresh=false"))
+    let refreshSchema = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+    let refreshProperty = try #require(refreshSchema["refresh"] as? [String: Any])
+    #expect((refreshProperty["description"] as? String)?.contains("without another provider request") == true)
     #expect(result.contentJSON?.contains("30.12") == true)
     #expect(result.contentJSON?.contains("120.99") == true)
     #expect(result.contentJSON?.contains("30.12345") == false)

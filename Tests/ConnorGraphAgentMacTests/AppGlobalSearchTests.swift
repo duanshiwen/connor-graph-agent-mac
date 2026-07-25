@@ -567,6 +567,8 @@ struct AppGlobalSearchTests {
         )
         try fixture.repository.saveSession(session)
         fixture.runtime.reloadChatSessions()
+        fixture.runtime.globalSearchFeatureModel.upsertSessionIndex(session)
+        await fixture.runtime.globalSearchFeatureModel.waitForSessionIndexOperations()
         fixture.runtime.globalSearchFeatureModel.updateQuery("帮我找泰国签证")
 
         await fixture.runtime.globalSearchFeatureModel.refreshPreview(for: "帮我找泰国签证")
@@ -600,6 +602,8 @@ struct AppGlobalSearchTests {
         )
         try fixture.repository.saveSession(session)
         fixture.runtime.reloadChatSessions()
+        fixture.runtime.globalSearchFeatureModel.upsertSessionIndex(session)
+        await fixture.runtime.globalSearchFeatureModel.waitForSessionIndexOperations()
         fixture.runtime.globalSearchFeatureModel.updateQuery("泰国")
 
         await fixture.runtime.globalSearchFeatureModel.refreshPreview(for: "泰国")

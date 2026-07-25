@@ -67,19 +67,36 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         guard context.allowedToolNames.contains(call.name) else {
             throw MemoryOSBackgroundToolExecutionError.toolNotAllowed(call.name)
         }
-        let agentArguments: AgentToolArguments
+        let rawArguments: AgentToolArguments
         do {
-            agentArguments = try AgentToolArguments(json: call.argumentsJSON)
+            rawArguments = try AgentToolArguments(json: call.argumentsJSON)
         } catch {
             throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
         }
+        let legacyNormalizedArguments: AgentToolArguments
+        switch call.name {
+        case "memory_os_recent_context":
+            legacyNormalizedArguments = MemoryOSLayeredContextSupport.normalizeLegacyArguments(rawArguments, includeDepth: false)
+        case "memory_os_knowledge_context":
+            legacyNormalizedArguments = MemoryOSLayeredContextSupport.normalizeLegacyArguments(rawArguments, includeDepth: true)
+        default:
+            legacyNormalizedArguments = rawArguments
+        }
+        let normalizedObject: SendableJSONValue
         if let schema = inputSchema(for: call.name) {
-            let issues = schema.argumentValidationIssues(.object(agentArguments.values))
+            normalizedObject = schema.normalizingLegacyPropertyAliases(.object(legacyNormalizedArguments.values))
+            let issues = schema.argumentValidationIssues(normalizedObject)
             guard issues.isEmpty else {
                 throw MemoryOSBackgroundToolExecutionError.invalidArguments(issues.joined(separator: "; "))
             }
+        } else {
+            normalizedObject = .object(legacyNormalizedArguments.values)
         }
-        let args = try Arguments(json: call.argumentsJSON)
+        guard case .object(let normalizedValues) = normalizedObject else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ must be an object")
+        }
+        let agentArguments = AgentToolArguments(values: normalizedValues)
+        let args = Arguments(values: normalizedValues.mapValues(\.jsonCompatibleObject))
         switch call.name {
         case "environment_history_coverage", "environment_history_query", "environment_history_compare":
             guard let environmentSnapshotRuntime else {
@@ -291,6 +308,29 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         }
     }
 
+    func normalizedArgumentsJSON(for call: MemoryOSBackgroundToolCall) throws -> String {
+        let rawArguments: AgentToolArguments
+        do {
+            rawArguments = try AgentToolArguments(json: call.argumentsJSON)
+        } catch {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
+        }
+        let normalizedObject = inputSchema(for: call.name)?
+            .normalizingLegacyPropertyAliases(.object(rawArguments.values))
+            ?? .object(rawArguments.values)
+        guard case .object(let normalizedValues) = normalizedObject else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ must be an object")
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: normalizedValues.mapValues(\.jsonCompatibleObject),
+            options: [.sortedKeys]
+        )
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw MemoryOSBackgroundToolExecutionError.invalidArguments("$ could not be normalized to JSON")
+        }
+        return json
+    }
+
     func inputSchema(for toolName: String) -> AgentToolInputSchema? {
         switch toolName {
         case "memory_os_recent_context": MemoryOSRecentContextTool(facade: facade, configuration: contextToolConfiguration).inputSchema
@@ -355,9 +395,6 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         let query = MemorySearchQueryParser.parse(rawQuery).terms.joined(separator: " ")
         let startDate = try args.iso8601Date("startDate")
         let endDate = try args.iso8601Date("endDate")
-        if query.isEmpty && (startDate == nil || endDate == nil) {
-            throw MemoryOSBackgroundToolExecutionError.invalidArguments("query may be empty only when both startDate and endDate are provided")
-        }
         if let startDate, let endDate, startDate >= endDate {
             throw MemoryOSBackgroundToolExecutionError.invalidArguments("startDate must be earlier than endDate")
         }
@@ -430,6 +467,10 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
 
 private struct Arguments {
     var values: [String: Any]
+
+    init(values: [String: Any]) {
+        self.values = values
+    }
 
     init(json: String) throws {
         guard let data = json.data(using: .utf8) else { throw MemoryOSBackgroundToolExecutionError.invalidArguments("Invalid UTF-8") }

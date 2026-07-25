@@ -11,7 +11,7 @@ import ConnorGraphCore
         sessionID: "session-1",
         capability: .readSession,
         toolName: "Read",
-        payloadJSON: "{ \"file_path\" : \"README.md\" }",
+        payloadJSON: "{ \"filePath\" : \"README.md\" }",
         status: .pending,
         createdAt: Date(timeIntervalSince1970: 1_000),
         updatedAt: Date(timeIntervalSince1970: 1_000)
@@ -23,7 +23,7 @@ import ConnorGraphCore
     #expect(row.requestID == "permission-tool-1")
     #expect(row.title == "请求执行：读取文件")
     #expect(row.detail.contains("权限：读取会话"))
-    #expect(row.detail.contains("参数：{\"file_path\":\"README.md\"}"))
+    #expect(row.detail.contains("参数：{\"filePath\":\"README.md\"}"))
     #expect(row.toolDisplayName == "读取文件")
     #expect(row.capabilityLabel == "读取会话")
     #expect(row.capabilityDescription.contains("不会主动修改内容"))

@@ -129,7 +129,7 @@ import ConnorGraphStore
     let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let result = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: #"{"file_path":"README.md"}"#),
+        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"README.md"}"#),
         context: AgentToolExecutionContext(
             runID: "run-local-runtime-workspace",
             sessionID: "session-local-runtime-workspace",
@@ -181,7 +181,7 @@ import ConnorGraphStore
     )
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly, sessionWorkspace: sessionWorkspaceReference)
     let result = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: #"{"file_path":"README.md"}"#),
+        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"README.md"}"#),
         context: AgentToolExecutionContext(
             runID: "run-local-session-workspace",
             sessionID: "session-local-session-workspace",
@@ -340,7 +340,7 @@ import ConnorGraphStore
         ]
     )
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly, sessionWorkspace: replacementWorkspace)
-    let arguments = #"{"file_path":"\#(oldFile.path)"}"#
+    let arguments = #"{"filePath":"\#(oldFile.path)"}"#
 
     do {
         _ = try await controller.toolRegistry.execute(
@@ -393,7 +393,7 @@ import ConnorGraphStore
     )
     let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
-    let arguments = #"{"file_path":"\#(sharedFile.path)"}"#
+    let arguments = #"{"filePath":"\#(sharedFile.path)"}"#
     let result = try await controller.toolRegistry.execute(
         AgentToolCall(name: "Read", argumentsJSON: arguments),
         context: AgentToolExecutionContext(
@@ -534,7 +534,7 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
 
     let readResult = try await controller.toolRegistry.execute(
-        AgentToolCall(name: "Read", argumentsJSON: #"{"file_path":"\#(skillFile.path)"}"#),
+        AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"\#(skillFile.path)"}"#),
         context: AgentToolExecutionContext(
             runID: "run-hidden-data-read",
             sessionID: "session-hidden-data-read",

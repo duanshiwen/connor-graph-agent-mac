@@ -71,8 +71,9 @@ import ConnorGraphAppSupport
     let profileDefinition = try #require(registry.definition(named: "memory_os_get_current_user_profile"))
     #expect(recentDefinition.description.contains("L1") && recentDefinition.description.contains("L2"))
     #expect(recentDefinition.description.contains("query is a lexical content filter, not a natural-language question"))
-    #expect(recentDefinition.description.contains("An empty query with both startDate and endDate means no lexical filtering"))
-    #expect(recentDefinition.description.contains("every available event/record"))
+    #expect(recentDefinition.description.contains("Omit query or pass an empty string to disable lexical filtering"))
+    #expect(recentDefinition.description.contains("omit both dates for all history"))
+    #expect(recentDefinition.description.contains("every available record"))
     #expect(knowledgeDefinition.description.contains("L3") && knowledgeDefinition.description.contains("L4"))
     #expect(knowledgeDefinition.description.contains("depth defaults to 1"))
     #expect(knowledgeDefinition.description.contains("depth >= 2 is an indirect path"))
@@ -86,14 +87,20 @@ import ConnorGraphAppSupport
     let recentQuerySchema = try #require(recentProperties["query"] as? [String: Any])
     let recentQueryDescription = try #require(recentQuerySchema["description"] as? String)
     #expect(recentQueryDescription.contains("This is not the user's natural-language question"))
-    #expect(recentQueryDescription.contains("An empty query means no lexical content filtering"))
-    #expect(recentQueryDescription.contains("retrieve every available event/record"))
+    #expect(recentQueryDescription.contains("Omit it or pass an empty string for no lexical filtering"))
+    #expect(recentQueryDescription.contains("every available record"))
     #expect(recentQueryDescription.contains("use only the topic"))
     #expect(recentProperties["page"] != nil)
     #expect(recentProperties["limit"] == nil)
+    let recentPageSchema = try #require(recentProperties["page"] as? [String: Any])
+    let recentPageDescription = try #require(recentPageSchema["description"] as? String)
+    #expect(recentPageDescription.contains("JSON integer"))
+    #expect(recentPageDescription.contains("nextPage"))
+    #expect(recentDefinition.inputExamples == [["query": .string("Project A"), "page": .int(1)]])
     let knowledgeProperties = try #require(knowledgeDefinition.inputSchema.jsonObject["properties"] as? [String: Any])
     #expect(knowledgeProperties["page"] != nil)
     #expect(knowledgeProperties["limit"] == nil)
+    #expect(knowledgeDefinition.inputExamples == [["query": .string("Project A"), "page": .int(1), "depth": .int(1)]])
     let profileProperties = try #require(profileDefinition.inputSchema.jsonObject["properties"] as? [String: Any])
     #expect(profileProperties["page"] != nil)
     #expect(recentDefinition.description.contains("totalItems"))
@@ -109,6 +116,33 @@ import ConnorGraphAppSupport
     #expect(registry.definition(named: "memory_os_l2_find_entities") == nil)
     #expect(registry.definition(named: "memory_os_l4_find_entity") == nil)
     #expect(registry.definition(named: "memory_os_read_record") == nil)
+}
+
+@Test func contextToolRegistryNormalizesLegacyLimitAndQuotedIntegers() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSReadToolDatabaseURL().path)
+    try store.migrate()
+    var registry = AgentToolRegistry()
+    registry.registerMemoryOSReadTools(facade: AppMemoryOSFacade(store: store))
+
+    let recent = try await registry.execute(
+        AgentToolCall(name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","limit":"10"}"#),
+        context: memoryOSReadToolContext()
+    )
+    let recentResponse = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(recent.contentJSON).utf8)
+    )
+    #expect(recentResponse.page == 1)
+
+    let knowledge = try await registry.execute(
+        AgentToolCall(name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"memory","page":"1","depth":"2","limit":"15"}"#),
+        context: memoryOSReadToolContext()
+    )
+    let knowledgeResponse = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(knowledge.contentJSON).utf8)
+    )
+    #expect(knowledgeResponse.page == 1)
 }
 
 private func memoryOSReadToolContext() -> AgentToolExecutionContext {

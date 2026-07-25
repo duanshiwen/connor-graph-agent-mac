@@ -4,16 +4,13 @@ import ConnorGraphStore
 public struct MemoryOSContextToolConfiguration: Sendable, Equatable {
     public var pageSize: Int
     public var maxDepth: Int
-    public var maxResponseCharacters: Int
 
     public init(
         pageSize: Int = 40,
-        maxDepth: Int = 6,
-        maxResponseCharacters: Int = 30 * 1024
+        maxDepth: Int = 6
     ) {
         self.pageSize = max(1, pageSize)
         self.maxDepth = max(1, maxDepth)
-        self.maxResponseCharacters = max(1_024, maxResponseCharacters)
     }
 }
 

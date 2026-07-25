@@ -7,6 +7,19 @@ enum AgentChatMessagePresentationPolicy {
     static func isNoteBody(sessionKind: AgentSessionKind?, firstMessageID: String?, messageID: String) -> Bool {
         sessionKind == .note && firstMessageID == messageID
     }
+
+    static func isBeforeFirstNoteMessage(
+        sessionKind: AgentSessionKind?,
+        sessionMessageCount: Int,
+        persistedMessageCount: Int?,
+        transcriptMessageCount: Int,
+        isSubmitting: Bool
+    ) -> Bool {
+        guard sessionKind == .note, !isSubmitting else { return false }
+        return sessionMessageCount == 0
+            && (persistedMessageCount ?? 0) == 0
+            && transcriptMessageCount == 0
+    }
 }
 
 struct AgentAssistantMessageActionsPresentation: Equatable {

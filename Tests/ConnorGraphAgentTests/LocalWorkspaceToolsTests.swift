@@ -16,7 +16,7 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     let tool = LocalReadFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"file_path":"README.md","offset":2,"limit":2}"#),
+        arguments: try AgentToolArguments(json: #"{"filePath":"README.md","offset":2,"limit":2}"#),
         context: .localToolTestContext(toolCallID: "read-1")
     )
 
@@ -87,7 +87,7 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     let tool = LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"file_path":"Sources/New.swift","content":"let value = 42\n"}"#),
+        arguments: try AgentToolArguments(json: #"{"filePath":"Sources/New.swift","content":"let value = 42\n"}"#),
         context: .localToolTestContext(toolCallID: "write-1")
     )
 
@@ -105,7 +105,7 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
 
     await #expect(throws: AgentToolError.self) {
         _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"file_path":"App.swift","old_text":"let a = 1","new_text":"let a = 2"}"#),
+            arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","oldText":"let a = 1","newText":"let a = 2"}"#),
             context: .localToolTestContext(toolCallID: "edit-dup")
         )
     }
@@ -118,7 +118,7 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     let tool = LocalEditFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"file_path":"App.swift","old_text":"let a = 1","new_text":"let a = 10"}"#),
+        arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","oldText":"let a = 1","newText":"let a = 10"}"#),
         context: .localToolTestContext(toolCallID: "edit-1")
     )
 
@@ -133,7 +133,7 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     let tool = LocalMultiEditTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
     let result = try await tool.execute(
-        arguments: try AgentToolArguments(json: #"{"file_path":"App.swift","edits":[{"old_text":"one","new_text":"ONE"},{"old_text":"three","new_text":"THREE"}]}"#),
+        arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","edits":[{"oldText":"one","newText":"ONE"},{"oldText":"three","newText":"THREE"}]}"#),
         context: .localToolTestContext(toolCallID: "multi-1")
     )
 
@@ -147,11 +147,15 @@ private func makeToolTempWorkspace(_ name: String = UUID().uuidString) throws ->
     try "one\ntwo\n".write(to: file, atomically: true, encoding: .utf8)
     let tool = LocalMultiEditTool(policy: LocalWorkspacePolicy(workingDirectory: workspace))
 
-    await #expect(throws: AgentToolError.self) {
+    do {
         _ = try await tool.execute(
-            arguments: try AgentToolArguments(json: #"{"file_path":"App.swift","edits":[{"old_text":"one","new_text":"ONE"},{"old_text":"missing","new_text":"MISSING"}]}"#),
+            arguments: try AgentToolArguments(json: #"{"filePath":"App.swift","edits":[{"oldText":"one","newText":"ONE"},{"oldText":"missing","newText":"MISSING"}]}"#),
             context: .localToolTestContext(toolCallID: "multi-invalid")
         )
+        Issue.record("Expected an invalidArguments error")
+    } catch let error as AgentToolError {
+        #expect(error.description.contains("oldText must occur exactly once"))
+        #expect(!error.description.contains("old_text"))
     }
     #expect(try String(contentsOf: file, encoding: .utf8) == "one\ntwo\n")
 }

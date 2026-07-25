@@ -175,7 +175,7 @@ struct CloudKnowledgePhase6Tests {
             client: CloudKnowledgeConsumptionClient(api: api, cache: cache),
             knowledgeBaseIDs: ["kb-1"]
         )
-        let arguments = try AgentToolArguments(json: #"{"query":"Connor","context_budget":8000,"limit":20}"#)
+        let arguments = try AgentToolArguments(json: #"{"query":"Connor","contextBudget":8000,"limit":20}"#)
         let context = AgentToolExecutionContext(
             runID: "run",
             sessionID: "session",
@@ -187,11 +187,15 @@ struct CloudKnowledgePhase6Tests {
 
         let recent = try await recentTool.execute(arguments: arguments, context: context)
         let knowledge = try await knowledgeTool.execute(arguments: arguments, context: context)
+        #expect(recentTool.description.contains("updatedAt"))
+        #expect(!recentTool.description.contains("recorded_at"))
         #expect(recent.contentText.contains("## L2"))
         #expect(!recent.contentText.contains("## L3"))
         #expect(knowledge.contentText.contains("## L3"))
         #expect(knowledge.contentText.contains("## L4"))
         #expect(!knowledge.contentText.contains("## L2"))
+        #expect(recent.contentJSON?.contains("\"requestId\"") == true)
+        #expect(recent.contentJSON?.contains("\"request_id\"") == false)
         #expect(await api.contextRequests.map(\.knowledgeBaseIDs) == [["kb-1"], ["kb-1"]])
         #expect(await api.contextChannels == [.recentContext, .knowledgeContext])
 

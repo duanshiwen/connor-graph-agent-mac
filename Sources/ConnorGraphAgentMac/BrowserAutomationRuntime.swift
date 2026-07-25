@@ -14,7 +14,7 @@ enum BrowserAutomationRuntimeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidRequest(let message): message
-        case .tabNotFound: "Browser tab was not found. Call browser_tabs and use a current tab_id."
+        case .tabNotFound: "Browser tab was not found. Call browser_tabs and use a current tabID."
         case .staleNode: "The browser node reference is stale. Call browser_snapshot again before retrying."
         case .timedOut(let condition): "Timed out waiting for browser condition: \(condition)"
         case .pageRejected(let message): message
@@ -127,6 +127,7 @@ final class BrowserAutomationRuntime {
         let tabs: [[String: Any]] = snapshot.tabs.map { tab in
             [
                 "id": tab.id.uuidString,
+                "tabID": tab.id.uuidString,
                 "selected": tab.id == snapshot.selectedTabID,
                 "title": tab.title,
                 "url": tab.currentURLString,
@@ -251,7 +252,7 @@ final class BrowserAutomationRuntime {
 
         if condition == "node" {
             guard let nodeReference = request.nodeReference else {
-                throw BrowserAutomationRuntimeError.invalidRequest("browser_wait node requires node_ref")
+                throw BrowserAutomationRuntimeError.invalidRequest("browser_wait node requires nodeRef")
             }
             let value = try await webView.callAsyncJavaScript(
                 Self.waitForNodeScript,
@@ -346,7 +347,7 @@ final class BrowserAutomationRuntime {
     ) async throws -> BrowserControlResponse {
         let resolved = try resolveTab(request)
         guard let nodeReference = request.nodeReference else {
-            throw BrowserAutomationRuntimeError.invalidRequest("Browser interaction requires node_ref")
+            throw BrowserAutomationRuntimeError.invalidRequest("Browser interaction requires nodeRef")
         }
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
         if uploadOnly { showWorkspace(request.sessionID) }
@@ -394,7 +395,7 @@ final class BrowserAutomationRuntime {
     private func describe(_ request: BrowserControlRequest) async throws -> BrowserControlResponse {
         let resolved = try resolveTab(request)
         guard let nodeReference = request.nodeReference else {
-            throw BrowserAutomationRuntimeError.invalidRequest("Browser action approval requires node_ref")
+            throw BrowserAutomationRuntimeError.invalidRequest("Browser action approval requires nodeRef")
         }
         let webView = ensureWebView(sessionID: request.sessionID, tabID: resolved.tab.id, initialURLString: resolved.tab.restoredURLString).webView
         let value = try await webView.callAsyncJavaScript(

@@ -466,6 +466,8 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("hasNextPage"))
         #expect(prompt.contains("nextPage"))
         #expect(prompt.contains("Aim to collect relevant memory comprehensively"))
+        #expect(prompt.contains("page and depth must be JSON integers"))
+        #expect(prompt.contains("page set to that exact integer"))
         #expect(!prompt.contains("memory_os_knowledge_context(query, limit, depth)"))
         #expect(prompt.contains("preserve chronological extraction and historical trajectories"))
         #expect(!prompt.contains("Every other task must call `web_search`"))

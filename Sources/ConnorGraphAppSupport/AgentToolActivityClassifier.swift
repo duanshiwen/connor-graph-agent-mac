@@ -110,7 +110,7 @@ public struct AgentToolActivityClassifier: Sendable {
             return ToolDescriptor(
                 semanticKind: .readFile,
                 title: "Read File",
-                target: basename(string(arguments["file_path"]) ?? string(result["path"])),
+                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: lineRange(offset: offset, limit: limit),
                 icon: "doc.text.magnifyingglass"
             )
@@ -119,7 +119,7 @@ public struct AgentToolActivityClassifier: Sendable {
             return ToolDescriptor(
                 semanticKind: .writeFile,
                 title: "Write File",
-                target: basename(string(arguments["file_path"]) ?? string(result["path"])),
+                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: operation,
                 icon: "square.and.pencil"
             )
@@ -127,7 +127,7 @@ public struct AgentToolActivityClassifier: Sendable {
             return ToolDescriptor(
                 semanticKind: .editFile,
                 title: "Edit File",
-                target: basename(string(arguments["file_path"]) ?? string(result["path"])),
+                target: basename(string(arguments["filePath"]) ?? string(arguments["file_path"]) ?? string(result["path"])),
                 subtitle: editSubtitle(arguments: arguments, result: result),
                 icon: "pencil"
             )
@@ -166,9 +166,27 @@ public struct AgentToolActivityClassifier: Sendable {
             case "delete_event": title = "Calendar: Delete Event"
             default: title = "Calendar: Write"
             }
-            return ToolDescriptor(semanticKind: .calendar, title: title, target: string(arguments["calendarID"]) ?? string(arguments["eventID"]), subtitle: operation, icon: "calendar.badge.plus")
+            return ToolDescriptor(
+                semanticKind: .calendar,
+                title: title,
+                target: string(arguments["calendarID"])
+                    ?? string(arguments["calendar_id"])
+                    ?? string(arguments["eventID"])
+                    ?? string(arguments["event_id"]),
+                subtitle: operation,
+                icon: "calendar.badge.plus"
+            )
         case "calendar_read", "calendar_search_events":
-            return ToolDescriptor(semanticKind: .calendar, title: "Calendar: Read", target: string(arguments["calendarID"]) ?? string(arguments["eventID"]), subtitle: string(arguments["operation"]), icon: "calendar")
+            return ToolDescriptor(
+                semanticKind: .calendar,
+                title: "Calendar: Read",
+                target: string(arguments["calendarID"])
+                    ?? string(arguments["calendar_id"])
+                    ?? string(arguments["eventID"])
+                    ?? string(arguments["event_id"]),
+                subtitle: string(arguments["operation"]),
+                icon: "calendar"
+            )
         default:
             if let mcp = mcpDescriptor(rawToolName) { return mcp }
             if rawToolName.localizedCaseInsensitiveContains("browser") {

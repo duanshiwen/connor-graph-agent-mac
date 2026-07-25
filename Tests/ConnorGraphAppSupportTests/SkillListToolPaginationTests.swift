@@ -44,13 +44,16 @@ private func skillListContext(_ page: Int) -> AgentToolExecutionContext {
 
 @Test func skillListFollowsNextPageWithoutGapsOrDuplicatesInStableOrder() async throws {
     let tool = SkillListTool(packages: ["echo", "alpha", "delta", "bravo", "charlie"].map(pagedSkill))
+    #expect(tool.description.contains("Whenever nextPage is non-null"))
+    #expect(tool.description.contains("immediately call this same connor_skill_list tool again"))
+    #expect(tool.description.contains("Repeat until nextPage is null"))
     var page = 1
     var slugs: [String] = []
     var seenPages: [Int] = []
 
     while true {
         let result = try await tool.execute(
-            arguments: AgentToolArguments(values: ["page": .int(page), "page_size": .int(2)]),
+            arguments: AgentToolArguments(values: ["page": .int(page), "pageSize": .int(2)]),
             context: skillListContext(page)
         )
         let payload = try JSONDecoder().decode(
@@ -81,13 +84,13 @@ private func skillListContext(_ page: Int) -> AgentToolExecutionContext {
     let tool = SkillListTool(packages: [pagedSkill("alpha")])
     await #expect(throws: AgentToolError.self) {
         try await tool.execute(
-            arguments: AgentToolArguments(values: ["page": .int(0), "page_size": .int(2)]),
+            arguments: AgentToolArguments(values: ["page": .int(0), "pageSize": .int(2)]),
             context: skillListContext(0)
         )
     }
     await #expect(throws: AgentToolError.self) {
         try await tool.execute(
-            arguments: AgentToolArguments(values: ["page": .int(2), "page_size": .int(2)]),
+            arguments: AgentToolArguments(values: ["page": .int(2), "pageSize": .int(2)]),
             context: skillListContext(2)
         )
     }

@@ -63,6 +63,23 @@ import ConnorGraphStore
     #expect(hits.allSatisfy { $0.effectiveOccurredAt == iso8601(insideObject.occurredAt) })
 }
 
+@Test func memoryOSUnboundedEmptyQueryBrowsesAllRequestedLayers() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 30_000)
+    let object = MemoryOSProvenanceObject(id: "all-history-object", sourceType: .manual, title: "All history", content: "Unbounded retrieval evidence", occurredAt: now, ingestedAt: now)
+    try store.upsert(provenance: object)
+    try store.upsert(node: MemoryOSNode(id: "all-history-node", stableKey: "all-history-node", nodeType: "project", name: "All History"))
+    try store.upsert(statement: MemoryOSStatement(id: "all-history-statement", subjectID: "all-history-node", predicate: "status", text: "Unbounded retrieval works.", validAt: now, committedAt: now, evidenceSpanIDs: []))
+    try store.upsert(belief: MemoryOSBelief(id: "all-history-belief", statement: "Unbounded knowledge retrieval works.", domain: "testing", createdAt: now, updatedAt: now))
+
+    let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(
+        MemoryOSRetrievalQuery(text: "", layers: [.l0, .l2, .l3], limit: 20)
+    )
+
+    #expect(Set(hits.map(\.recordID)).isSuperset(of: ["all-history-object", "all-history-statement", "all-history-belief"]))
+}
+
 @Test func memoryOSUnifiedRetrievalSearchesAcrossAllLayersAndRanksHits() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSUnifiedRetrievalDatabaseURL().path)
     try store.migrate()

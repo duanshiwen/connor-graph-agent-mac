@@ -12,6 +12,46 @@ enum ContactJSON {
         let data = try encoder.encode(value)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
+
+    static func encodePeople(_ people: [PersonProfile]) throws -> String {
+        let data = try encoder.encode(people)
+        guard var rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return String(data: data, encoding: .utf8) ?? "[]"
+        }
+        for index in rows.indices {
+            addPersonOperationIDs(to: &rows[index])
+        }
+        return try encodeJSONObject(rows)
+    }
+
+    static func encodePerson(_ person: PersonProfile?) throws -> String {
+        let data = try encoder.encode(person)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(data: data, encoding: .utf8) ?? "null"
+        }
+        addPersonOperationIDs(to: &object)
+        return try encodeJSONObject(object)
+    }
+
+    static func encodeDraft(_ draft: ContactMutationDraft) throws -> String {
+        let data = try encoder.encode(draft)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+        object["draftID"] = object["id"]
+        let output = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: output, encoding: .utf8) ?? "{}"
+    }
+
+    private static func addPersonOperationIDs(to object: inout [String: Any]) {
+        object["personID"] = object["id"]
+        object["mergedIntoPersonID"] = object["mergedIntoID"]
+    }
+
+    private static func encodeJSONObject(_ object: Any) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
 }
 
 public protocol AgentContactRuntime: Sendable {
@@ -176,7 +216,7 @@ public struct ContactCreateDraftTool: AgentTool {
         guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
         let record = ContactRecord(id: ContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
         let draft = try await runtime.createDraft(record: record)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created contact draft \(draft.id); not committed", contentJSON: try ContactJSON.encode(draft))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created contact draft \(draft.id); copy draftID into contact_commit_draft", contentJSON: try ContactJSON.encodeDraft(draft))
     }
 }
 
@@ -185,24 +225,24 @@ public struct ContactCommitDraftTool: AgentTool {
     public var name: String { "contact_commit_draft" }
     public var description: String { "Commit a contact mutation draft after approval." }
     public var permission: AgentPermissionCapability { .mutateContacts }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Draft ID"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Exact draftID returned by contact_create_draft; copy the field without renaming it"), "approved": .boolean(description: "Explicit approval")], required: ["draftID", "approved"]) }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
         let draft = try await runtime.commitDraft(id: draftID, approved: arguments.bool("approved") ?? false)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try ContactJSON.encode(draft))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Committed approved contact draft \(draftID)", contentJSON: try ContactJSON.encodeDraft(draft))
     }
 }
 
 private func summarizePeople(_ people: [PersonProfile], prefix: String) -> String {
     let lines = people.prefix(20).map { person in
         var parts = [
-            "person_id: \(person.id.rawValue)",
-            "display_name: \(person.displayName)",
+            "personID: \(person.id.rawValue)",
+            "displayName: \(person.displayName)",
             "status: \(person.status.rawValue)"
         ]
         if let mergedIntoID = person.mergedIntoID {
-            parts.append("merged_into_person_id: \(mergedIntoID.rawValue)")
+            parts.append("mergedIntoPersonID: \(mergedIntoID.rawValue)")
         }
         if let notes = person.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
             parts.append("notes: \(String(notes.prefix(160)))")
@@ -221,12 +261,12 @@ private func summarizePerson(_ person: PersonProfile?) -> String {
     guard let person else { return "Person not found" }
     var lines = [
         "Loaded person",
-        "person_id: \(person.id.rawValue)",
-        "display_name: \(person.displayName)",
+        "personID: \(person.id.rawValue)",
+        "displayName: \(person.displayName)",
         "status: \(person.status.rawValue)"
     ]
     if let mergedIntoID = person.mergedIntoID {
-        lines.append("merged_into_person_id: \(mergedIntoID.rawValue)")
+        lines.append("mergedIntoPersonID: \(mergedIntoID.rawValue)")
     }
     if !person.aliases.isEmpty {
         lines.append("aliases: \(person.aliases.joined(separator: ", "))")
@@ -246,13 +286,14 @@ private func summarizePerson(_ person: PersonProfile?) -> String {
 public struct ContactsReadTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_read" }
-    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts. For get_person, prefer the exact person_id from the prompt's Referenced People section; do not guess IDs from display names." }
+    public var description: String { "Read governed contacts and Person Registry profiles using operations: list_people, search_people, get_person, list_contacts, search_contacts. For get_person, copy the exact personID from the prompt's Referenced People section or a prior result; do not guess IDs from display names." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["list_people", "search_people", "get_person", "resolve_person", "list_contacts", "search_contacts", "get_contact", "resolve_contact"], description: "Read operation."),
             "query": .string(description: "Person/contact query; use this for plain names that were not already resolved in Referenced People"),
-            "id": .string(description: "Exact Person/contact ID. For people mentioned through Composer, use person_id from Referenced People; do not infer this from display_name")
+            "personID": .string(description: "Exact personID returned by a Person Registry list/search result or Referenced People; copy the field and value unchanged. Do not infer IDs from displayName."),
+            "id": .string(description: "Legacy Person/contact ID accepted for compatibility. Prefer personID for Person Registry operations; do not infer IDs from displayName")
         ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -261,14 +302,14 @@ public struct ContactsReadTool: AgentTool {
         switch operation {
         case "list_people":
             let people = try await runtime.listPeople()
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encode(people))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encodePeople(people))
         case "search_people", "resolve_person":
             let people = try await runtime.searchPeople(query: arguments.string("query") ?? "")
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encode(people))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encodePeople(people))
         case "get_person":
-            guard let id = arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("id is required") }
+            guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("personID is required") }
             let person = try await runtime.getPerson(id: ContactID(rawValue: id))
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePerson(person), contentJSON: try ContactJSON.encode(person))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePerson(person), contentJSON: try ContactJSON.encodePerson(person))
         case "list_contacts", "search_contacts", "resolve_contact":
             let records = try await runtime.search(query: arguments.string("query") ?? "")
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: try ContactJSON.encode(records))
@@ -285,14 +326,15 @@ public struct ContactsReadTool: AgentTool {
 public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
-    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. For update/delete/merge, use exact person_id values from Referenced People or prior contacts_read results; never guess IDs from display names." }
+    public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. For update/delete/merge, copy exact personID values from Referenced People or prior contacts_read results; never guess IDs from display names." }
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["create_person", "update_person", "delete_person", "merge_people"], description: "Write operation."),
-            "id": .string(description: "Exact Person ID, preferably person_id from Referenced People or contacts_read; never inferred from display name"),
-            "sourceID": .string(description: "Exact merge source person ID from Referenced People or contacts_read"),
-            "targetID": .string(description: "Exact merge target person ID from Referenced People or contacts_read"),
+            "personID": .string(description: "Exact personID returned by contacts_read or Referenced People; copy the field and value unchanged for update_person or delete_person."),
+            "id": .string(description: "Legacy Person ID accepted for compatibility. Prefer personID; never infer IDs from display name"),
+            "sourceID": .string(description: "For merge_people, copy the source person's exact personID returned by contacts_read into this field"),
+            "targetID": .string(description: "For merge_people, copy the target person's exact personID returned by contacts_read into this field"),
             "email": .string(description: "Email"),
             "name": .string(description: "Display name"),
             "organization": .string(description: "Organization"),
@@ -318,9 +360,9 @@ public struct ContactsWriteTool: AgentTool {
                 notes: arguments.string("notes")
             )
             let created = try await runtime.createPerson(profile, approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created approved person \(created.id.rawValue)", contentJSON: try ContactJSON.encode(created))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created approved person \(created.id.rawValue)", contentJSON: try ContactJSON.encodePerson(created))
         case "update_person":
-            guard let id = arguments.string("id") else { throw AgentToolError.invalidArguments("id is required") }
+            guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") else { throw AgentToolError.invalidArguments("personID is required") }
             let existing = try await runtime.getPerson(id: ContactID(rawValue: id))
             guard let existing else { throw AgentToolError.invalidArguments("Unknown person") }
             var draft = PersonProfileDraft(profile: existing)
@@ -330,15 +372,15 @@ public struct ContactsWriteTool: AgentTool {
             if let notes = arguments.string("notes") { draft.notes = notes }
             if let email = arguments.string("email") { draft.emails = [ContactEmailAddress(email: email)] }
             let updated = try await runtime.updatePerson(id: ContactID(rawValue: id), update: draft, approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Updated person \(updated.id.rawValue)", contentJSON: try ContactJSON.encode(updated))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Updated person \(updated.id.rawValue)", contentJSON: try ContactJSON.encodePerson(updated))
         case "delete_person":
-            guard let id = arguments.string("id") else { throw AgentToolError.invalidArguments("id is required") }
+            guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") else { throw AgentToolError.invalidArguments("personID is required") }
             let deleted = try await runtime.deletePerson(id: ContactID(rawValue: id), approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Deleted person \(deleted.id.rawValue)", contentJSON: try ContactJSON.encode(deleted))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Deleted person \(deleted.id.rawValue)", contentJSON: try ContactJSON.encodePerson(deleted))
         case "merge_people":
             guard let sourceID = arguments.string("sourceID"), let targetID = arguments.string("targetID") else { throw AgentToolError.invalidArguments("sourceID and targetID are required") }
             let merged = try await runtime.mergePeople(sourceID: ContactID(rawValue: sourceID), targetID: ContactID(rawValue: targetID), approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Merged person \(sourceID) into \(targetID)", contentJSON: try ContactJSON.encode(merged))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Merged person \(sourceID) into \(targetID)", contentJSON: try ContactJSON.encodePerson(merged))
         default:
             throw AgentToolError.invalidArguments("Unsupported contacts_write operation: \(operation)")
         }

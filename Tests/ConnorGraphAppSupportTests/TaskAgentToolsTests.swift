@@ -35,6 +35,10 @@ struct TaskAgentToolsTests {
         #expect(tasks.count == 1)
         #expect(tasks.first?.origin == .ai)
         #expect(tasks.first?.metadata.createdBySessionID == "session-1")
+        let json = try #require(result.contentJSON)
+        let payload = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect(payload["taskID"] as? String == payload["id"] as? String)
+        #expect(payload["task_id"] == nil)
     }
 
     @Test func aiToolCreatesStatusTriggeredTask() async throws {
@@ -66,13 +70,22 @@ struct TaskAgentToolsTests {
             _ = try service.createScheduledSessionMessageTask(origin: .ai, name: "Task \(index)", runAt: Date(timeIntervalSince1970: Double(100 + index)), recurrence: .daily, timezoneIdentifier: nil, message: "Message \(index)")
         }
         let tool = TaskListTool(repository: repository)
+        let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+        let pageSchema = try #require(properties["page"] as? [String: Any])
+        let pageSizeSchema = try #require(properties["pageSize"] as? [String: Any])
+        #expect((pageSchema["description"] as? String)?.contains("use exactly that value") == true)
+        #expect((pageSizeSchema["description"] as? String)?.contains("must remain unchanged") == true)
         var page = 1
         var ids: [String] = []
         var reportedTotal = 0
         repeat {
-            let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"page\":\(page),\"page_size\":2}"), context: taskContext())
+            let result = try await tool.execute(arguments: try AgentToolArguments(json: "{\"page\":\(page),\"pageSize\":2}"), context: taskContext())
             let json = try #require(result.contentJSON)
             let payload = try JSONDecoder.taskDecoder.decode(ListPage.self, from: Data(json.utf8))
+            let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+            let operationReadyTasks = try #require(object["tasks"] as? [[String: Any]])
+            #expect(operationReadyTasks.allSatisfy { $0["taskID"] as? String == $0["id"] as? String })
+            #expect(operationReadyTasks.allSatisfy { $0["task_id"] == nil })
             #expect(payload.page == page)
             #expect(payload.pageSize == 2)
             #expect(payload.totalPages == 3)
@@ -100,7 +113,7 @@ struct TaskAgentToolsTests {
         let expected = ISO8601DateFormatter().string(from: try #require(try repository.loadTask(id: original.id)).updatedAt)
         let tool = TaskUpdateScheduledSessionMessageTool(repository: repository)
         _ = try await tool.execute(arguments: try AgentToolArguments(json: """
-        {"task_id":"\(original.id)","expected_updated_at":"\(expected)","name":"New","runAt":"1970-01-01T00:03:20Z","recurrence":"weekly","timezone":"Asia/Shanghai","message":"New message","title":"New title"}
+        {"taskID":"\(original.id)","expectedUpdatedAt":"\(expected)","name":"New","runAt":"1970-01-01T00:03:20Z","recurrence":"weekly","timezone":"Asia/Shanghai","message":"New message","title":"New title"}
         """), context: taskContext())
         let updated = try #require(try repository.loadTask(id: original.id))
 
@@ -143,22 +156,22 @@ struct TaskAgentToolsTests {
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let task = try TaskCreationService(repository: repository).createScheduledSessionMessageTask(origin: .ai, name: "Delete me", runAt: Date(timeIntervalSince1970: 100), recurrence: .once, timezoneIdentifier: nil, message: "Message")
         let tool = TaskDeleteTool(repository: repository)
-        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"task_id\":\"\(task.id)\"}"), context: taskContext())
+        _ = try await tool.execute(arguments: try AgentToolArguments(json: "{\"taskID\":\"\(task.id)\"}"), context: taskContext())
         #expect(try repository.loadTasks().contains { $0.id == task.id } == false)
         #expect(try repository.loadTask(id: task.id)?.lifecycle.status == .deleted)
 
         await #expect(throws: AppTaskManagementError.taskNotFound("missing")) {
-            try await tool.execute(arguments: try AgentToolArguments(json: "{\"task_id\":\"missing\"}"), context: taskContext())
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"taskID\":\"missing\"}"), context: taskContext())
         }
         let system = try #require(try repository.loadOrCreateDefault().first { $0.metadata.isProtectedSystemTask })
         await #expect(throws: AppTaskManagementError.cannotDeleteProtectedSystemTask(system.id)) {
-            try await tool.execute(arguments: try AgentToolArguments(json: "{\"task_id\":\"\(system.id)\"}"), context: taskContext())
+            try await tool.execute(arguments: try AgentToolArguments(json: "{\"taskID\":\"\(system.id)\"}"), context: taskContext())
         }
 
         var registry = AgentToolRegistry()
         registry.registerTaskManagementTools(repository: repository)
         await #expect(throws: AgentToolError.self) {
-            try await registry.execute(AgentToolCall(name: "tasks_delete", argumentsJSON: "{\"task_id\":\"\(system.id)\"}"), context: taskContext(permissionMode: .readOnly))
+            try await registry.execute(AgentToolCall(name: "tasks_delete", argumentsJSON: "{\"taskID\":\"\(system.id)\"}"), context: taskContext(permissionMode: .readOnly))
         }
     }
 }

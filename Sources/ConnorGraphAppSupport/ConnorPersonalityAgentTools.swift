@@ -204,8 +204,8 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "request": .string(description: "User's persistent personality request. Required for merge and replace; omit for reset."),
         "mode": .stringEnumeration(values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue), description: "Update mode."),
-        "expected_revision": .integer(description: "Exact revision returned by personality_get_current.")
-    ], required: ["mode", "expected_revision"])
+        "expectedRevision": .integer(description: "Exact revision returned by personality_get_current.")
+    ], required: ["mode", "expectedRevision"])
 
     private let runtime: ConnorPersonalityRuntime
     private let provider: AnyAgentModelProvider
@@ -223,8 +223,8 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
         guard let mode = ConnorPersonalityUpdateMode(rawValue: modeRaw) else {
             throw ConnorPersonalityProposalError.invalidMode(modeRaw)
         }
-        guard let expectedRevision = arguments.int("expected_revision") else {
-            throw AgentToolError.invalidArguments("expected_revision is required")
+        guard let expectedRevision = arguments.int("expectedRevision") ?? arguments.int("expected_revision") else {
+            throw AgentToolError.invalidArguments("expectedRevision is required")
         }
         let request = arguments.string("request")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if mode != .reset, request.isEmpty { throw ConnorPersonalityProposalError.requestRequired }
@@ -283,8 +283,8 @@ public struct ConnorPersonalityUpdateTool: AgentTool {
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "request": .string(description: "User's persistent personality request. Use an empty string only for reset."),
         "mode": .stringEnumeration(values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue), description: "Update mode."),
-        "expected_revision": .integer(description: "Exact revision returned by personality_get_current.")
-    ], required: ["request", "mode", "expected_revision"])
+        "expectedRevision": .integer(description: "Exact revision returned by personality_get_current.")
+    ], required: ["request", "mode", "expectedRevision"])
 
     private let runtime: ConnorPersonalityRuntime
     private let provider: AnyAgentModelProvider
@@ -300,8 +300,8 @@ public struct ConnorPersonalityUpdateTool: AgentTool {
         guard let mode = ConnorPersonalityUpdateMode(rawValue: modeRaw) else {
             throw ConnorPersonalityProposalError.invalidMode(modeRaw)
         }
-        guard let expectedRevision = arguments.int("expected_revision") else {
-            throw AgentToolError.invalidArguments("expected_revision is required")
+        guard let expectedRevision = arguments.int("expectedRevision") ?? arguments.int("expected_revision") else {
+            throw AgentToolError.invalidArguments("expectedRevision is required")
         }
         let request = arguments.string("request")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if mode != .reset, request.isEmpty { throw ConnorPersonalityProposalError.requestRequired }
@@ -352,8 +352,8 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
     public let description = "Immediately commit an existing personality proposal only when the latest user message explicitly requests a persistent change, without a second confirmation or native approval step. Never commit in response to a question about current attributes, including gender, even if an older proposal ID appears in conversation history. Pass only the proposal ID returned by personality_propose_update. Read-only sessions still reject the write. This capability cannot change 康纳同学's name."
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "proposal_id": .string(description: "Exact proposal ID returned by personality_propose_update.")
-    ], required: ["proposal_id"])
+        "proposalID": .string(description: "Exact proposalID returned by personality_propose_update; copy the field without renaming it.")
+    ], required: ["proposalID"])
 
     private let runtime: ConnorPersonalityRuntime
     private let store: ConnorPersonalityProposalStore
@@ -411,8 +411,8 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
     }
 
     private func resolvedProposal(_ arguments: AgentToolArguments) async throws -> ConnorPersonalityProposal {
-        guard let id = arguments.string("proposal_id")?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else {
-            throw AgentToolError.invalidArguments("proposal_id is required")
+        guard let id = (arguments.string("proposalID") ?? arguments.string("proposal_id"))?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else {
+            throw AgentToolError.invalidArguments("proposalID is required")
         }
         return try await store.proposal(id: id)
     }

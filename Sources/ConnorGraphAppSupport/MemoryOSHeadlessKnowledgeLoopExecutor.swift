@@ -233,13 +233,20 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
             "memory_os_l4_update_entities"
         ]
         guard writeTools.contains(call.name) else { return nil }
-        let arguments = normalizedJSON(call.argumentsJSON)
-        guard let previous = try store.backgroundToolCalls(runID: runID).last(where: {
-            $0.status == .succeeded
-                && $0.toolName == call.name
-                && normalizedJSON($0.argumentsJSON) == arguments
-                && $0.resultJSON != nil
-        }) else { return nil }
+        let arguments = try toolExecutor.normalizedArgumentsJSON(for: call)
+        let previous = try store.backgroundToolCalls(runID: runID).reversed().first { candidate in
+            guard candidate.status == .succeeded,
+                  candidate.toolName == call.name,
+                  candidate.resultJSON != nil
+            else { return false }
+            let previousCall = MemoryOSBackgroundToolCall(
+                id: candidate.id,
+                name: candidate.toolName,
+                argumentsJSON: candidate.argumentsJSON
+            )
+            return (try? toolExecutor.normalizedArgumentsJSON(for: previousCall)) == arguments
+        }
+        guard let previous else { return nil }
         let citations = previous.metadata["citations"]?
             .split(separator: ",")
             .map(String.init) ?? []
@@ -250,15 +257,6 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
             contentText: previous.metadata["content_text"] ?? "Reused the successful result from an earlier attempt of this background job.",
             citations: citations
         )
-    }
-
-    private func normalizedJSON(_ json: String) -> String {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let normalized = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let value = String(data: normalized, encoding: .utf8)
-        else { return json }
-        return value
     }
 
     private func capped(_ value: String) -> String {

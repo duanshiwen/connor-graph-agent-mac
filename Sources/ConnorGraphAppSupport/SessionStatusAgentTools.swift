@@ -7,7 +7,7 @@ public struct SessionGetStatusTool: AgentTool {
     public let description = "Read the governance status for the current Connor session or a specific session."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "session_id": .string(description: "Optional session ID. Omit to read the current session status.")
+        "sessionID": .string(description: "Optional exact sessionID returned by session_list_by_status. Omit to read the current session status.")
     ], required: [])
 
     private let repository: AppChatSessionRepository
@@ -17,7 +17,7 @@ public struct SessionGetStatusTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let sessionID = arguments.string("session_id")?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.sessionID
+        let sessionID = (arguments.string("sessionID") ?? arguments.string("session_id"))?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.sessionID
         guard let session = try repository.loadSession(id: sessionID) else {
             throw AgentToolError.invalidArguments("Session not found: \(sessionID)")
         }
@@ -36,8 +36,8 @@ public struct SessionSetStatusTool: AgentTool {
     public let description = "Set the governance status for the current Connor session or a specific session. Call `session_list_statuses` first to get the available status IDs."
     public let permission: AgentPermissionCapability = .mutateSessionStatus
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "session_id": .string(description: "Optional session ID. Omit to update the current session."),
-        "status": .string(description: "Required status id. Must be one of the ids returned by session_list_statuses."),
+        "sessionID": .string(description: "Optional exact sessionID returned by session_list_by_status. Omit to update the current session."),
+        "status": .string(description: "Required exact status returned by session_list_statuses; copy the field without renaming it."),
         "reason": .string(description: "Optional human-readable reason for the status change.")
     ], required: ["status"])
 
@@ -50,7 +50,7 @@ public struct SessionSetStatusTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let sessionID = arguments.string("session_id")?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.sessionID
+        let sessionID = (arguments.string("sessionID") ?? arguments.string("session_id"))?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.sessionID
         guard let statusRaw = arguments.string("status")?.trimmingCharacters(in: .whitespacesAndNewlines), !statusRaw.isEmpty else {
             throw AgentToolError.invalidArguments("status is required")
         }
@@ -97,12 +97,12 @@ public extension AgentToolRegistry {
 
 public struct SessionListByStatusTool: AgentTool {
     public let name = "session_list_by_status"
-    public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. page defaults to 1 and page_size to 50. Follow nextPage with the same status and page_size for complete results."
+    public let description = "List Connor sessions, optionally filtered by governance status, with stable pagination. The response contains a sessions array; every item has an operation-ready sessionID that can be copied directly into session_set_status or session_batch_set_status updates[].sessionID. page defaults to 1 and pageSize to 50. When nextPage is non-null, call this tool again with page set to exactly nextPage and keep status and pageSize unchanged."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "status": .string(description: "Optional status ID returned by session_list_statuses. Omit to list all sessions."),
+        "status": .string(description: "Optional exact status returned by session_list_statuses; copy the field without renaming it. Omit to list all sessions."),
         "page": .integer(description: "1-based page. Defaults to 1; use nextPage from the previous response."),
-        "page_size": .integer(description: "Items per page from 1 through 100. Defaults to 50.")
+        "pageSize": .integer(description: "Items per page from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
     ], required: [])
 
     private let repository: AppChatSessionRepository
@@ -117,9 +117,9 @@ public struct SessionListByStatusTool: AgentTool {
         let status = arguments.string("status")?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         if let status { try validateStatus(status, governanceConfig: governanceConfig) }
         let page = arguments.int("page") ?? 1
-        let pageSize = arguments.int("page_size") ?? 50
+        let pageSize = arguments.int("pageSize") ?? arguments.int("page_size") ?? 50
         guard page >= 1 else { throw AgentToolError.invalidArguments("page must be at least 1") }
-        guard (1...100).contains(pageSize) else { throw AgentToolError.invalidArguments("page_size must be between 1 and 100") }
+        guard (1...100).contains(pageSize) else { throw AgentToolError.invalidArguments("pageSize must be between 1 and 100") }
         let sessions = try repository.loadSessionMetadata().filter { session in
             status == nil || session.governance.status.rawValue == status
         }.sorted {
@@ -154,20 +154,26 @@ public struct SessionListByStatusTool: AgentTool {
             nextPage: hasNextPage ? page + 1 : nil,
             sessions: items
         )
-        return try sessionStatusJSONResult(payload, context: context, toolName: name, text: "Returned \(items.count) of \(totalItems) session(s) on page \(page).")
+        return try sessionStatusJSONResult(
+            payload,
+            context: context,
+            toolName: name,
+            text: "Returned \(items.count) of \(totalItems) session(s) on page \(page).",
+            modelContentUsesJSON: true
+        )
     }
 }
 
 public struct SessionBatchSetStatusTool: AgentTool {
     public let name = "session_batch_set_status"
-    public let description = "Set multiple Connor sessions to one status. Each item returns updated, unchanged, not_found, conflict, or failed so partial success is explicit. Repeating the same request is idempotent: sessions already at the target status return unchanged. Optional expected_updated_at enables caller-visible optimistic concurrency; updates are compare-and-set even when it is omitted."
+    public let description = "Set multiple Connor sessions to one status. Copy each sessionID directly from session_list_by_status. Each item returns updated, unchanged, not_found, conflict, or failed so partial success is explicit. Repeating the same request is idempotent: sessions already at the target status return unchanged. Optional expectedUpdatedAt enables caller-visible optimistic concurrency; updates are compare-and-set even when it is omitted."
     public let permission: AgentPermissionCapability = .mutateSessionStatus
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "updates": .array(items: .closedObject(properties: [
-            "session_id": .string(description: "Session ID to update."),
-            "expected_updated_at": .string(description: "Optional ISO-8601 updatedAt value returned by session_list_by_status.")
-        ], required: ["session_id"]), description: "One or more session updates. Duplicate session IDs are processed once."),
-        "status": .string(description: "Target status ID returned by session_list_statuses."),
+            "sessionID": .string(description: "Exact sessionID returned by session_list_by_status; copy the field without renaming it."),
+            "expectedUpdatedAt": .string(description: "Optional ISO-8601 updatedAt value returned by session_list_by_status.")
+        ], required: ["sessionID"]), description: "One or more session updates. Duplicate session IDs are processed once."),
+        "status": .string(description: "Exact status returned by session_list_statuses; copy the field without renaming it."),
         "reason": .string(description: "Optional reason recorded for successfully updated sessions.")
     ], required: ["updates", "status"])
 
@@ -192,17 +198,17 @@ public struct SessionBatchSetStatusTool: AgentTool {
         let formatter = ISO8601DateFormatter()
         for value in values {
             guard let object = value.objectValue,
-                  let sessionID = object["session_id"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let sessionID = (object["sessionID"] ?? object["session_id"])?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !sessionID.isEmpty else {
-                results.append(.init(sessionID: "", outcome: "failed", status: nil, updatedAt: nil, message: "session_id is required"))
+                results.append(.init(sessionID: "", outcome: "failed", status: nil, updatedAt: nil, message: "sessionID is required"))
                 continue
             }
             guard seen.insert(sessionID).inserted else { continue }
-            let expectedRaw = object["expected_updated_at"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let expectedRaw = (object["expectedUpdatedAt"] ?? object["expected_updated_at"])?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
             let expectedUpdatedAt: Date?
             if let expectedRaw, !expectedRaw.isEmpty {
                 guard let parsed = formatter.date(from: expectedRaw) else {
-                    results.append(.init(sessionID: sessionID, outcome: "failed", status: nil, updatedAt: nil, message: "expected_updated_at must be ISO-8601"))
+                    results.append(.init(sessionID: sessionID, outcome: "failed", status: nil, updatedAt: nil, message: "expectedUpdatedAt must be ISO-8601"))
                     continue
                 }
                 expectedUpdatedAt = parsed
@@ -238,13 +244,22 @@ public struct SessionBatchSetStatusTool: AgentTool {
             }
         }
         let payload = SessionBatchStatusResponse(
-            requestedItems: Set(values.compactMap { $0.objectValue?["session_id"]?.stringValue }).count,
+            requestedItems: Set<String>(values.compactMap { value in
+                guard let object = value.objectValue else { return nil }
+                return (object["sessionID"] ?? object["session_id"])?.stringValue
+            }).count,
             updatedItems: results.filter { $0.outcome == "updated" }.count,
             unchangedItems: results.filter { $0.outcome == "unchanged" }.count,
             failedItems: results.filter { !["updated", "unchanged"].contains($0.outcome) }.count,
             results: results
         )
-        return try sessionStatusJSONResult(payload, context: context, toolName: name, text: "Batch status update completed: \(payload.updatedItems) updated, \(payload.unchangedItems) unchanged, \(payload.failedItems) failed or conflicted.")
+        return try sessionStatusJSONResult(
+            payload,
+            context: context,
+            toolName: name,
+            text: "Batch status update completed: \(payload.updatedItems) updated, \(payload.unchangedItems) unchanged, \(payload.failedItems) failed or conflicted.",
+            modelContentUsesJSON: true
+        )
     }
 }
 
@@ -262,16 +277,15 @@ public struct SessionListStatusesTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let statuses = governanceConfig.statuses.map { status -> [String: String] in
-            ["id": status.id, "name": status.name]
+            ["id": status.id, "status": status.id, "name": status.name]
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let json = String(decoding: try encoder.encode(statuses), as: UTF8.self)
-        let names = statuses.map { $0["name"] ?? $0["id"] ?? "" }.joined(separator: ", ")
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Found \(statuses.count) status definition(s): \(names).",
+            contentText: json,
             contentJSON: json
         )
     }
@@ -377,13 +391,19 @@ private func sessionStatusJSONResult<T: Encodable>(
     _ payload: T,
     context: AgentToolExecutionContext,
     toolName: String,
-    text: String
+    text: String,
+    modelContentUsesJSON: Bool = false
 ) throws -> AgentToolResult {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     encoder.dateEncodingStrategy = .iso8601
     let json = String(decoding: try encoder.encode(payload), as: UTF8.self)
-    return AgentToolResult(toolCallID: context.toolCallID, toolName: toolName, contentText: text, contentJSON: json)
+    return AgentToolResult(
+        toolCallID: context.toolCallID,
+        toolName: toolName,
+        contentText: modelContentUsesJSON ? json : text,
+        contentJSON: json
+    )
 }
 
 private func validateStatus(_ status: String, governanceConfig: AppSessionGovernanceConfig) throws {

@@ -74,11 +74,11 @@ public func buildSkillCatalogSummary(from packages: [SkillPackage]) -> String {
 /// Prefer this over injecting the full catalog into the system prompt.
 public struct SkillListTool: AgentTool {
     public let name = "connor_skill_list"
-    public let description = "List installed skills available for this session in stable slug order. page defaults to 1 and page_size defaults to 50. The response includes page, pageSize, returnedItems, totalItems, totalPages, hasNextPage, nextPage, and skills. When hasNextPage is true, call again with exactly nextPage and the same page_size to retrieve the complete catalog without gaps or duplicates."
+    public let description = "List installed skills available for this session in stable slug order. This is the internal skill-discovery function. page defaults to 1 and pageSize defaults to 50. The response includes page, pageSize, returnedItems, totalItems, totalPages, hasNextPage, nextPage, and skills. Whenever nextPage is non-null (equivalently, hasNextPage is true), immediately call this same connor_skill_list tool again with page set to exactly nextPage and the same pageSize. Repeat until nextPage is null before selecting or activating a skill, so the complete catalog is retrieved without gaps or duplicates."
     public let permission: AgentPermissionCapability = .readSession
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "page": .integer(description: "1-based result page. Defaults to 1; use nextPage from the previous response."),
-        "page_size": .integer(description: "Number of skills per page, from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
+        "pageSize": .integer(description: "Number of skills per page, from 1 through 100. Defaults to 50 and must remain unchanged while following nextPage.")
     ], required: [])
 
     private let packages: [SkillPackage]
@@ -89,10 +89,10 @@ public struct SkillListTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let page = arguments.int("page") ?? 1
-        let pageSize = arguments.int("page_size") ?? 50
+        let pageSize = arguments.int("pageSize") ?? arguments.int("page_size") ?? 50
         guard page >= 1 else { throw AgentToolError.invalidArguments("page must be at least 1") }
         guard (1...100).contains(pageSize) else {
-            throw AgentToolError.invalidArguments("page_size must be between 1 and 100")
+            throw AgentToolError.invalidArguments("pageSize must be between 1 and 100")
         }
 
         let sorted = packages.sorted {

@@ -8,14 +8,13 @@ struct AgentComposerStore {
     let actions: ChatFeatureActions
 
     func state(input: String, canSubmit: Bool, selectedSession: AgentSession?) -> AgentComposerState {
-        let isNoteBeforeFirstMessage: Bool = {
-            guard let session = selectedSession,
-                  session.governance.kind == .note,
-                  session.messages.isEmpty,
-                  !model.run.isSubmitting
-            else { return false }
-            return true
-        }()
+        let isNoteBeforeFirstMessage = AgentChatMessagePresentationPolicy.isBeforeFirstNoteMessage(
+            sessionKind: selectedSession?.governance.kind,
+            sessionMessageCount: selectedSession?.messages.count ?? 0,
+            persistedMessageCount: selectedSession.flatMap { model.sessions.messageCountsBySessionID[$0.id] },
+            transcriptMessageCount: model.run.transcript.count,
+            isSubmitting: model.run.isSubmitting
+        )
         return AgentComposerState(
             input: input,
             pendingAttachments: model.composer.pendingAttachmentRefs,

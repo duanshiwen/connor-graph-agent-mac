@@ -59,6 +59,35 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(result.citations == ["prov-1", "span-1"])
     }
 
+    @Test func normalizesLegacyAliasesBeforeBackgroundSchemaValidationAndExecution() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 1_000)
+        try store.upsert(provenance: MemoryOSProvenanceObject(
+            id: "prov-legacy",
+            sourceType: .chatMessage,
+            sourceID: "message-legacy",
+            title: "Legacy evidence",
+            content: "Legacy aliases reach the background executor.",
+            contentHash: "hash-legacy",
+            occurredAt: now,
+            ingestedAt: now
+        ))
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        let result = try executor.execute(
+            MemoryOSBackgroundToolCall(
+                id: "call-legacy",
+                name: "memory_os_read_provenance",
+                argumentsJSON: #"{"provenance_object_id":"prov-legacy"}"#
+            ),
+            context: MemoryOSBackgroundToolExecutionContext(runID: "run-legacy", iteration: 1)
+        )
+
+        #expect(result.contentText.contains("prov-legacy"))
+        #expect(result.contentJSON.contains("Legacy aliases reach the background executor"))
+    }
+
     @Test func readsSparseEnvironmentSnapshotsWithoutNetworkOrReconstruction() async throws {
         let memoryStore = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try memoryStore.migrate()
@@ -195,6 +224,26 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(response.records.contains { $0.recordID == "range-inside" && $0.occurredAt == ISO8601DateFormatter().string(from: object.occurredAt) })
     }
 
+    @Test func backgroundContextToolSupportsUnboundedEmptyQuery() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
+        try store.migrate()
+        let now = Date(timeIntervalSince1970: 12_000)
+        try store.upsert(node: MemoryOSNode(id: "all-history-project", stableKey: "all-history-project", nodeType: "project", name: "All History"))
+        try store.upsert(statement: MemoryOSStatement(id: "all-history-statement", subjectID: "all-history-project", predicate: "status", text: "All history is readable without artificial time bounds.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: []))
+        let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
+
+        let result = try executor.execute(
+            .init(id: "all-history", name: "memory_os_recent_context", argumentsJSON: #"{"query":"","page":1}"#),
+            context: .init(runID: "all-history-run", iteration: 1)
+        )
+        let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(result.contentJSON.utf8))
+
+        #expect(response.success)
+        #expect(response.query.isEmpty)
+        #expect(response.records.contains { $0.recordID == "all-history-statement" })
+        #expect(response.nextPage == nil)
+    }
+
     @Test func backgroundContextToolReturnsStructuredInvalidPageError() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()
@@ -213,17 +262,19 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(json["records"] is NSNull)
     }
 
-    @Test func backgroundContextToolRejectsRemovedLimitArgument() throws {
+    @Test func backgroundContextToolNormalizesLegacyLimitAndQuotedPage() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryBackgroundToolDatabaseURL().path)
         try store.migrate()
         let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
 
-        #expect(throws: MemoryOSBackgroundToolExecutionError.invalidArguments("$.limit is not supported")) {
-            try executor.execute(
-                .init(id: "removed-limit", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","limit":10}"#),
-                context: .init(runID: "removed-limit-run", iteration: 1)
-            )
-        }
+        let result = try executor.execute(
+            .init(id: "legacy-pagination", name: "memory_os_recent_context", argumentsJSON: #"{"query":"memory","page":"1","limit":"10"}"#),
+            context: .init(runID: "legacy-pagination-run", iteration: 1)
+        )
+        let response = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(result.contentJSON.utf8))
+
+        #expect(response.success)
+        #expect(response.page == 1)
     }
 
     @Test func l2UpdateToolAcceptsStructuredStatementsInBackgroundExecutor() throws {
