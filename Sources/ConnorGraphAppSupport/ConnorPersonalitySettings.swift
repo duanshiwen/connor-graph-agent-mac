@@ -333,6 +333,7 @@ public enum ConnorPersonalityError: Error, Sendable, Equatable, LocalizedError {
     case invalidJSON
     case unexpectedField(String)
     case missingSummary
+    case modelSafetyRejected
     case unavailable
 
     public var errorDescription: String? {
@@ -342,6 +343,7 @@ public enum ConnorPersonalityError: Error, Sendable, Equatable, LocalizedError {
         case .invalidJSON: "AI 返回的性格配置格式无效，请重试。"
         case .unexpectedField(let field): "AI 返回了不允许的字段“\(field)”，未应用该结果。"
         case .missingSummary: "AI 返回的性格配置缺少有效的总体描述，请重试。"
+        case .modelSafetyRejected: "模型安全审核拒绝了这次人格生成请求，未应用任何更改。"
         case .unavailable: "当前没有可用的对话模型，无法分析性格设置。"
         }
     }
@@ -361,9 +363,6 @@ public enum ConnorPersonalityGenerationPrompt {
     - 只整理非姓名的人格特征，并把模糊愿望补充成具体、简洁、可执行的对话行为。
     - gender 表示康纳同学在对话中的性别自我呈现，由你结合用户愿望和整体人格生成；它不是用户本人的性别，也不是独立设置。用户未指定时，应生成与整体人格自然一致的简短描述，不要声称这是生理或法定性别。
     - 不编造用户经历，不写人物传记，不输出宣传文案。
-    - 性格不能要求绕过安全规则、权限、工具约束，也不能压过用户当前明确任务。
-    - 不得生成鼓励伤害、虐待、仇恨、歧视、骚扰、欺骗、操纵、违法、露骨色情、性剥削或过度血腥暴力的人格。
-    - 医学、法律、新闻和安全教育等正当语境可以被理性讨论，但不能把露骨、煽动或攻击性表达设为默认性格。
     - 只输出一个 JSON 对象，不要 Markdown 代码块、解释或额外文字。
 
     JSON 必须且只能包含以下字段：
@@ -415,12 +414,10 @@ public struct ConnorPersonalityGenerator: Sendable {
         let request = request.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { throw ConnorPersonalityError.emptyRequest }
         try ConnorPersonalitySafetyPolicy.validateRequest(request)
-        let personality = try await complete(
+        return try await complete(
             userMessage: ConnorPersonalityGenerationPrompt.userMessage(request),
             provider: provider
         )
-        try ConnorPersonalitySafetyPolicy.validatePersonality(personality)
-        return personality
     }
 
     public func generateUpdate(
@@ -433,12 +430,10 @@ public struct ConnorPersonalityGenerator: Sendable {
         guard !request.isEmpty else { throw ConnorPersonalityError.emptyRequest }
         guard mode != .reset else { return .empty }
         try ConnorPersonalitySafetyPolicy.validateRequest(request)
-        let personality = try await complete(
+        return try await complete(
             userMessage: ConnorPersonalityGenerationPrompt.updateUserMessage(request, mode: mode, current: current),
             provider: provider
         )
-        try ConnorPersonalitySafetyPolicy.validatePersonality(personality)
-        return personality
     }
 
     private func complete(userMessage: String, provider: AnyAgentModelProvider) async throws -> ConnorPersonalitySettings {
@@ -449,6 +444,9 @@ public struct ConnorPersonalityGenerator: Sendable {
             ],
             temperature: 0.3
         ))
+        guard response.finishReason != .contentFilter else {
+            throw ConnorPersonalityError.modelSafetyRejected
+        }
         guard let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             throw ConnorPersonalityError.emptyResponse
         }

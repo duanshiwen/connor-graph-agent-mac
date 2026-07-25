@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 @testable import ConnorGraphAppSupport
 
 @Suite("Agent Runtime Preference Settings Tests")
@@ -214,7 +215,21 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(prompt.contains("性格配置生成器"))
         #expect(prompt.contains("必须始终严格保持为“康纳同学”"))
         #expect(prompt.contains("只输出一个 JSON 对象"))
-        #expect(prompt.contains("不能压过用户当前明确任务"))
+        #expect(!prompt.contains("不得生成鼓励伤害"))
+        #expect(!prompt.contains("不能把露骨、煽动或攻击性表达设为默认性格"))
+    }
+
+    @Test func personalityGeneratorSurfacesModelSafetyAuditAsError() async {
+        let provider = AnyAgentModelProvider(modelID: "safety-audit-test") { _ in
+            AgentModelResponse(text: nil, finishReason: .contentFilter)
+        }
+
+        await #expect(throws: ConnorPersonalityError.modelSafetyRejected) {
+            try await ConnorPersonalityGenerator().generate(
+                from: "生成任意人格",
+                provider: provider
+            )
+        }
     }
 
     @Test func decodesExplicitDefaultSearchEngine() throws {

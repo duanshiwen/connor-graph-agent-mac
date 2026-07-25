@@ -5,7 +5,11 @@ import ConnorGraphAgent
 
 private actor MiMOSpeechRequestRecorder {
     private(set) var request: AgentHTTPRequest?
-    func record(_ request: AgentHTTPRequest) { self.request = request }
+    private(set) var requestCount = 0
+    func record(_ request: AgentHTTPRequest) {
+        self.request = request
+        requestCount += 1
+    }
 }
 
 private struct MiMOSpeechHTTPClient: AgentHTTPClient {
@@ -21,7 +25,7 @@ private struct MiMOSpeechHTTPClient: AgentHTTPClient {
 @Suite("Xiaomi MiMo speech synthesis service")
 struct XiaomiMiMOSpeechSynthesisServiceTests {
     @Test func sendsOfficialVoiceDesignContractAndDecodesWAV() async throws {
-        let wav = Data("RIFF-test-wave".utf8)
+        let wav = validWAV()
         let responseBody = try JSONSerialization.data(withJSONObject: [
             "choices": [["message": ["audio": ["data": wav.base64EncodedString()]]]]
         ])
@@ -44,6 +48,7 @@ struct XiaomiMiMOSpeechSynthesisServiceTests {
         #expect(request.headers["Authorization"] == "Bearer secret")
         let body = try #require(JSONSerialization.jsonObject(with: request.body) as? [String: Any])
         #expect(body["model"] as? String == "mimo-v2.5-tts-voicedesign")
+        #expect(body["max_tokens"] as? Int == XiaomiMiMOSpeechConfiguration.speechOutputTokenLimit)
         let messages = try #require(body["messages"] as? [[String: String]])
         #expect(messages.map { $0["role"] } == ["user", "assistant"])
         #expect(messages[0]["content"]?.contains("青年女性") == true)
@@ -78,7 +83,7 @@ struct XiaomiMiMOSpeechSynthesisServiceTests {
     }
 
     @Test func customVoiceProfileOverridesPersonalityDerivedVoiceDescription() async throws {
-        let wav = Data("RIFF-custom-wave".utf8)
+        let wav = validWAV()
         let responseBody = try JSONSerialization.data(withJSONObject: [
             "choices": [["message": ["audio": ["data": wav.base64EncodedString()]]]]
         ])
@@ -128,10 +133,70 @@ struct XiaomiMiMOSpeechSynthesisServiceTests {
         #expect(await recorder.request == nil)
     }
 
+    @Test func retriesThenRejectsProviderOutputLimit() async throws {
+        let wav = validWAV()
+        let responseBody = try JSONSerialization.data(withJSONObject: [
+            "choices": [[
+                "finish_reason": "length",
+                "message": ["audio": ["data": wav.base64EncodedString()]]
+            ]]
+        ])
+        let recorder = MiMOSpeechRequestRecorder()
+        var service = XiaomiMiMOSpeechSynthesisService(client: MiMOSpeechHTTPClient(
+            response: AgentHTTPResponse(statusCode: 200, body: responseBody),
+            recorder: recorder
+        ))
+
+        await #expect(throws: XiaomiMiMOSpeechSynthesisError.truncatedAudio) {
+            try await service.synthesize(
+                markdown: "这段语音不应该作为成功结果返回。",
+                personality: .balancedDefault,
+                voiceGender: .female,
+                configuration: configuration()
+            )
+        }
+        #expect(await recorder.requestCount == 2)
+    }
+
+    @Test func retriesThenRejectsIncompleteWAVContainer() async throws {
+        var truncatedWAV = validWAV()
+        truncatedWAV.removeLast()
+        let responseBody = try JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["audio": ["data": truncatedWAV.base64EncodedString()]]]]
+        ])
+        let recorder = MiMOSpeechRequestRecorder()
+        var service = XiaomiMiMOSpeechSynthesisService(client: MiMOSpeechHTTPClient(
+            response: AgentHTTPResponse(statusCode: 200, body: responseBody),
+            recorder: recorder
+        ))
+
+        await #expect(throws: XiaomiMiMOSpeechSynthesisError.truncatedAudio) {
+            try await service.synthesize(
+                markdown: "这段容器已经损坏。",
+                personality: .balancedDefault,
+                voiceGender: .male,
+                configuration: configuration()
+            )
+        }
+        #expect(await recorder.requestCount == 2)
+    }
+
     private func configuration() -> XiaomiMiMOSpeechConfiguration {
         XiaomiMiMOSpeechConfiguration(
             baseURL: URL(string: "https://api.xiaomimimo.com/v1")!,
             apiKey: "secret"
+        )
+    }
+
+    private func validWAV() -> Data {
+        AgentAudioStreamSession.wavData(
+            pcm: Data(repeating: 0, count: 320),
+            format: AgentGeneratedAudioFormat(
+                encoding: "pcm_s16le",
+                sampleRate: 16_000,
+                channelCount: 1,
+                bitsPerChannel: 16
+            )
         )
     }
 }

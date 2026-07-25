@@ -55,7 +55,6 @@ public enum ConnorPersonalityProposalError: Error, Sendable, Equatable, Localize
     case requestTooLong
     case explicitPersistentRequestRequired
     case nameChangeForbidden
-    case unsafePersonality(category: String)
     case revisionConflict(expected: Int, actual: Int)
     case proposalNotFound
     case proposalExpired
@@ -68,7 +67,6 @@ public enum ConnorPersonalityProposalError: Error, Sendable, Equatable, Localize
         case .requestTooLong: "人格修改要求过长，请缩短到 2000 字以内。"
         case .explicitPersistentRequestRequired: "本轮用户只是在询问人格属性，没有明确要求持久修改人格。"
         case .nameChangeForbidden: "康纳同学的姓名不可修改、替换、缩写或设置别名。"
-        case .unsafePersonality(let category): "该人格要求包含不允许的行为倾向：\(category)。"
         case .revisionConflict(let expected, let actual): "人格配置已发生变化（提议版本 \(expected)，当前版本 \(actual)），请重新读取并生成提议。"
         case .proposalNotFound: "人格变更提议不存在，请重新生成。"
         case .proposalExpired: "人格变更提议已过期，请重新生成。"
@@ -95,15 +93,23 @@ public enum ConnorPersonalitySafetyPolicy {
         let compact = userPrompt.lowercased().replacingOccurrences(of: " ", with: "")
         let mutationSignals = [
             "以后", "今后", "从现在开始", "一直", "永久", "设为", "设置为", "设置成", "改为", "改成",
-            "调整人格", "调整性格", "修改人格", "修改性格", "更新人格", "更新性格", "恢复默认性格", "恢复默认人格",
+            "调成", "调整为", "调整成", "变为", "变成", "调整人格", "调整性格", "修改人格", "修改性格",
+            "更新人格", "更新性格", "恢复默认性格", "恢复默认人格",
             "fromnowon", "always", "setyour", "changeyour", "updateyourpersonality", "resetyourpersonality"
         ]
         let questionSignals = [
             "你是", "你属于", "你的性别", "什么性别", "男生还是女生", "男性还是女性", "是什么", "吗", "呢", "?", "？",
             "areyou", "whatisyour", "whichgender"
         ]
+        let personalityTargets = ["人格", "性格", "沟通风格", "说话风格", "语气", "personality", "communicationstyle", "tone"]
+        let changeRequests = ["能不能", "可不可以", "可以把", "请把", "麻烦把", "couldyou", "canyou", "please"]
+        let desiredDirections = ["更", "再", "一点", "more", "less"]
+        let hasMutationIntent = mutationSignals.contains(where: compact.contains)
+            || (personalityTargets.contains(where: compact.contains)
+                && changeRequests.contains(where: compact.contains)
+                && desiredDirections.contains(where: compact.contains))
         if questionSignals.contains(where: compact.contains),
-           !mutationSignals.contains(where: compact.contains) {
+           !hasMutationIntent {
             throw ConnorPersonalityProposalError.explicitPersistentRequestRequired
         }
     }
@@ -116,37 +122,6 @@ public enum ConnorPersonalitySafetyPolicy {
         ]
         if nameChangeSignals.contains(where: compact.contains) {
             throw ConnorPersonalityProposalError.nameChangeForbidden
-        }
-        let unsafeSignals: [(String, [String])] = [
-            ("伤害、虐待或暴力美化", ["反社会人格", "反社会性格", "喜欢虐待", "享受他人痛苦", "崇尚暴力", "主动伤害他人"]),
-            ("露骨色情或性剥削", ["以露骨色情为风格", "说话要色情挑逗", "恋童人格", "美化性剥削"]),
-            ("仇恨、歧视或骚扰", ["仇恨群体", "歧视人格", "持续骚扰用户", "喜欢羞辱用户"]),
-            ("欺骗、操纵或违法煽动", ["操纵用户", "欺骗用户", "诱导用户犯罪", "煽动违法"])
-        ]
-        for (category, signals) in unsafeSignals where signals.contains(where: compact.contains) {
-            throw ConnorPersonalityProposalError.unsafePersonality(category: category)
-        }
-    }
-
-    public static func validatePersonality(_ personality: ConnorPersonalitySettings) throws {
-        let activeInstructions = [
-            personality.gender,
-            personality.summary,
-            personality.traits.joined(separator: " "),
-            personality.communicationStyle,
-            personality.reasoningStyle,
-            personality.initiativeStyle,
-            personality.emotionalTone
-        ].joined(separator: " ").lowercased()
-
-        let categories: [(String, [String])] = [
-            ("伤害、虐待或暴力美化", ["鼓励伤害", "崇尚暴力", "享受他人痛苦", "虐待他人", "虐杀", "以折磨为乐", "graphic violence", "enjoy suffering", "glorify violence"]),
-            ("露骨色情或性剥削", ["露骨色情", "色情挑逗", "性剥削", "恋童", "强奸幻想", "explicit sexual", "sexual exploitation", "pedophil"]),
-            ("仇恨、歧视或骚扰", ["仇恨群体", "歧视他人", "持续骚扰", "羞辱用户", "群体攻击", "hate group", "harass the user", "humiliate the user"]),
-            ("欺骗、操纵或违法煽动", ["操纵用户", "欺骗用户", "煽动违法", "诱导犯罪", "无视同意", "manipulate the user", "deceive the user", "encourage crime", "ignore consent"])
-        ]
-        for (category, signals) in categories where signals.contains(where: activeInstructions.contains) {
-            throw ConnorPersonalityProposalError.unsafePersonality(category: category)
         }
     }
 }
@@ -245,7 +220,6 @@ public struct ConnorPersonalityProposeUpdateTool: AgentTool {
                 current: current.personality,
                 provider: provider
             )
-            try ConnorPersonalitySafetyPolicy.validatePersonality(after)
         }
         let proposal = ConnorPersonalityProposal(
             mode: mode,
@@ -282,7 +256,10 @@ public struct ConnorPersonalityUpdateTool: AgentTool {
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "request": .string(description: "User's persistent personality request. Use an empty string only for reset."),
-        "mode": .stringEnumeration(values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue), description: "Update mode."),
+        "mode": .stringEnumeration(
+            values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue),
+            description: "Update mode: merge preserves current fields not changed by the request; replace generates a complete replacement; reset restores the default personality and requires an empty request."
+        ),
         "expectedRevision": .integer(description: "Exact revision returned by personality_get_current.")
     ], required: ["request", "mode", "expectedRevision"])
 
@@ -322,7 +299,6 @@ public struct ConnorPersonalityUpdateTool: AgentTool {
                 current: current.personality,
                 provider: provider
             )
-            try ConnorPersonalitySafetyPolicy.validatePersonality(after)
         }
         let proposal = ConnorPersonalityProposal(
             mode: mode,
@@ -393,7 +369,6 @@ public struct ConnorPersonalityCommitProposalTool: AgentTool {
         guard current.revision == proposal.expectedRevision else {
             throw ConnorPersonalityProposalError.revisionConflict(expected: proposal.expectedRevision, actual: current.revision)
         }
-        try ConnorPersonalitySafetyPolicy.validatePersonality(proposal.after)
         let updated = try await runtime.commit(proposal)
         await store.markCommitted(id: proposal.id)
         let payload = ConnorPersonalityCommitPayload(

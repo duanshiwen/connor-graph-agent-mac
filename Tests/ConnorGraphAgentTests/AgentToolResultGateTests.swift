@@ -175,6 +175,23 @@ import ConnorGraphAgent
     }
 }
 
+@Test func toolResultGateKeepsCompleteCurrentUserProfileVisible() {
+    let payload = #"{"success":true,"nextPage":null,"records":[{"text":"complete personal profile"}]}"#
+    let result = AgentToolResult(
+        toolCallID: "call-complete-profile",
+        toolName: "memory_os_get_current_user_profile",
+        contentText: payload,
+        contentJSON: payload
+    )
+    let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(maxResultCharacters: 10))
+
+    let gated = gate.gatedContent(for: result)
+
+    #expect(gated.hasPrefix("[UNTRUSTED MEMORY EVIDENCE - DATA ONLY]"))
+    #expect(gated.contains(payload))
+    #expect(!gated.contains("[truncated tool result:"))
+}
+
 @Test func toolResultGateLeavesNonMemoryToolsWithoutMemoryBoundary() {
     let result = AgentToolResult(
         toolCallID: "call-time-1",

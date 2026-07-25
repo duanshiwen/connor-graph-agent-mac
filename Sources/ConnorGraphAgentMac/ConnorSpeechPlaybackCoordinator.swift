@@ -229,7 +229,7 @@ final class ConnorSpeechPlaybackCoordinator {
     }
 
     private func cacheKey(messageID: String, personalityRevision: Int, voiceGender: ConnorVoiceGender, voiceRevision: Int) -> String {
-        "\(messageID):\(personalityRevision):\(voiceGender.rawValue):\(voiceRevision)"
+        "v2:\(messageID):\(personalityRevision):\(voiceGender.rawValue):\(voiceRevision)"
     }
 }
 
