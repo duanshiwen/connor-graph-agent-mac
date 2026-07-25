@@ -281,12 +281,12 @@ public struct GetCurrentEnvironmentTool: AgentTool {
 
     public var name: String { "get_current_environment" }
     public var description: String {
-        "Return the current run's location, local-time context, and Open-Meteo weather snapshot. The automatic run preflight already captures it once. Set refresh to true only when a long-running task genuinely needs newer environment data."
+        "Return the current run's location, local-time context, and Open-Meteo weather snapshot. Strongly prefer calling this tool once near the start of every user run unless current environment clearly cannot help the task. The automatic run preflight already captures and caches the snapshot, so use the default refresh=false to avoid repeating provider requests. Set refresh=true only when a long-running task genuinely needs newer environment data."
     }
     public var permission: AgentPermissionCapability { .externalNetwork }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "refresh": .boolean(description: "Refresh location and weather instead of returning the snapshot captured for this run. Defaults to false.")
+            "refresh": .boolean(description: "Defaults to false and returns the snapshot already captured for this run without another provider request. Set true only when genuinely newer location or weather evidence is required.")
         ], required: [])
     }
 

@@ -2404,25 +2404,10 @@ final class AppRuntimeLifecycle {
 
     private func generateTitleFromUserPrompts(_ prompts: [String], sessionID: String) async throws -> String {
         let provider = try sessionAgentModelProvider(sessionID: sessionID)
-        let joinedPrompts = prompts.enumerated().map { index, prompt in
-            "用户 Prompt \(index + 1):\n\(prompt)"
-        }.joined(separator: "\n\n---\n\n")
-        let userPrompt = """
-        请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
-
-        要求：
-        - 20 个汉字以内
-        - 不要引号
-        - 不要句号
-        - 不要解释
-        - 只输出标题本身
-
-        \(joinedPrompts)
-        """
         let response = try await provider.complete(AgentModelRequest(
             messages: [
-                AgentModelMessage(role: .system, content: "你是会话标题生成器。"),
-                AgentModelMessage(role: .user, content: userPrompt)
+                AgentModelMessage(role: .system, content: ChatSessionTitleGenerationPrompt.systemInstruction),
+                AgentModelMessage(role: .user, content: ChatSessionTitleGenerationPrompt.userMessage(prompts))
             ],
             temperature: 1.0
         ))

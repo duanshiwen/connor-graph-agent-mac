@@ -118,7 +118,6 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
 
     public func search(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
         let trimmed = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || (query.startDate != nil && query.endDate != nil) else { return [] }
         var hits: [MemoryOSRetrievalHit] = []
         let layers = Set(query.layers)
         if trimmed.isEmpty {

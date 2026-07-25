@@ -386,6 +386,10 @@ struct BrowserFeatureModelTests {
         #expect(automationSource.contains("Task.detached(priority: .utility)"))
         #expect(automationSource.contains("The referenced element is obscured"))
         #expect(automationSource.contains("Sensitive fields require user handoff"))
+        #expect(automationSource.contains(#""tabID": tab.id.uuidString"#))
+        #expect(automationSource.contains("nodeRef,"))
+        #expect(!automationSource.contains(#""tab_id""#))
+        #expect(!automationSource.contains("node_ref:"))
     }
 
     @MainActor

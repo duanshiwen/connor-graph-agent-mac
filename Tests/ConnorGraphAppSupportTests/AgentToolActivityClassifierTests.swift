@@ -9,7 +9,7 @@ import ConnorGraphAgent
         runID: "run",
         sessionID: "session",
         name: "Read",
-        argumentsJSON: "{\"file_path\":\"Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift\",\"offset\":596,\"limit\":270}"
+        argumentsJSON: "{\"filePath\":\"Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift\",\"offset\":596,\"limit\":270}"
     )
 
     let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)
@@ -25,7 +25,7 @@ import ConnorGraphAgent
     let call = AgentToolCall(
         id: "write-1",
         name: "Write",
-        argumentsJSON: "{\"file_path\":\"README.md\",\"content\":\"hello\"}"
+        argumentsJSON: "{\"filePath\":\"README.md\",\"content\":\"hello\"}"
     )
 
     let activity = AgentToolActivityClassifier().activity(forRequestedCall: call)
@@ -141,6 +141,23 @@ import ConnorGraphAgent
     #expect(failed?.semanticKind == .calendar)
     #expect(failed?.phase == .failed)
     #expect(failed?.detail?.contains("Calendar 'default' was not found") == true)
+}
+
+@Test func classifiesLegacyCalendarIDsBeforeRegistryNormalization() {
+    let classifier = AgentToolActivityClassifier()
+    let write = AgentToolCall(
+        id: "calendar-write-legacy",
+        name: "calendar_write",
+        argumentsJSON: #"{"operation":"delete_event","event_id":"event-legacy"}"#
+    )
+    let read = AgentToolCall(
+        id: "calendar-read-legacy",
+        name: "calendar_read",
+        argumentsJSON: #"{"operation":"list_events","calendar_id":"calendar-legacy"}"#
+    )
+
+    #expect(classifier.activity(forRequestedCall: write)?.target == "event-legacy")
+    #expect(classifier.activity(forRequestedCall: read)?.target == "calendar-legacy")
 }
 
 @Test func failedResultUsesErrorSeverityAndXmarkIcon() {

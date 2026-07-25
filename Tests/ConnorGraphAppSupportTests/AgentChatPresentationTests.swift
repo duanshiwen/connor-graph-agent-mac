@@ -296,7 +296,7 @@ import ConnorGraphAppSupport
         runID: "run-1",
         sessionID: "session-1",
         name: "Read",
-        argumentsJSON: "{\"file_path\":\"README.md\"}"
+        argumentsJSON: "{\"filePath\":\"README.md\"}"
     )
     let permission = AgentPermissionRequest(
         id: "permission-tool-1",
@@ -304,7 +304,7 @@ import ConnorGraphAppSupport
         sessionID: "session-1",
         capability: .readSession,
         toolName: "Read",
-        payloadJSON: "{\"file_path\":\"README.md\"}"
+        payloadJSON: "{\"filePath\":\"README.md\"}"
     )
     let result = AgentToolResult(
         runID: "run-1",
@@ -337,8 +337,8 @@ import ConnorGraphAppSupport
         "Tool failed: Write"
     ])
     #expect(rows.map(\.severity) == [.info, .warning, .info, .success, .error])
-    #expect(rows[0].detail == "Call tool-1 · Arguments: {\"file_path\":\"README.md\"}")
-    #expect(rows[1].detail == "Request permission-tool-1 · Tool: Read · Payload: {\"file_path\":\"README.md\"}")
+    #expect(rows[0].detail == "Call tool-1 · Arguments: {\"filePath\":\"README.md\"}")
+    #expect(rows[1].detail == "Request permission-tool-1 · Tool: Read · Payload: {\"filePath\":\"README.md\"}")
     #expect(rows[2].detail == "Call tool-1 is executing.")
     #expect(rows[3].detail == "Call tool-1 · README contents")
     #expect(rows[4].detail == "Call tool-1 · Denied by Connor policy")

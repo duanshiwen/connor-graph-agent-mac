@@ -8,10 +8,10 @@ public struct LocalReadFileTool: AgentTool {
     public let description = "Read a text file from the configured local workspace. Supports 1-based line offset and limit. Paths must stay inside allowed workspace roots."
     public let permission: AgentPermissionCapability = .readWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "file_path": .string(description: "Path to a file inside the workspace."),
+        "filePath": .string(description: "Path to a file inside the workspace."),
         "offset": .integer(description: "Optional 1-based line number to start reading from."),
         "limit": .integer(description: "Optional maximum number of lines to return.")
-    ], required: ["file_path"])
+    ], required: ["filePath"])
 
     private let policy: LocalWorkspacePolicy
 
@@ -20,8 +20,8 @@ public struct LocalReadFileTool: AgentTool {
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("file_path") else {
-            throw AgentToolError.invalidArguments("file_path is required")
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path") else {
+            throw AgentToolError.invalidArguments("filePath is required")
         }
         let path = try policy.resolvePath(rawPath)
         try policy.validateReadablePath(path)
@@ -117,7 +117,7 @@ public struct LocalGrepTool: AgentTool {
         "pattern": .string(description: "Text or regex pattern to search for."),
         "path": .string(description: "Directory to search from. Defaults to '.'."),
         "glob": .string(description: "Optional file glob filter, for example '*.swift'."),
-        "ignore_case": .boolean(description: "Whether to search case-insensitively."),
+        "ignoreCase": .boolean(description: "Whether to search case-insensitively."),
         "literal": .boolean(description: "Whether to treat pattern as literal text."),
         "context": .integer(description: "Number of context lines before and after each match.")
     ], required: ["pattern"])
@@ -136,7 +136,7 @@ public struct LocalGrepTool: AgentTool {
         try policy.validateSearchScope(root)
         let glob = arguments.string("glob")
         let literal = arguments.bool("literal") ?? false
-        let ignoreCase = arguments.bool("ignore_case") ?? false
+        let ignoreCase = arguments.bool("ignoreCase") ?? arguments.bool("ignore_case") ?? false
         let contextLines = max(arguments.int("context") ?? 0, 0)
         let files = try LocalWorkspaceScanner.files(under: root, relativeTo: policy.workingDirectory)
             .filter { relative in glob.map { LocalWorkspaceScanner.globMatch(pattern: $0, path: relative) } ?? true }
@@ -191,8 +191,8 @@ public struct LocalBashTool: AgentTool {
     public let permission: AgentPermissionCapability = .runReadOnlyShellCommand
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "command": .string(description: "Shell command to execute."),
-        "timeout_seconds": .integer(description: "Optional timeout in seconds. Defaults to 30, max 120."),
-        "working_directory": .string(description: "Optional workspace-relative directory to run in.")
+        "timeoutSeconds": .integer(description: "Optional timeout in seconds. Defaults to 30, max 120."),
+        "workingDirectory": .string(description: "Optional workspace-relative directory to run in.")
     ], required: ["command"])
 
     private let policy: LocalWorkspacePolicy
@@ -233,9 +233,9 @@ public struct LocalBashTool: AgentTool {
                 throw AgentToolError.permissionDenied(permissionDecision.reason)
             }
         }
-        let workingDirectory = try policy.resolvePath(arguments.string("working_directory") ?? ".")
+        let workingDirectory = try policy.resolvePath(arguments.string("workingDirectory") ?? arguments.string("working_directory") ?? ".")
         try policy.validateSearchScope(workingDirectory)
-        let timeout = min(max(arguments.int("timeout_seconds") ?? 30, 1), 120)
+        let timeout = min(max(arguments.int("timeoutSeconds") ?? arguments.int("timeout_seconds") ?? 30, 1), 120)
         let execution = try await LocalShellExecutor.run(command: command, workingDirectory: workingDirectory, timeoutSeconds: timeout, maxOutputBytes: policy.maxToolOutputBytes)
         let json = LocalToolJSON.encode([
             "command": command,
@@ -264,17 +264,17 @@ public struct LocalWriteFileTool: AgentTool {
     public let description = "Create or overwrite a text file inside the configured local workspace. Protected paths are denied."
     public let permission: AgentPermissionCapability = .writeWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "file_path": .string(description: "Path to write inside the workspace."),
+        "filePath": .string(description: "Path to write inside the workspace."),
         "content": .string(description: "Complete file content to write.")
-    ], required: ["file_path", "content"])
+    ], required: ["filePath", "content"])
 
     private let policy: LocalWorkspacePolicy
 
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("file_path"), let content = arguments.string("content") else {
-            throw AgentToolError.invalidArguments("file_path and content are required")
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path"), let content = arguments.string("content") else {
+            throw AgentToolError.invalidArguments("filePath and content are required")
         }
         let path = try policy.resolvePath(rawPath)
         let existed = FileManager.default.fileExists(atPath: path.path)
@@ -294,21 +294,23 @@ public struct LocalWriteFileTool: AgentTool {
 
 public struct LocalEditFileTool: AgentTool {
     public let name = "Edit"
-    public let description = "Replace a unique old_text occurrence in a text file inside the configured local workspace. Fails if old_text is missing or not unique."
+    public let description = "Replace a unique oldText occurrence in a text file inside the configured local workspace. Fails if oldText is missing or not unique."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "file_path": .string(description: "Path to edit inside the workspace."),
-        "old_text": .string(description: "Exact text to replace. Must occur exactly once."),
-        "new_text": .string(description: "Replacement text.")
-    ], required: ["file_path", "old_text", "new_text"])
+        "filePath": .string(description: "Path to edit inside the workspace."),
+        "oldText": .string(description: "Exact text to replace. Must occur exactly once."),
+        "newText": .string(description: "Replacement text.")
+    ], required: ["filePath", "oldText", "newText"])
 
     private let policy: LocalWorkspacePolicy
 
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("file_path"), let oldText = arguments.string("old_text"), let newText = arguments.string("new_text") else {
-            throw AgentToolError.invalidArguments("file_path, old_text, and new_text are required")
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path"),
+              let oldText = arguments.string("oldText") ?? arguments.string("old_text"),
+              let newText = arguments.string("newText") ?? arguments.string("new_text") else {
+            throw AgentToolError.invalidArguments("filePath, oldText, and newText are required")
         }
         let path = try policy.resolvePath(rawPath)
         try policy.validateReadablePath(path)
@@ -329,32 +331,32 @@ public struct LocalEditFileTool: AgentTool {
 
 public struct LocalMultiEditTool: AgentTool {
     public let name = "MultiEdit"
-    public let description = "Apply multiple exact text replacements atomically to one workspace file. Every old_text must occur exactly once in the original file."
+    public let description = "Apply multiple exact text replacements atomically to one workspace file. Every oldText must occur exactly once in the original file."
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "file_path": .string(description: "Path to edit inside the workspace."),
+        "filePath": .string(description: "Path to edit inside the workspace."),
         "edits": .array(
             items: .closedObject(properties: [
-                "old_text": .string(description: "Exact text to replace. Must occur exactly once in the original file."),
-                "new_text": .string(description: "Replacement text.")
-            ], required: ["old_text", "new_text"]),
+                "oldText": .string(description: "Exact text to replace. Must occur exactly once in the original file."),
+                "newText": .string(description: "Replacement text.")
+            ], required: ["oldText", "newText"]),
             description: "Ordered list of exact replacements to validate against the original file and then apply atomically."
         )
-    ], required: ["file_path", "edits"])
+    ], required: ["filePath", "edits"])
 
     private let policy: LocalWorkspacePolicy
 
     public init(policy: LocalWorkspacePolicy) { self.policy = policy }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawPath = arguments.string("file_path"), let rawEdits = arguments.array("edits") else {
-            throw AgentToolError.invalidArguments("file_path and edits are required")
+        guard let rawPath = arguments.string("filePath") ?? arguments.string("file_path"), let rawEdits = arguments.array("edits") else {
+            throw AgentToolError.invalidArguments("filePath and edits are required")
         }
         let edits: [(oldText: String, newText: String)] = try rawEdits.map { value in
             guard let object = value.objectValue,
-                  let oldText = object["old_text"]?.stringValue,
-                  let newText = object["new_text"]?.stringValue else {
-                throw AgentToolError.invalidArguments("Each edit requires old_text and new_text")
+                  let oldText = object["oldText"]?.stringValue ?? object["old_text"]?.stringValue,
+                  let newText = object["newText"]?.stringValue ?? object["new_text"]?.stringValue else {
+                throw AgentToolError.invalidArguments("Each edit requires oldText and newText")
             }
             return (oldText, newText)
         }
@@ -378,10 +380,10 @@ public struct LocalMultiEditTool: AgentTool {
 
 enum LocalTextEditor {
     static func replacingUnique(original: String, oldText: String, newText: String) throws -> String {
-        guard !oldText.isEmpty else { throw AgentToolError.invalidArguments("old_text must not be empty") }
+        guard !oldText.isEmpty else { throw AgentToolError.invalidArguments("oldText must not be empty") }
         let ranges = ranges(of: oldText, in: original)
         guard ranges.count == 1 else {
-            throw AgentToolError.invalidArguments("old_text must occur exactly once; found \(ranges.count)")
+            throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count)")
         }
         return original.replacingCharacters(in: ranges[0], with: newText)
     }
@@ -390,7 +392,7 @@ enum LocalTextEditor {
         for edit in edits {
             let ranges = ranges(of: edit.oldText, in: original)
             guard ranges.count == 1 else {
-                throw AgentToolError.invalidArguments("old_text must occur exactly once; found \(ranges.count): \(edit.oldText)")
+                throw AgentToolError.invalidArguments("oldText must occur exactly once; found \(ranges.count): \(edit.oldText)")
             }
         }
         var updated = original

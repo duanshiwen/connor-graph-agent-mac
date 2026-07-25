@@ -49,6 +49,19 @@ struct NativeRSSSystemTests {
         let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "rss_search_items", argumentsJSON: "{\"query\":\"Memory\",\"limit\":1}")
         let result = try await registry.execute(call, context: context)
         #expect(result.contentText.contains("RSS item"))
+        let itemsJSON = try #require(result.contentJSON)
+        let items = try #require(try JSONSerialization.jsonObject(with: Data(itemsJSON.utf8)) as? [[String: Any]])
+        #expect(items.first?["itemID"] as? String == items.first?["id"] as? String)
+
+        let sourcesResult = try await registry.execute(AgentToolCall(name: "rss_list_sources", argumentsJSON: "{}"), context: context)
+        let sourcesJSON = try #require(sourcesResult.contentJSON)
+        let sources = try #require(try JSONSerialization.jsonObject(with: Data(sourcesJSON.utf8)) as? [[String: Any]])
+        #expect(sources.first?["sourceID"] as? String == sources.first?["id"] as? String)
+
+        let getDefinition = try #require(registry.definition(named: "rss_get_item"))
+        let properties = try #require(getDefinition.inputSchema.jsonObject["properties"] as? [String: Any])
+        let itemIDSchema = try #require(properties["itemID"] as? [String: Any])
+        #expect((itemIDSchema["description"] as? String)?.contains("Exact itemID returned") == true)
     }
 
     @Test func parserHandlesRSSAtomAndJSONFeed() throws {

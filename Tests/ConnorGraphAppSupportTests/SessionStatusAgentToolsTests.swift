@@ -77,6 +77,9 @@ import ConnorGraphStore
         ))
     }
     let tool = SessionListByStatusTool(repository: repository)
+    let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+    let pageSize = try #require(properties["pageSize"] as? [String: Any])
+    #expect((pageSize["description"] as? String)?.contains("must remain unchanged") == true)
     var page = 1
     var collected: [String] = []
 
@@ -85,12 +88,17 @@ import ConnorGraphStore
             arguments: AgentToolArguments(values: [
                 "status": .string("done"),
                 "page": .int(page),
-                "page_size": .int(2)
+                "pageSize": .int(2)
             ]),
             context: sessionStatusToolContext(sessionID: "session-page-0", toolCallID: "list-page-\(page)")
         )
         let object = try resultJSONObject(result)
         let sessions = try #require(object["sessions"] as? [[String: Any]])
+        #expect(sessions.allSatisfy { $0["sessionID"] as? String != nil && $0["session_id"] == nil })
+        let modelContent = AgentToolResultGate().gatedContent(for: result)
+        #expect(modelContent.contains("\"sessions\""))
+        #expect(modelContent.contains("\"sessionID\""))
+        #expect(modelContent.contains("session-page-\(4 - collected.count)"))
         collected.append(contentsOf: sessions.compactMap { $0["sessionID"] as? String })
         #expect(object["totalItems"] as? Int == 5)
         #expect(object["totalPages"] as? Int == 3)
@@ -105,6 +113,18 @@ import ConnorGraphStore
 
     #expect(collected == ["session-page-4", "session-page-3", "session-page-2", "session-page-1", "session-page-0"])
     #expect(Set(collected).count == collected.count)
+}
+
+@Test func sessionStatusListReturnsOperationReadyStatusField() async throws {
+    let tool = SessionListStatusesTool(governanceConfig: .default)
+    let result = try await tool.execute(
+        arguments: AgentToolArguments(values: [:]),
+        context: sessionStatusToolContext(sessionID: "session-status-list", toolCallID: "list-statuses")
+    )
+    let json = try #require(result.contentJSON)
+    let statuses = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+    #expect(statuses.allSatisfy { $0["status"] as? String == $0["id"] as? String })
+    #expect(AgentToolResultGate().gatedContent(for: result) == json)
 }
 
 @Test func sessionBatchSetStatusReportsPartialSuccessConflictsAndIdempotency() async throws {
@@ -124,11 +144,11 @@ import ConnorGraphStore
         arguments: AgentToolArguments(json: """
         {
           "updates": [
-            {"session_id":"batch-update"},
-            {"session_id":"batch-update"},
-            {"session_id":"batch-unchanged"},
-            {"session_id":"batch-missing"},
-            {"session_id":"batch-conflict","expected_updated_at":"\(stale)"}
+            {"sessionID":"batch-update"},
+            {"sessionID":"batch-update"},
+            {"sessionID":"batch-unchanged"},
+            {"sessionID":"batch-missing"},
+            {"sessionID":"batch-conflict","expectedUpdatedAt":"\(stale)"}
           ],
           "status":"done",
           "reason":"Bulk completion"
@@ -139,6 +159,9 @@ import ConnorGraphStore
 
     let object = try resultJSONObject(result)
     let items = try #require(object["results"] as? [[String: Any]])
+    let modelContent = AgentToolResultGate().gatedContent(for: result)
+    #expect(modelContent.contains("\"results\""))
+    #expect(modelContent.contains("\"sessionID\":\"batch-update\""))
     let outcomes = Dictionary(uniqueKeysWithValues: items.compactMap { item -> (String, String)? in
         guard let id = item["sessionID"] as? String, let outcome = item["outcome"] as? String else { return nil }
         return (id, outcome)
@@ -156,7 +179,7 @@ import ConnorGraphStore
     #expect(try repository.loadSession(id: "batch-conflict")?.governance.status == .todo)
 
     let retry = try await tool.execute(
-        arguments: AgentToolArguments(json: #"{"updates":[{"session_id":"batch-update"}],"status":"done"}"#),
+        arguments: AgentToolArguments(json: #"{"updates":[{"sessionID":"batch-update"}],"status":"done"}"#),
         context: sessionStatusToolContext(sessionID: "batch-update", toolCallID: "batch-retry")
     )
     let retryObject = try resultJSONObject(retry)
@@ -182,7 +205,7 @@ import ConnorGraphStore
 
     await #expect(throws: AgentToolError.self) {
         try await registry.execute(
-            AgentToolCall(name: "session_batch_set_status", argumentsJSON: #"{"updates":[{"session_id":"batch-read-only"}],"status":"done"}"#),
+            AgentToolCall(name: "session_batch_set_status", argumentsJSON: #"{"updates":[{"sessionID":"batch-read-only"}],"status":"done"}"#),
             context: context
         )
     }

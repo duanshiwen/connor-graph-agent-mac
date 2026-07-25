@@ -73,8 +73,12 @@ struct NativeSourceSearchToolGovernanceTests {
     }
 
     private func schema(_ schema: AgentToolInputSchema?, contains key: String) -> Bool {
-        guard case .object(let properties, _) = schema else { return false }
-        return properties.keys.contains(key)
+        switch schema {
+        case .object(let properties, _), .closedObject(let properties, _):
+            return properties.keys.contains(key)
+        default:
+            return false
+        }
     }
 }
 

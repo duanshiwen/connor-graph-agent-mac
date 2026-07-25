@@ -184,7 +184,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "call-write-approval", name: "Write", argumentsJSON: #"{"file_path":"note.txt","content":"approved"}"#)],
+            toolCalls: [AgentToolCall(id: "call-write-approval", name: "Write", argumentsJSON: #"{"filePath":"note.txt","content":"approved"}"#)],
             usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
             finishReason: .toolCalls
         ),

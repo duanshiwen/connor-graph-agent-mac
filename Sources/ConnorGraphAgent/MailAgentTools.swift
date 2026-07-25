@@ -122,11 +122,70 @@ public struct MailSendApprovalBridge: Codable, Sendable, Equatable {
 }
 
 enum MailJSON {
-    static func encode<T: Encodable>(_ value: T) throws -> String {
+    private static func encodedObject<T: Encodable>(_ value: T) throws -> Any {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
-        return String(data: try encoder.encode(value), encoding: .utf8) ?? "{}"
+        return try JSONSerialization.jsonObject(with: encoder.encode(value))
+    }
+
+    private static func string(_ object: Any) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private static func addingMessageID(to object: inout [String: Any]) {
+        if let id = object["id"] { object["messageID"] = id }
+    }
+
+    static func encode<T: Encodable>(_ value: T) throws -> String {
+        try string(encodedObject(value))
+    }
+
+    static func encodeAccounts(_ accounts: [MailAccount]) throws -> String {
+        var rows = (try encodedObject(accounts) as? [[String: Any]]) ?? []
+        for index in rows.indices {
+            if let id = rows[index]["id"] { rows[index]["accountID"] = id }
+            guard var identities = rows[index]["identities"] as? [[String: Any]] else { continue }
+            for identityIndex in identities.indices {
+                if let id = identities[identityIndex]["id"] { identities[identityIndex]["identityID"] = id }
+            }
+            rows[index]["identities"] = identities
+        }
+        return try string(rows)
+    }
+
+    static func encodeMessageSummaries(_ messages: [MailMessageSummary]) throws -> String {
+        var rows = (try encodedObject(messages) as? [[String: Any]]) ?? []
+        for index in rows.indices { addingMessageID(to: &rows[index]) }
+        return try string(rows)
+    }
+
+    static func encodeBodyPreviewResults(_ results: [MailMessageBodyPreviewResult]) throws -> String {
+        var rows = (try encodedObject(results) as? [[String: Any]]) ?? []
+        for index in rows.indices {
+            guard var summary = rows[index]["summary"] as? [String: Any] else { continue }
+            addingMessageID(to: &summary)
+            rows[index]["summary"] = summary
+            rows[index]["messageID"] = summary["messageID"]
+        }
+        return try string(rows)
+    }
+
+    static func encodeMessageDetail(_ detail: MailMessageDetail) throws -> String {
+        var object = (try encodedObject(detail) as? [String: Any]) ?? [:]
+        addingMessageID(to: &object)
+        if var summary = object["summary"] as? [String: Any] {
+            addingMessageID(to: &summary)
+            object["summary"] = summary
+        }
+        return try string(object)
+    }
+
+    static func encodeDraft(_ draft: MailDraft) throws -> String {
+        var object = (try encodedObject(draft) as? [String: Any]) ?? [:]
+        if let id = object["id"] { object["draftID"] = id }
+        return try string(object)
     }
 }
 
@@ -139,7 +198,7 @@ public struct MailListAccountsTool: AgentTool {
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let accounts = try await runtime.listAccounts(runID: context.runID, sessionID: context.sessionID)
-        let json = try MailJSON.encode(accounts)
+        let json = try MailJSON.encodeAccounts(accounts)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(accounts.count) mail accounts", contentJSON: json)
     }
 }
@@ -153,7 +212,7 @@ public struct MailSearchMessagesTool: AgentTool {
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "query": .string(description: "Search query"),
-            "accountID": .string(description: "Optional account ID"),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts"),
             "limit": .integer(description: "Maximum summaries"),
             "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for sent/received time filtering"),
             "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for sent/received time filtering"),
@@ -177,7 +236,7 @@ public struct MailSearchMessagesTool: AgentTool {
         )
         let messages = try await runtime.searchMessages(request, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(messages.map { NativeSourceReference.mailSummary($0, query: request.query, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; use the selected summary's id as messageID for mail_get_message; read state unchanged", contentJSON: try MailJSON.encode(messages))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; copy the selected result's messageID into mail_get_message; read state unchanged", contentJSON: try MailJSON.encodeMessageSummaries(messages))
     }
 }
 
@@ -189,7 +248,7 @@ public struct MailListRecentMessagesTool: AgentTool {
     public var permission: AgentPermissionCapability { .readMail }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts; omit to search all mail accounts"),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts; omit to search all mail accounts"),
             "direction": .stringEnumeration(values: AgentMailMessageDirectionFilter.allCases.map(\.rawValue), description: "Optional direction filter. Defaults to all, mixing received and sent mail by newest time."),
             "limit": .integer(description: "Maximum recent mail summaries to return")
         ], required: [])
@@ -215,7 +274,7 @@ public struct MailListRecentMessagesTool: AgentTool {
         )
         let messages = try await runtime.listRecentMessages(request, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(messages.map { NativeSourceReference.mailSummary($0, query: "recent", toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) recent mail message summaries; use the selected summary's id as messageID for mail_get_message; read state unchanged", contentJSON: try MailJSON.encode(messages))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) recent mail message summaries; copy the selected result's messageID into mail_get_message; read state unchanged", contentJSON: try MailJSON.encodeMessageSummaries(messages))
     }
 }
 
@@ -239,7 +298,7 @@ public struct MailSearchMessagesWithBodyPreviewTool: AgentTool {
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "query": .string(description: "Search query; cached body text is included in search where available"),
-            "accountID": .string(description: "Optional account ID"),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts"),
             "limit": .integer(description: "Maximum results"),
             "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for sent/received time filtering"),
             "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for sent/received time filtering"),
@@ -265,7 +324,7 @@ public struct MailSearchMessagesWithBodyPreviewTool: AgentTool {
         let maxChars = MailBodyPreviewToolPolicy.clampedMaxChars(from: arguments)
         let results = try await runtime.searchMessagesWithBodyPreview(request, bodyPreviewMaxChars: maxChars, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(results.map { NativeSourceReference.mailSummary($0.summary, query: request.query, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(results.count) mail messages with cached body previews up to \(maxChars) characters each; use summary.id as messageID for mail_get_message for full bodies; read state unchanged; missing previews were not fetched remotely", contentJSON: try MailJSON.encode(results))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(results.count) mail messages with cached body previews up to \(maxChars) characters each; copy a result's messageID into mail_get_message for the full body; read state unchanged; missing previews were not fetched remotely", contentJSON: try MailJSON.encodeBodyPreviewResults(results))
     }
 }
 
@@ -277,7 +336,7 @@ public struct MailListRecentMessagesWithBodyPreviewTool: AgentTool {
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts; omit to search all mail accounts"),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts; omit to search all mail accounts"),
             "direction": .stringEnumeration(values: AgentMailMessageDirectionFilter.allCases.map(\.rawValue), description: "Optional direction filter. Defaults to all, mixing received and sent mail by newest time."),
             "limit": .integer(description: "Maximum recent mail results to return"),
             "bodyPreviewMaxChars": .integer(description: "Maximum cached body preview characters per message; clamped between 200 and 2000; defaults to 1200")
@@ -305,7 +364,7 @@ public struct MailListRecentMessagesWithBodyPreviewTool: AgentTool {
         let maxChars = MailBodyPreviewToolPolicy.clampedMaxChars(from: arguments)
         let results = try await runtime.listRecentMessagesWithBodyPreview(request, bodyPreviewMaxChars: maxChars, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record(results.map { NativeSourceReference.mailSummary($0.summary, query: "recent", toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(results.count) recent mail messages with cached body previews up to \(maxChars) characters each; use summary.id as messageID for mail_get_message for full bodies; read state unchanged; missing previews were not fetched remotely", contentJSON: try MailJSON.encode(results))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(results.count) recent mail messages with cached body previews up to \(maxChars) characters each; copy a result's messageID into mail_get_message for the full body; read state unchanged; missing previews were not fetched remotely", contentJSON: try MailJSON.encodeBodyPreviewResults(results))
     }
 }
 
@@ -317,7 +376,7 @@ public struct MailGetMessageTool: AgentTool {
     public var permission: AgentPermissionCapability { .readMailBody }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "messageID": .string(description: "Exact MailMessageSummary.id returned by mail_search_messages or mail_list_recent_messages. Do not pass result numbers, invented pseudo IDs such as 'message1' or 'msg1', or IMAP UIDs."),
+            "messageID": .string(description: "Exact messageID returned by mail_search_messages, mail_list_recent_messages, or their body-preview variants. Copy the field without renaming it. Do not pass result numbers, invented pseudo IDs such as 'message1' or 'msg1', or IMAP UIDs."),
             "includeBody": .boolean(description: "Whether to include body")
         ], required: ["messageID"])
     }
@@ -327,7 +386,7 @@ public struct MailGetMessageTool: AgentTool {
     }
 
     private static func guidanceForOrdinalLikeMessageID(_ value: String) -> AgentToolError {
-        .invalidArguments("mail_get_message expects the exact messageID returned in a MailMessageSummary from mail_search_messages or mail_list_recent_messages. Received \"\(value)\", which looks like a result index or invented pseudo ID. Pass the selected summary's id field exactly; do not pass ordinals such as '1', pseudo IDs such as 'message1'/'msg1', or IMAP UIDs.")
+        .invalidArguments("mail_get_message expects the exact messageID returned by mail_search_messages or mail_list_recent_messages. Received \"\(value)\", which looks like a result index or invented pseudo ID. Copy the selected result's messageID field exactly; do not pass ordinals such as '1', pseudo IDs such as 'message1'/'msg1', or IMAP UIDs.")
     }
 
     private static func looksLikeOrdinalOrPseudoResultID(_ value: String) -> Bool {
@@ -352,7 +411,7 @@ public struct MailGetMessageTool: AgentTool {
         let includeBody = arguments.bool("includeBody") ?? false
         let detail = try await runtime.getMessage(id: MailMessageID(rawValue: messageID), includeBody: includeBody, runID: context.runID, sessionID: context.sessionID)
         await recorder?.record([NativeSourceReference.mailDetail(detail, includeBody: includeBody, toolName: name, context: context)])
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: includeBody ? "Read message body; read state unchanged" : "Read message without body; read state unchanged", contentJSON: try MailJSON.encode(detail))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: includeBody ? "Read message body; read state unchanged" : "Read message without body; read state unchanged", contentJSON: try MailJSON.encodeMessageDetail(detail))
     }
 }
 
@@ -363,7 +422,7 @@ public struct MailSetReadStateTool: AgentTool {
     public var permission: AgentPermissionCapability { .mutateMailState }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "messageIDs": .array(items: .string(description: "Message ID"), description: "Message IDs"),
+            "messageIDs": .array(items: .string(description: "Exact messageID returned by a mail list/search result"), description: "Exact messageID values returned by mail list/search results"),
             "isRead": .boolean(description: "Desired read state")
         ], required: ["messageIDs", "isRead"])
     }
@@ -379,12 +438,12 @@ public struct MailSetReadStateTool: AgentTool {
 public struct MailCreateDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_create_draft" }
-    public var description: String { "Create a governed mail draft without sending. The returned MailDraft.id is the exact draftID to pass to mail_send_draft when requesting the native send-approval card; never ask the user to provide this ID." }
+    public var description: String { "Create a governed mail draft without sending. Copy the returned draftID directly into mail_send_draft when requesting the native send-approval card; never ask the user to provide this ID." }
     public var permission: AgentPermissionCapability { .createMailDraft }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
-            "accountID": .string(description: "Optional exact MailAccount.id from mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
-            "identityID": .string(description: "Optional exact MailIdentity.id from the selected account. Omit, empty, or pass default to use the Settings default send identity; never invent identity IDs."),
+            "accountID": .string(description: "Optional exact accountID returned by mail_list_accounts. Omit, empty, or pass default to use the Settings default send account; never invent account IDs."),
+            "identityID": .string(description: "Optional exact identityID returned inside the selected mail_list_accounts result. Omit, empty, or pass default to use the Settings default send identity; never invent identity IDs."),
             "to": .array(items: .string(description: "Email address"), description: "Recipients"),
             "cc": .array(items: .string(description: "Email address"), description: "CC recipients"),
             "bcc": .array(items: .string(description: "Email address"), description: "BCC recipients"),
@@ -392,7 +451,8 @@ public struct MailCreateDraftTool: AgentTool {
             "subject": .string(description: "Subject"),
             "body": .string(description: "Plain-text body"),
             "htmlBody": .string(description: "Optional HTML body"),
-            "inReplyToMessageID": .string(description: "Optional source message ID for replies"),
+            "messageID": .string(description: "Optional exact messageID returned by a mail list/search result; copy the field without renaming it when creating a reply draft"),
+            "inReplyToMessageID": .string(description: "Legacy reply source message ID accepted for compatibility. Prefer messageID."),
             "attachmentIDs": .array(items: .string(description: "Attachment ID"), description: "Attachment IDs"),
             "intentSummary": .string(description: "Short user intent summary for auditing")
         ], required: ["to", "subject", "body"])
@@ -476,14 +536,14 @@ public struct MailCreateDraftTool: AgentTool {
         let bcc = Self.addresses(arguments.array("bcc"))
         let replyTo = Self.addresses(arguments.array("replyTo"))
         let attachmentIDs = (arguments.array("attachmentIDs") ?? []).compactMap(\.stringValue).map(MailAttachmentID.init(rawValue:))
-        let inReplyToMessageID = arguments.string("inReplyToMessageID").map(MailMessageID.init(rawValue:))
+        let inReplyToMessageID = (arguments.string("messageID") ?? arguments.string("inReplyToMessageID")).map(MailMessageID.init(rawValue:))
         let draft = try await runtime.createDraft(accountID: resolved.account.id, identityID: resolved.identity.id, to: to, cc: cc, bcc: bcc, replyTo: replyTo, subject: arguments.string("subject") ?? "", body: arguments.string("body") ?? "", htmlBody: arguments.string("htmlBody"), inReplyToMessageID: inReplyToMessageID, attachmentIDs: attachmentIDs, intentSummary: arguments.string("intentSummary"), runID: context.runID, sessionID: context.sessionID)
         let draftID = draft.id.rawValue
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
             contentText: "Created draft \(draftID) using account=\"\(resolved.account.id.rawValue)\" from=\"\(resolved.identity.address.email)\"; not sent. To send it through the current session permission policy, call mail_send_draft with draftID=\"\(draftID)\". Ask mode presents the native Compose approval card; Execute mode sends immediately. Do not ask the user to provide the draft ID.",
-            contentJSON: try MailJSON.encode(draft)
+            contentJSON: try MailJSON.encodeDraft(draft)
         )
     }
 }
@@ -491,9 +551,9 @@ public struct MailCreateDraftTool: AgentTool {
 public struct MailSendDraftTool: AgentTool {
     public let runtime: any AgentMailRuntime
     public var name: String { "mail_send_draft" }
-    public var description: String { "Send an existing mail draft through the current session permission policy. Ask mode presents native Compose approval; Execute mode sends immediately. Use the exact MailDraft.id returned by mail_create_draft and do not replace this tool with a natural-language confirmation." }
+    public var description: String { "Send an existing mail draft through the current session permission policy. Ask mode presents native Compose approval; Execute mode sends immediately. Use the exact draftID returned by mail_create_draft and do not replace this tool with a natural-language confirmation." }
     public var permission: AgentPermissionCapability { .sendMail }
-    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Exact MailDraft.id returned by mail_create_draft. Do not ask the user to provide this ID; pass the ID from the prior tool result to send through the current session permission policy.")], required: ["draftID"]) }
+    public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["draftID": .string(description: "Exact draftID returned by mail_create_draft. Copy the field without renaming it. Do not ask the user to provide this ID. Sending remains governed by the current session permission policy.")], required: ["draftID"]) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
     public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
         guard let args = try? AgentToolArguments(json: call.argumentsJSON), let draftID = args.string("draftID"), let payload = try? await runtime.sendApprovalBridgePayload(draftID: MailDraftID(rawValue: draftID)) else {

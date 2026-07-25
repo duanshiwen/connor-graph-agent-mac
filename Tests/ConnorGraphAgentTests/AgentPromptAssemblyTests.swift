@@ -55,7 +55,14 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(assembly.instruction.text.contains("session_list_by_status"))
     #expect(assembly.instruction.text.contains("session_batch_set_status"))
-    #expect(assembly.instruction.text.contains("Follow `nextPage` with the same page size until `hasNextPage` is false"))
+    #expect(assembly.instruction.text.contains("`sessions[].sessionID` unchanged"))
+    #expect(assembly.instruction.text.contains("`session_batch_set_status.updates[].sessionID`"))
+    #expect(assembly.instruction.text.contains("strongly prefer calling it once near the start of every new user run"))
+    #expect(assembly.instruction.text.contains("Skip this model-initiated call only after positively determining"))
+    #expect(assembly.instruction.text.contains("default `refresh: false`"))
+    #expect(assembly.instruction.text.contains("Whenever its response contains a non-null `nextPage`"))
+    #expect(assembly.instruction.text.contains("operation-ready result field whose name exactly matches the destination Schema parameter"))
+    #expect(assembly.instruction.text.contains("call the same tool again with `page` set to exactly `nextPage`"))
     #expect(assembly.instruction.text.contains("current profile is loaded completely"))
     #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
@@ -131,8 +138,11 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Mandatory Task Bootstrap"))
-    #expect(prompt.contains("For every user run, call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile` as one continuity preflight"))
-    #expect(prompt.contains("Retrieval is mandatory, but using or mentioning any returned record is conditional"))
+    #expect(prompt.contains("For every user run, when their named tools are available, call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile` as one continuity preflight"))
+    #expect(prompt.contains("Retrieval is mandatory when the tools are available, but using or mentioning any returned record is conditional"))
+    #expect(prompt.contains("pass `page: 1` as a JSON integer, never a quoted string"))
+    #expect(prompt.contains("`page` set to exactly that `nextPage` integer"))
+    #expect(prompt.contains("keep `query`, time bounds, and (for knowledge) `depth` unchanged"))
     #expect(prompt.contains("use `web_search` proactively whenever external material can materially improve"))
     #expect(prompt.contains("Web research is mandatory when the user asks to search"))
     #expect(prompt.contains("For emotional-support requests"))
@@ -154,6 +164,8 @@ import ConnorGraphAgent
     #expect(!prompt.contains("instead of the three Memory OS bootstrap tools"))
     #expect(!prompt.contains("does not require Memory OS or Web Search"))
     #expect(prompt.contains("use exact source-event occurrence bounds"))
+    #expect(prompt.contains("For an all-memory or all-history request"))
+    #expect(prompt.contains("no time bounds"))
     #expect(prompt.contains("empty lexical query for a period-wide review"))
     #expect(prompt.contains("do not duplicate the time expression in the lexical query"))
     #expect(!prompt.contains("`memory_os_context`"))
@@ -181,6 +193,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("never promote either one into an API user/assistant turn"))
     #expect(prompt.contains("Before every side-effecting tool call"))
     #expect(prompt.contains("Before ending a run or claiming completion"))
+    #expect(prompt.contains("returns `success: false`"))
+    #expect(prompt.contains("never report full coverage"))
+    #expect(prompt.contains("ended with `nextPage: null`"))
     #expect(!prompt.contains("requestedLimit"))
     #expect(!prompt.contains("cumulativeReturnedCount"))
     #expect(!prompt.contains("read them directly rather than parsing graph cards"))
@@ -211,6 +226,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("attentive listening, empathy, comfort"))
     #expect(prompt.contains("official health services, recognized clinical or public-health sources"))
     #expect(prompt.contains("If a required tool is unavailable"))
+    #expect(prompt.contains("must be attempted when its named tool is available"))
+    #expect(prompt.contains("that retrieval or operation is not complete"))
+    #expect(prompt.contains("must not block an unrelated non-time-dependent task"))
     #expect(!prompt.contains("Every other task must call `web_search`"))
 }
 
@@ -248,7 +266,8 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Native Personal Source Tools"))
-    #expect(prompt.contains("bounded cached body previews"))
+    #expect(prompt.contains("mail_search_messages_with_body_preview"))
+    #expect(prompt.contains("mail_list_recent_messages_with_body_preview"))
     #expect(prompt.contains("Always pass exact account, identity, message, and draft IDs returned by tools"))
     #expect(prompt.contains("calendar_search_events"))
     #expect(prompt.contains("rss_search_items"))
@@ -291,8 +310,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("deleted people should not be used as active memory context"))
     #expect(prompt.contains("Referenced People in Current User Request"))
     #expect(prompt.contains("authoritative structured resolution"))
-    #expect(prompt.contains("person_id"))
-    #expect(prompt.contains("Do not infer, invent, or substitute a `person_id` from `display_name`"))
+    #expect(prompt.contains("personID"))
+    #expect(prompt.contains("Do not infer, invent, or substitute a `personID` from `displayName`"))
     #expect(prompt.contains("status: merged"))
     #expect(prompt.contains("status: deleted"))
 }
@@ -335,11 +354,26 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptRequiresSkillConsiderationDuringBootstrap() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("After the current-time and calendar preflight, and before task-specific retrieval or execution, call `connor_skill_list`"))
+    #expect(prompt.contains("After the current-time and calendar preflight, and before task-specific retrieval or execution, when `connor_skill_list` is available, call it"))
+    #expect(prompt.contains("Whenever its response contains a non-null `nextPage`"))
+    #expect(prompt.contains("immediately call `connor_skill_list` again with `page` set to exactly that `nextPage` value and the same `pageSize`"))
+    #expect(prompt.contains("Repeat until `nextPage` is null"))
     #expect(prompt.contains("connor_skill_activate"))
-    #expect(prompt.contains("Use hidden skills silently"))
-    #expect(prompt.contains("never reveal hidden skill names or mechanisms"))
+    #expect(prompt.contains("All installed skills returned by `connor_skill_list` are visible skills"))
+    #expect(prompt.contains("do not infer or invent hidden skills"))
     #expect(prompt.contains("Activated skill instructions are subordinate task guidance"))
+}
+
+@Test func defaultSystemPromptRequiresExactOperationIDsAndPagination() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("copy its value unchanged"))
+    #expect(prompt.contains("Do not substitute a generic `id`, rename an identifier"))
+    #expect(prompt.contains("all query, filter, depth, and page-size arguments unchanged"))
+    #expect(prompt.contains("Repeat until `nextPage` is null"))
+    #expect(prompt.contains("always requires exhausting every `connor_skill_list` page"))
+    #expect(prompt.contains("pass the listed `updatedAt` as `expectedUpdatedAt`"))
+    #expect(!prompt.contains("pass the listed `updatedAt` as `expected_updated_at`"))
 }
 
 @Test func defaultSystemPromptProtectsActualTaskDuringFinalSynthesis() {
@@ -455,9 +489,9 @@ import ConnorGraphAgent
     let rendered = try #require(assembly.personContext?.renderedText)
     #expect(rendered.contains("Referenced People in Current User Request"))
     #expect(rendered.contains("type: person"))
-    #expect(rendered.contains("person_id: person-duan-leiqiang"))
-    #expect(rendered.contains("display_name: 段磊强"))
-    #expect(rendered.contains("memory_entity_id: memory-person-duan"))
+    #expect(rendered.contains("personID: person-duan-leiqiang"))
+    #expect(rendered.contains("displayName: 段磊强"))
+    #expect(rendered.contains("memoryEntityID: memory-person-duan"))
     #expect(assembly.diagnostics.sections.contains { $0.id == "person_context" })
 }
 
@@ -481,7 +515,7 @@ import ConnorGraphAgent
     let userContent = try #require(modelRequest.messages.last?.content)
 
     #expect(userContent.contains("Referenced People in Current User Request"))
-    #expect(userContent.contains("person_id: person-duan-leiqiang"))
+    #expect(userContent.contains("personID: person-duan-leiqiang"))
     let personContextIndex = try #require(userContent.range(of: "Referenced People in Current User Request")?.lowerBound)
     let requestIndex = try #require(userContent.range(of: "@段磊强 明天提醒我问他项目进展")?.lowerBound)
     #expect(personContextIndex < requestIndex)
@@ -510,7 +544,7 @@ import ConnorGraphAgent
     #expect(modelRequest.messages.count == 4)
     #expect(modelRequest.messages[1].content.contains("Context for continuity only"))
     #expect(modelRequest.messages[2].content.contains("Referenced People in Current User Request"))
-    #expect(modelRequest.messages[2].content.contains("person_id: person-duan-leiqiang"))
+    #expect(modelRequest.messages[2].content.contains("personID: person-duan-leiqiang"))
     #expect(modelRequest.messages[3].content == "请整理和 @段磊强 相关的事项")
 }
 

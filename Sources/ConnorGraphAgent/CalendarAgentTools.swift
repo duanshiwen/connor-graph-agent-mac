@@ -1,6 +1,45 @@
 import Foundation
 import ConnorGraphCore
 
+private enum CalendarToolJSON {
+    private static func encodedObject<T: Encodable>(_ value: T) throws -> Any {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return try JSONSerialization.jsonObject(with: encoder.encode(value))
+    }
+
+    private static func string(_ object: Any) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    static func encodeCalendars(_ calendars: [CalendarCollection]) throws -> String {
+        var rows = (try encodedObject(calendars) as? [[String: Any]]) ?? []
+        for index in rows.indices {
+            if let id = rows[index]["id"] { rows[index]["calendarID"] = id }
+        }
+        return try string(rows)
+    }
+
+    static func encodeEvents(_ events: [CalendarEvent]) throws -> String {
+        var rows = (try encodedObject(events) as? [[String: Any]]) ?? []
+        for index in rows.indices {
+            if let id = rows[index]["id"] { rows[index]["eventID"] = id }
+        }
+        return try string(rows)
+    }
+
+    static func encodeEvent(_ event: CalendarEvent) throws -> String {
+        var object = (try encodedObject(event) as? [String: Any]) ?? [:]
+        if let id = object["id"] { object["eventID"] = id }
+        if let metadata = object["sourceMetadata"] as? [String: Any], let etag = metadata["etag"] {
+            object["expectedVersion"] = etag
+        }
+        return try string(object)
+    }
+}
+
 public protocol AgentCalendarRuntime: Sendable {
     func listCalendars(runID: String?, sessionID: String?) async throws -> [CalendarCollection]
     func listEvents(calendarID: CalendarID?, runID: String?, sessionID: String?) async throws -> [CalendarEvent]
@@ -147,7 +186,7 @@ public struct CalendarSearchEventsTool: AgentTool {
             sessionID: context.sessionID
         )
         await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: arguments.string("query"), strength: .summaryCandidate, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Found"), contentJSON: try ContactJSON.encode(events))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Found"), contentJSON: try CalendarToolJSON.encodeEvents(events))
     }
 }
 
@@ -206,8 +245,8 @@ public struct CalendarReadTool: AgentTool {
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["list_calendars", "list_events", "get_event", "get_agenda", "get_free_busy"], description: "Calendar read operation"),
-            "calendarID": .string(description: "Exact calendar ID returned by list_calendars; optional for list_events, get_agenda, and get_free_busy"),
-            "eventID": .string(description: "Exact event ID returned by calendar_search_events or list_events; required for get_event")
+            "calendarID": .string(description: "Exact calendarID returned by list_calendars; copy the field without renaming it. Optional for list_events, get_agenda, and get_free_busy"),
+            "eventID": .string(description: "Exact eventID returned by calendar_search_events or list_events; copy the field without renaming it. Required for get_event")
         ], required: ["operation"])
     }
 
@@ -232,11 +271,11 @@ public struct CalendarReadTool: AgentTool {
                 let choices = writable.map { "\($0.displayName) [exact id: \($0.id.rawValue)]" }.joined(separator: "; ")
                 summary = "Listed \(calendars.count) calendars; \(writable.count) writable for event creation: \(choices)"
             }
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summary, contentJSON: try ContactJSON.encode(calendars))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summary, contentJSON: try CalendarToolJSON.encodeCalendars(calendars))
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Listed"), contentJSON: try ContactJSON.encode(events))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventCandidateTextRenderer.render(events, verb: "Listed"), contentJSON: try CalendarToolJSON.encodeEvents(events))
         case "get_event":
             guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required for calendar_read get_event. Copy an exact eventID returned by calendar_search_events or list_events.") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
@@ -245,7 +284,7 @@ public struct CalendarReadTool: AgentTool {
                 if mutationEligibility(event) == "eligible", let version = event.sourceMetadata?.etag, !version.isEmpty {
                     await evidenceRegistry?.record(.init(runID: context.runID, sessionID: context.sessionID, eventID: event.id.rawValue, calendarID: event.calendarID.rawValue, expectedVersion: version))
                 }
-                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventDetailTextRenderer.render(event), contentJSON: try ContactJSON.encode(event))
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: CalendarEventDetailTextRenderer.render(event), contentJSON: try CalendarToolJSON.encodeEvent(event))
             }
             let text = "Calendar event not found for eventID '\(eventID)'. Do not reuse or guess this ID. Search or list events again and copy a returned eventID exactly. Do not call calendar_write with this ID."
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text, contentJSON: try ContactJSON.encode(event))
@@ -291,9 +330,9 @@ public struct CalendarWriteTool: AgentTool {
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "operation": .stringEnumeration(values: ["create_event", "update_event", "delete_event"], description: "Calendar mutation operation"),
-            "calendarID": .string(description: "Exact writable calendar ID returned by calendar_read list_calendars; required for create_event"),
-            "eventID": .string(description: "Exact event ID returned by calendar_read get_event; required for update_event and delete_event"),
-            "expectedVersion": .string(description: "Exact version returned by the latest event read; required for update_event and delete_event"),
+            "calendarID": .string(description: "Exact writable calendarID returned by calendar_read list_calendars; copy the field without renaming it. Required for create_event"),
+            "eventID": .string(description: "Exact eventID returned by calendar_read get_event; copy the field without renaming it. Required for update_event and delete_event"),
+            "expectedVersion": .string(description: "Exact expectedVersion returned by the latest calendar_read get_event; copy the field without renaming it. Required for update_event and delete_event"),
             "title": .string(description: "Event title"),
             "start": .string(description: "ISO-8601 start timestamp"),
             "end": .string(description: "ISO-8601 end timestamp"),

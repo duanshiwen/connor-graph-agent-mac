@@ -5,6 +5,26 @@ import ConnorGraphAgent
 
 @Suite("Calendar Contacts Agent Tools Tests")
 struct CalendarContactsAgentToolsTests {
+    @Test func contactDraftOutputMatchesCommitSchemaID() async throws {
+        let runtime = InMemoryAgentContactRuntime()
+        let create = ContactCreateDraftTool(runtime: runtime)
+        let created = try await create.execute(
+            arguments: try AgentToolArguments(json: #"{"email":"alice@example.com","name":"Alice"}"#),
+            context: Self.context(toolCallID: "contact-create")
+        )
+        let json = try #require(created.contentJSON)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect(object["draftID"] as? String == object["id"] as? String)
+
+        let commit = ContactCommitDraftTool(runtime: runtime)
+        guard case .closedObject(let properties, _) = commit.inputSchema,
+              case .string(let description) = properties["draftID"] else {
+            Issue.record("Expected contact_commit_draft draftID schema")
+            return
+        }
+        #expect(description.contains("draftID returned by contact_create_draft"))
+    }
+
     @Test func timeAnalyzeRangesToolComputesOverlapJSON() async throws {
         let tool = TimeAnalyzeRangesTool()
         let call = AgentToolCall(
@@ -52,6 +72,8 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("calendar-exact-write-id"))
         #expect(!result.contentText.contains("calendar-holidays"))
         #expect(result.contentJSON?.contains("calendar-holidays") == true)
+        let calendars = try #require(try Self.jsonObject(result) as? [[String: Any]])
+        #expect(calendars.first?["calendarID"] as? String == calendars.first?["id"] as? String)
     }
 
     @Test func calendarReadToolReportsWhenNoWritableCalendarExists() async throws {
@@ -79,6 +101,8 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("end: 1970-01-01T01:16:40Z"))
         #expect(result.contentText.contains("Next: call calendar_read with operation get_event"))
         #expect(result.contentJSON?.contains("产品讨论") == true)
+        let events = try #require(try Self.jsonObject(result) as? [[String: Any]])
+        #expect(events.first?["eventID"] as? String == events.first?["id"] as? String)
     }
 
     @Test func calendarAgendaExposesExactOpaqueCandidateIDsWithoutNotes() async throws {
@@ -139,6 +163,10 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("mutationEligibility: eligible"))
         #expect(result.contentText.contains("copy eventID and expectedVersion exactly"))
         #expect(result.contentJSON?.contains("etag-42") == true)
+        let object = try #require(try Self.jsonObject(result) as? [String: Any])
+        #expect(object["eventID"] as? String == "event:opaque/id")
+        #expect(object["calendarID"] as? String == "calendar-work")
+        #expect(object["expectedVersion"] as? String == "W/\"etag-42\"")
     }
 
     @Test func calendarReadGetEventExplainsIneligibleAndMissingEvents() async throws {
@@ -391,23 +419,21 @@ struct CalendarContactsAgentToolsTests {
         let writeTool = ContactsWriteTool(runtime: InMemoryAgentContactRuntime())
 
         #expect(readTool.description.contains("Referenced People"))
-        #expect(readTool.description.contains("person_id"))
+        #expect(readTool.description.contains("personID"))
         #expect(readTool.description.contains("do not guess IDs from display names"))
         #expect(writeTool.description.contains("Referenced People"))
         #expect(writeTool.description.contains("never guess IDs from display names"))
 
         guard case .closedObject(let readProperties, _) = readTool.inputSchema,
-              case .string(let readIDDescription) = readProperties["id"],
+              case .string(let readIDDescription) = readProperties["personID"],
               case .closedObject(let writeProperties, _) = writeTool.inputSchema,
-              case .string(let writeIDDescription) = writeProperties["id"] else {
-            Issue.record("Expected contacts tools to expose object schemas with id descriptions")
+              case .string(let writeIDDescription) = writeProperties["personID"] else {
+            Issue.record("Expected contacts tools to expose object schemas with personID descriptions")
             return
         }
 
-        #expect(readIDDescription.contains("person_id from Referenced People"))
-        #expect(readIDDescription.contains("do not infer"))
-        #expect(writeIDDescription.contains("person_id from Referenced People"))
-        #expect(writeIDDescription.contains("never inferred"))
+        #expect(readIDDescription.contains("copy the field and value unchanged"))
+        #expect(writeIDDescription.contains("copy the field and value unchanged"))
     }
 
     @Test func registryRegistersCalendarContactsAndTimeTools() {
@@ -436,6 +462,11 @@ struct CalendarContactsAgentToolsTests {
             toolCallID: toolCallID,
             policyEngine: policy
         )
+    }
+
+    private static func jsonObject(_ result: AgentToolResult) throws -> Any {
+        let json = try #require(result.contentJSON)
+        return try JSONSerialization.jsonObject(with: Data(json.utf8))
     }
 
     private static func expectInvalidArguments(

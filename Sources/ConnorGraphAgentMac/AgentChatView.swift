@@ -815,10 +815,15 @@ private struct AgentChatConversationView: View {
 
     private var isNoteModeBeforeFirstMessage: Bool {
         guard let sessionID = model.sessions.selectedSessionID else { return false }
-        let session = model.sessions.sessions.first { $0.id == sessionID }
-        guard session?.governance.kind == .note else { return false }
-        // 正在提交或已有消息 → 退出笔记全屏模式
-        return (session?.messages.isEmpty ?? true) && !model.run.isSubmitting
+        let session = model.sessions.allSessions.first { $0.id == sessionID }
+            ?? model.sessions.sessions.first { $0.id == sessionID }
+        return AgentChatMessagePresentationPolicy.isBeforeFirstNoteMessage(
+            sessionKind: session?.governance.kind,
+            sessionMessageCount: session?.messages.count ?? 0,
+            persistedMessageCount: model.sessions.messageCountsBySessionID[sessionID],
+            transcriptMessageCount: model.run.transcript.count,
+            isSubmitting: model.run.isSubmitting
+        )
     }
 
     var body: some View {
