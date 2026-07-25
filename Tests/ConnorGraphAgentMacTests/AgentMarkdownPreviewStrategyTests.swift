@@ -23,6 +23,17 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(strategy == .deferredPreview)
     }
 
+    @Test func longUserMessageCanDisableDeferredPreviewRendering() {
+        let strategy = AgentMarkdownPreviewRenderStrategy.strategy(
+            lineLimit: nil,
+            monospacedFallback: false,
+            markdownCharacterCount: 20_000,
+            allowsDeferredPreview: false
+        )
+
+        #expect(strategy == .compiledDocument)
+    }
+
     @Test func messageBodyPointSizeIsDisplayedAndClamped() {
         #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)
@@ -47,7 +58,8 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(preview.components(separatedBy: ".fixedSize(horizontal: false, vertical: true)").count >= 9)
         #expect(messageRows.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(messageRows.contains("@AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)"))
-        #expect(messageRows.components(separatedBy: "bodyPointSize: messageBodyPointSize").count >= 4)
+        #expect(messageRows.components(separatedBy: "bodyPointSize: messageBodyPointSize").count >= 3)
+        #expect(messageRows.contains("allowsDeferredPreview: false"))
         #expect(preview.contains("bodyPointSize + semanticSize - systemBodySize"))
     }
 
