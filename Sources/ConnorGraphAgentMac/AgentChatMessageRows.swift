@@ -32,7 +32,9 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
     var exportHelp: String
 
     init(message: AgentMessage) {
-        let hasContent = !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasContent = message.content.unicodeScalars.contains {
+            !CharacterSet.whitespacesAndNewlines.contains($0)
+        }
         self.showsActions = message.role == .assistant && hasContent
         self.copyTitle = "复制"
         self.exportTitle = "导出到文件"
@@ -52,12 +54,13 @@ struct AgentAssistantMessageExpansionPresentation: Equatable {
     var help: String
 
     init(message: AgentMessage, isExpanded: Bool) {
-        self.isAvailable = message.role == .assistant
+        self.isAvailable = (message.role == .assistant || message.role == .user)
             && message.content.utf8.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
         self.isExpanded = isExpanded
         self.title = isExpanded ? "收起" : "展开"
         self.systemImage = isExpanded ? "chevron.up" : "chevron.down"
-        self.accessibilityLabel = isExpanded ? "收起这条助理回复" : "展开这条助理回复"
+        let contentName = message.role == .user ? "用户消息" : "助理回复"
+        self.accessibilityLabel = isExpanded ? "收起这条\(contentName)" : "展开这条\(contentName)"
         self.help = isExpanded ? "收起长回复，显示轻量预览" : "展开并显示完整回复"
     }
 }
@@ -177,7 +180,7 @@ struct AgentChatMessageRow: View {
         messageID: ""
     )
     var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
-    @State private var isAssistantMessageExpanded = false
+    @State private var isMessageExpanded = false
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -196,7 +199,7 @@ struct AgentChatMessageRow: View {
     private var assistantExpansionPresentation: AgentAssistantMessageExpansionPresentation {
         AgentAssistantMessageExpansionPresentation(
             message: row.message,
-            isExpanded: isAssistantMessageExpanded
+            isExpanded: isMessageExpanded
         )
     }
 
@@ -218,7 +221,7 @@ struct AgentChatMessageRow: View {
         HStack(alignment: .top) {
             if usesTrailingUserLayout { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+            VStack(alignment: usesTrailingUserLayout ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                     if isNoteBody {
                         noteBodyHeader
@@ -246,12 +249,12 @@ struct AgentChatMessageRow: View {
                         .stroke(messageBorder, lineWidth: 1)
                 )
 
-                if assistantActionsPresentation.showsActions {
+                if assistantActionsPresentation.showsActions || assistantExpansionPresentation.isAvailable {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
                         expansionPresentation: assistantExpansionPresentation,
                         speechPresentation: speechPresentation,
-                        onToggleExpansion: toggleAssistantMessageExpansion,
+                        onToggleExpansion: toggleMessageExpansion,
                         onToggleSpeech: { onToggleSpeech(row) },
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
@@ -312,7 +315,7 @@ struct AgentChatMessageRow: View {
                 markdown: row.message.content,
                 font: messageBodyFont,
                 bodyPointSize: messageBodyPointSize,
-                allowsDeferredPreview: false
+                allowsDeferredPreview: !isMessageExpanded
             )
         } else {
             assistantMarkdownBody
@@ -324,7 +327,7 @@ struct AgentChatMessageRow: View {
             markdown: row.message.content,
             font: messageBodyFont,
             bodyPointSize: messageBodyPointSize,
-            allowsDeferredPreview: !isAssistantMessageExpanded,
+            allowsDeferredPreview: !isMessageExpanded,
             persistentCacheContext: persistentCacheContext
         )
         .fixedSize(horizontal: false, vertical: true)
@@ -332,11 +335,11 @@ struct AgentChatMessageRow: View {
         .padding(.trailing, AgentChatLayout.assistantMessageTrailingPadding)
     }
 
-    private func toggleAssistantMessageExpansion() {
+    private func toggleMessageExpansion() {
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            isAssistantMessageExpanded.toggle()
+            isMessageExpanded.toggle()
         }
     }
 
@@ -372,7 +375,7 @@ private struct AgentAssistantMessageActionsView: View {
                     action: onToggleExpansion
                 )
             }
-            if speechPresentation.isVisible {
+            if presentation.showsActions, speechPresentation.isVisible {
                 actionButton(
                     title: speechPresentation.title,
                     systemImage: speechPresentation.systemImage,
@@ -383,21 +386,22 @@ private struct AgentAssistantMessageActionsView: View {
                     action: onToggleSpeech
                 )
             }
-            actionButton(
-                title: presentation.copyTitle,
-                systemImage: "doc.on.doc",
-                accessibilityLabel: presentation.copyAccessibilityLabel,
-                help: presentation.copyHelp,
-                action: onCopy
-            )
-            actionButton(
-                title: presentation.exportTitle,
-                systemImage: "doc.text",
-                accessibilityLabel: presentation.exportAccessibilityLabel,
-                help: presentation.exportHelp,
-                action: onExport
-            )
-            Spacer(minLength: 0)
+            if presentation.showsActions {
+                actionButton(
+                    title: presentation.copyTitle,
+                    systemImage: "doc.on.doc",
+                    accessibilityLabel: presentation.copyAccessibilityLabel,
+                    help: presentation.copyHelp,
+                    action: onCopy
+                )
+                actionButton(
+                    title: presentation.exportTitle,
+                    systemImage: "doc.text",
+                    accessibilityLabel: presentation.exportAccessibilityLabel,
+                    help: presentation.exportHelp,
+                    action: onExport
+                )
+            }
         }
         .padding(.top, 2)
         .accessibilityElement(children: .contain)

@@ -92,14 +92,22 @@ struct AssistantMessageExportFormatterTests {
         #expect(expanded.accessibilityLabel == "收起这条助理回复")
     }
 
-    @Test("expansion controls are hidden for short and non-assistant messages")
-    func expansionControlsAreHiddenWhenUnavailable() {
+    @Test("long user messages also expose expansion controls")
+    func longUserMessagesAlsoExposeExpansionControls() {
         let threshold = AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
         let shortReply = AgentMessage(role: .assistant, content: String(repeating: "a", count: threshold - 1))
         let longUserMessage = AgentMessage(role: .user, content: String(repeating: "a", count: threshold))
+        let longSystemMessage = AgentMessage(role: .system, content: String(repeating: "a", count: threshold))
+
+        let userPresentation = AgentAssistantMessageExpansionPresentation(
+            message: longUserMessage,
+            isExpanded: false
+        )
 
         #expect(!AgentAssistantMessageExpansionPresentation(message: shortReply, isExpanded: false).isAvailable)
-        #expect(!AgentAssistantMessageExpansionPresentation(message: longUserMessage, isExpanded: false).isAvailable)
+        #expect(userPresentation.isAvailable)
+        #expect(userPresentation.accessibilityLabel == "展开这条用户消息")
+        #expect(!AgentAssistantMessageExpansionPresentation(message: longSystemMessage, isExpanded: false).isAvailable)
     }
 
     @Test("copy and export payload preserves the complete long reply")

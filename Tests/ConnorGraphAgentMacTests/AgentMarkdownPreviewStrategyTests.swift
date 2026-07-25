@@ -69,7 +69,6 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(messageRows.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(messageRows.contains("@AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)"))
         #expect(messageRows.components(separatedBy: "bodyPointSize: messageBodyPointSize").count >= 3)
-        #expect(messageRows.contains("allowsDeferredPreview: false"))
         #expect(preview.contains("bodyPointSize + semanticSize - systemBodySize"))
     }
 
@@ -107,9 +106,11 @@ struct AgentMarkdownPreviewStrategyTests {
 
         #expect(preview.contains("deferred:\\(allowsDeferredPreview)"))
         #expect(preview.contains("deferredPreviewView(statusText: \"正在展开完整内容…\", showsProgress: true)"))
-        #expect(messageRows.contains("allowsDeferredPreview: !isAssistantMessageExpanded"))
+        #expect(messageRows.components(separatedBy: "allowsDeferredPreview: !isMessageExpanded").count == 3)
         #expect(messageRows.contains("transaction.disablesAnimations = true"))
         #expect(messageRows.contains("action: onToggleExpansion"))
+        #expect(!messageRows.contains("allowsDeferredPreview: false"))
+        #expect(!messageRows.contains("content.trimmingCharacters"))
     }
 
     @Test @MainActor func markdownLinksUseTheNativePointingHandCursorAttribute() throws {
