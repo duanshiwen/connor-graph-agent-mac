@@ -322,12 +322,18 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptChecksUpcomingCalendarWithoutDistractingFromCurrentWork() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("call `calendar_search_events` only when the request concerns the user's schedule"))
-    #expect(prompt.contains("When a next-24-hours check is relevant"))
+    #expect(prompt.contains("always check the user's calendar from the authoritative current time through the next 24 hours"))
     #expect(prompt.contains("`timeFilterMode: intervalOverlapsRange`"))
-    #expect(prompt.contains("Judge relevance from full candidate context rather than title keywords alone"))
+    #expect(prompt.contains("includes events already in progress at the current time as well as events that begin later"))
+    #expect(prompt.contains("Use the successful current-time result and its timezone as the local schedule frame"))
+    #expect(prompt.contains("call `get_current_environment` with `refresh: false`"))
+    #expect(prompt.contains("do not classify from title keywords alone"))
     #expect(prompt.contains("Before relying on or reminding about an event, confirm its current details with `calendar_read`"))
-    #expect(prompt.contains("if relevance is uncertain or calendar coverage is immaterial, do not call the calendar or interrupt the user"))
+    #expect(prompt.contains("distinguish clearly between an event in progress and the next upcoming event"))
+    #expect(prompt.contains("do not repeat an unchanged event already surfaced in the current conversation"))
+    #expect(prompt.contains("If relevance or actionability is uncertain, do not interrupt"))
+    #expect(prompt.contains("If no event qualifies, say nothing about the calendar"))
+    #expect(prompt.contains("continue an unrelated task without claiming the schedule is clear"))
 }
 
 @Test func defaultSystemPromptExcludesProjectsFromCurrentUserProfilePurpose() {
