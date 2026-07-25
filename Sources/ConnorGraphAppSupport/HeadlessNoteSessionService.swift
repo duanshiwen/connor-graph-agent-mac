@@ -81,7 +81,11 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
     }
 
     public func associateImportedNote(sessionID: String, metadata: NoteImportProjectionMetadata) {
-        try? AppNoteRepository(store: repository.store).attachImportMetadata(sessionID: sessionID, metadata: metadata)
+        let noteRepository = AppNoteRepository(store: repository.store)
+        try? noteRepository.attachImportMetadata(sessionID: sessionID, metadata: metadata)
+        if let note = try? noteRepository.note(sessionID: sessionID) {
+            try? NoteSearchService(repository: noteRepository).index(note)
+        }
     }
 
     @discardableResult

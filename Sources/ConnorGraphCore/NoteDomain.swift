@@ -133,3 +133,31 @@ public struct NoteImportProjectionMetadata: Sendable, Equatable {
         self.sourceCreatedAt = sourceCreatedAt
     }
 }
+
+public enum NoteSearchHealthStatus: String, Codable, Sendable, Equatable {
+    case uninitialized
+    case backfilling
+    case available
+    case partialFailure = "partial_failure"
+    case repairRequired = "repair_required"
+}
+
+public struct NoteSearchHit: Codable, Sendable, Equatable {
+    public var noteID: String
+    public var sessionID: String
+    public var title: String
+    public var snippet: String
+    public var matchedTerms: [String]
+    public var relevance: Double
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var originKind: NoteOriginKind
+    public var sourceKind: String?
+    public var projectionStatus: NoteProjectionStatus
+}
+
+public struct NoteSearchPage: Codable, Sendable, Equatable {
+    public var records: [NoteSearchHit]
+    public var totalItems: Int
+    public var health: NoteSearchHealthStatus
+}

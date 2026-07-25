@@ -690,6 +690,7 @@ final class AppRuntimeLifecycle {
             let noteRepository = AppNoteRepository(store: repository.store)
             Task.detached(priority: .utility) {
                 _ = await NoteProjectionReconciler(repository: noteRepository).reconcile()
+                _ = await NoteIndexReconciler(repository: noteRepository).reconcile()
             }
         }
         if startupMode == .deferred || injectedMemoryOSStore != nil || injectedMemoryOSFacade != nil || injectedMemoryOSInitializationError != nil {

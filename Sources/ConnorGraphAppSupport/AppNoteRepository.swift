@@ -20,4 +20,9 @@ public struct AppNoteRepository: Sendable {
     public func claimProjection(sessionID: String, owner: String, leaseDuration: TimeInterval = 120) throws -> Bool { try store.claimNoteProjection(sessionID: sessionID, owner: owner, leaseDuration: leaseDuration) }
     public func releaseProjection(sessionID: String, owner: String) throws { try store.releaseNoteProjection(sessionID: sessionID, owner: owner) }
     public func orphanedSessionIDs(limit: Int = 25) throws -> [String] { try store.orphanedNoteSessionIDs(limit: limit) }
+    public func notesNeedingIndex(version: Int, limit: Int = 25) throws -> [NoteRecord] { try store.notesNeedingIndex(version: version, limit: limit) }
+    public func upsertSearchDocument(_ note: NoteRecord, indexedText: String, indexVersion: Int) throws { try store.upsertNoteSearchDocument(note, indexedText: indexedText, indexVersion: indexVersion) }
+    public func search(matchQuery: String?, matchedTerms: [String], startDate: Date?, endDate: Date?, originKind: NoteOriginKind?, page: Int, pageSize: Int) throws -> NoteSearchPage {
+        try store.searchNotes(matchQuery: matchQuery, matchedTerms: matchedTerms, startDate: startDate, endDate: endDate, originKind: originKind, page: page, pageSize: pageSize)
+    }
 }
