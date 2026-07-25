@@ -42,6 +42,32 @@ private func skillListContext(_ page: Int) -> AgentToolExecutionContext {
     )
 }
 
+@Test func skillActivationSeparatesModelVisibleResultFromTrustedInstructions() async throws {
+    let package = pagedSkill("alpha")
+    let result = try await SkillActivateTool(packages: [package]).execute(
+        arguments: AgentToolArguments(values: ["slug": .string("alpha")]),
+        context: skillListContext(1)
+    )
+
+    #expect(result.error == nil)
+    #expect(result.contentText.contains("Activated validated skill"))
+    #expect(!result.contentText.contains(package.instructions))
+    #expect(result.contentJSON?.contains("\"slug\":\"alpha\"") == true)
+    #expect(result.instructionPromotion?.kind == .validatedSkill)
+    #expect(result.instructionPromotion?.identifier == "alpha")
+    #expect(result.instructionPromotion?.instructions == package.instructions)
+}
+
+@Test func missingSkillCannotProduceTrustedInstructions() async throws {
+    let result = try await SkillActivateTool(packages: [pagedSkill("alpha")]).execute(
+        arguments: AgentToolArguments(values: ["slug": .string("missing")]),
+        context: skillListContext(1)
+    )
+
+    #expect(result.error != nil)
+    #expect(result.instructionPromotion == nil)
+}
+
 @Test func skillListFollowsNextPageWithoutGapsOrDuplicatesInStableOrder() async throws {
     let tool = SkillListTool(packages: ["echo", "alpha", "delta", "bravo", "charlie"].map(pagedSkill))
     #expect(tool.description.contains("Whenever nextPage is non-null"))
