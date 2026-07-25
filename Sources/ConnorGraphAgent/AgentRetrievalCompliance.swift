@@ -73,10 +73,11 @@ public struct AgentCurrentTimePreflightPolicy: Sendable, Equatable {
     }
 }
 
-/// Enforces inclusion of every available continuity source without prescribing
-/// call order or limiting how often the model may revisit a paginated source.
+/// Enforces inclusion of every available continuity source and complete sequential
+/// pagination of the current-user profile source.
 public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
     public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    public static let currentUserProfileToolName = "memory_os_get_current_user_profile"
 
     public init() {}
 
@@ -94,9 +95,44 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         guard !missingToolNames.isEmpty else { return nil }
         let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
         return """
-        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. This requirement does not impose a call-count limit: repeat any continuity tool whenever its pagination metadata or the task's evidence needs justify another call. A successful empty result still counts as a real call and does not require an automatic retry; retry only when pagination metadata or the task's evidence needs justify it. A failed attempt also satisfies invocation but supplies no evidence; preserve its real error and never fabricate memory.
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Start `memory_os_get_current_user_profile` at page 1 and follow every exact non-null `nextPage` until it returns null. For the other continuity tools, repeat calls when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
         """
     }
+
+    public func initialRequiredCurrentUserProfilePage(availableTools: [AgentToolDefinition]) -> Int? {
+        availableTools.contains { $0.name == Self.currentUserProfileToolName } ? 1 : nil
+    }
+
+    public func call(_ call: AgentToolCall, matchesRequiredCurrentUserProfilePage requiredPage: Int) -> Bool {
+        guard call.name == Self.currentUserProfileToolName,
+              let arguments = try? AgentToolArguments(json: call.argumentsJSON) else {
+            return false
+        }
+        return (arguments.int("page") ?? 1) == requiredPage
+    }
+
+    public func nextRequiredCurrentUserProfilePage(after result: AgentToolResult) -> Int? {
+        guard result.toolName == Self.currentUserProfileToolName,
+              result.error == nil,
+              let payload = result.contentJSON,
+              let data = payload.data(using: .utf8),
+              let response = try? JSONDecoder().decode(CurrentUserProfilePaginationResponse.self, from: data),
+              response.success else {
+            return nil
+        }
+        return response.nextPage
+    }
+
+    public func currentUserProfileCorrectionInstruction(requiredPage: Int) -> String {
+        """
+        Mandatory current-user profile pagination is incomplete. Before any task-specific tool call or final answer, call `memory_os_get_current_user_profile` with `page` set to the exact JSON integer \(requiredPage). Continue following each returned exact non-null `nextPage` until `nextPage` is null. Do not skip, guess, repeat, or stop early.
+        """
+    }
+}
+
+private struct CurrentUserProfilePaginationResponse: Decodable {
+    var success: Bool
+    var nextPage: Int?
 }
 
 public enum AgentMemoryClaimStatus: String, Sendable, Equatable {

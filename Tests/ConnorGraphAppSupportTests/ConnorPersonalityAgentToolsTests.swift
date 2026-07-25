@@ -147,6 +147,37 @@ private let unrestrictedPersonalityProvider = AnyAgentModelProvider(modelID: "pe
     #expect(await state.read().revision == 2)
 }
 
+@Test func personalityIntentAcceptsPersistentChangesPhrasedAsQuestions() throws {
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "你能把你的人格调成一种对于我更热情、更亲密的特征吗？"
+    )
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "你的性格能不能再温柔一点？"
+    )
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "可以把你的沟通风格变成更直接的吗？"
+    )
+}
+
+@Test func personalityIntentStillRejectsReadOnlyComparativeQuestions() {
+    #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent("你的性格是不是更温柔了？")
+    }
+}
+
+@Test func personalityUpdateSchemaDocumentsEachModeAndSupportsStrictToolCalling() throws {
+    let state = PersonalityTestState()
+    let tool = ConnorPersonalityUpdateTool(runtime: personalityRuntime(state), provider: personalityProvider)
+    let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+    let mode = try #require(properties["mode"] as? [String: Any])
+    let description = try #require(mode["description"] as? String)
+
+    #expect(description.contains("merge preserves"))
+    #expect(description.contains("replace generates"))
+    #expect(description.contains("reset restores"))
+    #expect(tool.inputSchema.isOpenAIStrictCompatible)
+}
+
 @Test func personalityProposalReturnsCommitReadyProposalID() async throws {
     let state = PersonalityTestState()
     let tool = ConnorPersonalityProposeUpdateTool(
