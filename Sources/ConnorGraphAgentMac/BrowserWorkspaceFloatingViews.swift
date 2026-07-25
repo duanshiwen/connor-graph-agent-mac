@@ -535,39 +535,50 @@ struct BrowserVerticalTabGroupHeader: View {
     var count: Int
     var isExpanded: Bool
     var isActive: Bool
+    var isCollapsed: Bool
+    var onToggle: () -> Void
 
     var body: some View {
         let accent = BrowserVerticalTabAccent.color(for: title)
-        HStack(spacing: 6) {
-            Image(systemName: isActive ? "bubble.left.fill" : "bubble.left")
-                .font(BrowserFloatingTypography.tabIcon)
-                .foregroundStyle(Color.white.opacity(0.94))
-                .frame(width: 20, height: 20)
+        Button(action: onToggle) {
+            HStack(spacing: 6) {
+                Image(systemName: isActive ? "bubble.left.fill" : "bubble.left")
+                    .font(BrowserFloatingTypography.tabIcon)
+                    .foregroundStyle(Color.white.opacity(0.94))
+                    .frame(width: 20, height: 20)
 
-            if isExpanded {
-                Text(title)
-                    .font(BrowserFloatingTypography.listTitleSelected)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text("\(count)")
-                    .font(BrowserFloatingTypography.tabTitle)
-                    .foregroundStyle(Color.white.opacity(0.76))
-                    .monospacedDigit()
+                if isExpanded {
+                    Text(title)
+                        .font(BrowserFloatingTypography.listTitleSelected)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text("\(count)")
+                        .font(BrowserFloatingTypography.tabTitle)
+                        .foregroundStyle(Color.white.opacity(0.76))
+                        .monospacedDigit()
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(BrowserFloatingTypography.tabCloseIcon.weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.76))
+                        .frame(width: 14, height: 14)
+                }
             }
+            .padding(.horizontal, isExpanded ? 8 : 6)
+            .frame(minHeight: 32, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(accent.opacity(isActive ? 1 : 0.88))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.white.opacity(isActive ? 0.18 : 0.08), lineWidth: 1)
+            }
+            .shadow(color: accent.opacity(isActive ? 0.2 : 0), radius: 3, x: 0, y: 1)
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
-        .padding(.horizontal, isExpanded ? 8 : 6)
-        .frame(minHeight: 32, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(accent.opacity(isActive ? 1 : 0.88))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .stroke(Color.white.opacity(isActive ? 0.18 : 0.08), lineWidth: 1)
-        }
-        .shadow(color: accent.opacity(isActive ? 0.2 : 0), radius: 3, x: 0, y: 1)
-        .help(title)
+        .buttonStyle(.plain)
+        .help(isCollapsed ? "展开\(title)" : "折叠\(title)")
         .accessibilityLabel("会话：\(title)，\(count) 个标签页")
+        .accessibilityValue(isCollapsed ? "已折叠" : "已展开")
     }
 }
 
