@@ -937,6 +937,10 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(policy.correctionInstruction(for: []) == nil)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("follow every exact non-null `nextPage`") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
+    #expect(policy.call(AgentToolCall(id: "profile-default-page", name: names[2], argumentsJSON: "{}"), matchesRequiredCurrentUserProfilePage: 1))
+    #expect(policy.call(AgentToolCall(id: "profile-exact-page", name: names[2], argumentsJSON: #"{"page":2}"#), matchesRequiredCurrentUserProfilePage: 2))
+    #expect(!policy.call(AgentToolCall(id: "profile-wrong-page", name: names[2], argumentsJSON: #"{"page":3}"#), matchesRequiredCurrentUserProfilePage: 2))
+    #expect(!policy.call(AgentToolCall(id: "profile-string-page", name: names[2], argumentsJSON: #"{"page":"2"}"#), matchesRequiredCurrentUserProfilePage: 2))
 }
 
 @Test func agentLoopExhaustsCurrentUserProfileBeforeTaskToolsOrFinalAnswer() async throws {
