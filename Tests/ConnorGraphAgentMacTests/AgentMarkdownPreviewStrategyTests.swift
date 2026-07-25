@@ -80,6 +80,28 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(preview.contains("persistentCacheContext.store.loadBlocks"))
     }
 
+    @Test func longAssistantReplyExpansionKeepsPreviewUntilTheFullDocumentLoads() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let root = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let preview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift"),
+            encoding: .utf8
+        )
+        let messageRows = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift"),
+            encoding: .utf8
+        )
+
+        #expect(preview.contains("deferred:\\(allowsDeferredPreview)"))
+        #expect(preview.contains("deferredPreviewView(statusText: \"正在展开完整内容…\", showsProgress: true)"))
+        #expect(messageRows.contains("allowsDeferredPreview: !isAssistantMessageExpanded"))
+        #expect(messageRows.contains("transaction.disablesAnimations = true"))
+        #expect(messageRows.contains("action: onToggleExpansion"))
+    }
+
     @Test @MainActor func markdownLinksUseTheNativePointingHandCursorAttribute() throws {
         let attributed = try AttributedString(
             markdown: "Before [Connor](https://example.com) after",

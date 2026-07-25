@@ -171,6 +171,7 @@ struct AgentChatMessageRow: View {
         messageID: ""
     )
     var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
+    @State private var isAssistantMessageExpanded = false
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -185,6 +186,12 @@ struct AgentChatMessageRow: View {
     }
     private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
         AgentAssistantMessageActionsPresentation(message: row.message)
+    }
+    private var assistantExpansionPresentation: AgentAssistantMessageExpansionPresentation {
+        AgentAssistantMessageExpansionPresentation(
+            message: row.message,
+            isExpanded: isAssistantMessageExpanded
+        )
     }
 
     private var activeSkillLabel: String? {
@@ -236,7 +243,9 @@ struct AgentChatMessageRow: View {
                 if assistantActionsPresentation.showsActions {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
+                        expansionPresentation: assistantExpansionPresentation,
                         speechPresentation: speechPresentation,
+                        onToggleExpansion: toggleAssistantMessageExpansion,
                         onToggleSpeech: { onToggleSpeech(row) },
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
@@ -309,11 +318,20 @@ struct AgentChatMessageRow: View {
             markdown: row.message.content,
             font: messageBodyFont,
             bodyPointSize: messageBodyPointSize,
+            allowsDeferredPreview: !isAssistantMessageExpanded,
             persistentCacheContext: persistentCacheContext
         )
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, AgentChatLayout.assistantMessageTrailingPadding)
+    }
+
+    private func toggleAssistantMessageExpansion() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isAssistantMessageExpanded.toggle()
+        }
     }
 
     private var messageBackground: Color {
@@ -330,13 +348,24 @@ struct AgentChatMessageRow: View {
 
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
+    var expansionPresentation: AgentAssistantMessageExpansionPresentation
     var speechPresentation: ConnorSpeechActionPresentation
+    var onToggleExpansion: () -> Void
     var onToggleSpeech: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceM) {
+            if expansionPresentation.isAvailable {
+                actionButton(
+                    title: expansionPresentation.title,
+                    systemImage: expansionPresentation.systemImage,
+                    accessibilityLabel: expansionPresentation.accessibilityLabel,
+                    help: expansionPresentation.help,
+                    action: onToggleExpansion
+                )
+            }
             if speechPresentation.isVisible {
                 actionButton(
                     title: speechPresentation.title,
