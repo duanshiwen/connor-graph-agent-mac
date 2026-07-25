@@ -198,7 +198,6 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
         switch event {
         case .contentBlockStart(let index, let type, let rawJSON):
             blocks[index] = Block(type: type, rawStartJSON: rawJSON)
-            rawContentJSON.append(rawJSON)
             return nil
         case .textDelta(let index, let text):
             blocks[index, default: Block(type: "text")].text += text
@@ -230,7 +229,6 @@ public struct AnthropicStreamAccumulator: Sendable, Equatable {
         case .error(let message):
             return .rawProviderEvent(message)
         case .unknown(_, let rawJSON):
-            rawContentJSON.append(rawJSON)
             return .rawProviderEvent(rawJSON)
         }
     }
@@ -316,7 +314,14 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
         for (key, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: key) }
         let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else { throw AnthropicCompatibleProviderError.invalidResponse }
-        guard (200..<300).contains(httpResponse.statusCode) else { throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: nil) }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            var body = Data()
+            for try await byte in bytes { body.append(byte) }
+            throw AnthropicCompatibleProviderError.httpStatus(
+                httpResponse.statusCode,
+                message: anthropicCompatibleErrorMessage(from: body)
+            )
+        }
         return AsyncThrowingStream { continuation in
             Task {
                 do {
