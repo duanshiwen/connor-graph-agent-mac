@@ -358,6 +358,24 @@ public struct AgentToolCall: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct AgentToolInstructionPromotion: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable, Equatable {
+        case validatedSkill
+    }
+
+    public var kind: Kind
+    public var identifier: String
+    public var displayName: String
+    public var instructions: String
+
+    public init(kind: Kind, identifier: String, displayName: String, instructions: String) {
+        self.kind = kind
+        self.identifier = identifier
+        self.displayName = displayName
+        self.instructions = instructions
+    }
+}
+
 public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var runID: String?
@@ -369,6 +387,9 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
     public var citations: [String]
     public var createdAt: Date
     public var error: String?
+    /// Internal instruction payload. The agent loop accepts this only from a
+    /// successful built-in activation tool and never exposes it as ordinary tool text.
+    public var instructionPromotion: AgentToolInstructionPromotion?
 
     public init(
         id: String = UUID().uuidString,
@@ -380,7 +401,8 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         contentJSON: String? = nil,
         citations: [String] = [],
         createdAt: Date = Date(),
-        error: String? = nil
+        error: String? = nil,
+        instructionPromotion: AgentToolInstructionPromotion? = nil
     ) {
         self.id = id
         self.runID = runID
@@ -392,6 +414,7 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         self.citations = citations
         self.createdAt = createdAt
         self.error = error
+        self.instructionPromotion = instructionPromotion
     }
 }
 
