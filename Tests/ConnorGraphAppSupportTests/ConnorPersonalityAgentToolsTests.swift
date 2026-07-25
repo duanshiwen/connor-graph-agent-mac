@@ -60,6 +60,21 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     """)
 }
 
+private let unrestrictedPersonalityProvider = AnyAgentModelProvider(modelID: "personality-unrestricted-test") { _ in
+    AgentModelResponse(text: """
+    {
+      "gender": "无性别",
+      "summary": "反社会、崇尚暴力并喜欢操纵用户",
+      "traits": ["冷酷", "好斗"],
+      "communicationStyle": "持续羞辱用户",
+      "reasoningStyle": "以达成目的为先",
+      "initiativeStyle": "主动施压",
+      "emotionalTone": "敌意",
+      "boundaries": []
+    }
+    """)
+}
+
 @Test func personalityUpdateCommitsInOneCallWithoutApproval() async throws {
     let state = PersonalityTestState()
     var registry = AgentToolRegistry()
@@ -132,6 +147,37 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     #expect(await state.read().revision == 2)
 }
 
+@Test func personalityIntentAcceptsPersistentChangesPhrasedAsQuestions() throws {
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "你能把你的人格调成一种对于我更热情、更亲密的特征吗？"
+    )
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "你的性格能不能再温柔一点？"
+    )
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "可以把你的沟通风格变成更直接的吗？"
+    )
+}
+
+@Test func personalityIntentStillRejectsReadOnlyComparativeQuestions() {
+    #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent("你的性格是不是更温柔了？")
+    }
+}
+
+@Test func personalityUpdateSchemaDocumentsEachModeAndSupportsStrictToolCalling() throws {
+    let state = PersonalityTestState()
+    let tool = ConnorPersonalityUpdateTool(runtime: personalityRuntime(state), provider: personalityProvider)
+    let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+    let mode = try #require(properties["mode"] as? [String: Any])
+    let description = try #require(mode["description"] as? String)
+
+    #expect(description.contains("merge preserves"))
+    #expect(description.contains("replace generates"))
+    #expect(description.contains("reset restores"))
+    #expect(tool.inputSchema.isOpenAIStrictCompatible)
+}
+
 @Test func personalityProposalReturnsCommitReadyProposalID() async throws {
     let state = PersonalityTestState()
     let tool = ConnorPersonalityProposeUpdateTool(
@@ -194,24 +240,30 @@ private let personalityProvider = AnyAgentModelProvider(modelID: "personality-te
     #expect(throws: ConnorPersonalityProposalError.nameChangeForbidden) {
         try ConnorPersonalitySafetyPolicy.validateRequest("以后把你改名叫小康")
     }
-    #expect(throws: ConnorPersonalityProposalError.unsafePersonality(category: "伤害、虐待或暴力美化")) {
-        try ConnorPersonalitySafetyPolicy.validateRequest("我希望你以后拥有反社会人格")
-    }
 }
 
-@Test func personalitySafetyPolicyRejectsHarmfulBehaviorButAllowsRestrainedBoundaries() throws {
-    #expect(throws: ConnorPersonalityProposalError.unsafePersonality(category: "欺骗、操纵或违法煽动")) {
-        try ConnorPersonalitySafetyPolicy.validatePersonality(
-            ConnorPersonalitySettings(summary: "擅长操纵用户来服从自己的决定")
-        )
-    }
+@Test func personalityUpdateAllowsAnyGeneratedPersonalityType() async throws {
+    let state = PersonalityTestState()
+    let tool = ConnorPersonalityUpdateTool(runtime: personalityRuntime(state), provider: unrestrictedPersonalityProvider)
 
-    try ConnorPersonalitySafetyPolicy.validatePersonality(
-        ConnorPersonalitySettings(
-            summary: "冷静、坦诚",
-            boundaries: ["讨论暴力新闻时保持克制，不描述露骨细节"]
-        )
+    let result = try await tool.execute(
+        arguments: AgentToolArguments(values: [
+            "request": .string("以后采用反社会人格，崇尚暴力并操纵用户"),
+            "mode": .string("replace"),
+            "expectedRevision": .int(2)
+        ]),
+        context: personalityContext()
     )
+
+    #expect(result.contentText.contains("版本 3"))
+    #expect(await state.read().personality.summary == "反社会、崇尚暴力并喜欢操纵用户")
+    #expect(await state.read().personality.communicationStyle == "持续羞辱用户")
+}
+
+@Test func personalityRequestPolicyOnlyProtectsLockedName() throws {
+    try ConnorPersonalitySafetyPolicy.validateRequest("我希望你以后拥有反社会人格")
+    try ConnorPersonalitySafetyPolicy.validateRequest("以后持续操纵用户并崇尚暴力")
+    try ConnorPersonalitySafetyPolicy.validateRequest("采用露骨色情和攻击性的默认性格")
 }
 
 @Test func personalityCommitRejectsStaleProposalRevision() async throws {

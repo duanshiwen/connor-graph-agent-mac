@@ -30,6 +30,7 @@ private func noteToolFixture(count: Int = 1) throws -> (AppNoteRepository, NoteS
 
 @Test func noteSearchToolReturnsSummaryOnlyPaginationEnvelope() async throws {
     let (_, tool, _) = try noteToolFixture(count: 12)
+    let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
     let result = try await tool.execute(arguments: AgentToolArguments(values: ["query": .string("searchable"), "page": .int(1)]), context: noteToolContext("search"))
     let data = try #require(result.contentJSON?.data(using: .utf8))
     let response = try JSONDecoder.noteTool.decode(NoteSearchToolResponse.self, from: data)
@@ -41,6 +42,9 @@ private func noteToolFixture(count: Int = 1) throws -> (AppNoteRepository, NoteS
     #expect(response.totalItems == 12)
     #expect(response.nextPage == 2)
     #expect(result.contentJSON?.contains("\"body\":") == false)
+    #expect(properties["page"] != nil)
+    #expect(properties["pageSize"] == nil)
+    #expect(tool.description.contains("pageSize is runtime-controlled response metadata, not an input parameter"))
 }
 
 @Test func noteSearchToolRejectsNonIntegerAndOutOfRangePagesWithoutFallback() async throws {

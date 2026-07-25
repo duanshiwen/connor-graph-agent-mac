@@ -345,9 +345,15 @@ private struct EchoArgumentsTool: AgentTool {
 
 private struct RetrievalEvidenceTool: AgentTool {
     let name: String
+    let returnsEmpty: Bool
     let description = "Return deterministic retrieval evidence"
     let permission = AgentPermissionCapability.readSession
     let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    init(name: String, returnsEmpty: Bool = false) {
+        self.name = name
+        self.returnsEmpty = returnsEmpty
+    }
 
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         AgentToolResult(
@@ -355,10 +361,41 @@ private struct RetrievalEvidenceTool: AgentTool {
             sessionID: context.sessionID,
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "retrieved by \(name)",
-            citations: name.hasPrefix("memory_os_")
+            contentText: returnsEmpty ? "" : "retrieved by \(name)",
+            citations: !returnsEmpty && name.hasPrefix("memory_os_")
                 ? ["record:\(name)"]
                 : (AgentEvidenceValidationPolicy.webEvidenceTools.contains(name) ? ["https://example.com/research"] : [])
+        )
+    }
+}
+
+private struct PaginatedCurrentUserProfileTool: AgentTool {
+    let name = AgentContinuityPreflightPolicy.currentUserProfileToolName
+    let description = "Return deterministic paginated current-user profile evidence"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["page": .integer(description: "Sequential page")],
+        required: []
+    )
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let page = arguments.int("page") ?? 1
+        let nextPage: Any = page == 1 ? 2 : NSNull()
+        let payload: [String: Any] = [
+            "success": true,
+            "page": page,
+            "hasNextPage": page == 1,
+            "nextPage": nextPage,
+            "records": [["record_id": "profile-\(page)"]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let json = String(decoding: data, as: UTF8.self)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: json,
+            contentJSON: json,
+            citations: ["profile-\(page)"]
         )
     }
 }
@@ -831,26 +868,317 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(!finalSystemMessage.contains(instructions))
 }
 
-@Test func agentLoopDoesNotForceMissingBootstrapToolCalls() async throws {
-    let bootstrapToolNames = [
-        "get_current_time",
-        "calendar_search_events",
-        "connor_skill_list"
-    ] + AgentEvidenceValidationPolicy.memoryEvidenceTools
-    let provider = ScriptedModelProvider(responses: [AgentModelResponse(text: "Model-completed response")])
+@Test func agentLoopRequiresEveryAvailableContinuityToolWithoutFixingCallCount() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "Premature response"),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "recent-1", name: names[0], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "knowledge-1", name: names[1], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "profile-1", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "deferred-task", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "recent-2", name: names[0], argumentsJSON: #"{"page":2}"#),
+                AgentToolCall(id: "task-after-continuity", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Model-completed response")
+    ])
     var registry = AgentToolRegistry()
-    for name in bootstrapToolNames { registry.register(RetrievalEvidenceTool(name: name)) }
+    for name in names {
+        registry.register(RetrievalEvidenceTool(name: name, returnsEmpty: name == names[2]))
+    }
+    registry.register(RetrievalEvidenceTool(name: "task_tool"))
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
 
     var completed: AgentTextCompleteEvent?
-    for try await event in loop.run(AgentChatRequest(sessionID: "bootstrap-not-forced", userMessage: "直接回答")) {
+    var finishedToolNames: [String] = []
+    var emptyResultToolNames: [String] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "continuity-required", userMessage: "直接回答")) {
+        if case .textComplete(let payload) = event { completed = payload }
+        if case .toolFinished(let result) = event {
+            finishedToolNames.append(result.toolName)
+            if result.contentText.isEmpty { emptyResultToolNames.append(result.toolName) }
+        }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 4)
+    #expect(completed?.text == "Model-completed response")
+    #expect(requests[1].messages.last?.role == .system)
+    #expect(requests[1].messages.last?.content.contains("Mandatory continuity preflight is incomplete") == true)
+    #expect(requests[2].messages.flatMap { $0.toolCalls ?? [] }.contains { $0.name == "task_tool" } == false)
+    #expect(finishedToolNames.count == 5)
+    #expect(finishedToolNames.filter { $0 == names[0] }.count == 2)
+    #expect(finishedToolNames.filter { $0 == "task_tool" }.count == 1)
+    #expect(Set(finishedToolNames) == Set(names + ["task_tool"]))
+    #expect(emptyResultToolNames == [names[2]])
+}
+
+@Test func continuityPreflightPolicyRequiresOnlyAvailableMissingToolsInStableOrder() {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: names[2]))
+    registry.register(RetrievalEvidenceTool(name: "unrelated_tool"))
+    registry.register(RetrievalEvidenceTool(name: names[0]))
+    let policy = AgentContinuityPreflightPolicy()
+
+    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: []) == [names[0], names[2]])
+    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: [names[0]]) == [names[2]])
+    #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: Set(names)) == [])
+    #expect(policy.correctionInstruction(for: []) == nil)
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("follow every exact non-null `nextPage`") == true)
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
+    #expect(policy.call(AgentToolCall(id: "profile-default-page", name: names[2], argumentsJSON: "{}"), matchesRequiredCurrentUserProfilePage: 1))
+    #expect(policy.call(AgentToolCall(id: "profile-exact-page", name: names[2], argumentsJSON: #"{"page":2}"#), matchesRequiredCurrentUserProfilePage: 2))
+    #expect(!policy.call(AgentToolCall(id: "profile-wrong-page", name: names[2], argumentsJSON: #"{"page":3}"#), matchesRequiredCurrentUserProfilePage: 2))
+    #expect(!policy.call(AgentToolCall(id: "profile-string-page", name: names[2], argumentsJSON: #"{"page":"2"}"#), matchesRequiredCurrentUserProfilePage: 2))
+}
+
+@Test func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: "unrelated_tool"))
+    registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
+    let policy = AgentNoteSearchPreflightPolicy()
+
+    #expect(policy.requiresAttempt(availableTools: registry.definitions, didAttempt: false))
+    #expect(!policy.requiresAttempt(availableTools: registry.definitions, didAttempt: true))
+    #expect(!policy.requiresAttempt(
+        availableTools: registry.definitions.filter { $0.name == "unrelated_tool" },
+        didAttempt: false
+    ))
+    #expect(policy.correctionInstruction().contains("Mandatory Note preflight is incomplete"))
+    #expect(policy.correctionInstruction().contains("one-attempt requirement"))
+    #expect(policy.correctionInstruction().contains("must not restart already completed startup tools"))
+}
+
+@Test func agentLoopRequiresNoteSearchBeforeTaskToolsOrFinalAnswer() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "Premature final answer"),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "note-startup", name: AgentNoteSearchPreflightPolicy.requiredToolName, argumentsJSON: #"{"query":"project"}"#),
+                AgentToolCall(id: "task-too-early", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "task-after-note", name: "task_tool", argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Note-grounded final answer")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
+    registry.register(RetrievalEvidenceTool(name: "task_tool"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var requestedToolNames: [String] = []
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "note-preflight-required", userMessage: "继续项目")) {
+        if case .toolRequested(let call) = event { requestedToolNames.append(call.name) }
+        if case .textComplete(let result) = event { completed = result }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 4)
+    #expect(requests[1].messages.last?.role == .system)
+    #expect(requests[1].messages.last?.content.contains("Mandatory Note preflight is incomplete") == true)
+    #expect(requestedToolNames == [AgentNoteSearchPreflightPolicy.requiredToolName, "task_tool"])
+    #expect(completed?.text == "Note-grounded final answer")
+}
+
+@Test func agentLoopKeepsIncrementalContextSearchesIndependentAfterStartup() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "time-startup", name: AgentCurrentTimePreflightPolicy.requiredToolName, argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "recent-startup", name: names[0], argumentsJSON: #"{"query":"project","page":1}"#),
+                AgentToolCall(id: "knowledge-startup", name: names[1], argumentsJSON: #"{"query":"project","page":1}"#),
+                AgentToolCall(id: "profile-page-1", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "note-startup", name: AgentNoteSearchPreflightPolicy.requiredToolName, argumentsJSON: #"{"query":"project"}"#)
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "profile-page-2", name: names[2], argumentsJSON: #"{"page":2}"#)],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "time-redundant", name: AgentCurrentTimePreflightPolicy.requiredToolName, argumentsJSON: "{}"),
+                AgentToolCall(id: "profile-redundant", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "recent-incremental", name: names[0], argumentsJSON: #"{"query":"deadline","page":1}"#),
+                AgentToolCall(id: "knowledge-incremental", name: names[1], argumentsJSON: #"{"query":"deadline","page":1}"#)
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Incremental retrieval complete")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(GetCurrentTimeTool())
+    registry.register(RetrievalEvidenceTool(name: names[0]))
+    registry.register(RetrievalEvidenceTool(name: names[1]))
+    registry.register(PaginatedCurrentUserProfileTool())
+    registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var requestedToolNames: [String] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "independent-incremental-retrieval", userMessage: "继续项目并检查截止时间")) {
+        if case .toolRequested(let call) = event { requestedToolNames.append(call.name) }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 5)
+    #expect(!requests[1].tools.contains { $0.name == AgentCurrentTimePreflightPolicy.requiredToolName })
+    #expect(requests[1].tools.contains { $0.name == names[2] })
+    #expect(!requests[3].tools.contains { $0.name == AgentCurrentTimePreflightPolicy.requiredToolName })
+    #expect(!requests[3].tools.contains { $0.name == names[2] })
+    #expect(requests[3].tools.contains { $0.name == names[0] })
+    #expect(requests[3].tools.contains { $0.name == names[1] })
+    #expect(requests[3].tools.contains { $0.name == AgentNoteSearchPreflightPolicy.requiredToolName })
+    #expect(requestedToolNames.filter { $0 == AgentCurrentTimePreflightPolicy.requiredToolName }.count == 1)
+    #expect(requestedToolNames.filter { $0 == names[2] }.count == 2)
+    #expect(requestedToolNames.filter { $0 == names[0] }.count == 2)
+    #expect(requestedToolNames.filter { $0 == names[1] }.count == 2)
+    #expect(requestedToolNames.filter { $0 == AgentNoteSearchPreflightPolicy.requiredToolName }.count == 1)
+}
+
+@Test func agentLoopExhaustsCurrentUserProfileBeforeTaskToolsOrFinalAnswer() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "recent-page-1", name: names[0], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "knowledge-page-1", name: names[1], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "profile-page-1", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "task-too-early-1", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Premature final answer"),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "profile-page-2", name: names[2], argumentsJSON: #"{"page":2}"#),
+                AgentToolCall(id: "task-too-early-2", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "task-after-profile", name: "task_tool", argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Profile-grounded final answer")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: names[0]))
+    registry.register(RetrievalEvidenceTool(name: names[1]))
+    registry.register(PaginatedCurrentUserProfileTool())
+    registry.register(RetrievalEvidenceTool(name: "task_tool"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var finishedToolNames: [String] = []
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "profile-pagination-required", userMessage: "帮我做一个决定")) {
+        if case .toolFinished(let result) = event { finishedToolNames.append(result.toolName) }
+        if case .textComplete(let result) = event { completed = result }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 5)
+    #expect(requests[2].messages.last?.role == .system)
+    #expect(requests[2].messages.last?.content.contains("exact JSON integer 2") == true)
+    #expect(finishedToolNames == [names[0], names[1], names[2], names[2], "task_tool"])
+    #expect(completed?.text == "Profile-grounded final answer")
+}
+
+@Test func currentTimePreflightPolicyRequiresOneAvailableAttempt() {
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: "unrelated_tool"))
+    registry.register(GetCurrentTimeTool())
+    let policy = AgentCurrentTimePreflightPolicy()
+
+    #expect(policy.requiresAttempt(availableTools: registry.definitions, didAttempt: false))
+    #expect(!policy.requiresAttempt(availableTools: registry.definitions, didAttempt: true))
+    #expect(!policy.requiresAttempt(
+        availableTools: registry.definitions.filter { $0.name == "unrelated_tool" },
+        didAttempt: false
+    ))
+    #expect(policy.correctionInstruction().contains("first-attempt requirement, not a success requirement"))
+    #expect(policy.correctionInstruction().contains("do not retry automatically"))
+}
+
+@Test func agentLoopAttemptsCurrentTimeFirstAndContinuesAfterFailure() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let continuityCalls = names.enumerated().map {
+        AgentToolCall(id: "time-failure-memory-\($0.offset)", name: $0.element, argumentsJSON: "{}")
+    }
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: nil, toolCalls: continuityCalls, finishReason: .toolCalls),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "failing-current-time",
+                name: AgentCurrentTimePreflightPolicy.requiredToolName,
+                argumentsJSON: #"{"timeZone":"Not/A-Time-Zone"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: nil, toolCalls: continuityCalls, finishReason: .toolCalls),
+        AgentModelResponse(text: "时间失败没有阻断后续流程。")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(GetCurrentTimeTool())
+    for name in names {
+        registry.register(RetrievalEvidenceTool(name: name))
+    }
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxConsecutiveToolResultErrors: 1)
+    )
+
+    var requestedToolNames: [String] = []
+    var timeFailure: AgentToolFailure?
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "time-failure-preflight", userMessage: "继续处理")) {
+        if case .toolRequested(let call) = event { requestedToolNames.append(call.name) }
+        if case .toolFailed(let failure) = event, failure.toolName == AgentCurrentTimePreflightPolicy.requiredToolName {
+            timeFailure = failure
+        }
         if case .textComplete(let payload) = event { completed = payload }
     }
 
     let requests = await provider.requests
-    #expect(requests.count == 1)
-    #expect(completed?.text == "Model-completed response")
-    #expect(!requests[0].messages.contains { $0.content.contains("blocked the first completion") })
+    #expect(requests.count == 4)
+    #expect(requests[1].messages.last?.role == .system)
+    #expect(requests[1].messages.last?.content.contains("Mandatory current-time preflight is incomplete") == true)
+    #expect(requestedToolNames == [AgentCurrentTimePreflightPolicy.requiredToolName] + names)
+    #expect(timeFailure?.message.contains("Invalid IANA time zone identifier") == true)
+    #expect(requests[2].messages.filter { $0.role == .tool }.count == 1)
+    #expect(requests[2].messages.last?.content.contains("Mandatory continuity preflight is incomplete") == true)
+    #expect(completed?.text == "时间失败没有阻断后续流程。")
 }
 
 @Test func evidenceValidationClassifiesMemoryAndWebAnswers() async throws {
@@ -898,12 +1226,23 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(completed?.citations == ["https://example.com/research"])
 }
 
-@Test func agentLoopAllowsImmediateWorkspaceStopWithoutBootstrapTools() async throws {
+@Test func agentLoopCompletesReadOnlyContinuityPreflightBeforeWorkspaceStop() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let calls = names.enumerated().map {
+        AgentToolCall(id: "workspace-memory-\($0.offset)", name: $0.element, argumentsJSON: "{}")
+    }
     let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "workspace-time", name: "get_current_time", argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: nil, toolCalls: calls, finishReason: .toolCalls),
         AgentModelResponse(text: "尚未选择合适的工作目录。请先在 Composer 中选择工作目录后再试。")
     ])
     var registry = AgentToolRegistry()
-    for name in AgentEvidenceValidationPolicy.memoryEvidenceTools + ["web_search"] {
+    registry.register(GetCurrentTimeTool())
+    for name in names + ["web_search"] {
         registry.register(RetrievalEvidenceTool(name: name))
     }
     let configuration = AgentLoopConfiguration(instructionAppendix: """
@@ -919,7 +1258,9 @@ private struct InstructionPromotionTool: AgentTool {
     }
 
     let requests = await provider.requests
-    #expect(requests.count == 1)
+    #expect(requests.count == 3)
+    #expect(requests[1].messages.filter { $0.role == .tool }.count == 1)
+    #expect(requests[2].messages.filter { $0.role == .tool }.count == 4)
     #expect(completed?.text.contains("选择工作目录") == true)
 }
 

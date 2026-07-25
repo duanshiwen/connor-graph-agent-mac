@@ -1,7 +1,6 @@
 import Foundation
 
-/// Classifies evidence already gathered for answer-quality checks. It does not
-/// require, schedule, or block completion on any bootstrap tool call.
+/// Classifies evidence already gathered for answer-quality checks.
 public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
     public static let webEvidenceTools = ["web_search", "web_fetch", "browser_fetch"]
     public static let memoryEvidenceTools = [
@@ -51,6 +50,110 @@ public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
         let isClearlyLocalSearch = localSourceSignals.contains(where: normalized.contains) && !hasExplicitWebIntent
         return hasExplicitWebIntent || hasFreshnessOrVerificationNeed || (hasSearchIntent && !isClearlyLocalSearch)
     }
+}
+
+/// Enforces one leading current-time attempt when the tool is available.
+/// Invocation, rather than success, unlocks the rest of the run.
+public struct AgentCurrentTimePreflightPolicy: Sendable, Equatable {
+    public static let requiredToolName = "get_current_time"
+
+    public init() {}
+
+    public func requiresAttempt(
+        availableTools: [AgentToolDefinition],
+        didAttempt: Bool
+    ) -> Bool {
+        !didAttempt && availableTools.contains { $0.name == Self.requiredToolName }
+    }
+
+    public func correctionInstruction() -> String {
+        """
+        Mandatory current-time preflight is incomplete. Before any other tool call or final answer, call `get_current_time`. This is a first-attempt requirement, not a success requirement: if the call returns empty content or fails, preserve the real result, do not retry automatically, and continue with the remaining bootstrap and task. Never replace a failed time result with a guessed current time.
+        """
+    }
+}
+
+/// Enforces one initial Note search when the read-only tool is available.
+/// Later focused Note searches remain independent and do not restart preflight.
+public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
+    public static let requiredToolName = "note_search"
+
+    public init() {}
+
+    public func requiresAttempt(
+        availableTools: [AgentToolDefinition],
+        didAttempt: Bool
+    ) -> Bool {
+        !didAttempt && availableTools.contains { $0.name == Self.requiredToolName }
+    }
+
+    public func correctionInstruction() -> String {
+        """
+        Mandatory Note preflight is incomplete. Before task-specific tool use or a final answer, call `note_search` once using compact topic keywords, entity names, or a subject phrase tied to the latest actual user request. Use an empty `query` only when no meaningful search terms can be formed. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt, and later focused searches of Notes or either Memory OS context source must not restart already completed startup tools.
+        """
+    }
+}
+
+/// Enforces inclusion of every available continuity source and complete sequential
+/// pagination of the current-user profile source.
+public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
+    public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    public static let currentUserProfileToolName = "memory_os_get_current_user_profile"
+
+    public init() {}
+
+    public func missingToolNames(
+        availableTools: [AgentToolDefinition],
+        invokedToolNames: Set<String>
+    ) -> [String] {
+        let availableNames = Set(availableTools.map(\.name))
+        return Self.requiredToolNames.filter {
+            availableNames.contains($0) && !invokedToolNames.contains($0)
+        }
+    }
+
+    public func correctionInstruction(for missingToolNames: [String]) -> String? {
+        guard !missingToolNames.isEmpty else { return nil }
+        let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
+        return """
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Start `memory_os_get_current_user_profile` at page 1 and follow every exact non-null `nextPage` until it returns null. For the other continuity tools, repeat calls when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
+        """
+    }
+
+    public func initialRequiredCurrentUserProfilePage(availableTools: [AgentToolDefinition]) -> Int? {
+        availableTools.contains { $0.name == Self.currentUserProfileToolName } ? 1 : nil
+    }
+
+    public func call(_ call: AgentToolCall, matchesRequiredCurrentUserProfilePage requiredPage: Int) -> Bool {
+        guard call.name == Self.currentUserProfileToolName,
+              let arguments = try? AgentToolArguments(json: call.argumentsJSON) else {
+            return false
+        }
+        return (arguments.int("page") ?? 1) == requiredPage
+    }
+
+    public func nextRequiredCurrentUserProfilePage(after result: AgentToolResult) -> Int? {
+        guard result.toolName == Self.currentUserProfileToolName,
+              result.error == nil,
+              let payload = result.contentJSON,
+              let data = payload.data(using: .utf8),
+              let response = try? JSONDecoder().decode(CurrentUserProfilePaginationResponse.self, from: data),
+              response.success else {
+            return nil
+        }
+        return response.nextPage
+    }
+
+    public func currentUserProfileCorrectionInstruction(requiredPage: Int) -> String {
+        """
+        Mandatory current-user profile pagination is incomplete. Before any task-specific tool call or final answer, call `memory_os_get_current_user_profile` with `page` set to the exact JSON integer \(requiredPage). Continue following each returned exact non-null `nextPage` until `nextPage` is null. Do not skip, guess, repeat, or stop early.
+        """
+    }
+}
+
+private struct CurrentUserProfilePaginationResponse: Decodable {
+    var success: Bool
+    var nextPage: Int?
 }
 
 public enum AgentMemoryClaimStatus: String, Sendable, Equatable {

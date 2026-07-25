@@ -207,6 +207,15 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didRequestClaimCorrection = false
                 var didRequestResearchCorrection = false
                 var promotedSkillIdentifiers = Set<String>()
+                let currentTimePreflightPolicy = AgentCurrentTimePreflightPolicy()
+                var didAttemptCurrentTime = false
+                let continuityPreflightPolicy = AgentContinuityPreflightPolicy()
+                var invokedContinuityToolNames = Set<String>()
+                let noteSearchPreflightPolicy = AgentNoteSearchPreflightPolicy()
+                var didAttemptNoteSearch = false
+                var requiredCurrentUserProfilePage = continuityPreflightPolicy.initialRequiredCurrentUserProfilePage(
+                    availableTools: toolRegistry.definitions
+                )
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -243,7 +252,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         try Task.checkCancellation()
                         modelRequest.messages = messages
-                        modelRequest.tools = toolRegistry.definitions
+                        let profileStartupIsComplete = requiredCurrentUserProfilePage == nil
+                            && invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
+                        modelRequest.tools = toolRegistry.definitions.filter { definition in
+                            if definition.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
+                                return false
+                            }
+                            if definition.name == AgentContinuityPreflightPolicy.currentUserProfileToolName,
+                               profileStartupIsComplete {
+                                return false
+                            }
+                            return true
+                        }
                         var modelResponse = try await completeModelRequest(
                             modelRequest,
                             run: run,
@@ -278,6 +298,41 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         if modelResponse.toolCalls.isEmpty {
+                            if currentTimePreflightPolicy.requiresAttempt(
+                                availableTools: toolRegistry.definitions,
+                                didAttempt: didAttemptCurrentTime
+                            ) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: currentTimePreflightPolicy.correctionInstruction()))
+                                continue
+                            }
+                            let missingContinuityTools = continuityPreflightPolicy.missingToolNames(
+                                availableTools: toolRegistry.definitions,
+                                invokedToolNames: invokedContinuityToolNames
+                            )
+                            if let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                continue
+                            }
+                            if let requiredCurrentUserProfilePage {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(
+                                    role: .system,
+                                    content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                        requiredPage: requiredCurrentUserProfilePage
+                                    )
+                                ))
+                                continue
+                            }
+                            if noteSearchPreflightPolicy.requiresAttempt(
+                                availableTools: toolRegistry.definitions,
+                                didAttempt: didAttemptNoteSearch
+                            ) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
+                                continue
+                            }
                             if evidencePolicy.requiresWebResearch(request.userMessage),
                                !didRequestResearchCorrection,
                                let correction = AgentExternalResearchAnswerValidator().correctionInstruction(
@@ -334,9 +389,146 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         var calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
+                        var isCurrentTimePreflightBatch = false
+                        if currentTimePreflightPolicy.requiresAttempt(
+                            availableTools: toolRegistry.definitions,
+                            didAttempt: didAttemptCurrentTime
+                        ) {
+                            guard let currentTimeCall = calls.first(where: {
+                                $0.name == AgentCurrentTimePreflightPolicy.requiredToolName
+                            }) else {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: currentTimePreflightPolicy.correctionInstruction()))
+                                continue
+                            }
+                            // Record the attempt before execution so a real tool failure does
+                            // not block continuity retrieval or unrelated task work.
+                            didAttemptCurrentTime = true
+                            isCurrentTimePreflightBatch = true
+                            calls = [currentTimeCall]
+                        }
+                        let missingContinuityTools = continuityPreflightPolicy.missingToolNames(
+                            availableTools: toolRegistry.definitions,
+                            invokedToolNames: invokedContinuityToolNames
+                        )
+                        let requiresNoteSearchAttempt = noteSearchPreflightPolicy.requiresAttempt(
+                            availableTools: toolRegistry.definitions,
+                            didAttempt: didAttemptNoteSearch
+                        )
+                        if !isCurrentTimePreflightBatch
+                            && (!missingContinuityTools.isEmpty || requiredCurrentUserProfilePage != nil) {
+                            let continuityCalls = calls.filter {
+                                AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
+                            }
+                            if continuityCalls.isEmpty {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools)
+                                    ?? requiredCurrentUserProfilePage.map {
+                                        continuityPreflightPolicy.currentUserProfileCorrectionInstruction(requiredPage: $0)
+                                    }
+                                if let correction {
+                                    messages.append(AgentModelMessage(role: .system, content: correction))
+                                }
+                                continue
+                            }
+                            let startupCalls = calls.filter {
+                                AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
+                                    || (requiresNoteSearchAttempt && $0.name == AgentNoteSearchPreflightPolicy.requiredToolName)
+                            }
+                            if let requiredPage = requiredCurrentUserProfilePage {
+                                let matchingProfileCalls = continuityCalls.filter {
+                                    continuityPreflightPolicy.call(
+                                        $0,
+                                        matchesRequiredCurrentUserProfilePage: requiredPage
+                                    )
+                                }
+                                let profileChainAlreadyStarted = requiredPage != 1
+                                    || invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
+                                let proposedWrongProfilePage = continuityCalls.contains {
+                                    $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
+                                } && matchingProfileCalls.isEmpty
+                                if (profileChainAlreadyStarted || proposedWrongProfilePage)
+                                    && matchingProfileCalls.isEmpty {
+                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(AgentModelMessage(
+                                        role: .system,
+                                        content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                            requiredPage: requiredPage
+                                        )
+                                    ))
+                                    continue
+                                }
+                                var didSelectRequiredProfileCall = false
+                                calls = startupCalls.filter { call in
+                                    guard call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName else {
+                                        return true
+                                    }
+                                    guard !didSelectRequiredProfileCall,
+                                          continuityPreflightPolicy.call(
+                                            call,
+                                            matchesRequiredCurrentUserProfilePage: requiredPage
+                                          ) else {
+                                        return false
+                                    }
+                                    didSelectRequiredProfileCall = true
+                                    return true
+                                }
+                            } else {
+                                calls = startupCalls
+                            }
+                            // Let the model observe continuity results before it chooses or
+                            // repeats task-specific calls that may depend on personal context.
+                        }
+                        if !isCurrentTimePreflightBatch,
+                           missingContinuityTools.isEmpty,
+                           requiredCurrentUserProfilePage == nil,
+                           requiresNoteSearchAttempt {
+                            guard let noteSearchCall = calls.first(where: {
+                                $0.name == AgentNoteSearchPreflightPolicy.requiredToolName
+                            }) else {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(role: .system, content: noteSearchPreflightPolicy.correctionInstruction()))
+                                continue
+                            }
+                            calls = [noteSearchCall]
+                        }
+                        if !isCurrentTimePreflightBatch {
+                            let profileStartupIsComplete = requiredCurrentUserProfilePage == nil
+                                && invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
+                            let incrementalCalls = calls.filter { call in
+                                if call.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
+                                    return false
+                                }
+                                if call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName,
+                                   profileStartupIsComplete {
+                                    return false
+                                }
+                                return true
+                            }
+                            if incrementalCalls.isEmpty, !calls.isEmpty {
+                                messages.append(AgentModelMessage(
+                                    role: .assistant,
+                                    content: modelResponse.text ?? "",
+                                    toolCalls: [],
+                                    providerMetadata: modelResponse.providerMetadata
+                                ))
+                                messages.append(AgentModelMessage(
+                                    role: .system,
+                                    content: "The current-time attempt and complete current-user profile are already satisfied for this user run. Do not call them again during incremental retrieval. Continue by querying only the specific recent-context, durable-knowledge, or Note source that needs more evidence, or proceed with the task."
+                                ))
+                                continue
+                            }
+                            calls = incrementalCalls
+                        }
                         for index in calls.indices {
                             calls[index].runID = run.id
                             calls[index].sessionID = run.sessionID
+                        }
+                        invokedContinuityToolNames.formUnion(
+                            calls.map(\.name).filter(AgentContinuityPreflightPolicy.requiredToolNames.contains)
+                        )
+                        if calls.contains(where: { $0.name == AgentNoteSearchPreflightPolicy.requiredToolName }) {
+                            didAttemptNoteSearch = true
                         }
                         logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
 
@@ -374,6 +566,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )
 
                         for batchResult in batchResults {
+                            if batchResult.call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName {
+                                requiredCurrentUserProfilePage = continuityPreflightPolicy
+                                    .nextRequiredCurrentUserProfilePage(after: batchResult.result)
+                            }
                             if let promotion = trustedSkillPromotion(from: batchResult.result),
                                promotedSkillIdentifiers.insert(promotion.identifier).inserted {
                                 promoteSkillInstruction(promotion, in: &messages)
@@ -393,7 +589,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             if batchResult.result.error == nil {
                                 consecutiveToolResultErrors = 0
-                            } else {
+                            } else if batchResult.call.name != AgentCurrentTimePreflightPolicy.requiredToolName {
                                 consecutiveToolResultErrors += 1
                             }
                             messages.append(AgentModelMessage(
@@ -404,9 +600,34 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             ))
                         }
 
+                        let stillMissingContinuityTools = continuityPreflightPolicy.missingToolNames(
+                            availableTools: toolRegistry.definitions,
+                            invokedToolNames: invokedContinuityToolNames
+                        )
+                        if let correction = continuityPreflightPolicy.correctionInstruction(for: stillMissingContinuityTools) {
+                            messages.append(AgentModelMessage(role: .system, content: correction))
+                        } else if let requiredCurrentUserProfilePage {
+                            messages.append(AgentModelMessage(
+                                role: .system,
+                                content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                    requiredPage: requiredCurrentUserProfilePage
+                                )
+                            ))
+                        } else if noteSearchPreflightPolicy.requiresAttempt(
+                            availableTools: toolRegistry.definitions,
+                            didAttempt: didAttemptNoteSearch
+                        ) {
+                            messages.append(AgentModelMessage(
+                                role: .system,
+                                content: noteSearchPreflightPolicy.correctionInstruction()
+                            ))
+                        }
+
                         let reachedToolErrorLimit = configuration.maxConsecutiveToolResultErrors > 0
                             && consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors
-                        let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded && budgetExceeded
+                        let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded
+                            && budgetExceeded
+                            && requiredCurrentUserProfilePage == nil
                         yield(.turnCompleted(AgentTurnCompletedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,

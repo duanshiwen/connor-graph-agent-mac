@@ -239,6 +239,7 @@ data: {"type":"message_stop"}
     #expect(object["stream"] as? Bool == true)
     #expect(events.contains(.textDelta("Hel")))
     #expect(events.contains(.textDelta("lo")))
+    #expect(events.filter { if case .completed = $0 { true } else { false } }.count == 1)
     guard case .completed(let response)? = events.last else {
         Issue.record("Expected completed event")
         return
@@ -291,6 +292,11 @@ data: {"type":"message_stop"}
     #expect(response.toolCalls.first?.id == "toolu_1")
     #expect(response.toolCalls.first?.name == "write_file")
     #expect(response.toolCalls.first?.argumentsJSON == #"{"path":"README.md"}"#)
+    let rawContent = try #require(response.providerMetadata?.rawAssistantContentJSON)
+    let blocks = try #require(try JSONSerialization.jsonObject(with: Data(rawContent.utf8)) as? [[String: Any]])
+    #expect(blocks.count == 1)
+    #expect(blocks.first?["type"] as? String == "tool_use")
+    #expect(!rawContent.contains("content_block_start"))
 }
 
 @Test func anthropicAccumulatorPreservesInvalidFineGrainedToolInput() throws {
@@ -363,6 +369,7 @@ data: {"type":"message_stop"}
     let metadata = try #require(completed?.providerMetadata)
     #expect(metadata.rawAssistantContentJSON?.contains("I should reason.") == true)
     #expect(metadata.rawAssistantContentJSON?.contains("sig_123") == true)
+    #expect(metadata.rawAssistantContentJSON?.contains("content_block_start") == false)
 }
 
 @Test func anthropicRawAssistantContentRoundTripsIntoNextRequest() async throws {

@@ -90,6 +90,25 @@ public enum AnthropicCompatibleProviderError: Error, Equatable, Sendable {
     case invalidImageDataURL
 }
 
+func anthropicCompatibleErrorMessage(from data: Data) -> String? {
+    guard !data.isEmpty else { return nil }
+    let message: String?
+    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        if let error = object["error"] as? [String: Any] {
+            message = (error["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (error["type"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        } else {
+            message = (object["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        }
+    } else {
+        message = String(data: data, encoding: .utf8)
+    }
+    guard let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed.count <= 800 ? trimmed : String(trimmed.prefix(800)) + "…"
+}
+
 extension AnthropicCompatibleProviderError: LocalizedError {
     public var errorDescription: String? {
         switch self {
@@ -154,7 +173,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             let httpRequest = try makeMessagesRequest(request)
             let httpResponse = try await client.send(httpRequest)
             if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
-                throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
+                throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: anthropicCompatibleErrorMessage(from: httpResponse.body))
             }
             return try parseMessagesResponse(httpResponse.body)
         } catch AnthropicCompatibleProviderError.unsupportedVisionInput {
@@ -163,7 +182,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             let httpRequest = try makeMessagesRequest(stripped)
             let httpResponse = try await client.send(httpRequest)
             if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
-                throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
+                throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: anthropicCompatibleErrorMessage(from: httpResponse.body))
             }
             var result = try parseMessagesResponse(httpResponse.body)
             result.warnings.append(Self.visionDegradationWarning)
@@ -185,6 +204,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                         let frames = try await sseClient.stream(httpRequest)
                         let parser = AnthropicSSEParser()
                         var accumulator = AnthropicStreamAccumulator()
+                        var didEmitCompleted = false
                         for try await frame in frames {
                             for event in parser.parse(frame) {
                                 if case .error(let message) = event {
@@ -192,11 +212,12 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                                     return
                                 }
                                 if let mapped = accumulator.append(event) {
+                                    if case .completed = mapped { didEmitCompleted = true }
                                     continuation.yield(mapped)
                                 }
                             }
                         }
-                        continuation.yield(.completed(accumulator.response()))
+                        if !didEmitCompleted { continuation.yield(.completed(accumulator.response())) }
                         continuation.finish()
                     } catch AnthropicCompatibleProviderError.unsupportedVisionInput {
                         guard request.containsImageInput else { throw AnthropicCompatibleProviderError.unsupportedVisionInput(model: capabilityProfile.modelID, reason: "vision not supported") }
@@ -205,6 +226,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                         let frames = try await sseClient.stream(httpRequest)
                         let parser = AnthropicSSEParser()
                         var accumulator = AnthropicStreamAccumulator()
+                        var didEmitCompleted = false
                         for try await frame in frames {
                             for event in parser.parse(frame) {
                                 if case .error(let message) = event {
@@ -212,13 +234,19 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                                     return
                                 }
                                 if let mapped = accumulator.append(event) {
-                                    continuation.yield(mapped)
+                                    if case .completed(var response) = mapped {
+                                        response.warnings.append(Self.visionDegradationWarning)
+                                        didEmitCompleted = true
+                                        continuation.yield(.completed(response))
+                                    } else {
+                                        continuation.yield(mapped)
+                                    }
                                 }
                             }
                         }
                         var finalResponse = accumulator.response()
                         finalResponse.warnings.append(Self.visionDegradationWarning)
-                        continuation.yield(.completed(finalResponse))
+                        if !didEmitCompleted { continuation.yield(.completed(finalResponse)) }
                         continuation.finish()
                     }
                 } catch {
@@ -245,8 +273,14 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             "messages": anthropicMessages(for: request.messages)
         ]
         if stream { body["stream"] = true }
-        if let thinking = config.featureOptions.thinking { body["thinking"] = thinking.jsonObject }
-        if let cache = config.featureOptions.promptCache.jsonObject { body["cache_control"] = cache }
+        if let thinking = config.featureOptions.thinking {
+            body["thinking"] = isXiaomiMiMoEndpoint ? ["type": "enabled"] : thinking.jsonObject
+        } else if isXiaomiMiMoEndpoint {
+            body["thinking"] = ["type": "disabled"]
+        }
+        if !isXiaomiMiMoEndpoint, let cache = config.featureOptions.promptCache.jsonObject {
+            body["cache_control"] = cache
+        }
         let system = request.messages
             .filter { $0.role == .system }
             .map(\.content)
@@ -263,12 +297,21 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                     "description": tool.description,
                     "input_schema": tool.inputSchema.jsonObject
                 ]
-                if config.featureOptions.strictToolUseEnabled { object["strict"] = true }
-                if !tool.inputExamples.isEmpty {
+                if config.featureOptions.strictToolUseEnabled && !isXiaomiMiMoEndpoint { object["strict"] = true }
+                if !tool.inputExamples.isEmpty,
+                   !isXiaomiMiMoEndpoint,
+                   (isNativeAnthropicEndpoint || config.featureOptions.strictToolUseEnabled) {
                     object["input_examples"] = tool.inputExamples.map { $0.mapValues(\.jsonCompatibleObject) }
                 }
-                if config.featureOptions.eagerInputStreamingToolNames.contains(tool.name) { object["eager_input_streaming"] = true }
-                if config.featureOptions.cachedToolNames.contains(tool.name) { object["cache_control"] = ["type": "ephemeral"] }
+                if !isXiaomiMiMoEndpoint,
+                   config.featureOptions.eagerInputStreamingToolNames.contains(tool.name) {
+                    object["eager_input_streaming"] = true
+                }
+                if !isXiaomiMiMoEndpoint,
+                   config.featureOptions.cachedToolNames.contains(tool.name) {
+                    object["cache_control"] = ["type": "ephemeral"]
+                }
+                if isXiaomiMiMoEndpoint { object["type"] = "custom" }
                 return object
             }
             tools.append(contentsOf: config.featureOptions.serverTools.map(\.jsonObject))
@@ -286,6 +329,19 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
 
     private func anthropicMessages(for messages: [AgentModelMessage]) -> [[String: Any]] {
         var result: [[String: Any]] = []
+
+        func appendMessage(role: String, content: [[String: Any]]) {
+            guard !content.isEmpty else { return }
+            if let lastIndex = result.indices.last,
+               result[lastIndex]["role"] as? String == role,
+               var existing = result[lastIndex]["content"] as? [[String: Any]] {
+                existing.append(contentsOf: content)
+                result[lastIndex]["content"] = Self.normalizedContentOrder(existing, role: role)
+            } else {
+                result.append(["role": role, "content": Self.normalizedContentOrder(content, role: role)])
+            }
+        }
+
         var index = messages.startIndex
         while index < messages.endIndex {
             let message = messages[index]
@@ -293,10 +349,10 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             case .system:
                 index = messages.index(after: index)
             case .user:
-                result.append(["role": "user", "content": contentBlocks(for: message)])
+                appendMessage(role: "user", content: contentBlocks(for: message))
                 index = messages.index(after: index)
             case .assistant:
-                result.append(anthropicAssistantMessage(for: message))
+                appendMessage(role: "assistant", content: anthropicAssistantContent(for: message))
                 index = messages.index(after: index)
             case .tool:
                 var content: [[String: Any]] = []
@@ -308,32 +364,69 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                     content.append(contentsOf: contentBlocks(for: messages[index]))
                     index = messages.index(after: index)
                 }
-                result.append(["role": "user", "content": content])
+                appendMessage(role: "user", content: content)
             }
         }
         return result
     }
 
-    private func anthropicAssistantMessage(for message: AgentModelMessage) -> [String: Any] {
+    private static func normalizedContentOrder(_ blocks: [[String: Any]], role: String) -> [[String: Any]] {
+        switch role {
+        case "assistant":
+            let thinkingTypes: Set<String> = ["thinking", "redacted_thinking"]
+            return blocks.filter { thinkingTypes.contains($0["type"] as? String ?? "") }
+                + blocks.filter { !thinkingTypes.contains($0["type"] as? String ?? "") }
+        case "user":
+            return blocks.filter { $0["type"] as? String == "tool_result" }
+                + blocks.filter { $0["type"] as? String != "tool_result" }
+        default:
+            return blocks
+        }
+    }
+
+    private func anthropicAssistantContent(for message: AgentModelMessage) -> [[String: Any]] {
         if message.providerMetadata?.providerID == "anthropic-compatible",
            let raw = message.providerMetadata?.rawAssistantContentJSON,
            let data = raw.data(using: .utf8),
-           let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            return ["role": "assistant", "content": blocks]
+           var blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            blocks.removeAll { Self.isStreamingEnvelope($0) }
+            if let selectedCalls = message.toolCalls {
+                let selectedIDs = Set(selectedCalls.map(\.id))
+                blocks.removeAll { block in
+                    block["type"] as? String == "tool_use"
+                        && !((block["id"] as? String).map { selectedIDs.contains($0) } ?? false)
+                }
+                let existingIDs = Set(blocks.compactMap { block in
+                    block["type"] as? String == "tool_use" ? block["id"] as? String : nil
+                })
+                blocks.append(contentsOf: selectedCalls.filter { !existingIDs.contains($0.id) }.map(toolUseBlock))
+            }
+            return blocks
         }
         var content: [[String: Any]] = []
         let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { content.append(["type": "text", "text": text]) }
-        for toolCall in message.toolCalls ?? [] {
-            let inputObject = (try? JSONSerialization.jsonObject(with: Data(toolCall.argumentsJSON.utf8))) ?? [:]
-            content.append([
-                "type": "tool_use",
-                "id": toolCall.id,
-                "name": toolCall.name,
-                "input": inputObject
-            ])
+        content.append(contentsOf: (message.toolCalls ?? []).map(toolUseBlock))
+        return content
+    }
+
+    private func toolUseBlock(for toolCall: AgentToolCall) -> [String: Any] {
+        let inputObject = (try? JSONSerialization.jsonObject(with: Data(toolCall.argumentsJSON.utf8))) ?? [:]
+        return [
+            "type": "tool_use",
+            "id": toolCall.id,
+            "name": toolCall.name,
+            "input": inputObject
+        ]
+    }
+
+    private static func isStreamingEnvelope(_ block: [String: Any]) -> Bool {
+        switch block["type"] as? String {
+        case "message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop", "ping", "error":
+            return true
+        default:
+            return false
         }
-        return ["role": "assistant", "content": content]
     }
 
     private func toolResultBlock(for message: AgentModelMessage) -> [String: Any] {
@@ -367,7 +460,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             }
             if !blocks.isEmpty { return blocks }
         }
-        return [["type": "text", "text": message.content]]
+        return message.content.isEmpty ? [] : [["type": "text", "text": message.content]]
     }
 
     private func validateVisionSendAllowed(_ request: AgentModelRequest) throws {
@@ -380,32 +473,17 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         }
     }
 
-    private static func errorMessage(from data: Data) -> String? {
-        guard !data.isEmpty else { return nil }
-        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let error = object["error"] as? [String: Any] {
-                if let message = error["message"] as? String, !message.isEmpty {
-                    return sanitizedErrorMessage(message)
-                }
-                if let type = error["type"] as? String, !type.isEmpty {
-                    return sanitizedErrorMessage(type)
-                }
-            }
-            if let message = object["message"] as? String, !message.isEmpty {
-                return sanitizedErrorMessage(message)
-            }
-        }
-        guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
-        return sanitizedErrorMessage(text)
-    }
-
-    private static func sanitizedErrorMessage(_ message: String) -> String {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count <= 800 { return trimmed }
-        return String(trimmed.prefix(800)) + "…"
-    }
-
     private func messagesEndpoint() -> URL {
+        if config.baseURL.lastPathComponent == "messages" {
+            return config.baseURL
+        }
+        if isXiaomiMiMoEndpoint {
+            var components = URLComponents(url: config.baseURL, resolvingAgainstBaseURL: false)
+            components?.path = "/anthropic/v1/messages"
+            components?.query = nil
+            components?.fragment = nil
+            if let url = components?.url { return url }
+        }
         let path = config.baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if path == "v1" || path.hasSuffix("/v1") {
             return config.baseURL.appendingPathComponent("messages")
@@ -417,16 +495,30 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         var headers = config.extraHeaders
         headers["Content-Type"] = "application/json"
         headers["anthropic-version"] = config.anthropicVersion
-        if !config.featureOptions.betaHeaders.isEmpty { headers["anthropic-beta"] = config.featureOptions.betaHeaders.joined(separator: ",") }
+        if !isXiaomiMiMoEndpoint, !config.featureOptions.betaHeaders.isEmpty {
+            headers["anthropic-beta"] = config.featureOptions.betaHeaders.joined(separator: ",")
+        } else if isXiaomiMiMoEndpoint {
+            headers.removeValue(forKey: "anthropic-beta")
+        }
         switch config.authHeaderKind {
         case .xAPIKey:
-            headers["x-api-key"] = config.apiKey
+            headers[isXiaomiMiMoEndpoint ? "api-key" : "x-api-key"] = config.apiKey
+            if isXiaomiMiMoEndpoint { headers.removeValue(forKey: "x-api-key") }
             headers.removeValue(forKey: "Authorization")
         case .bearer:
             headers["Authorization"] = "Bearer \(config.apiKey)"
             headers.removeValue(forKey: "x-api-key")
         }
         return headers
+    }
+
+    private var isXiaomiMiMoEndpoint: Bool {
+        let host = config.baseURL.host?.lowercased()
+        return host == "api.xiaomimimo.com" || host == "token-plan-cn.xiaomimimo.com"
+    }
+
+    private var isNativeAnthropicEndpoint: Bool {
+        config.baseURL.host?.lowercased() == "api.anthropic.com"
     }
 
     private func parseMessagesResponse(_ data: Data) throws -> AgentModelResponse {

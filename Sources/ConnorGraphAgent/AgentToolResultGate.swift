@@ -17,6 +17,10 @@ public struct AgentToolResultGateConfiguration: Codable, Sendable, Equatable {
 }
 
 public struct AgentToolResultGate: Sendable, Equatable {
+    private static let completeResultToolNames: Set<String> = [
+        "memory_os_get_current_user_profile"
+    ]
+
     private static let memoryEvidenceToolNames: Set<String> = [
         "memory_os_recent_context",
         "memory_os_knowledge_context",
@@ -42,6 +46,9 @@ public struct AgentToolResultGate: Sendable, Equatable {
             ? Self.memoryEvidenceBoundary + "\n"
             : ""
         let payload = base
+        if Self.completeResultToolNames.contains(result.toolName) {
+            return prefix + payload
+        }
         let payloadLimit = prefix.isEmpty ? limit : max(0, limit - prefix.count)
         guard payload.count > payloadLimit else { return prefix + payload }
 

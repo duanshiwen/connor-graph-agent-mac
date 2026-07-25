@@ -93,6 +93,87 @@ private enum AnthropicFixtures {
     #expect(request.url.absoluteString == "https://api.anthropic.com/v1/messages")
 }
 
+@Test func anthropicFullMessagesEndpointIsUsedWithoutAppendingAnotherPath() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://gateway.example.com/custom/v1/messages")!, apiKey: "secret", model: "compatible-model"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Hello")]))
+
+    #expect(client.storage.capturedRequest?.url.absoluteString == "https://gateway.example.com/custom/v1/messages")
+}
+
+@Test func anthropicVercelGatewayUsesMessagesEndpointBearerAuthAndCoreToolSchema() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://ai-gateway.vercel.sh/v1")!,
+            apiKey: "vck_test",
+            model: "anthropic/claude-sonnet-4",
+            authHeaderKind: .bearer
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Read memory")],
+        tools: [AgentToolDefinition(
+            name: "memory_read",
+            description: "Read memory",
+            inputSchema: .object(properties: [:], required: [])
+        )]
+    ))
+
+    let request = try #require(client.storage.capturedRequest)
+    #expect(request.url.absoluteString == "https://ai-gateway.vercel.sh/v1/messages")
+    #expect(request.headers["Authorization"] == "Bearer vck_test")
+    #expect(request.headers["x-api-key"] == nil)
+    let object = try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: Any])
+    let requestTool = try #require((object["tools"] as? [[String: Any]])?.first)
+    #expect(requestTool["name"] as? String == "memory_read")
+    #expect(requestTool["input_schema"] != nil)
+    #expect(requestTool["strict"] == nil)
+    #expect(requestTool["input_examples"] == nil)
+}
+
+@Test func anthropicXiaomiMiMoUsesOfficialEndpointHeadersAndCoreSchema() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.xiaomimimo.com/v1")!,
+            apiKey: "mimo-secret",
+            model: "mimo-v2.5-pro",
+            featureOptions: AnthropicCompatibleFeatureOptions(
+                thinking: .enabled(budgetTokens: 10_000, display: .omitted),
+                strictToolUseEnabled: true
+            )
+        ),
+        httpClient: client
+    )
+    let tool = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime())
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [AgentModelMessage(role: .user, content: "Create an event")],
+        tools: [AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema, inputExamples: tool.inputExamples)]
+    ))
+
+    let request = try #require(client.storage.capturedRequest)
+    #expect(request.url.absoluteString == "https://api.xiaomimimo.com/anthropic/v1/messages")
+    #expect(request.headers["api-key"] == "mimo-secret")
+    #expect(request.headers["x-api-key"] == nil)
+    let object = try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: Any])
+    let thinking = try #require(object["thinking"] as? [String: Any])
+    #expect(thinking["type"] as? String == "enabled")
+    #expect(thinking["budget_tokens"] == nil)
+    #expect(thinking["display"] == nil)
+    let requestTool = try #require((object["tools"] as? [[String: Any]])?.first)
+    #expect(requestTool["type"] as? String == "custom")
+    #expect(requestTool["strict"] == nil)
+    #expect(requestTool["input_examples"] == nil)
+}
+
 @Test func anthropicXAPIKeyAuthBuildsAnthropicHeaders() async throws {
     let client = AnthropicCapturingHTTPClient()
     let provider = AnthropicCompatibleProvider(
@@ -369,6 +450,67 @@ private enum AnthropicFixtures {
     let content = try #require(toolResultMessage["content"] as? [[String: Any]])
     #expect(content.map { $0["type"] as? String } == ["tool_result", "tool_result"])
     #expect(content.map { $0["tool_use_id"] as? String } == ["toolu_search", "toolu_fetch"])
+}
+
+@Test func anthropicRawAssistantContentDropsToolUsesFilteredByRuntime() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+    let rawContent = #"[{"type":"thinking","thinking":"Reason","signature":"sig"},{"type":"tool_use","id":"toolu_keep","name":"memory_read","input":{}},{"type":"tool_use","id":"toolu_drop","name":"task_write","input":{}}]"#
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Read memory, then write"),
+        AgentModelMessage(
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "toolu_keep", name: "memory_read", argumentsJSON: "{}")],
+            providerMetadata: AgentModelProviderMetadata(providerID: "anthropic-compatible", rawAssistantContentJSON: rawContent, stopReason: "tool_use")
+        ),
+        AgentModelMessage(role: .tool, content: "{}", toolCallID: "toolu_keep", name: "memory_read")
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    let assistant = try #require(messages.first { $0["role"] as? String == "assistant" })
+    let content = try #require(assistant["content"] as? [[String: Any]])
+    #expect(content.compactMap { $0["id"] as? String } == ["toolu_keep"])
+    #expect(content.first?["type"] as? String == "thinking")
+}
+
+@Test func anthropicMessagesDropEmptyTurnsAndMergeAdjacentRoles() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Start"),
+        AgentModelMessage(role: .assistant, content: ""),
+        AgentModelMessage(role: .assistant, content: "Rejected draft"),
+        AgentModelMessage(
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "toolu_1", name: "read", argumentsJSON: "{}")],
+            providerMetadata: AgentModelProviderMetadata(
+                providerID: "anthropic-compatible",
+                rawAssistantContentJSON: #"[{"type":"thinking","thinking":"Correct course","signature":"sig"},{"type":"tool_use","id":"toolu_1","name":"read","input":{}}]"#,
+                stopReason: "tool_use"
+            )
+        ),
+        AgentModelMessage(role: .tool, content: "done", toolCallID: "toolu_1", name: "read")
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    #expect(messages.map { $0["role"] as? String } == ["user", "assistant", "user"])
+    let assistantContent = try #require(messages[1]["content"] as? [[String: Any]])
+    #expect(assistantContent.map { $0["type"] as? String } == ["thinking", "text", "tool_use"])
+    #expect(assistantContent[1]["text"] as? String == "Rejected draft")
 }
 
 @Test func anthropicToolResultBlocksPrecedeTextWhenAdjacentUserMessageIsMerged() async throws {
