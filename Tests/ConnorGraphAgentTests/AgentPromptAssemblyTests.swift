@@ -240,6 +240,8 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("L1/L2"))
+    #expect(prompt.contains("governed batching criteria trigger L2/L3/L4 processing"))
+    #expect(!prompt.contains("≥100 events or ≥24h"))
     #expect(prompt.contains("L2: Entity-centered working memory with operational facts"))
     #expect(prompt.contains("L3/L4"))
     #expect(prompt.contains("L3: Reusable cross-session knowledge records"))
