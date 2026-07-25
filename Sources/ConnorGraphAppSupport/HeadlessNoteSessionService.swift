@@ -14,6 +14,7 @@ public struct NoteSessionPromptPolicy: Sendable {
         return """
         <connor-note-session>
         这是一个笔记会话。用户消息已经由 Session OS 保存，并会通过既有后台摄取链路自动进入 Memory OS L0/L1。
+        首条笔记正文会保留并直接摄取用户原文，豁免用户意图 LLM 规范化；同一会话的后续用户消息仍按常规流程处理。不要声称原文已被改写、润色或摘要后保存。
         请理解并处理笔记内容：提炼核心主题、关键观点、概念关系和可以继续探索的方向。
         不要为了保存这条笔记调用 Write、Edit、shell、知识库写入或 Memory 写入工具。
         </connor-note-session>
