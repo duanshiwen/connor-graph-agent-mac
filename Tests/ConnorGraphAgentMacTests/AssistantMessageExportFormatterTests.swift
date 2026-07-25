@@ -71,6 +71,37 @@ struct AssistantMessageExportFormatterTests {
         #expect(presentation.exportHelp == "选择保存位置和文件名，导出为 Markdown 文件")
     }
 
+    @Test("long assistant replies expose reversible expansion controls")
+    func longAssistantRepliesExposeReversibleExpansionControls() {
+        let content = String(
+            repeating: "a",
+            count: AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        )
+        let message = AgentMessage(role: .assistant, content: content)
+
+        let collapsed = AgentAssistantMessageExpansionPresentation(message: message, isExpanded: false)
+        let expanded = AgentAssistantMessageExpansionPresentation(message: message, isExpanded: true)
+
+        #expect(collapsed.isAvailable)
+        #expect(collapsed.title == "展开")
+        #expect(collapsed.systemImage == "chevron.down")
+        #expect(collapsed.accessibilityLabel == "展开这条助理回复")
+        #expect(expanded.isAvailable)
+        #expect(expanded.title == "收起")
+        #expect(expanded.systemImage == "chevron.up")
+        #expect(expanded.accessibilityLabel == "收起这条助理回复")
+    }
+
+    @Test("expansion controls are hidden for short and non-assistant messages")
+    func expansionControlsAreHiddenWhenUnavailable() {
+        let threshold = AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        let shortReply = AgentMessage(role: .assistant, content: String(repeating: "a", count: threshold - 1))
+        let longUserMessage = AgentMessage(role: .user, content: String(repeating: "a", count: threshold))
+
+        #expect(!AgentAssistantMessageExpansionPresentation(message: shortReply, isExpanded: false).isAvailable)
+        #expect(!AgentAssistantMessageExpansionPresentation(message: longUserMessage, isExpanded: false).isAvailable)
+    }
+
     @Test("only the first message in a note session uses note body presentation")
     func noteBodyPresentationIsLimitedToFirstNoteMessage() {
         #expect(AgentChatMessagePresentationPolicy.isNoteBody(sessionKind: .note, firstMessageID: "first", messageID: "first"))
