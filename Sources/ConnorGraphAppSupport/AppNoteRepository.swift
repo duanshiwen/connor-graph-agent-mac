@@ -15,4 +15,9 @@ public struct AppNoteRepository: Sendable {
     public func notes(ids: [String]) throws -> [NoteRecord] { try store.notes(ids: ids) }
     public func delete(sessionID: String, deletedAt: Date = Date()) throws { try store.deleteNote(sessionID: sessionID, deletedAt: deletedAt) }
     public func isDeleted(id: String) throws -> Bool { try store.isNoteDeleted(id: id) }
+    public func attachImportMetadata(sessionID: String, metadata: NoteImportProjectionMetadata) throws { try store.attachNoteImportMetadata(sessionID: sessionID, metadata: metadata) }
+    public func projectionCandidates(afterSessionID: String? = nil, limit: Int = 25) throws -> [NoteProjectionCandidate] { try store.noteProjectionCandidates(afterSessionID: afterSessionID, limit: limit) }
+    public func claimProjection(sessionID: String, owner: String, leaseDuration: TimeInterval = 120) throws -> Bool { try store.claimNoteProjection(sessionID: sessionID, owner: owner, leaseDuration: leaseDuration) }
+    public func releaseProjection(sessionID: String, owner: String) throws { try store.releaseNoteProjection(sessionID: sessionID, owner: owner) }
+    public func orphanedSessionIDs(limit: Int = 25) throws -> [String] { try store.orphanedNoteSessionIDs(limit: limit) }
 }

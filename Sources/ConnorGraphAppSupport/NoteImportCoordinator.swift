@@ -151,12 +151,13 @@ public actor NoteImportCoordinator {
             statuses: [.ready, .duplicateChanged, .imported, .queuedForLLM]
         )
         let options = job.options
+        let sourceKind = source?.kind.rawValue
         let payloadStore = self.payloadStore
         let retryPolicy = self.retryPolicy
         let rateLimiter = self.rateLimiter
         let providerKey = NoteImportProviderKey(connection: "note-import", provider: "active-runtime", model: "active")
         await rateLimiter.configure(.init(maxConcurrent: options.llmConcurrency, requestsPerMinute: 60), for: providerKey)
-        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options, sourceLease, enexLease, retryPolicy, rateLimiter, onSessionImported] item in
+        _ = await scheduler.run(elements: pending) { [ledger, sessionService, attachmentImporter, payloadStore, options, sourceKind, sourceLease, enexLease, retryPolicy, rateLimiter, onSessionImported] item in
             let itemInterval = NoteImportPerformanceLog.begin("Import Item", jobID: jobID, itemCount: 1)
             defer { NoteImportPerformanceLog.end(itemInterval, jobID: jobID, itemCount: 1) }
             let owner = "\(jobID):\(UUID().uuidString)"
@@ -184,6 +185,11 @@ public actor NoteImportCoordinator {
                             createdAt: note.createdAt ?? current.createdAt
                         )
                         onSessionImported(importedSession)
+                        await sessionService.associateImportedNote(sessionID: sessionID, metadata: NoteImportProjectionMetadata(
+                            itemID: current.id, sourceID: current.sourceID,
+                            sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
+                            externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt
+                        ))
                         current.sessionID = sessionID
                         current.status = .imported
                         current.errorCode = nil
@@ -213,6 +219,11 @@ public actor NoteImportCoordinator {
                             createdAt: note.createdAt ?? current.createdAt
                         )
                         onSessionImported(importedSession)
+                        await sessionService.associateImportedNote(sessionID: boundSessionID, metadata: NoteImportProjectionMetadata(
+                            itemID: current.id, sourceID: current.sourceID,
+                            sourceKind: sourceKind ?? note.sourceKind.rawValue, sourceIdentity: current.sourceIdentity,
+                            externalID: current.externalID, relativePath: current.relativePath, sourceCreatedAt: note.createdAt
+                        ))
                         current = options.llmMode == .automatic
                             ? try ledger.transitionItem(id: current.id, to: .queuedForLLM)
                             : try ledger.transitionItem(id: current.id, to: .completed)

@@ -163,6 +163,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "agent_sessions",
         "notes",
         "note_projection_tombstones",
+        "note_projection_claims",
         "session_background_tasks",
         "agent_runs",
         "agent_events",
@@ -478,6 +479,15 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             deleted_at TEXT NOT NULL
         );
         """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS note_projection_claims (
+            session_id TEXT PRIMARY KEY,
+            lease_owner TEXT NOT NULL,
+            lease_expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_note_projection_claims_expiry ON note_projection_claims(lease_expires_at);")
         try execute("""
         INSERT OR IGNORE INTO agent_session_messages (session_id, position, message_id, message_json)
         SELECT session.id, CAST(message.key AS INTEGER), json_extract(message.value, '$.id'), message.value
@@ -1040,6 +1050,60 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
 
     public func isNoteDeleted(id: String) throws -> Bool {
         try !query(sql: "SELECT 1 FROM note_projection_tombstones WHERE note_id = \(quote(id)) LIMIT 1").isEmpty
+    }
+
+    public func attachNoteImportMetadata(sessionID: String, metadata: NoteImportProjectionMetadata) throws {
+        try execute("""
+        UPDATE notes SET origin_kind = 'imported', import_item_id = \(quote(metadata.itemID)),
+          import_source_id = \(quote(metadata.sourceID)), source_kind = \(quote(metadata.sourceKind)),
+          source_identity = \(quote(metadata.sourceIdentity)), external_id = \(quote(metadata.externalID)),
+          relative_path = \(quote(metadata.relativePath)), source_created_at = \(quote(metadata.sourceCreatedAt.map(iso)))
+        WHERE session_id = \(quote(sessionID));
+        """)
+    }
+
+    public func noteProjectionCandidates(afterSessionID: String? = nil, limit: Int = 25) throws -> [NoteProjectionCandidate] {
+        let cursor = afterSessionID.map { "AND s.id > \(quote($0))" } ?? ""
+        return try query(sql: """
+        SELECT s.id, s.title, m.message_id, m.message_json, s.created_at, s.updated_at
+        FROM agent_sessions s
+        JOIN agent_session_messages m ON m.session_id = s.id AND m.position = 0
+        LEFT JOIN notes n ON n.session_id = s.id
+        WHERE s.kind = 'note' AND s.deleted_at IS NULL \(cursor)
+          AND (n.session_id IS NULL OR n.source_message_id != m.message_id OR n.title != s.title
+               OR n.source_updated_at != s.updated_at OR n.projection_status IN ('failed', 'cleanup_required'))
+        ORDER BY s.id ASC LIMIT \(min(max(limit, 1), 100))
+        """).map { row in
+            NoteProjectionCandidate(
+                sessionID: row[0], title: row[1], sourceMessageID: row[2], messageJSON: row[3],
+                createdAt: try date(row[4]), updatedAt: try date(row[5])
+            )
+        }
+    }
+
+    public func claimNoteProjection(sessionID: String, owner: String, now: Date = Date(), leaseDuration: TimeInterval = 120) throws -> Bool {
+        try withDatabaseLock {
+            try execute("""
+            INSERT INTO note_projection_claims(session_id, lease_owner, lease_expires_at, updated_at)
+            VALUES (\(quote(sessionID)), \(quote(owner)), \(quote(iso(now.addingTimeInterval(leaseDuration)))), \(quote(iso(now))))
+            ON CONFLICT(session_id) DO UPDATE SET lease_owner=excluded.lease_owner,
+              lease_expires_at=excluded.lease_expires_at, updated_at=excluded.updated_at
+            WHERE note_projection_claims.lease_expires_at <= \(quote(iso(now))) OR note_projection_claims.lease_owner = \(quote(owner));
+            """)
+            return sqlite3_changes(db) == 1
+        }
+    }
+
+    public func releaseNoteProjection(sessionID: String, owner: String) throws {
+        try execute("DELETE FROM note_projection_claims WHERE session_id = \(quote(sessionID)) AND lease_owner = \(quote(owner));")
+    }
+
+    public func orphanedNoteSessionIDs(limit: Int = 25) throws -> [String] {
+        try query(sql: """
+        SELECT n.session_id FROM notes n LEFT JOIN agent_sessions s ON s.id = n.session_id
+        WHERE s.id IS NULL OR s.deleted_at IS NOT NULL OR s.kind != 'note'
+        ORDER BY n.session_id ASC LIMIT \(min(max(limit, 1), 100))
+        """).compactMap(\.first)
     }
 
     private func noteRows(whereClause: String, limit: Int) throws -> [NoteRecord] {
