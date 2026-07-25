@@ -3,6 +3,7 @@ import ConnorGraphAgent
 
 public struct XiaomiMiMOSpeechConfiguration: Sendable, Equatable {
     public static let voiceDesignModel = "mimo-v2.5-tts-voicedesign"
+    public static let speechOutputTokenLimit = 8_192
 
     public var baseURL: URL
     public var apiKey: String
@@ -58,6 +59,7 @@ public enum XiaomiMiMOSpeechSynthesisError: Error, Sendable, Equatable, Localize
     case providerRejected(statusCode: Int, message: String?)
     case missingAudio
     case invalidAudioData
+    case truncatedAudio
 
     public var errorDescription: String? {
         switch self {
@@ -68,6 +70,7 @@ public enum XiaomiMiMOSpeechSynthesisError: Error, Sendable, Equatable, Localize
                 ?? "MiMO 语音服务请求失败（HTTP \(statusCode)）。"
         case .missingAudio: "MiMO 语音服务没有返回音频。"
         case .invalidAudioData: "MiMO 语音服务返回的音频数据无效。"
+        case .truncatedAudio: "MiMO 语音服务返回的语音不完整，请重试。"
         }
     }
 }
@@ -148,6 +151,29 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
         let text = ConnorSpeechTextFormatter.spokenText(from: markdown)
         guard !text.isEmpty else { throw XiaomiMiMOSpeechSynthesisError.emptyText }
 
+        for attempt in 0..<2 {
+            do {
+                return try await synthesizeOnce(
+                    text: text,
+                    personality: personality,
+                    voiceGender: voiceGender,
+                    voiceProfile: voiceProfile,
+                    configuration: configuration
+                )
+            } catch XiaomiMiMOSpeechSynthesisError.truncatedAudio where attempt == 0 {
+                try Task.checkCancellation()
+            }
+        }
+        throw XiaomiMiMOSpeechSynthesisError.truncatedAudio
+    }
+
+    private mutating func synthesizeOnce(
+        text: String,
+        personality: ConnorPersonalitySettings,
+        voiceGender: ConnorVoiceGender,
+        voiceProfile: ConnorVoiceProfile?,
+        configuration: XiaomiMiMOSpeechConfiguration
+    ) async throws -> Data {
         let response = try await client.send(try makeRequest(
             text: text,
             personality: personality,
@@ -161,14 +187,24 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
                 message: Self.errorMessage(from: response.body)
             )
         }
-        guard let payload = try? JSONDecoder().decode(ResponsePayload.self, from: response.body) else {
-            throw XiaomiMiMOSpeechSynthesisError.invalidResponse
+        guard let payload = try? JSONDecoder().decode(ResponsePayload.self, from: response.body),
+              let choice = payload.choices.first
+        else { throw XiaomiMiMOSpeechSynthesisError.invalidResponse }
+        if Self.indicatesOutputLimit(choice.finishReason) {
+            throw XiaomiMiMOSpeechSynthesisError.truncatedAudio
         }
-        guard let encoded = payload.choices.first?.message.audio?.data, !encoded.isEmpty else {
+        guard let encoded = choice.message.audio?.data, !encoded.isEmpty else {
             throw XiaomiMiMOSpeechSynthesisError.missingAudio
         }
         guard let audio = Data(base64Encoded: encoded), !audio.isEmpty else {
             throw XiaomiMiMOSpeechSynthesisError.invalidAudioData
+        }
+        guard Self.isCompletePCMWave(audio) else {
+            throw XiaomiMiMOSpeechSynthesisError.truncatedAudio
+        }
+        if let transcript = choice.message.audio?.transcript,
+           Self.transcriptLooksTruncated(transcript, source: text) {
+            throw XiaomiMiMOSpeechSynthesisError.truncatedAudio
         }
         return audio
     }
@@ -182,6 +218,7 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
     ) throws -> AgentHTTPRequest {
         let body: [String: Any] = [
             "model": XiaomiMiMOSpeechConfiguration.voiceDesignModel,
+            "max_tokens": XiaomiMiMOSpeechConfiguration.speechOutputTokenLimit,
             "messages": [
                 ["role": "user", "content": ConnorVoiceDesignPromptBuilder.prompt(personality: personality, voiceGender: voiceGender, voiceProfile: voiceProfile)],
                 ["role": "assistant", "content": text]
@@ -207,11 +244,69 @@ public struct XiaomiMiMOSpeechSynthesisService<Client: AgentHTTPClient>: Sendabl
         (try? JSONDecoder().decode(ErrorPayload.self, from: data))?.error.message
     }
 
+    private static func indicatesOutputLimit(_ finishReason: String?) -> Bool {
+        guard let finishReason else { return false }
+        return ["length", "max_tokens", "max_output_tokens"].contains(finishReason.lowercased())
+    }
+
+    private static func transcriptLooksTruncated(_ transcript: String, source: String) -> Bool {
+        let expected = normalizedForCoverage(source)
+        let actual = normalizedForCoverage(transcript)
+        guard expected.count >= 20, actual.count >= 8, expected.hasPrefix(actual) else { return false }
+        return Double(actual.count) / Double(expected.count) < 0.9
+    }
+
+    private static func normalizedForCoverage(_ text: String) -> String {
+        String(text.lowercased().filter { $0.isLetter || $0.isNumber })
+    }
+
+    private static func isCompletePCMWave(_ data: Data) -> Bool {
+        guard data.count >= 12,
+              String(decoding: data[0..<4], as: UTF8.self) == "RIFF",
+              String(decoding: data[8..<12], as: UTF8.self) == "WAVE",
+              let declaredSize = littleEndianUInt32(in: data, at: 4),
+              UInt64(declaredSize) + 8 <= UInt64(data.count)
+        else { return false }
+
+        var offset = 12
+        var hasFormat = false
+        var hasAudio = false
+        while offset + 8 <= data.count {
+            let identifier = String(decoding: data[offset..<(offset + 4)], as: UTF8.self)
+            guard let chunkSize = littleEndianUInt32(in: data, at: offset + 4) else { return false }
+            let chunkEnd = offset + 8 + Int(chunkSize)
+            guard chunkEnd <= data.count else { return false }
+            if identifier == "fmt " { hasFormat = chunkSize >= 16 }
+            if identifier == "data" { hasAudio = chunkSize > 0 }
+            offset = chunkEnd + Int(chunkSize % 2)
+        }
+        return hasFormat && hasAudio
+    }
+
+    private static func littleEndianUInt32(in data: Data, at offset: Int) -> UInt32? {
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        return UInt32(data[offset])
+            | UInt32(data[offset + 1]) << 8
+            | UInt32(data[offset + 2]) << 16
+            | UInt32(data[offset + 3]) << 24
+    }
+
     private struct ResponsePayload: Decodable {
         var choices: [Choice]
-        struct Choice: Decodable { var message: Message }
+        struct Choice: Decodable {
+            var message: Message
+            var finishReason: String?
+
+            enum CodingKeys: String, CodingKey {
+                case message
+                case finishReason = "finish_reason"
+            }
+        }
         struct Message: Decodable { var audio: Audio? }
-        struct Audio: Decodable { var data: String }
+        struct Audio: Decodable {
+            var data: String
+            var transcript: String?
+        }
     }
 
     private struct ErrorPayload: Decodable {
