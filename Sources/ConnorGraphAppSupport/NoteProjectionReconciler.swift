@@ -46,9 +46,12 @@ public actor NoteProjectionReconciler {
             var consumedCharacters = 0
             for candidate in candidates {
                 guard !Task.isCancelled else { hasMore = true; break }
-                cursor = candidate.sessionID
+                if consumedCharacters > 0 && consumedCharacters + candidate.messageJSON.count > bodyBudget {
+                    hasMore = true
+                    break
+                }
                 consumedCharacters += candidate.messageJSON.count
-                if consumedCharacters > bodyBudget { hasMore = true; break }
+                cursor = candidate.sessionID
                 guard (try? repository.claimProjection(sessionID: candidate.sessionID, owner: owner)) == true else { continue }
                 defer { try? repository.releaseProjection(sessionID: candidate.sessionID, owner: owner) }
                 do {

@@ -70,6 +70,22 @@ private struct FailingNoteProjection: NoteProjectionSynchronizing {
     #expect(try AppNoteRepository(store: store).note(sessionID: "note") == nil)
 }
 
+@Test func appChatRepositoryRestoresDeletedNoteProjectionAndIndex() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    try repository.saveSession(AgentSession(id: "restore-note", messages: [AgentMessage(role: .user, content: "restorable unique body")], governance: governance))
+    try repository.deleteSession(sessionID: "restore-note")
+
+    let restored = try repository.restoreDeletedSession(sessionID: "restore-note", now: Date(timeIntervalSince1970: 9_000))
+
+    #expect(!restored.governance.isDeleted)
+    #expect(try AppNoteRepository(store: store).note(sessionID: "restore-note")?.body == "restorable unique body")
+    #expect(try NoteSearchService(repository: AppNoteRepository(store: store)).search(query: "restorable").totalItems == 1)
+}
+
 @Test func appChatRepositoryPersistsMarkdownRenderCacheForSavedAssistantMessages() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()

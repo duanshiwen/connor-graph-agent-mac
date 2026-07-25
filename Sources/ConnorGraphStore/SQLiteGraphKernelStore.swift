@@ -1020,6 +1020,13 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    public func restoreSession(id: String, restoredAt: Date = Date()) throws {
+        try execute("""
+        UPDATE agent_sessions SET deleted_at = NULL, updated_at = \(quote(iso(restoredAt)))
+        WHERE id = \(quote(id));
+        """)
+    }
+
     // MARK: - Note Projection
 
     public func upsertNote(_ note: NoteRecord) throws {
@@ -1182,7 +1189,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         if let matchQuery, !matchQuery.isEmpty {
             countSQL = "SELECT COUNT(*) FROM note_search_fts f JOIN note_search_docs d ON d.note_id=f.note_id WHERE note_search_fts MATCH \(quote(matchQuery))\(whereFilter)"
             rowsSQL = """
-            SELECT d.note_id, d.session_id, d.title, snippet(note_search_fts, 2, '', '', '...', 32),
+            SELECT d.note_id, d.session_id, d.title, snippet(note_search_fts, 2, '', '', '...', 32), d.body,
                    -bm25(note_search_fts, 0.0, 5.0, 1.0, 0.5), d.created_at, d.updated_at,
                    d.origin_kind, d.source_kind, d.projection_status
             FROM note_search_fts f JOIN note_search_docs d ON d.note_id=f.note_id
@@ -1194,7 +1201,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             let plainWhere = filters.isEmpty ? "" : " WHERE " + filters.map { $0.replacingOccurrences(of: "d.", with: "") }.joined(separator: " AND ")
             countSQL = "SELECT COUNT(*) FROM note_search_docs\(plainWhere)"
             rowsSQL = """
-            SELECT d.note_id, d.session_id, d.title, substr(d.body, 1, 240), 0, d.created_at, d.updated_at,
+            SELECT d.note_id, d.session_id, d.title, substr(d.body, 1, 240), d.body, 0, d.created_at, d.updated_at,
                    d.origin_kind, d.source_kind, d.projection_status
             FROM note_search_docs d\(filters.isEmpty ? "" : " WHERE " + filters.joined(separator: " AND "))
             ORDER BY d.updated_at DESC, d.note_id ASC LIMIT \(pageSize) OFFSET \(offset)
@@ -1202,15 +1209,28 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         }
         let total = Int(try query(sql: countSQL).first?.first ?? "0") ?? 0
         let records = try query(sql: rowsSQL).map { row in
-            guard let origin = NoteOriginKind(rawValue: row[7]), let status = NoteProjectionStatus(rawValue: row[9]) else {
+            guard let origin = NoteOriginKind(rawValue: row[8]), let status = NoteProjectionStatus(rawValue: row[10]) else {
                 throw SQLiteGraphKernelStoreError.decodeFailed("Invalid note search row")
             }
-            return NoteSearchHit(noteID: row[0], sessionID: row[1], title: row[2], snippet: row[3],
-                matchedTerms: matchedTerms, relevance: Double(row[4]) ?? 0, createdAt: try date(row[5]),
-                updatedAt: try date(row[6]), originKind: origin, sourceKind: nilIfEmpty(row[8]), projectionStatus: status)
+            return NoteSearchHit(noteID: row[0], sessionID: row[1], title: row[2],
+                snippet: Self.noteSnippet(body: row[4], fallback: row[3], matchedTerms: matchedTerms),
+                matchedTerms: matchedTerms, relevance: Double(row[5]) ?? 0, createdAt: try date(row[6]),
+                updatedAt: try date(row[7]), originKind: origin, sourceKind: nilIfEmpty(row[9]), projectionStatus: status)
         }
         let health: NoteSearchHealthStatus = (try notesNeedingIndex(version: 1, limit: 1)).isEmpty ? .available : .backfilling
         return NoteSearchPage(records: records, totalItems: total, health: health)
+    }
+
+    private static func noteSnippet(body: String, fallback: String, matchedTerms: [String], limit: Int = 240) -> String {
+        guard let range = matchedTerms.lazy.compactMap({ body.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) }).first else {
+            return String(fallback.prefix(limit))
+        }
+        let matchOffset = body.distance(from: body.startIndex, to: range.lowerBound)
+        let startOffset = max(0, matchOffset - limit / 3)
+        let endOffset = min(body.count, startOffset + limit)
+        let start = body.index(body.startIndex, offsetBy: startOffset)
+        let end = body.index(body.startIndex, offsetBy: endOffset)
+        return String(body[start..<end])
     }
 
     private func noteRows(whereClause: String, limit: Int) throws -> [NoteRecord] {
