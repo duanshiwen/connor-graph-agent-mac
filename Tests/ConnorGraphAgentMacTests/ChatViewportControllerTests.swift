@@ -74,6 +74,37 @@ struct ChatViewportControllerTests {
         #expect(controller.snapshot.pendingNewItemCount == 0)
     }
 
+    @Test func submissionFollowDoesNotInterruptFreeBrowsing() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        controller.updateMetrics(.init(
+            viewportHeight: 600,
+            contentHeight: 1_200,
+            distanceToBottom: 240,
+            distanceToTop: 360
+        ))
+
+        controller.followLatestIfPinned()
+
+        #expect(controller.snapshot.mode == .freeBrowsing)
+        #expect(!controller.snapshot.isPinnedToBottom)
+        #expect(controller.pendingScrollCommand == nil)
+    }
+
+    @Test func submissionFollowKeepsPinnedViewportAtLatest() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        controller.updateMetrics(.init(
+            viewportHeight: 600,
+            contentHeight: 1_200,
+            distanceToBottom: 0,
+            distanceToTop: 600
+        ))
+
+        controller.followLatestIfPinned()
+
+        #expect(controller.pendingScrollCommand?.target == .bottom(animated: true))
+        #expect(controller.snapshot.isPinnedToBottom)
+    }
+
     @Test func prependPublishesAnchorRestorationCommand() {
         let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
         controller.updateMetrics(.init(viewportHeight: 600, contentHeight: 1_200, distanceToBottom: 300, distanceToTop: 300))
