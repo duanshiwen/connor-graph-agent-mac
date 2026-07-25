@@ -199,16 +199,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 ))
                 var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
                 var messages = modelRequest.messages
-                let retrievalPolicy = AgentRetrievalCompliancePolicy()
-                let systemContext = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n")
-                var retrievalCompliance = AgentRetrievalComplianceState(
-                    prompt: request.userMessage,
-                    definitions: toolRegistry.definitions,
-                    skipRequiredRetrieval: retrievalPolicy.shouldStopForUnavailableWorkspace(prompt: request.userMessage, systemContext: systemContext),
-                    policy: retrievalPolicy
-                )
+                let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
-                let isPureMemoryTask = retrievalPolicy.isPureMemoryTask(request.userMessage)
+                let isPureMemoryTask = evidencePolicy.isPureMemoryTask(request.userMessage)
                 var memoryEvidencePayloads: [String] = []
                 var webEvidenceCitations: [String] = []
                 var didRequestClaimCorrection = false
@@ -285,12 +278,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         if modelResponse.toolCalls.isEmpty {
-                            if let correction = retrievalCompliance.correctionMessageIfNeeded() {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: correction))
-                                continue
-                            }
-                            if retrievalPolicy.requiresWebResearch(request.userMessage),
+                            if evidencePolicy.requiresWebResearch(request.userMessage),
                                !didRequestResearchCorrection,
                                let correction = AgentExternalResearchAnswerValidator().correctionInstruction(
                                    answer: modelResponse.text ?? "",
@@ -386,19 +374,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )
 
                         for batchResult in batchResults {
-                            retrievalCompliance.record(batchResult.result)
                             if let promotion = trustedSkillPromotion(from: batchResult.result),
                                promotedSkillIdentifiers.insert(promotion.identifier).inserted {
                                 promoteSkillInstruction(promotion, in: &messages)
                             }
-                            if AgentRetrievalCompliancePolicy.requiredMemoryTools.contains(batchResult.call.name),
+                            if AgentEvidenceValidationPolicy.memoryEvidenceTools.contains(batchResult.call.name),
                                batchResult.result.error == nil {
                                 memoryEvidencePayloads.append(batchResult.result.contentJSON ?? batchResult.result.contentText)
                                 for citation in batchResult.result.citations where !memoryCitations.contains(citation) {
                                     memoryCitations.append(citation)
                                 }
                             }
-                            if AgentRetrievalCompliancePolicy.webEvidenceTools.contains(batchResult.call.name),
+                            if AgentEvidenceValidationPolicy.webEvidenceTools.contains(batchResult.call.name),
                                batchResult.result.error == nil {
                                 for citation in batchResult.result.citations where !webEvidenceCitations.contains(citation) {
                                     webEvidenceCitations.append(citation)

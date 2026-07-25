@@ -358,7 +358,7 @@ private struct RetrievalEvidenceTool: AgentTool {
             contentText: "retrieved by \(name)",
             citations: name.hasPrefix("memory_os_")
                 ? ["record:\(name)"]
-                : (AgentRetrievalCompliancePolicy.webEvidenceTools.contains(name) ? ["https://example.com/research"] : [])
+                : (AgentEvidenceValidationPolicy.webEvidenceTools.contains(name) ? ["https://example.com/research"] : [])
         )
     }
 }
@@ -831,51 +831,41 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(!finalSystemMessage.contains(instructions))
 }
 
-@Test func retrievalComplianceRequiresMemoryAndWebForExplicitExternalResearch() async throws {
-    let toolNames = AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"]
-    let calls = toolNames.enumerated().map { index, name in
-        AgentToolCall(id: "required-\(index)", name: name, argumentsJSON: "{}")
-    }
-    let provider = ScriptedModelProvider(responses: [
-        AgentModelResponse(text: "premature"),
-        AgentModelResponse(text: nil, toolCalls: calls, finishReason: .toolCalls),
-        AgentModelResponse(text: "杭州岗位结果：https://example.com/research")
-    ])
+@Test func agentLoopDoesNotForceMissingBootstrapToolCalls() async throws {
+    let bootstrapToolNames = [
+        "get_current_time",
+        "calendar_search_events",
+        "connor_skill_list"
+    ] + AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let provider = ScriptedModelProvider(responses: [AgentModelResponse(text: "Model-completed response")])
     var registry = AgentToolRegistry()
-    for name in toolNames { registry.register(RetrievalEvidenceTool(name: name)) }
+    for name in bootstrapToolNames { registry.register(RetrievalEvidenceTool(name: name)) }
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
 
     var completed: AgentTextCompleteEvent?
-    for try await event in loop.run(AgentChatRequest(sessionID: "compliance-web", userMessage: "请搜索杭州的 AI 产品经理岗位")) {
+    for try await event in loop.run(AgentChatRequest(sessionID: "bootstrap-not-forced", userMessage: "直接回答")) {
         if case .textComplete(let payload) = event { completed = payload }
     }
 
     let requests = await provider.requests
-    #expect(requests.count == 3)
-    #expect(requests[1].messages.last?.role == .system)
-    #expect(requests[1].messages.last?.content.contains("blocked the first completion") == true)
-    #expect(completed?.text == "杭州岗位结果：https://example.com/research")
-    #expect(completed?.citations == ["https://example.com/research"])
+    #expect(requests.count == 1)
+    #expect(completed?.text == "Model-completed response")
+    #expect(!requests[0].messages.contains { $0.content.contains("blocked the first completion") })
 }
 
-@Test func retrievalComplianceExemptsPureMemoryTasksFromWebSearch() async throws {
-    let policy = AgentRetrievalCompliancePolicy()
+@Test func evidenceValidationClassifiesMemoryAndWebAnswers() async throws {
+    let policy = AgentEvidenceValidationPolicy()
     #expect(policy.isPureMemoryTask("请根据我的记忆总结我们之前的决定"))
     #expect(policy.isPureMemoryTask("请总结今天的工作"))
     #expect(policy.isPureMemoryTask("请回顾昨天的任务"))
     #expect(!policy.isPureMemoryTask("请搜索最新 Swift 版本"))
     #expect(!policy.isPureMemoryTask("回顾昨天我们讨论的 Swift 版本，并核实现在是否仍是最新版。"))
-    #expect(policy.requiresMemoryRetrieval("请搜索杭州的 AI 产品经理岗位"))
     #expect(policy.requiresWebResearch("请搜寻杭州的 AI 产品经理岗位"))
     #expect(!policy.requiresWebResearch("请搜索工作区里的 Swift 文件"))
-    #expect(policy.requiredTools(for: "Explain Swift concurrency") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
-    #expect(policy.requiredTools(for: "回忆我的偏好") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
-    #expect(policy.requiredTools(for: "请回顾昨天的任务") == AgentRetrievalCompliancePolicy.requiredMemoryTools)
-    #expect(policy.requiredTools(for: "回顾昨天我们讨论的 Swift 版本，并核实现在是否仍是最新版。") == AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"])
 }
 
 @Test func agentLoopRewritesExternalResearchAnswerThatOmitsSuccessfulWebResults() async throws {
-    let memoryCalls = AgentRetrievalCompliancePolicy.requiredMemoryTools.enumerated().map {
+    let memoryCalls = AgentEvidenceValidationPolicy.memoryEvidenceTools.enumerated().map {
         AgentToolCall(id: "memory-\($0.offset)", name: $0.element, argumentsJSON: "{}")
     }
     let provider = ScriptedModelProvider(responses: [
@@ -889,7 +879,7 @@ private struct InstructionPromotionTool: AgentTool {
     ])
     var registry = AgentToolRegistry()
     registry.register(RetrievalEvidenceTool(name: "web_search"))
-    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools {
+    for name in AgentEvidenceValidationPolicy.memoryEvidenceTools {
         registry.register(RetrievalEvidenceTool(name: name))
     }
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
@@ -908,12 +898,12 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(completed?.citations == ["https://example.com/research"])
 }
 
-@Test func retrievalComplianceAllowsImmediateWorkspaceStopWithoutBootstrapTools() async throws {
+@Test func agentLoopAllowsImmediateWorkspaceStopWithoutBootstrapTools() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(text: "尚未选择合适的工作目录。请先在 Composer 中选择工作目录后再试。")
     ])
     var registry = AgentToolRegistry()
-    for name in AgentRetrievalCompliancePolicy.requiredMemoryTools + ["web_search"] {
+    for name in AgentEvidenceValidationPolicy.memoryEvidenceTools + ["web_search"] {
         registry.register(RetrievalEvidenceTool(name: name))
     }
     let configuration = AgentLoopConfiguration(instructionAppendix: """
@@ -942,7 +932,7 @@ private struct InstructionPromotionTool: AgentTool {
 }
 
 @Test func agentLoopCorrectsConflictedMemoryClaimOnce() async throws {
-    let names = AgentRetrievalCompliancePolicy.requiredMemoryTools
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
     let calls = names.enumerated().map { AgentToolCall(id: "memory-\($0.offset)", name: $0.element, argumentsJSON: "{}") }
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(text: nil, toolCalls: calls, finishReason: .toolCalls),
