@@ -48,6 +48,7 @@ struct BrowserWorkspaceView: View {
     @State private var formUndoReceipt: BrowserFormInsertionReceipt?
     @State private var isVerticalTabSidebarHovered = false
     @State private var verticalTabFilter = ""
+    @State private var collapsedVerticalTabGroupIDs: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -494,35 +495,41 @@ struct BrowserWorkspaceView: View {
                             .padding(.top, 8)
                     } else {
                         ForEach(groups) { group in
+                            let isCollapsed = isVerticalTabGroupCollapsed(group.sessionID)
                             VStack(alignment: .leading, spacing: 5) {
                                 BrowserVerticalTabGroupHeader(
                                     title: group.sessionTitle,
                                     count: group.tabs.count,
                                     isExpanded: isExpanded,
-                                    isActive: group.sessionID == activeSessionID
+                                    isActive: group.sessionID == activeSessionID,
+                                    isCollapsed: isCollapsed,
+                                    onToggle: { toggleVerticalTabGroup(group.sessionID) }
                                 )
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    ForEach(group.tabs) { item in
-                                        BrowserVerticalTabRow(
-                                            item: item,
-                                            isExpanded: isExpanded,
-                                            isSelected: item.reference.sessionID == activeSessionID
-                                                && item.reference.tabID == activeSelectedTabID,
-                                            isPrivate: privateTabIDs.contains(item.reference.tabID),
-                                            onSelect: { selectGlobalTab(item.reference) },
-                                            onClose: { closeGlobalTab(item.reference) }
-                                        )
+                                if !isCollapsed {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        ForEach(group.tabs) { item in
+                                            BrowserVerticalTabRow(
+                                                item: item,
+                                                isExpanded: isExpanded,
+                                                isSelected: item.reference.sessionID == activeSessionID
+                                                    && item.reference.tabID == activeSelectedTabID,
+                                                isPrivate: privateTabIDs.contains(item.reference.tabID),
+                                                onSelect: { selectGlobalTab(item.reference) },
+                                                onClose: { closeGlobalTab(item.reference) }
+                                            )
+                                        }
                                     }
-                                }
-                                .padding(.leading, isExpanded ? 9 : 0)
-                                .overlay(alignment: .leading) {
-                                    if isExpanded {
-                                        Capsule(style: .continuous)
-                                            .fill(BrowserVerticalTabAccent.color(for: group.sessionTitle))
-                                            .frame(width: 3)
-                                            .padding(.vertical, 3)
+                                    .padding(.leading, isExpanded ? 9 : 0)
+                                    .overlay(alignment: .leading) {
+                                        if isExpanded {
+                                            Capsule(style: .continuous)
+                                                .fill(BrowserVerticalTabAccent.color(for: group.sessionTitle))
+                                                .frame(width: 3)
+                                                .padding(.vertical, 3)
+                                        }
                                     }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                             }
                         }
@@ -553,6 +560,20 @@ struct BrowserWorkspaceView: View {
             }
         }
         .animation(.easeInOut(duration: 0.16), value: isExpanded)
+    }
+
+    private func isVerticalTabGroupCollapsed(_ sessionID: String) -> Bool {
+        collapsedVerticalTabGroupIDs.contains(sessionID)
+    }
+
+    private func toggleVerticalTabGroup(_ sessionID: String) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if collapsedVerticalTabGroupIDs.contains(sessionID) {
+                collapsedVerticalTabGroupIDs.remove(sessionID)
+            } else {
+                collapsedVerticalTabGroupIDs.insert(sessionID)
+            }
+        }
     }
 
     private var toolbar: some View {
