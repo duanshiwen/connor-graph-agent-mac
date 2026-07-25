@@ -73,6 +73,27 @@ public struct AgentCurrentTimePreflightPolicy: Sendable, Equatable {
     }
 }
 
+/// Enforces one initial Note search when the read-only tool is available.
+/// Later focused Note searches remain independent and do not restart preflight.
+public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
+    public static let requiredToolName = "note_search"
+
+    public init() {}
+
+    public func requiresAttempt(
+        availableTools: [AgentToolDefinition],
+        didAttempt: Bool
+    ) -> Bool {
+        !didAttempt && availableTools.contains { $0.name == Self.requiredToolName }
+    }
+
+    public func correctionInstruction() -> String {
+        """
+        Mandatory Note preflight is incomplete. Before task-specific tool use or a final answer, call `note_search` once using compact topic keywords, entity names, or a subject phrase tied to the latest actual user request. Use an empty `query` only when no meaningful search terms can be formed. This is a one-attempt requirement: a successful empty result or a real failure satisfies the startup attempt, and later focused searches of Notes or either Memory OS context source must not restart already completed startup tools.
+        """
+    }
+}
+
 /// Enforces inclusion of every available continuity source and complete sequential
 /// pagination of the current-user profile source.
 public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
