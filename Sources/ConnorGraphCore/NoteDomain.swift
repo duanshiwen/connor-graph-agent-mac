@@ -113,3 +113,23 @@ public struct NoteProjectionCandidate: Sendable, Equatable {
         self.updatedAt = updatedAt
     }
 }
+
+public struct NoteImportProjectionMetadata: Sendable, Equatable {
+    public var itemID: String
+    public var sourceID: String
+    public var sourceKind: String
+    public var sourceIdentity: String
+    public var externalID: String?
+    public var relativePath: String?
+    public var sourceCreatedAt: Date?
+
+    public init(itemID: String, sourceID: String, sourceKind: String, sourceIdentity: String, externalID: String? = nil, relativePath: String? = nil, sourceCreatedAt: Date? = nil) {
+        self.itemID = itemID
+        self.sourceID = sourceID
+        self.sourceKind = sourceKind
+        self.sourceIdentity = sourceIdentity
+        self.externalID = externalID
+        self.relativePath = relativePath
+        self.sourceCreatedAt = sourceCreatedAt
+    }
+}
