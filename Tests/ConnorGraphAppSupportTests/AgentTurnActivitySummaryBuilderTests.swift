@@ -143,6 +143,22 @@ import ConnorGraphCore
     #expect(summary.subtitle == "当前会话正在等待权限审批，请前往处理 · 未调用工具")
 }
 
+@Test func clearsWaitingStateAfterPermissionIsApproved() {
+    let process = makeProcess(state: .running, turnNumber: 12)
+    let events: [AgentEventPresentation] = [
+        event(kind: "permissionRequested", title: "Permission requested: workspaceWrite", detail: "Request permission-1", severity: .warning),
+        event(kind: "permissionResolved", title: "Permission approved: workspaceWrite", detail: "Request permission-1", severity: .success)
+    ]
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
+
+    #expect(summary.hasPermissionRequest)
+    #expect(!summary.isWaitingForPermission)
+    #expect(summary.state == .running)
+    #expect(summary.statusText == "正在处理")
+    #expect(summary.subtitle == "未调用工具")
+}
+
 @Test func localizesRegisteredToolFamiliesAndFutureToolFallbacks() {
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mail_send_draft", semanticKind: .unknown) == "发送邮件")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "rss_sync_source", semanticKind: .unknown) == "同步 RSS 订阅源")

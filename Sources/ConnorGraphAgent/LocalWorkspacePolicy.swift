@@ -233,22 +233,45 @@ public enum LocalShellCommandPolicy {
             return ShellCommandClassification(risk: .unknown, reason: "empty command")
         }
         let lower = trimmed.lowercased()
-        let destructivePatterns = ["rm -rf /", "sudo ", " chown ", "chmod -r", "diskutil", "mkfs", ":(){", "killall "]
-        if destructivePatterns.contains(where: { lower.contains($0) }) {
+        let destructivePatterns = ["rm -rf /", "rm -fr /", ":(){"]
+        let destructiveCommands = ["sudo", "chown", "diskutil", "mkfs", "killall"]
+        if destructivePatterns.contains(where: { lower.contains($0) })
+            || destructiveCommands.contains(where: { containsCommandPrefix($0, in: lower) })
+            || containsCommandPrefix("chmod -r", in: lower) {
             return ShellCommandClassification(risk: .destructive, reason: "matches destructive shell pattern")
         }
-        let networkPrefixes = ["curl ", "wget ", "git fetch", "git pull", "git push", "npm install", "npm update", "swift package resolve"]
-        if networkPrefixes.contains(where: { lower.hasPrefix($0) }) {
+        let networkPrefixes = ["curl", "wget", "git clone", "git fetch", "git pull", "git push", "npm install", "npm update", "swift package resolve"]
+        if networkPrefixes.contains(where: { containsCommandPrefix($0, in: lower) }) {
             return ShellCommandClassification(risk: .network, reason: "network or dependency command")
         }
-        let writePrefixes = ["mkdir ", "touch ", "cp ", "mv ", "rm ", "sed -i", "python ", "python3 ", "node ", "npm run"]
-        if writePrefixes.contains(where: { lower.hasPrefix($0) }) {
+        let writePrefixes = [
+            "mkdir", "touch", "cp", "mv", "rm", "tee", "sed -i",
+            "python", "python3", "node", "bash", "zsh", "sh",
+            "git add", "git commit", "git switch", "git checkout", "git merge", "git rebase",
+            "npm run", "npm test", "swift test", "swift build", "xcodebuild",
+            "cargo test", "cargo build", "go test", "pytest", "make", "gradle", "./gradlew"
+        ]
+        if writePrefixes.contains(where: { containsCommandPrefix($0, in: lower) }) {
             return ShellCommandClassification(risk: .workspaceWrite, reason: "may mutate workspace")
         }
-        let readOnlyPrefixes = ["pwd", "ls", "cat ", "sed -n", "grep ", "rg ", "find ", "git status", "git diff", "swift test", "swift build", "xcodebuild test"]
-        if readOnlyPrefixes.contains(where: { lower == $0 || lower.hasPrefix($0 + " ") || lower.hasPrefix($0) }) {
-            return ShellCommandClassification(risk: .readOnly, reason: "recognized read-only or verification command")
+        let compositionSignals = [";", "&&", "||", "\n", ">", "<", "$(", "`"]
+        if compositionSignals.contains(where: { lower.contains($0) }) {
+            return ShellCommandClassification(risk: .unknown, reason: "compound shell syntax requires conservative workspace-write review")
+        }
+        let readOnlyPrefixes = ["pwd", "ls", "cat", "sed -n", "grep", "rg", "find", "head", "tail", "wc", "git status", "git diff", "git log", "git show"]
+        if readOnlyPrefixes.contains(where: { hasSimplePrefix($0, in: lower) }) {
+            return ShellCommandClassification(risk: .readOnly, reason: "recognized read-only command")
         }
         return ShellCommandClassification(risk: .unknown, reason: "command is not in local policy allowlist")
+    }
+
+    private static func containsCommandPrefix(_ prefix: String, in command: String) -> Bool {
+        let escaped = NSRegularExpression.escapedPattern(for: prefix)
+        let pattern = #"(?:^|[;&|]\s*|\n\s*)"# + escaped + #"(?:\s|$)"#
+        return command.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private static func hasSimplePrefix(_ prefix: String, in command: String) -> Bool {
+        command == prefix || command.hasPrefix(prefix + " ")
     }
 }

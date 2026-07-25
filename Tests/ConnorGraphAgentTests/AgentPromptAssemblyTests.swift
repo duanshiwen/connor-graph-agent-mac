@@ -109,6 +109,23 @@ import ConnorGraphAgent
     #expect(prompt.contains("Personality may shape presentation"))
 }
 
+@Test func defaultSystemPromptDefinesAProgrammingWorkLoopWithoutAffectingEverydayTasks() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Programming and Precision Work"))
+    #expect(prompt.contains("distinguish whether the user asked to explain, review, diagnose, or change code"))
+    #expect(prompt.contains("but not code changes unless the user also requested a fix or implementation"))
+    #expect(prompt.contains("inspect applicable repository instructions, the current working-tree state"))
+    #expect(prompt.contains("Preserve unrelated user changes"))
+    #expect(prompt.contains("Build a bounded model of the affected behavior with targeted search and selective file reads"))
+    #expect(prompt.contains("complete all logically related edits before verification"))
+    #expect(prompt.contains("run one consolidated final verification pass using the smallest meaningful check"))
+    #expect(prompt.contains("Treat compiler, test, lint, and tool output as ground truth"))
+    #expect(prompt.contains("Never claim that code works, builds, or passes tests without a successful current-run result"))
+    #expect(prompt.contains("Apply this engineering workflow only to code, file, and configuration work"))
+    #expect(prompt.contains("do not impose it on unrelated everyday-assistant tasks"))
+}
+
 @Test func defaultSystemPromptRequiresSelectedWorkspaceForLocalFileRequests() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
@@ -139,6 +156,14 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("## Mandatory Task Bootstrap"))
     #expect(prompt.contains("For every user run, when their named tools are available, call `memory_os_recent_context`, `memory_os_knowledge_context`, and `memory_os_get_current_user_profile` as one continuity preflight"))
+    #expect(prompt.contains("After reading the user profile and any initial memory results"))
+    #expect(prompt.contains("privately extract the few profile or memory information points that are valuable to the current task"))
+    #expect(prompt.contains("strongly prefer focused follow-up searches with the context tools"))
+    #expect(prompt.contains("combine any new evidence with the initial results"))
+    #expect(prompt.contains("an especially strong recommendation, not an additional mandatory bootstrap or compliance requirement"))
+    #expect(prompt.contains("The initial profile and context calls have no required relative order"))
+    #expect(prompt.contains("a context search may occur before the profile is read"))
+    #expect(prompt.contains("Do not expose the extracted information-point list, perform unrelated follow-up searches"))
     #expect(prompt.contains("Retrieval is mandatory when the tools are available, but using or mentioning any returned record is conditional"))
     #expect(prompt.contains("pass `page: 1` as a JSON integer, never a quoted string"))
     #expect(prompt.contains("`page` set to exactly that `nextPage` integer"))
@@ -410,6 +435,10 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("memory_os_get_current_user_profile"))
     #expect(prompt.contains("Retrieve the current user's preferences, habits, traits, constraints, and interaction guidance"))
+    #expect(prompt.contains("Once the profile is available, extract only information points useful to this run"))
+    #expect(prompt.contains("strongly prefer using them for focused follow-up memory searches"))
+    #expect(prompt.contains("a high-priority recommendation rather than a mandatory extra search"))
+    #expect(prompt.contains("This refinement does not impose an order on the initial profile and memory calls"))
     #expect(prompt.contains("Apply profile records only when they materially improve the actual user request"))
     #expect(prompt.contains("never let older profile memory override the user's latest explicit request"))
     #expect(prompt.contains("If the user changes their name"))
