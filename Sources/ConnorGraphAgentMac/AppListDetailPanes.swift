@@ -2284,19 +2284,18 @@ struct ContactsSourceSettingsView: View {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                         PersonProfileDetailHero(
                             row: selected,
-                            imageURL: model.imageURLs(for: selected.id).first,
-                            onChooseImage: { imageImportPersonID = selected.id },
                             onEdit: { model.presentEditProfile(selected.id) },
                             onAddRelationship: { model.presentNewRelationshipEditor(sourcePersonID: selected.id) },
                             onDelete: { model.pendingProfileDeletionID = selected.id }
                         )
 
                         let imageURLs = model.imageURLs(for: selected.id)
-                        if !imageURLs.isEmpty {
-                            PersonProfilePhotoGallery(imageURLs: imageURLs) { imageURL in
-                                Task { @MainActor in
-                                    await model.removeProfileImage(at: imageURL, for: selected.id)
-                                }
+                        PersonProfilePhotoGallery(
+                            imageURLs: imageURLs,
+                            onAdd: { imageImportPersonID = selected.id }
+                        ) { imageURL in
+                            Task { @MainActor in
+                                await model.removeProfileImage(at: imageURL, for: selected.id)
                             }
                         }
 
@@ -2436,43 +2435,12 @@ private struct RelationshipEditorSheet: View {
 
 private struct PersonProfileDetailHero: View {
     var row: NativeContactRowPresentation
-    var imageURL: URL?
-    var onChooseImage: () -> Void
     var onEdit: () -> Void
     var onAddRelationship: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
-            VStack(spacing: AppShellLayout.spaceS) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.14))
-                    if let imageURL, let image = NSImage(contentsOf: imageURL) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 36, weight: .semibold))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(Color.accentColor)
-                    }
-                }
-                .frame(width: 112, height: 112)
-                .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                        .stroke(AppShellColors.hairline, lineWidth: 1)
-                )
-
-                Button(action: onChooseImage) {
-                    Label("添加图片", systemImage: "photo.badge.plus")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
             VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
                 Text(row.displayName)
                     .font(AgentChatTypography.title)
@@ -2547,6 +2515,7 @@ private struct PersonProfileDetailHero: View {
 
 private struct PersonProfilePhotoGallery: View {
     var imageURLs: [URL]
+    var onAdd: () -> Void
     var onRemove: (URL) -> Void
 
     private let columns = [
@@ -2577,6 +2546,25 @@ private struct PersonProfilePhotoGallery: View {
                         }
                     }
                 }
+
+                Button(action: onAdd) {
+                    VStack(spacing: AppShellLayout.spaceS) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 26, weight: .medium))
+                        Text("添加图片")
+                            .font(AgentChatTypography.meta)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+                    .aspectRatio(1, contentMode: .fit)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("为此人物添加一张或多张图片")
             }
         }
     }

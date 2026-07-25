@@ -65,6 +65,49 @@ private final class FactoryContactsCredentialStore: CredentialStore, @unchecked 
     #expect(try await fallbackStore.loadProfiles(includeInactive: false).isEmpty)
 }
 
+@Test func contactsReadRecoversPhotosStoredOnDiskWithoutProfilePaths() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-recover-person-images-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: root)
+    try storagePaths.ensureDirectoryHierarchy()
+    let graphStore = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path)
+    try graphStore.migrate()
+    let profileStore = try SQLitePersonProfileStore(databaseURL: root.appendingPathComponent("people.sqlite"))
+    let personID = ContactID(rawValue: "person-recovered-images")
+    _ = try await profileStore.upsert(PersonProfile(id: personID, displayName: "恢复图片的人"))
+    let sourceURL = root.appendingPathComponent("recovered.png")
+    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL)
+    let recoveredPath = try PersonProfileImageStore(storagePaths: storagePaths).importImage(at: sourceURL, personID: personID)
+    let factory = AppGraphAgentRuntimeFactory(
+        store: graphStore,
+        settingsRepository: AppLLMSettingsRepository(
+            settingsStore: FactoryContactsSettingsStore(),
+            credentialStore: FactoryContactsCredentialStore()
+        ),
+        storagePaths: storagePaths,
+        personProfileStore: profileStore
+    )
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "contacts_read", argumentsJSON: "{\"operation\":\"get_person\",\"personID\":\"\(personID.rawValue)\"}"),
+        context: AgentToolExecutionContext(
+            runID: "recover-person-images-run",
+            sessionID: "recover-person-images-session",
+            groupID: "default",
+            userPrompt: "读取人物图片",
+            toolCallID: "recover-person-images-read",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    let data = try #require(result.contentJSON?.data(using: .utf8))
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(object["photos"] as? [String] == [recoveredPath])
+}
+
 @Test func approvedPersonRegistryWritesBecomeGovernedMemoryEvidence() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-factory-contacts-memory-\(UUID().uuidString)", isDirectory: true)

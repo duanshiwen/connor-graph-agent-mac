@@ -62,6 +62,23 @@ public struct PersonProfileImageStore: Sendable {
         return url
     }
 
+    public func storedImageRelativePaths(for personID: ContactID, fileManager: FileManager = .default) -> [String] {
+        let personDirectory = imagesDirectory.appendingPathComponent(Self.sanitizedComponent(personID.rawValue), isDirectory: true)
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: personDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return urls
+            .filter { url in
+                Self.supportedExtensions.contains(url.pathExtension.lowercased())
+                    && ((try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false)
+            }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            .compactMap { try? relativePath(for: $0) }
+    }
+
     public func removeImage(at relativePath: String?, fileManager: FileManager = .default) throws {
         guard let relativePath else { return }
         let url = try resolvedURL(for: relativePath)
