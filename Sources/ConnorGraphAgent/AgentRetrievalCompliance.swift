@@ -1,7 +1,6 @@
 import Foundation
 
-/// Classifies evidence already gathered for answer-quality checks. It does not
-/// require, schedule, or block completion on any bootstrap tool call.
+/// Classifies evidence already gathered for answer-quality checks.
 public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
     public static let webEvidenceTools = ["web_search", "web_fetch", "browser_fetch"]
     public static let memoryEvidenceTools = [
@@ -50,6 +49,53 @@ public struct AgentEvidenceValidationPolicy: Sendable, Equatable {
         let hasSearchIntent = searchSignals.contains(where: normalized.contains)
         let isClearlyLocalSearch = localSourceSignals.contains(where: normalized.contains) && !hasExplicitWebIntent
         return hasExplicitWebIntent || hasFreshnessOrVerificationNeed || (hasSearchIntent && !isClearlyLocalSearch)
+    }
+}
+
+/// Enforces one leading current-time attempt when the tool is available.
+/// Invocation, rather than success, unlocks the rest of the run.
+public struct AgentCurrentTimePreflightPolicy: Sendable, Equatable {
+    public static let requiredToolName = "get_current_time"
+
+    public init() {}
+
+    public func requiresAttempt(
+        availableTools: [AgentToolDefinition],
+        didAttempt: Bool
+    ) -> Bool {
+        !didAttempt && availableTools.contains { $0.name == Self.requiredToolName }
+    }
+
+    public func correctionInstruction() -> String {
+        """
+        Mandatory current-time preflight is incomplete. Before any other tool call or final answer, call `get_current_time`. This is a first-attempt requirement, not a success requirement: if the call returns empty content or fails, preserve the real result, do not retry automatically, and continue with the remaining bootstrap and task. Never replace a failed time result with a guessed current time.
+        """
+    }
+}
+
+/// Enforces inclusion of every available continuity source without prescribing
+/// call order or limiting how often the model may revisit a paginated source.
+public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
+    public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools
+
+    public init() {}
+
+    public func missingToolNames(
+        availableTools: [AgentToolDefinition],
+        invokedToolNames: Set<String>
+    ) -> [String] {
+        let availableNames = Set(availableTools.map(\.name))
+        return Self.requiredToolNames.filter {
+            availableNames.contains($0) && !invokedToolNames.contains($0)
+        }
+    }
+
+    public func correctionInstruction(for missingToolNames: [String]) -> String? {
+        guard !missingToolNames.isEmpty else { return nil }
+        let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
+        return """
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. This requirement does not impose a call-count limit: repeat any continuity tool whenever its pagination metadata or the task's evidence needs justify another call. A successful empty result still counts as a real call and does not require an automatic retry; retry only when pagination metadata or the task's evidence needs justify it. A failed attempt also satisfies invocation but supplies no evidence; preserve its real error and never fabricate memory.
+        """
     }
 }
 

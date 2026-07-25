@@ -2,7 +2,7 @@ import Foundation
 
 public struct GetCurrentTimeTool: AgentTool {
     public var name: String { "get_current_time" }
-    public var description: String { "Get the current system date and time. Use this instead of guessing whenever the user asks about the current date, current time, today, now, or time-sensitive information." }
+    public var description: String { "Get the current system date and time. When available, this must be the first tool attempted in each new user run. A failed attempt must not be retried automatically or block unrelated work. Use a successful result instead of guessing for current-date, current-time, today, now, or other time-sensitive reasoning." }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
