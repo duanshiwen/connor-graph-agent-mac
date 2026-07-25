@@ -12,6 +12,64 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
     AppStoragePaths(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true))
 }
 
+private struct FailingNoteProjection: NoteProjectionSynchronizing {
+    func synchronize(session: AgentSession, origin: NoteOriginKind) throws { throw CocoaError(.fileWriteUnknown) }
+    func remove(sessionID: String, deletedAt: Date) throws { throw CocoaError(.fileWriteUnknown) }
+}
+
+@Test func appChatRepositoryProjectsOnlyNoteFirstMessageAndUpdatesIt() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    try repository.saveSession(AgentSession(id: "chat", messages: [AgentMessage(role: .user, content: "chat")]))
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    var noteSession = AgentSession(
+        id: "note", title: "Original",
+        messages: [AgentMessage(id: "first", role: .user, content: "first body"), AgentMessage(role: .assistant, content: "summary")],
+        governance: governance
+    )
+    try repository.saveSession(noteSession)
+
+    #expect(try AppNoteRepository(store: store).note(sessionID: "chat") == nil)
+    #expect(try AppNoteRepository(store: store).note(sessionID: "note")?.body == "first body")
+    noteSession.title = "Renamed"
+    noteSession.messages[0].content = "edited body"
+    noteSession.updatedAt = Date(timeIntervalSince1970: 5_000)
+    try repository.saveSession(noteSession)
+    let projected = try #require(try AppNoteRepository(store: store).note(sessionID: "note"))
+    #expect(projected.title == "Renamed")
+    #expect(projected.body == "edited body")
+    #expect(projected.sourceMessageID == "first")
+}
+
+@Test func appChatRepositoryNoteProjectionFailureDoesNotFailSessionPersistence() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store, noteProjection: FailingNoteProjection())
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    let session = AgentSession(id: "note", messages: [AgentMessage(role: .user, content: "body")], governance: governance)
+
+    try repository.saveSession(session)
+    #expect(try repository.loadSession(id: "note") != nil)
+}
+
+@Test func appChatRepositoryDeletingNoteRemovesProjectionButDeletingChatIsIsolated() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    try repository.saveSession(AgentSession(id: "note", messages: [AgentMessage(role: .user, content: "body")], governance: governance))
+    try repository.saveSession(AgentSession(id: "chat", messages: [AgentMessage(role: .user, content: "body")]))
+
+    try repository.deleteSession(sessionID: "chat")
+    #expect(try AppNoteRepository(store: store).note(sessionID: "note") != nil)
+    try repository.deleteSession(sessionID: "note")
+    #expect(try AppNoteRepository(store: store).note(sessionID: "note") == nil)
+}
+
 @Test func appChatRepositoryPersistsMarkdownRenderCacheForSavedAssistantMessages() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
