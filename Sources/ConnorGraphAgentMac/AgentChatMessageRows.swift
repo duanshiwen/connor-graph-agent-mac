@@ -156,48 +156,6 @@ struct AgentChatMessageRow: View {
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
 
-    @MainActor
-    private final class BrowserPromptFoldingCache {
-        static let shared = BrowserPromptFoldingCache()
-        private var hits: [String: BrowserPromptFoldingParts] = [:]
-        private var misses = Set<String>()
-        private let limit = 600
-
-        func parts(for messageID: String, content: String) -> BrowserPromptFoldingParts? {
-            if let cached = hits[messageID] { return cached }
-            if misses.contains(messageID) { return nil }
-
-            guard content.contains("网页正文：") else {
-                storeMiss(messageID)
-                return nil
-            }
-
-            guard let parsed = BrowserPromptFoldingParser().parse(content) else {
-                storeMiss(messageID)
-                return nil
-            }
-            storeHit(parsed, for: messageID)
-            return parsed
-        }
-
-        private func storeHit(_ parts: BrowserPromptFoldingParts, for messageID: String) {
-            pruneIfNeeded()
-            hits[messageID] = parts
-        }
-
-        private func storeMiss(_ messageID: String) {
-            pruneIfNeeded()
-            misses.insert(messageID)
-        }
-
-        private func pruneIfNeeded() {
-            if hits.count + misses.count >= limit {
-                hits.removeAll(keepingCapacity: true)
-                misses.removeAll(keepingCapacity: true)
-            }
-        }
-    }
-
     private var isUser: Bool { row.message.role == .user }
     private var usesTrailingUserLayout: Bool { isUser && !isNoteBody }
     private var messageBodyPointSize: CGFloat {
@@ -222,10 +180,6 @@ struct AgentChatMessageRow: View {
             .dropFirst(prefix.count)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return label.isEmpty ? nil : label
-    }
-
-    private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
-        BrowserPromptFoldingCache.shared.parts(for: row.id, content: row.message.content)
     }
 
     var body: some View {
@@ -320,11 +274,12 @@ struct AgentChatMessageRow: View {
     @ViewBuilder
     private var messageContent: some View {
         if isUser {
-            if let browserPromptFoldingParts {
-                BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts, bodyPointSize: messageBodyPointSize)
-            } else {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: messageBodyFont, bodyPointSize: messageBodyPointSize)
-            }
+            AgentMarkdownPreviewText(
+                markdown: row.message.content,
+                font: messageBodyFont,
+                bodyPointSize: messageBodyPointSize,
+                allowsDeferredPreview: false
+            )
         } else {
             assistantMarkdownBody
         }
@@ -495,44 +450,6 @@ struct AgentAssistantHeaderView: View {
                 .aspectRatio(contentMode: .fill)
                 .frame(width: AgentChatLayout.avatarSize, height: AgentChatLayout.avatarSize)
                 .clipShape(Circle())
-        }
-    }
-}
-
-struct BrowserPromptFoldedMessageView: View {
-    var parts: BrowserPromptFoldingParts
-    var bodyPointSize: CGFloat
-    @State private var isWebPageBodyExpanded: Bool = false
-
-    private var bodyFont: Font {
-        AgentChatTypography.messageBody(pointSize: bodyPointSize)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-            if !parts.leadingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: bodyFont, bodyPointSize: bodyPointSize)
-            }
-
-            DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
-                ScrollView {
-                    Text(parts.webPageBody)
-                        .font(AgentChatTypography.monoMeta)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(AgentChatLayout.spaceS)
-                }
-                .frame(maxHeight: 220, alignment: .top)
-                .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
-            } label: {
-                Label("网页正文", systemImage: "doc.text.magnifyingglass")
-                    .font(AgentChatTypography.metaEmphasis)
-            }
-            .tint(.primary)
-
-            if !parts.trailingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: bodyFont, bodyPointSize: bodyPointSize)
-            }
         }
     }
 }

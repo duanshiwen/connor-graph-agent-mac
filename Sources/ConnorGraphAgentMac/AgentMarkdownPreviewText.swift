@@ -11,10 +11,15 @@ enum AgentMarkdownPreviewRenderStrategy: Equatable {
 
     static let deferredPreviewCharacterThreshold = 12_000
 
-    static func strategy(lineLimit: Int?, monospacedFallback: Bool, markdownCharacterCount: Int) -> AgentMarkdownPreviewRenderStrategy {
+    static func strategy(
+        lineLimit: Int?,
+        monospacedFallback: Bool,
+        markdownCharacterCount: Int,
+        allowsDeferredPreview: Bool = true
+    ) -> AgentMarkdownPreviewRenderStrategy {
         if lineLimit != nil { return .inlineOnly }
         if monospacedFallback { return .plainText }
-        if markdownCharacterCount >= deferredPreviewCharacterThreshold { return .deferredPreview }
+        if allowsDeferredPreview, markdownCharacterCount >= deferredPreviewCharacterThreshold { return .deferredPreview }
         return .compiledDocument
     }
 }
@@ -26,6 +31,7 @@ struct AgentMarkdownPreviewText: View {
     var monospacedFallback: Bool = false
     var lineLimit: Int? = nil
     var maxRenderedBlocks: Int? = nil
+    var allowsDeferredPreview: Bool = true
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     @State private var loadedDocument: AgentMarkdownCompiledDocument?
 
@@ -113,7 +119,8 @@ struct AgentMarkdownPreviewText: View {
         AgentMarkdownPreviewRenderStrategy.strategy(
             lineLimit: lineLimit,
             monospacedFallback: monospacedFallback,
-            markdownCharacterCount: markdown.count
+            markdownCharacterCount: markdown.count,
+            allowsDeferredPreview: allowsDeferredPreview
         )
     }
 
