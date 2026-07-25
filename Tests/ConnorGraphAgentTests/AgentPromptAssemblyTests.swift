@@ -283,8 +283,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("follow each exact `nextPage`"))
     #expect(prompt.contains("never claim that all Notes were checked"))
     #expect(prompt.contains("A Note-tool failure must not block a task that does not depend on Note evidence"))
-    #expect(!AgentRetrievalCompliancePolicy.requiredMemoryTools.contains("note_search"))
-    #expect(!AgentRetrievalCompliancePolicy.requiredMemoryTools.contains("note_get"))
+    #expect(!AgentEvidenceValidationPolicy.memoryEvidenceTools.contains("note_search"))
+    #expect(!AgentEvidenceValidationPolicy.memoryEvidenceTools.contains("note_get"))
 }
 
 @Test func defaultSystemPromptChecksUpcomingCalendarWithoutDistractingFromCurrentWork() {
