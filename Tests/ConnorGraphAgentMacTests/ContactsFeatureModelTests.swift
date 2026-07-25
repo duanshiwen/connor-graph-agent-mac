@@ -95,6 +95,21 @@ struct ContactsFeatureModelTests {
         #expect(fixture.model.isSyncingSystemContacts == false)
     }
 
+    @Test func systemSyncPreservesExistingProfileImages() async throws {
+        let id = ContactID(rawValue: "system-person-with-images")
+        let record = ContactRecord(id: id, givenName: "更新后的姓名", emails: [])
+        let fixture = try makeFixture(systemLoader: { [record] })
+        defer { fixture.cleanup() }
+        let paths = ["contacts/images/system-person-with-images/one.png", "contacts/images/system-person-with-images/two.jpg"]
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: id, displayName: "旧姓名", imageRelativePaths: paths))
+
+        #expect(await fixture.model.syncSystemContactsNow())
+
+        let synced = try #require(try await fixture.profileStore.profile(id: id))
+        #expect(synced.displayName == "更新后的姓名")
+        #expect(synced.imageRelativePaths == paths)
+    }
+
     @Test func systemSyncFailureResetsLoadingAndReportsLocalizedMessage() async throws {
         struct Failure: LocalizedError { var errorDescription: String? { "通讯录权限被拒绝" } }
         let fixture = try makeFixture(systemLoader: { throw Failure() })
@@ -168,6 +183,24 @@ struct ContactsFeatureModelTests {
         #expect(fixture.model.imageURLs(for: id).isEmpty)
         #expect(fixture.model.profiles.first?.imageRelativePaths == nil)
         #expect(storedURLs.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+    }
+
+    @Test func orphanedStoredImagesAreRecoveredAndCanBeRemoved() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let id = ContactID(rawValue: "person-orphaned-images")
+        _ = try await fixture.profileStore.upsert(PersonProfile(id: id, displayName: "恢复图片"))
+        let sourceURL = fixture.root.appendingPathComponent("orphan.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL)
+        let imageStore = PersonProfileImageStore(applicationSupportDirectory: fixture.root)
+        _ = try imageStore.importImage(at: sourceURL, personID: id)
+        await fixture.model.reload()
+
+        let recoveredURL = try #require(fixture.model.imageURLs(for: id).first)
+        await fixture.model.removeProfileImage(at: recoveredURL, for: id)
+
+        #expect(fixture.model.imageURLs(for: id).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: recoveredURL.path))
     }
 
     private func makeFixture(

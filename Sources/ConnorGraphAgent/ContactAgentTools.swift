@@ -46,6 +46,9 @@ enum ContactJSON {
     private static func addPersonOperationIDs(to object: inout [String: Any]) {
         object["personID"] = object["id"]
         object["mergedIntoPersonID"] = object["mergedIntoID"]
+        let photos = object["imageRelativePaths"] as? [String] ?? []
+        object["imageRelativePaths"] = photos
+        object["photos"] = photos
     }
 
     private static func encodeJSONObject(_ object: Any) throws -> String {

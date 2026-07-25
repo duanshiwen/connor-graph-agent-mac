@@ -37,15 +37,15 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
     }
 
     public func listPeople() async throws -> [PersonProfile] {
-        try await profileStore.loadProfiles(includeInactive: false)
+        try await profileStore.loadProfiles(includeInactive: false).map(resolvingStoredImages(in:))
     }
 
     public func searchPeople(query: String) async throws -> [PersonProfile] {
-        try await profileStore.searchProfiles(query: query, includeInactive: false)
+        try await profileStore.searchProfiles(query: query, includeInactive: false).map(resolvingStoredImages(in:))
     }
 
     public func getPerson(id: ContactID) async throws -> PersonProfile? {
-        try await profileStore.profile(id: id)
+        try await profileStore.profile(id: id).map(resolvingStoredImages(in:))
     }
 
     public func createPerson(_ profile: PersonProfile, approved: Bool) async throws -> PersonProfile {
@@ -57,9 +57,10 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
 
     public func updatePerson(id: ContactID, update: PersonProfileDraft, approved: Bool) async throws -> PersonProfile {
         guard approved else { throw AgentToolError.permissionDenied("Person profile write approval required") }
-        guard let existing = try await profileStore.profile(id: id) else {
+        guard let stored = try await profileStore.profile(id: id) else {
             throw AgentToolError.invalidArguments("Unknown person")
         }
+        let existing = resolvingStoredImages(in: stored)
         let updated = update.makeProfile(existing: existing)
         let saved = try await profileStore.upsert(updated)
         captureInMemoryOS(saved, operation: "update")
@@ -70,9 +71,10 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
         guard approved else { throw AgentToolError.permissionDenied("Person profile image write approval required") }
         guard let storagePaths else { throw AgentToolError.invalidArguments("Person image storage is unavailable") }
         guard !attachmentIDs.isEmpty else { throw AgentToolError.invalidArguments("attachmentIDs must contain at least one image ID") }
-        guard var existing = try await profileStore.profile(id: id) else {
+        guard let stored = try await profileStore.profile(id: id) else {
             throw AgentToolError.invalidArguments("Unknown person")
         }
+        var existing = resolvingStoredImages(in: stored)
         let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
         let imageStore = PersonProfileImageStore(storagePaths: storagePaths)
         var newPaths: [String] = []
@@ -109,9 +111,10 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
 
     public func removeAllPersonImages(id: ContactID, approved: Bool) async throws -> PersonProfile {
         guard approved else { throw AgentToolError.permissionDenied("Person profile image write approval required") }
-        guard var existing = try await profileStore.profile(id: id) else {
+        guard let stored = try await profileStore.profile(id: id) else {
             throw AgentToolError.invalidArguments("Unknown person")
         }
+        var existing = resolvingStoredImages(in: stored)
         let previousPaths = existing.imageRelativePaths ?? []
         existing.imageRelativePaths = nil
         existing.updatedAt = Date()
@@ -190,5 +193,14 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
         var seen: Set<String> = []
         let unique = paths.filter { !$0.isEmpty && seen.insert($0).inserted }
         return unique.isEmpty ? nil : unique
+    }
+
+    private func resolvingStoredImages(in profile: PersonProfile) -> PersonProfile {
+        guard let storagePaths else { return profile }
+        let discovered = PersonProfileImageStore(storagePaths: storagePaths).storedImageRelativePaths(for: profile.id)
+        guard !discovered.isEmpty else { return profile }
+        var resolved = profile
+        resolved.imageRelativePaths = uniqueImagePaths((profile.imageRelativePaths ?? []) + discovered)
+        return resolved
     }
 }

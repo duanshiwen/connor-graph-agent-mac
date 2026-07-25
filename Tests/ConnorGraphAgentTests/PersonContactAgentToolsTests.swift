@@ -57,6 +57,22 @@ struct PersonContactAgentToolsTests {
         #expect(loaded.contentText.contains("displayName: 张霞"))
     }
 
+    @Test func contactsReadReturnsEveryPersonPhoto() async throws {
+        let paths = ["contacts/images/person-photo/one.png", "contacts/images/person-photo/two.jpg"]
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(id: ContactID(rawValue: "person-photo"), displayName: "多图联系人", imageRelativePaths: paths)
+        ])
+        let result = try await ContactsReadTool(runtime: runtime).execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"personID\":\"person-photo\"}"),
+            context: Self.context(toolCallID: "call-get-person-photos")
+        )
+
+        let data = try #require(result.contentJSON?.data(using: .utf8))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["imageRelativePaths"] as? [String] == paths)
+        #expect(object["photos"] as? [String] == paths)
+    }
+
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
         let runtime = InMemoryAgentContactRuntime(people: [
             PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "小王", aliases: ["王同学"]),
