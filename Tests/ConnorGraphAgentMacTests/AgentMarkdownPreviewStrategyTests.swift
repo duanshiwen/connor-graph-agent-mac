@@ -34,6 +34,16 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(strategy == .compiledDocument)
     }
 
+    @Test func deferredPreviewOnlyCopiesABoundedMarkdownPrefix() {
+        let limit = AgentMarkdownDeferredPreviewPolicy.characterLimit
+        let markdown = String(repeating: "前", count: limit) + "不应进入折叠预览"
+
+        let preview = AgentMarkdownDeferredPreviewPolicy.source(for: markdown)
+
+        #expect(preview.count == limit)
+        #expect(!preview.contains("不应进入折叠预览"))
+    }
+
     @Test func messageBodyPointSizeIsDisplayedAndClamped() {
         #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)

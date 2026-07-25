@@ -53,7 +53,7 @@ struct AgentAssistantMessageExpansionPresentation: Equatable {
 
     init(message: AgentMessage, isExpanded: Bool) {
         self.isAvailable = message.role == .assistant
-            && message.content.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+            && message.content.utf8.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
         self.isExpanded = isExpanded
         self.title = isExpanded ? "收起" : "展开"
         self.systemImage = isExpanded ? "chevron.up" : "chevron.down"
