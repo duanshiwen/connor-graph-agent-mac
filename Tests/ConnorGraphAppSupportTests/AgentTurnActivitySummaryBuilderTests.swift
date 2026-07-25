@@ -160,6 +160,8 @@ import ConnorGraphCore
 }
 
 @Test func localizesRegisteredToolFamiliesAndFutureToolFallbacks() {
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "note_search", semanticKind: .unknown) == "搜索笔记")
+    #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "note_get", semanticKind: .unknown) == "读取笔记详情")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "mail_send_draft", semanticKind: .unknown) == "发送邮件")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "rss_sync_source", semanticKind: .unknown) == "同步 RSS 订阅源")
     #expect(AgentToolDisplayNameResolver.displayName(rawToolName: "memory_os_l4_neighbors", semanticKind: .unknown) == "查看实体关系")
