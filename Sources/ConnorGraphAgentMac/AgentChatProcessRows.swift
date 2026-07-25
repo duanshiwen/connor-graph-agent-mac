@@ -274,7 +274,7 @@ struct AgentTurnActivitySummaryDetailView: View {
 
             detailLine(icon: "checklist", text: resultText)
 
-            if summary.hasPermissionRequest {
+            if summary.isWaitingForPermission {
                 detailLine(icon: "lock.fill", text: "当前会话正在等待权限审批，请前往处理", color: .orange)
             }
 
