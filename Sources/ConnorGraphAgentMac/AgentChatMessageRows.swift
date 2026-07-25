@@ -90,6 +90,12 @@ enum AssistantMessageExportFormatter {
     }
 }
 
+enum AssistantMessageFullContentProvider {
+    static func markdown(for message: AgentChatMessagePresentation) -> String {
+        message.message.content
+    }
+}
+
 struct AgentChatTurnTimestampRow: View {
     var timestamp: AgentChatTurnTimestampPresentation
 
