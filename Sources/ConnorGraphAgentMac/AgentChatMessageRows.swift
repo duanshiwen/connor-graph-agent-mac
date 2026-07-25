@@ -43,6 +43,25 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
     }
 }
 
+struct AgentAssistantMessageExpansionPresentation: Equatable {
+    var isAvailable: Bool
+    var isExpanded: Bool
+    var title: String
+    var systemImage: String
+    var accessibilityLabel: String
+    var help: String
+
+    init(message: AgentMessage, isExpanded: Bool) {
+        self.isAvailable = message.role == .assistant
+            && message.content.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        self.isExpanded = isExpanded
+        self.title = isExpanded ? "收起" : "展开"
+        self.systemImage = isExpanded ? "chevron.up" : "chevron.down"
+        self.accessibilityLabel = isExpanded ? "收起这条助理回复" : "展开这条助理回复"
+        self.help = isExpanded ? "收起长回复，显示轻量预览" : "展开并显示完整回复"
+    }
+}
+
 enum AssistantMessageExportFormatter {
     private static let invalidFilenameCharacters = CharacterSet(charactersIn: "/\\?%*|\"<>:")
 
