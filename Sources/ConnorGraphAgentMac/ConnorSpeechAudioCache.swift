@@ -81,10 +81,19 @@ final class ConnorSpeechAudioCache {
         guard exporter.status == .completed else {
             throw exporter.error ?? ConnorSpeechAudioCacheError.compressionFailed
         }
+        let sourceDuration = try await asset.load(.duration).seconds
+        let compressedDuration = try await AVURLAsset(url: destinationURL).load(.duration).seconds
+        let tolerance = max(0.25, sourceDuration * 0.005)
+        guard sourceDuration.isFinite,
+              compressedDuration.isFinite,
+              sourceDuration > 0,
+              compressedDuration + tolerance >= sourceDuration
+        else { throw ConnorSpeechAudioCacheError.compressionTruncated }
     }
 }
 
 enum ConnorSpeechAudioCacheError: Error {
     case compressionUnavailable
     case compressionFailed
+    case compressionTruncated
 }
