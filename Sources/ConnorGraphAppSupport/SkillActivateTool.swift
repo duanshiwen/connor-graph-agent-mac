@@ -35,13 +35,18 @@ public struct SkillActivateTool: AgentTool {
                 error: "Skill not found: \(slug)"
             )
         }
-        let header = "# \(package.manifest.name) (slug: \(package.slug.rawValue))\n\n\(package.manifest.description)\n\n---\n\n"
         let json = "{\"slug\":\"\(package.slug.rawValue)\",\"name\":\"\(package.manifest.name)\",\"instructionLength\":\(package.instructions.count)}"
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: header + package.instructions,
-            contentJSON: json
+            contentText: "Activated validated skill \(package.manifest.name) (\(package.slug.rawValue)). The runtime will apply its instructions on the next model turn.",
+            contentJSON: json,
+            instructionPromotion: AgentToolInstructionPromotion(
+                kind: .validatedSkill,
+                identifier: package.slug.rawValue,
+                displayName: package.manifest.name,
+                instructions: package.instructions
+            )
         )
     }
 }
