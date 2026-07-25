@@ -63,7 +63,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Whenever its response contains a non-null `nextPage`"))
     #expect(assembly.instruction.text.contains("operation-ready result field whose name exactly matches the destination Schema parameter"))
     #expect(assembly.instruction.text.contains("call the same tool again with `page` set to exactly `nextPage`"))
-    #expect(assembly.instruction.text.contains("Strongly prefer reading the current-user profile through its terminal page whenever reasonably possible"))
+    #expect(assembly.instruction.text.contains("strongly prefer continuing through exact `nextPage` values"))
     #expect(assembly.instruction.text.contains("Newer is not automatically more relevant or more true"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
@@ -503,8 +503,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("The latest actual user request and current self-description override older memories or profile records"))
     #expect(prompt.contains("If no reliable personal evidence can improve the current task, answer normally"))
     #expect(prompt.contains("does not impose an order or call-count cap"))
-    #expect(prompt.contains("Strongly prefer reading the current-user profile through its terminal page whenever reasonably possible"))
-    #expect(prompt.contains("a strong personalization default, not a fixed call count"))
+    #expect(prompt.contains("strongly prefer continuing through exact `nextPage` values"))
+    #expect(prompt.contains("a personalization default, not a fixed call count"))
+    #expect(prompt.contains("A complete-profile or complete-coverage request must continue through `nextPage: null`"))
     #expect(prompt.contains("If the user changes their name"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
