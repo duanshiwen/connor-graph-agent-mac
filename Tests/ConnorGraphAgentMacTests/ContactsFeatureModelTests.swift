@@ -6,6 +6,18 @@ import ConnorGraphAppSupport
 
 @MainActor
 struct ContactsFeatureModelTests {
+    @Test func imageImporterRetainsTargetWhenSwiftUIDismissesBeforeCompletion() {
+        let personID = ContactID(rawValue: "person-image-import")
+        var state = ContactImageImporterState()
+
+        state.present(for: personID)
+        state.isPresented = false
+
+        #expect(state.consumeTargetPersonID() == personID)
+        #expect(state.targetPersonID == nil)
+        #expect(state.isPresented == false)
+    }
+
     @Test func reloadBuildsPresentationAndRepairsInvalidSelection() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
