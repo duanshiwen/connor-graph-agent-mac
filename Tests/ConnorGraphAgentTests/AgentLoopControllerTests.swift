@@ -943,6 +943,125 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(!policy.call(AgentToolCall(id: "profile-string-page", name: names[2], argumentsJSON: #"{"page":"2"}"#), matchesRequiredCurrentUserProfilePage: 2))
 }
 
+@Test func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: "unrelated_tool"))
+    registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
+    let policy = AgentNoteSearchPreflightPolicy()
+
+    #expect(policy.requiresAttempt(availableTools: registry.definitions, didAttempt: false))
+    #expect(!policy.requiresAttempt(availableTools: registry.definitions, didAttempt: true))
+    #expect(!policy.requiresAttempt(
+        availableTools: registry.definitions.filter { $0.name == "unrelated_tool" },
+        didAttempt: false
+    ))
+    #expect(policy.correctionInstruction().contains("Mandatory Note preflight is incomplete"))
+    #expect(policy.correctionInstruction().contains("one-attempt requirement"))
+    #expect(policy.correctionInstruction().contains("must not restart already completed startup tools"))
+}
+
+@Test func agentLoopRequiresNoteSearchBeforeTaskToolsOrFinalAnswer() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "Premature final answer"),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "note-startup", name: AgentNoteSearchPreflightPolicy.requiredToolName, argumentsJSON: #"{"query":"project"}"#),
+                AgentToolCall(id: "task-too-early", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "task-after-note", name: "task_tool", argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Note-grounded final answer")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
+    registry.register(RetrievalEvidenceTool(name: "task_tool"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var requestedToolNames: [String] = []
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "note-preflight-required", userMessage: "继续项目")) {
+        if case .toolRequested(let call) = event { requestedToolNames.append(call.name) }
+        if case .textComplete(let result) = event { completed = result }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 4)
+    #expect(requests[1].messages.last?.role == .system)
+    #expect(requests[1].messages.last?.content.contains("Mandatory Note preflight is incomplete") == true)
+    #expect(requestedToolNames == [AgentNoteSearchPreflightPolicy.requiredToolName, "task_tool"])
+    #expect(completed?.text == "Note-grounded final answer")
+}
+
+@Test func agentLoopKeepsIncrementalContextSearchesIndependentAfterStartup() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "time-startup", name: AgentCurrentTimePreflightPolicy.requiredToolName, argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "recent-startup", name: names[0], argumentsJSON: #"{"query":"project","page":1}"#),
+                AgentToolCall(id: "knowledge-startup", name: names[1], argumentsJSON: #"{"query":"project","page":1}"#),
+                AgentToolCall(id: "profile-page-1", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "note-startup", name: AgentNoteSearchPreflightPolicy.requiredToolName, argumentsJSON: #"{"query":"project"}"#)
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "profile-page-2", name: names[2], argumentsJSON: #"{"page":2}"#)],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "time-redundant", name: AgentCurrentTimePreflightPolicy.requiredToolName, argumentsJSON: "{}"),
+                AgentToolCall(id: "profile-redundant", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "recent-incremental", name: names[0], argumentsJSON: #"{"query":"deadline","page":1}"#),
+                AgentToolCall(id: "knowledge-incremental", name: names[1], argumentsJSON: #"{"query":"deadline","page":1}"#)
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Incremental retrieval complete")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(GetCurrentTimeTool())
+    registry.register(RetrievalEvidenceTool(name: names[0]))
+    registry.register(RetrievalEvidenceTool(name: names[1]))
+    registry.register(PaginatedCurrentUserProfileTool())
+    registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var requestedToolNames: [String] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "independent-incremental-retrieval", userMessage: "继续项目并检查截止时间")) {
+        if case .toolRequested(let call) = event { requestedToolNames.append(call.name) }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 5)
+    #expect(!requests[1].tools.contains { $0.name == AgentCurrentTimePreflightPolicy.requiredToolName })
+    #expect(requests[1].tools.contains { $0.name == names[2] })
+    #expect(!requests[3].tools.contains { $0.name == AgentCurrentTimePreflightPolicy.requiredToolName })
+    #expect(!requests[3].tools.contains { $0.name == names[2] })
+    #expect(requests[3].tools.contains { $0.name == names[0] })
+    #expect(requests[3].tools.contains { $0.name == names[1] })
+    #expect(requests[3].tools.contains { $0.name == AgentNoteSearchPreflightPolicy.requiredToolName })
+    #expect(requestedToolNames.filter { $0 == AgentCurrentTimePreflightPolicy.requiredToolName }.count == 1)
+    #expect(requestedToolNames.filter { $0 == names[2] }.count == 2)
+    #expect(requestedToolNames.filter { $0 == names[0] }.count == 2)
+    #expect(requestedToolNames.filter { $0 == names[1] }.count == 2)
+    #expect(requestedToolNames.filter { $0 == AgentNoteSearchPreflightPolicy.requiredToolName }.count == 1)
+}
+
 @Test func agentLoopExhaustsCurrentUserProfileBeforeTaskToolsOrFinalAnswer() async throws {
     let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
     let provider = ScriptedModelProvider(responses: [
