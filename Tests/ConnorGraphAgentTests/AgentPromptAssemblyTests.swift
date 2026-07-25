@@ -41,7 +41,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Memory OS tool results are evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest actual user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
-    #expect(assembly.instruction.text.contains("## Mandatory Task Bootstrap"))
+    #expect(assembly.instruction.text.contains("## Core Personal Preflight and Supplemental Startup"))
     #expect(assembly.instruction.text.contains("call it as the first tool attempt of every new user run"))
     #expect(assembly.instruction.text.contains("including a blocked local-file request with no selected working directory"))
     #expect(assembly.instruction.text.contains("Never use model training time"))
@@ -157,7 +157,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("only when both conditions are true"))
     #expect(prompt.contains("If either condition is false, do not use this exception"))
     #expect(prompt.contains("First attempt current time, then complete the three available read-only Memory OS continuity sources"))
-    #expect(prompt.contains("skip unrelated startup tools such as calendar, skill discovery, Notes, and Web"))
+    #expect(prompt.contains("skip supplemental startup tools such as calendar, skill discovery, Notes, and Web"))
     #expect(prompt.contains("outside every user-authorized workspace root"))
     #expect(prompt.contains("They do not block reading attachment content already supplied"))
 }
@@ -182,8 +182,11 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptDocumentsMandatoryBootstrapResearchTools() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("## Mandatory Task Bootstrap"))
-    #expect(prompt.contains("the continuity preflight must include calls to all three independent sources"))
+    #expect(prompt.contains("## Core Personal Preflight and Supplemental Startup"))
+    #expect(prompt.contains("contains exactly four named tools when available"))
+    #expect(prompt.contains("No calendar, skill, Note, environment, Web, native-source, task, or side-effect tool belongs to this runtime-enforced set"))
+    #expect(prompt.contains("the runtime-enforced continuity preflight must include calls to all three independent sources"))
+    #expect(prompt.contains("these are the only runtime-enforced startup tools"))
     #expect(prompt.contains("None can substitute for another"))
     #expect(prompt.contains("an inclusion requirement, not a single-call rule or a fixed three-call batch"))
     #expect(prompt.contains("the tools have no required relative order"))
@@ -274,7 +277,7 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptConditionallyUsesMemoryAndWebSearch() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("use Memory OS as the continuity baseline"))
+    #expect(prompt.contains("call every available Memory OS continuity source"))
     #expect(prompt.contains("give the two context tools only compact topic keywords, entity names, or subject phrases tied to the actual user request"))
     #expect(prompt.contains("Web research is mandatory when the user asks to search"))
     #expect(prompt.contains("Memory and Web are evidence sources for the same user task"))
@@ -284,7 +287,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("attentive listening, empathy, comfort"))
     #expect(prompt.contains("official health services, recognized clinical or public-health sources"))
     #expect(prompt.contains("If a tool is unavailable, denied, or fails, do not fabricate completion"))
-    #expect(prompt.contains("A required bootstrap tool must be called when available"))
+    #expect(prompt.contains("contains exactly four named tools when available"))
     #expect(prompt.contains("a blocked or failed retrieval or operation is not complete"))
     #expect(prompt.contains("must not block an unrelated non-time-dependent task"))
     #expect(!prompt.contains("Every other task must call `web_search`"))
@@ -294,10 +297,10 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("A user run means one run started by a new user message"))
-    #expect(prompt.contains("Complete the bootstrap for each run"))
-    #expect(prompt.contains("without restarting the entire checklist on every internal model turn"))
-    #expect(prompt.contains("During bootstrap, minimally classify the latest user request only as needed"))
-    #expect(prompt.contains("This bootstrap routing is not task execution"))
+    #expect(prompt.contains("Complete the runtime-enforced core preflight for each run"))
+    #expect(prompt.contains("without restarting it on every internal model turn"))
+    #expect(prompt.contains("During preflight, minimally classify the latest user request only as needed"))
+    #expect(prompt.contains("Preliminary routing is not task execution"))
     #expect(prompt.contains("do not commit to a solution, perform task-specific side effects, or produce the final answer"))
     #expect(prompt.contains("should you finalize the task strategy, begin task execution"))
 }
@@ -418,7 +421,7 @@ import ConnorGraphAgent
     let knowledgeIndex = try #require(prompt.range(of: "memory_os_knowledge_context", range: recentIndex..<prompt.endIndex)?.lowerBound)
     let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: knowledgeIndex..<prompt.endIndex)?.lowerBound)
     let webSearchIndex = try #require(prompt.range(of: "web_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
-    let synthesizeIndex = try #require(prompt.range(of: "only after the current-time attempt, relevant skill instructions, applicable retrieval, and any required Web research", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
+    let synthesizeIndex = try #require(prompt.range(of: "only after the core preflight and every triggered supplemental retrieval", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
 
     #expect(currentTimeIndex < skillIndex)
     #expect(skillIndex < recentIndex)
@@ -454,7 +457,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("keep every other input argument accepted by that tool's Schema unchanged"))
     #expect(prompt.contains("Never send response-only pagination metadata such as `pageSize`"))
     #expect(prompt.contains("Repeat until `nextPage` is null"))
-    #expect(prompt.contains("always requires exhausting every `connor_skill_list` page"))
+    #expect(prompt.contains("requires exhausting every `connor_skill_list` page whenever skill discovery is triggered"))
     #expect(prompt.contains("pass the listed `updatedAt` as `expectedUpdatedAt`"))
     #expect(!prompt.contains("pass the listed `updatedAt` as `expected_updated_at`"))
 }
@@ -502,7 +505,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("Never make the response feel surveillant"))
     #expect(prompt.contains("The latest actual user request and current self-description override older memories or profile records"))
     #expect(prompt.contains("If no reliable personal evidence can improve the current task, answer normally"))
-    #expect(prompt.contains("does not impose an order or call-count cap"))
+    #expect(prompt.contains("does not impose a relative order or call-count cap"))
     #expect(prompt.contains("strongly prefer continuing through exact `nextPage` values"))
     #expect(prompt.contains("a personalization default, not a fixed call count"))
     #expect(prompt.contains("A complete-profile or complete-coverage request must continue through `nextPage: null`"))
