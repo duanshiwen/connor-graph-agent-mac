@@ -119,6 +119,11 @@ final class ChatViewportController: ObservableObject {
         )
     }
 
+    func followLatestIfPinned(animated: Bool = true) {
+        guard snapshot.isPinnedToBottom else { return }
+        scrollToBottom(animated: animated)
+    }
+
     func scrollToTop() {
         apply(.scrollToTopRequested)
     }
