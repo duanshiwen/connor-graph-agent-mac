@@ -211,6 +211,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var didAttemptCurrentTime = false
                 let continuityPreflightPolicy = AgentContinuityPreflightPolicy()
                 var invokedContinuityToolNames = Set<String>()
+                var requiredCurrentUserProfilePage = continuityPreflightPolicy.initialRequiredCurrentUserProfilePage(
+                    availableTools: toolRegistry.definitions
+                )
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -299,6 +302,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .system, content: correction))
                                 continue
                             }
+                            if let requiredCurrentUserProfilePage {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(
+                                    role: .system,
+                                    content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                        requiredPage: requiredCurrentUserProfilePage
+                                    )
+                                ))
+                                continue
+                            }
                             if evidencePolicy.requiresWebResearch(request.userMessage),
                                !didRequestResearchCorrection,
                                let correction = AgentExternalResearchAnswerValidator().correctionInstruction(
@@ -377,19 +390,65 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             availableTools: toolRegistry.definitions,
                             invokedToolNames: invokedContinuityToolNames
                         )
-                        if !isCurrentTimePreflightBatch && !missingContinuityTools.isEmpty {
+                        if !isCurrentTimePreflightBatch
+                            && (!missingContinuityTools.isEmpty || requiredCurrentUserProfilePage != nil) {
                             let continuityCalls = calls.filter {
                                 AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
                             }
-                            if continuityCalls.isEmpty,
-                               let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools) {
+                            if continuityCalls.isEmpty {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(role: .system, content: correction))
+                                let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools)
+                                    ?? requiredCurrentUserProfilePage.map {
+                                        continuityPreflightPolicy.currentUserProfileCorrectionInstruction(requiredPage: $0)
+                                    }
+                                if let correction {
+                                    messages.append(AgentModelMessage(role: .system, content: correction))
+                                }
                                 continue
+                            }
+                            if let requiredPage = requiredCurrentUserProfilePage {
+                                let matchingProfileCalls = continuityCalls.filter {
+                                    continuityPreflightPolicy.call(
+                                        $0,
+                                        matchesRequiredCurrentUserProfilePage: requiredPage
+                                    )
+                                }
+                                let profileChainAlreadyStarted = requiredPage != 1
+                                    || invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
+                                let proposedWrongProfilePage = continuityCalls.contains {
+                                    $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
+                                } && matchingProfileCalls.isEmpty
+                                if (profileChainAlreadyStarted || proposedWrongProfilePage)
+                                    && matchingProfileCalls.isEmpty {
+                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                    messages.append(AgentModelMessage(
+                                        role: .system,
+                                        content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                            requiredPage: requiredPage
+                                        )
+                                    ))
+                                    continue
+                                }
+                                var didSelectRequiredProfileCall = false
+                                calls = continuityCalls.filter { call in
+                                    guard call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName else {
+                                        return true
+                                    }
+                                    guard !didSelectRequiredProfileCall,
+                                          continuityPreflightPolicy.call(
+                                            call,
+                                            matchesRequiredCurrentUserProfilePage: requiredPage
+                                          ) else {
+                                        return false
+                                    }
+                                    didSelectRequiredProfileCall = true
+                                    return true
+                                }
+                            } else {
+                                calls = continuityCalls
                             }
                             // Let the model observe continuity results before it chooses or
                             // repeats task-specific calls that may depend on personal context.
-                            calls = continuityCalls
                         }
                         for index in calls.indices {
                             calls[index].runID = run.id
@@ -434,6 +493,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )
 
                         for batchResult in batchResults {
+                            if batchResult.call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName {
+                                requiredCurrentUserProfilePage = continuityPreflightPolicy
+                                    .nextRequiredCurrentUserProfilePage(after: batchResult.result)
+                            }
                             if let promotion = trustedSkillPromotion(from: batchResult.result),
                                promotedSkillIdentifiers.insert(promotion.identifier).inserted {
                                 promoteSkillInstruction(promotion, in: &messages)
@@ -470,11 +533,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )
                         if let correction = continuityPreflightPolicy.correctionInstruction(for: stillMissingContinuityTools) {
                             messages.append(AgentModelMessage(role: .system, content: correction))
+                        } else if let requiredCurrentUserProfilePage {
+                            messages.append(AgentModelMessage(
+                                role: .system,
+                                content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                    requiredPage: requiredCurrentUserProfilePage
+                                )
+                            ))
                         }
 
                         let reachedToolErrorLimit = configuration.maxConsecutiveToolResultErrors > 0
                             && consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors
-                        let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded && budgetExceeded
+                        let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded
+                            && budgetExceeded
+                            && requiredCurrentUserProfilePage == nil
                         yield(.turnCompleted(AgentTurnCompletedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,

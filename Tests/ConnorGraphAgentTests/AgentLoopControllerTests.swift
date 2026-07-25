@@ -369,6 +369,37 @@ private struct RetrievalEvidenceTool: AgentTool {
     }
 }
 
+private struct PaginatedCurrentUserProfileTool: AgentTool {
+    let name = AgentContinuityPreflightPolicy.currentUserProfileToolName
+    let description = "Return deterministic paginated current-user profile evidence"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.closedObject(
+        properties: ["page": .integer(description: "Sequential page")],
+        required: []
+    )
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let page = arguments.int("page") ?? 1
+        let nextPage: Any = page == 1 ? 2 : NSNull()
+        let payload: [String: Any] = [
+            "success": true,
+            "page": page,
+            "hasNextPage": page == 1,
+            "nextPage": nextPage,
+            "records": [["record_id": "profile-\(page)"]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let json = String(decoding: data, as: UTF8.self)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: json,
+            contentJSON: json,
+            citations: ["profile-\(page)"]
+        )
+    }
+}
+
 private struct MemoryClaimEvidenceTool: AgentTool {
     let name: String
     let contentJSON: String
@@ -904,8 +935,59 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: [names[0]]) == [names[2]])
     #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: Set(names)) == [])
     #expect(policy.correctionInstruction(for: []) == nil)
-    #expect(policy.correctionInstruction(for: [names[0]])?.contains("does not impose a call-count limit") == true)
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("follow every exact non-null `nextPage`") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
+}
+
+@Test func agentLoopExhaustsCurrentUserProfileBeforeTaskToolsOrFinalAnswer() async throws {
+    let names = AgentEvidenceValidationPolicy.memoryEvidenceTools
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "recent-page-1", name: names[0], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "knowledge-page-1", name: names[1], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "profile-page-1", name: names[2], argumentsJSON: #"{"page":1}"#),
+                AgentToolCall(id: "task-too-early-1", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Premature final answer"),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "profile-page-2", name: names[2], argumentsJSON: #"{"page":2}"#),
+                AgentToolCall(id: "task-too-early-2", name: "task_tool", argumentsJSON: "{}")
+            ],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "task-after-profile", name: "task_tool", argumentsJSON: "{}")],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Profile-grounded final answer")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(RetrievalEvidenceTool(name: names[0]))
+    registry.register(RetrievalEvidenceTool(name: names[1]))
+    registry.register(PaginatedCurrentUserProfileTool())
+    registry.register(RetrievalEvidenceTool(name: "task_tool"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var finishedToolNames: [String] = []
+    var completed: AgentTextCompleteEvent?
+    for try await event in loop.run(AgentChatRequest(sessionID: "profile-pagination-required", userMessage: "帮我做一个决定")) {
+        if case .toolFinished(let result) = event { finishedToolNames.append(result.toolName) }
+        if case .textComplete(let result) = event { completed = result }
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 5)
+    #expect(requests[2].messages.last?.role == .system)
+    #expect(requests[2].messages.last?.content.contains("exact JSON integer 2") == true)
+    #expect(finishedToolNames == [names[0], names[1], names[2], names[2], "task_tool"])
+    #expect(completed?.text == "Profile-grounded final answer")
 }
 
 @Test func currentTimePreflightPolicyRequiresOneAvailableAttempt() {

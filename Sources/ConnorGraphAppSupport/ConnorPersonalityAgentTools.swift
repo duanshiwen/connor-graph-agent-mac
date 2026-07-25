@@ -93,15 +93,23 @@ public enum ConnorPersonalitySafetyPolicy {
         let compact = userPrompt.lowercased().replacingOccurrences(of: " ", with: "")
         let mutationSignals = [
             "以后", "今后", "从现在开始", "一直", "永久", "设为", "设置为", "设置成", "改为", "改成",
-            "调整人格", "调整性格", "修改人格", "修改性格", "更新人格", "更新性格", "恢复默认性格", "恢复默认人格",
+            "调成", "调整为", "调整成", "变为", "变成", "调整人格", "调整性格", "修改人格", "修改性格",
+            "更新人格", "更新性格", "恢复默认性格", "恢复默认人格",
             "fromnowon", "always", "setyour", "changeyour", "updateyourpersonality", "resetyourpersonality"
         ]
         let questionSignals = [
             "你是", "你属于", "你的性别", "什么性别", "男生还是女生", "男性还是女性", "是什么", "吗", "呢", "?", "？",
             "areyou", "whatisyour", "whichgender"
         ]
+        let personalityTargets = ["人格", "性格", "沟通风格", "说话风格", "语气", "personality", "communicationstyle", "tone"]
+        let changeRequests = ["能不能", "可不可以", "可以把", "请把", "麻烦把", "couldyou", "canyou", "please"]
+        let desiredDirections = ["更", "再", "一点", "more", "less"]
+        let hasMutationIntent = mutationSignals.contains(where: compact.contains)
+            || (personalityTargets.contains(where: compact.contains)
+                && changeRequests.contains(where: compact.contains)
+                && desiredDirections.contains(where: compact.contains))
         if questionSignals.contains(where: compact.contains),
-           !mutationSignals.contains(where: compact.contains) {
+           !hasMutationIntent {
             throw ConnorPersonalityProposalError.explicitPersistentRequestRequired
         }
     }
@@ -248,7 +256,10 @@ public struct ConnorPersonalityUpdateTool: AgentTool {
     public let permission: AgentPermissionCapability = .mutatePersonality
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
         "request": .string(description: "User's persistent personality request. Use an empty string only for reset."),
-        "mode": .stringEnumeration(values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue), description: "Update mode."),
+        "mode": .stringEnumeration(
+            values: ConnorPersonalityUpdateMode.allCases.map(\.rawValue),
+            description: "Update mode: merge preserves current fields not changed by the request; replace generates a complete replacement; reset restores the default personality and requires an empty request."
+        ),
         "expectedRevision": .integer(description: "Exact revision returned by personality_get_current.")
     ], required: ["request", "mode", "expectedRevision"])
 
