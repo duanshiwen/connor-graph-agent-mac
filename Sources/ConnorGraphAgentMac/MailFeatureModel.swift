@@ -7,6 +7,16 @@ import ConnorGraphAppSupport
 @Observable
 final class MailFeatureModel {
     enum Event { case operationSucceeded; case operationFailed(String) }
+    enum ModelError: LocalizedError {
+        case storeUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .storeUnavailable:
+                "邮件存储尚未初始化，请重新启动应用后再试。"
+            }
+        }
+    }
     typealias SyncServiceFactory = @Sendable () -> MailIMAPInitialSyncService
 
     var presentation: NativeMailBrowserPresentation = .empty {
@@ -44,6 +54,7 @@ final class MailFeatureModel {
     private(set) var navigationMessage: String?
     private(set) var preferences = MailPreferences()
     var isPresentingAddAccountSheet = false
+    private(set) var isSyncing = false
     private(set) var syncMessage: String?
     private(set) var errorMessage: String?
 
@@ -205,6 +216,7 @@ final class MailFeatureModel {
     }
 
     func addAccountAndPrepareSync(displayName: String, email: String, provider: MailProviderKind, incomingHost: String, incomingPort: Int, incomingSecurity: MailConnectionSecurity, outgoingHost: String, outgoingPort: Int, outgoingSecurity: MailConnectionSecurity, username: String, password: String, authMode: MailAuthMode) async throws {
+        guard let store else { throw ModelError.storeUnavailable }
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let accountID = MailAccountID(rawValue: normalizedEmail)
         let resolvedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? normalizedEmail : username.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -213,13 +225,15 @@ final class MailFeatureModel {
         let account = MailAccount(id: accountID, provider: provider, displayName: displayName.isEmpty ? email : displayName, identities: [identity], incoming: MailServerEndpoint(host: incomingHost, port: incomingPort, security: incomingSecurity, protocolKind: .imap), outgoing: MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: outgoingSecurity, protocolKind: .smtp), credentialBinding: binding, health: MailAccountHealth(status: .unknown, summary: "Ready to sync"))
         let inbox = MailMailbox(id: MailMailboxID(rawValue: "\(accountID.rawValue)-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox)
         try credentialStore.saveCredential(password, binding: binding)
-        try await store?.saveAccount(account); try await store?.saveMailbox(inbox)
+        try await store.saveAccount(account); try await store.saveMailbox(inbox)
         selectedAccountID = accountID; selectedMailboxID = inbox.id
         syncMessage = "已添加邮箱：\(account.displayName)，正在同步最近邮件…"
         await reload()
         isPresentingAddAccountSheet = false
-        do { try await sourceSetChanged(); let summary = try await refreshForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil); syncMessage = summary; try await sourceSetChanged() }
-        catch { let message = String(describing: error); syncMessage = "邮箱已添加，但同步失败：\(message)"; reportFailure(message) }
+        isSyncing = true
+        startOwnedTask { [weak self] in
+            await self?.syncNewAccount(accountID)
+        }
     }
 
     func rebuildCacheAndRefresh() async -> String {
@@ -232,7 +246,7 @@ final class MailFeatureModel {
     }
 
     func refreshForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
-        guard let store else { return "Mail store unavailable" }
+        guard let store else { throw ModelError.storeUnavailable }
         let accounts: [MailAccount]
         if let sourceInstanceID, !sourceInstanceID.isEmpty {
             guard let account = try await store.account(id: MailAccountID(rawValue: sourceInstanceID)) else { return "Mail account not found: \(sourceInstanceID)" }
@@ -275,6 +289,27 @@ final class MailFeatureModel {
         visibleListMessages = filteredListMessages
         visibleListMessageIDs = Set(filteredListMessages.map(\.id))
         listProjectionRevision &+= 1
+    }
+
+    private func syncNewAccount(_ accountID: MailAccountID) async {
+        defer { isSyncing = false }
+        do {
+            let summary = try await refreshForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil)
+            syncMessage = summary
+        } catch {
+            let message = error.localizedDescription
+            syncMessage = "邮箱已添加，但同步失败：\(message)"
+            reportFailure(message)
+        }
+
+        do {
+            try await sourceSetChanged()
+        } catch {
+            let message = error.localizedDescription
+            let prefix = syncMessage.map { "\($0) " } ?? ""
+            syncMessage = "\(prefix)定时刷新任务创建失败：\(message)"
+            reportFailure(message)
+        }
     }
 
     private func reloadForCurrentListFilters() {
