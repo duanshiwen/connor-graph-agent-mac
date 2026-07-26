@@ -214,6 +214,66 @@ struct NoteImportCoordinatorTests {
         #expect(try chat.loadRecentSessions(limit: 10).isEmpty)
     }
 
+    @Test("Persists scanned note provenance metadata in the import ledger")
+    func persistsScannedProvenanceMetadata() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let source = NoteImportSourceRecord(id: "source", kind: .obsidianVault, displayName: "Vault")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(id: "job", sourceID: source.id, options: .init(llmMode: .disabled))
+        try ledger.saveJob(job)
+        let service = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service)
+        let link = ImportedNoteLink(
+            id: "link",
+            kind: .internalNote,
+            rawTarget: "Related",
+            resolvedSourceIdentity: "related.md",
+            metadata: ["anchor": "section"]
+        )
+        let note = ImportedNote(
+            sourceKind: .obsidianVault,
+            sourceIdentity: "note.md",
+            title: "Note",
+            markdownContent: "Body",
+            tags: ["project", "important"],
+            hierarchy: ["Work", "Connor"],
+            links: [link],
+            sourceMetadata: [
+                "encoding": "utf-8",
+                "encoding_confidence": "high",
+                "decoder_version": "2",
+                "obsidian_aliases": "Primary"
+            ],
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        )
+
+        _ = try await coordinator.scan(
+            jobID: job.id,
+            adapter: SingleNoteAdapter(note: note),
+            request: .init(sourceID: source.id, sourceURL: root, kind: .obsidianVault, options: job.options)
+        )
+        let item = try #require(ledger.items(jobID: job.id).first)
+        let decoder = JSONDecoder()
+
+        #expect(try decoder.decode([String].self, from: Data(try #require(item.metadata["imported_note_tags"]).utf8)) == note.tags)
+        #expect(try decoder.decode([String].self, from: Data(try #require(item.metadata["imported_note_hierarchy"]).utf8)) == note.hierarchy)
+        #expect(try decoder.decode([ImportedNoteLink].self, from: Data(try #require(item.metadata["imported_note_links"]).utf8)) == [link])
+        #expect(try decoder.decode([String: String].self, from: Data(try #require(item.metadata["imported_note_source_metadata"]).utf8)) == note.sourceMetadata)
+        #expect(item.sourceEncoding == "utf-8")
+        #expect(item.encodingConfidence == 0.9)
+        #expect(item.decoderVersion == "2")
+    }
+
     @Test("Persists original content first and retries transient LLM failures idempotently")
     func retriesTransientLLMWithoutDuplicatingProcessingMessages() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
