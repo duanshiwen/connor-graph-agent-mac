@@ -55,8 +55,48 @@ private struct SingleNoteAdapter: NoteImportSourceAdapter {
     }
 }
 
+private struct FailingNoteAdapter: NoteImportSourceAdapter {
+    var sourceKind: NoteImportSourceKind { .markdownFolder }
+
+    func scan(_ request: NoteImportScanRequest) -> AsyncThrowingStream<ImportedNote, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: NoteImportErrorCode.sourceUnavailable)
+        }
+    }
+}
+
 @Suite("Note import coordinator")
 struct NoteImportCoordinatorTests {
+    @Test("Marks a job failed when source scanning throws")
+    func scanFailureIsTerminal() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(id: "job", sourceID: source.id)
+        try ledger.saveJob(job)
+        let service = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service)
+
+        await #expect(throws: NoteImportErrorCode.sourceUnavailable) {
+            try await coordinator.scan(
+                jobID: job.id,
+                adapter: FailingNoteAdapter(),
+                request: .init(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
+            )
+        }
+
+        #expect(try ledger.job(id: job.id)?.status == .failed)
+    }
+
     @Test("Scans, creates note sessions, and processes them headlessly")
     func endToEnd() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
