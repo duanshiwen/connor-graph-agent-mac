@@ -65,6 +65,49 @@ private final class FactoryContactsCredentialStore: CredentialStore, @unchecked 
     #expect(try await fallbackStore.loadProfiles(includeInactive: false).isEmpty)
 }
 
+@Test func contactsReadRecoversPhotosStoredOnDiskWithoutProfilePaths() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-recover-person-images-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: root)
+    try storagePaths.ensureDirectoryHierarchy()
+    let graphStore = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path)
+    try graphStore.migrate()
+    let profileStore = try SQLitePersonProfileStore(databaseURL: root.appendingPathComponent("people.sqlite"))
+    let personID = ContactID(rawValue: "person-recovered-images")
+    _ = try await profileStore.upsert(PersonProfile(id: personID, displayName: "恢复图片的人"))
+    let sourceURL = root.appendingPathComponent("recovered.png")
+    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL)
+    let recoveredPath = try PersonProfileImageStore(storagePaths: storagePaths).importImage(at: sourceURL, personID: personID)
+    let factory = AppGraphAgentRuntimeFactory(
+        store: graphStore,
+        settingsRepository: AppLLMSettingsRepository(
+            settingsStore: FactoryContactsSettingsStore(),
+            credentialStore: FactoryContactsCredentialStore()
+        ),
+        storagePaths: storagePaths,
+        personProfileStore: profileStore
+    )
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "contacts_read", argumentsJSON: "{\"operation\":\"get_person\",\"personID\":\"\(personID.rawValue)\"}"),
+        context: AgentToolExecutionContext(
+            runID: "recover-person-images-run",
+            sessionID: "recover-person-images-session",
+            groupID: "default",
+            userPrompt: "读取人物图片",
+            toolCallID: "recover-person-images-read",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    let data = try #require(result.contentJSON?.data(using: .utf8))
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(object["photos"] as? [String] == [recoveredPath])
+}
+
 @Test func approvedPersonRegistryWritesBecomeGovernedMemoryEvidence() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-factory-contacts-memory-\(UUID().uuidString)", isDirectory: true)
@@ -113,4 +156,61 @@ private final class FactoryContactsCredentialStore: CredentialStore, @unchecked 
         hit.matchedText.contains("Display name: Annie") &&
         !hit.matchedText.contains("annie@example.com")
     })
+}
+
+@Test func conversationCanSetOptionalPersonImageFromCurrentAttachment() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-person-image-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: root)
+    try storagePaths.ensureDirectoryHierarchy()
+    let graphStore = try SQLiteGraphKernelStore(path: root.appendingPathComponent("graph.sqlite").path)
+    try graphStore.migrate()
+    let profileStore = try SQLitePersonProfileStore(databaseURL: root.appendingPathComponent("people.sqlite"))
+    let personID = ContactID(rawValue: "person-with-image")
+    _ = try await profileStore.upsert(PersonProfile(id: personID, displayName: "图片人物"))
+
+    let firstSourceURL = root.appendingPathComponent("portrait-1.png")
+    let secondSourceURL = root.appendingPathComponent("portrait-2.jpg")
+    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: firstSourceURL)
+    try Data([0xFF, 0xD8, 0xFF]).write(to: secondSourceURL)
+    let sessionID = "person-image-session"
+    let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
+    let firstAttachment = try attachmentStore.importFile(at: firstSourceURL, sessionID: sessionID)
+    let secondAttachment = try attachmentStore.importFile(at: secondSourceURL, sessionID: sessionID)
+    let factory = AppGraphAgentRuntimeFactory(
+        store: graphStore,
+        settingsRepository: AppLLMSettingsRepository(
+            settingsStore: FactoryContactsSettingsStore(),
+            credentialStore: FactoryContactsCredentialStore()
+        ),
+        storagePaths: storagePaths,
+        personProfileStore: profileStore
+    )
+    let controller = factory.makeAgentLoopController(permissionMode: .allowAll)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(
+            name: "contacts_write",
+            argumentsJSON: "{\"operation\":\"add_person_images\",\"personID\":\"\(personID.rawValue)\",\"attachmentIDs\":[\"\(firstAttachment.id)\",\"\(secondAttachment.id)\"],\"approved\":true}"
+        ),
+        context: AgentToolExecutionContext(
+            runID: "person-image-run",
+            sessionID: sessionID,
+            groupID: "default",
+            userPrompt: "把我上传的图片设置成这个人的头像",
+            toolCallID: "person-image-write",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
+            approvedCapabilities: [.mutateContacts]
+        )
+    )
+
+    let updated = try #require(try await profileStore.profile(id: personID))
+    let imageStore = PersonProfileImageStore(storagePaths: storagePaths)
+    let storedURLs = (updated.imageRelativePaths ?? []).compactMap { imageStore.imageURL(for: $0) }
+    #expect(result.contentText.contains("Added 2 image(s) for person"))
+    #expect(storedURLs.count == 2)
+    #expect(storedURLs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    #expect(storedURLs.allSatisfy { $0.deletingLastPathComponent().lastPathComponent == personID.rawValue })
 }

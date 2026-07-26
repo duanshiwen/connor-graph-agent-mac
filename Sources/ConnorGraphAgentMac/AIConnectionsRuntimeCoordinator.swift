@@ -37,7 +37,7 @@ final class AIConnectionsRuntimeCoordinator {
     func selectModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String?) {
         guard !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         model.providerMode = providerMode
-        if let connectionID { model.defaultConnectionID = connectionID }
+        if let connectionID { model.activeConnectionID = connectionID }
         model.selectedModel = modelID
 
         let sessionID = currentSessionID()
@@ -57,19 +57,14 @@ final class AIConnectionsRuntimeCoordinator {
         model.thinkingLevel = level
         let sessionID = currentSessionID()
         var state = workspace.stateSnapshotsBySessionID[sessionID] ?? AppSessionStateSnapshot(sessionID: sessionID)
-        let settings = try? model.settingsRepository.loadSettings()
         state.llmOverride = SessionLLMOverride(
             providerMode: state.llmOverride?.providerMode ?? model.providerMode.rawValue,
             model: state.llmOverride?.model ?? model.selectedModel,
             baseURLString: state.llmOverride?.baseURLString,
-            connectionID: state.llmOverride?.connectionID ?? model.defaultConnectionID,
+            connectionID: state.llmOverride?.connectionID ?? model.activeConnectionID,
             thinkingLevel: level.rawValue
         )
         persist(state, sessionID: sessionID)
-        if state.llmOverride?.connectionID == nil,
-           settings?.defaultConnectionID == model.defaultConnectionID {
-            // The explicit session override remains intentional even when it matches the global default.
-        }
         rebuildRuntime()
     }
 
@@ -88,21 +83,7 @@ final class AIConnectionsRuntimeCoordinator {
             workspace.stateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
             return existing
         }
-        guard let settings = try? model.settingsRepository.loadSettings(),
-              let connection = settings.defaultConnection else { return nil }
-        let selectedModel = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selectedModel.isEmpty else { return nil }
-        var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
-        let override = SessionLLMOverride(
-            providerMode: connection.providerMode.rawValue,
-            model: selectedModel,
-            baseURLString: nil,
-            connectionID: connection.id,
-            thinkingLevel: settings.defaultThinkingLevel.rawValue
-        )
-        nextState.llmOverride = override
-        persist(nextState, sessionID: sessionID)
-        return override
+        return nil
     }
 
     func syncDisplay(sessionID: String) {
@@ -115,11 +96,15 @@ final class AIConnectionsRuntimeCoordinator {
                 model.providerMode = providerMode
             }
             if let connectionID = override.connectionID {
-                model.defaultConnectionID = connectionID
+                model.activeConnectionID = connectionID
             }
         } else {
             applyGlobalDisplay()
         }
+    }
+
+    func syncCurrentSessionDisplay() {
+        syncDisplay(sessionID: currentSessionID())
     }
 
     func syncDisplayInBackground(sessionID: String) {
@@ -134,24 +119,6 @@ final class AIConnectionsRuntimeCoordinator {
                     state = try? sessionRepository?.loadSessionState(sessionID: sessionID)
                 }
                 let settings = try? settingsRepository.loadSettings()
-                if state?.llmOverride?.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
-                   let settings,
-                   let connection = settings.defaultConnection {
-                    let selectedModel = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !selectedModel.isEmpty {
-                        var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
-                        nextState.llmOverride = SessionLLMOverride(
-                            providerMode: connection.providerMode.rawValue,
-                            model: selectedModel,
-                            baseURLString: nil,
-                            connectionID: connection.id,
-                            thinkingLevel: settings.defaultThinkingLevel.rawValue
-                        )
-                        nextState.updatedAt = Date()
-                        try? sessionRepository?.saveSessionState(nextState, sessionID: sessionID)
-                        state = nextState
-                    }
-                }
                 return DisplayPreparation(state: state, settings: settings)
             }.value
             guard !Task.isCancelled,
@@ -182,7 +149,15 @@ final class AIConnectionsRuntimeCoordinator {
         persist(state, sessionID: sessionID)
         model.providerMode = connection.providerMode
         model.selectedModel = connection.effectiveModel
-        model.defaultConnectionID = connection.id
+        model.activeConnectionID = connection.id
+    }
+
+    func adoptGlobalDefaultForActiveSession() {
+        let sessionID = currentSessionID()
+        var state = workspace.stateSnapshotsBySessionID[sessionID] ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.llmOverride = nil
+        persist(state, sessionID: sessionID)
+        applyGlobalDisplay()
     }
 
     func clearOverride() {
@@ -213,7 +188,7 @@ final class AIConnectionsRuntimeCoordinator {
             model.providerMode = providerMode
         }
         if let connectionID = override.connectionID {
-            model.defaultConnectionID = connectionID
+            model.activeConnectionID = connectionID
         }
     }
 
@@ -222,6 +197,7 @@ final class AIConnectionsRuntimeCoordinator {
         model.thinkingLevel = settings?.defaultThinkingLevel ?? model.thinkingLevel
         model.providerMode = settings?.defaultConnection?.providerMode ?? .openAICompatible
         model.defaultConnectionID = settings?.defaultConnectionID ?? ""
+        model.activeConnectionID = settings?.defaultConnectionID ?? ""
     }
 
     private func persist(_ state: AppSessionStateSnapshot, sessionID: String) {

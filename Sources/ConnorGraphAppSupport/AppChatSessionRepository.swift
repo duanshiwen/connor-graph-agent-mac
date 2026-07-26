@@ -191,15 +191,12 @@ public struct AppChatSessionRepository: Sendable {
         createdAt: Date = Date()
     ) throws -> AgentSession {
         if var existing = try loadSession(id: id) {
-            if let index = existing.messages.firstIndex(where: { $0.id == messageID }) {
-                existing.messages[index].content = content
-                existing.messages[index].attachments = attachments
-            } else {
-                existing.messages.append(AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments))
-            }
+            let previousMessageCount = existing.messages.count
+            existing.title = title
+            existing.messages = [AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments)]
             existing.governance.kind = .note
             existing.updatedAt = max(existing.updatedAt, createdAt)
-            let saved = try saveSession(existing)
+            let saved = try saveSession(existing, previousMessageCount: previousMessageCount)
             synchronizeNoteBestEffort(saved, origin: .imported)
             return saved
         }
@@ -228,12 +225,7 @@ public struct AppChatSessionRepository: Sendable {
     ) throws -> AgentSession {
         guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
         let previousMessageCount = session.messages.count
-        if let index = session.messages.firstIndex(where: { $0.id == messageID }) {
-            session.messages[index].content = content
-            session.messages[index].attachments = attachments
-        } else {
-            session.messages.append(AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments))
-        }
+        session.messages = [AgentMessage(id: messageID, role: .user, content: content, createdAt: createdAt, attachments: attachments)]
         session.governance.kind = .note
         session.updatedAt = max(session.updatedAt, createdAt)
         return try saveSession(session, previousMessageCount: previousMessageCount)

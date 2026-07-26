@@ -67,6 +67,33 @@ struct ChatViewportStateMachineTests {
         #expect(snapshot.shouldShowJumpToLatest)
     }
 
+    @Test func agentChatOnlyAutoFollowsWhenVisuallyAtTheBottom() {
+        let machine = ChatViewportStateMachine(configuration: .init(
+            bottomPinThreshold: AgentChatLayout.chatBottomPinnedThreshold
+        ))
+        let pinned = ChatViewportSnapshot(
+            mode: .pinnedToBottom,
+            isPinnedToBottom: true,
+            shouldShowJumpToLatest: false,
+            pendingNewItemCount: 0
+        )
+
+        let browsing = machine.reduce(
+            snapshot: pinned,
+            event: .metricsChanged(.init(
+                viewportHeight: 600,
+                contentHeight: 1_200,
+                distanceToBottom: 24,
+                distanceToTop: 576
+            ))
+        )
+
+        #expect(AgentChatLayout.chatBottomPinnedThreshold == 8)
+        #expect(browsing.mode == .freeBrowsing)
+        #expect(!browsing.isPinnedToBottom)
+        #expect(browsing.shouldShowJumpToLatest)
+    }
+
     @Test func pinnedAppendAutoFollows() {
         let machine = ChatViewportStateMachine(configuration: .init())
         let pinned = ChatViewportSnapshot(mode: .pinnedToBottom, isPinnedToBottom: true, shouldShowJumpToLatest: false, pendingNewItemCount: 0)

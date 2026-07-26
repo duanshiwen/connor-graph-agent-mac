@@ -30,12 +30,15 @@ private func personalityRuntime(_ state: PersonalityTestState) -> ConnorPersonal
     )
 }
 
-private func personalityContext(approved: Set<AgentPermissionCapability> = []) -> AgentToolExecutionContext {
+private func personalityContext(
+    userPrompt: String = "以后说话更直接",
+    approved: Set<AgentPermissionCapability> = []
+) -> AgentToolExecutionContext {
     AgentToolExecutionContext(
         runID: "run-personality",
         sessionID: "session-personality",
         groupID: "default",
-        userPrompt: "以后说话更直接",
+        userPrompt: userPrompt,
         toolCallID: UUID().uuidString,
         policyEngine: AgentPolicyEngine(permissionMode: .askToWrite),
         approvedCapabilities: approved
@@ -117,6 +120,23 @@ private let unrestrictedPersonalityProvider = AnyAgentModelProvider(modelID: "pe
     #expect(await state.read().snapshotSummary == "温和可靠")
 }
 
+@Test func personalityUpdateCommitsNaturalPoliteRequest() async throws {
+    let state = PersonalityTestState()
+    let tool = ConnorPersonalityUpdateTool(runtime: personalityRuntime(state), provider: personalityProvider)
+
+    let result = try await tool.execute(
+        arguments: AgentToolArguments(values: [
+            "request": .string("把你的人格属性变得更主动一点。"),
+            "mode": .string("merge"),
+            "expectedRevision": .int(2)
+        ]),
+        context: personalityContext(userPrompt: "能把你的人格属性变得更主动一点吗？")
+    )
+
+    #expect(result.contentText.contains("版本 3"))
+    #expect(await state.read().revision == 3)
+}
+
 @Test func personalityProposalRejectsReadOnlyGenderQuestion() async throws {
     let state = PersonalityTestState()
     let tool = ConnorPersonalityProposeUpdateTool(
@@ -157,11 +177,20 @@ private let unrestrictedPersonalityProvider = AnyAgentModelProvider(modelID: "pe
     try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
         "可以把你的沟通风格变成更直接的吗？"
     )
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "能把你的人格属性变得更主动一点吗？"
+    )
+    try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent(
+        "把你的人格属性变得更主动一点。"
+    )
 }
 
 @Test func personalityIntentStillRejectsReadOnlyComparativeQuestions() {
     #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
         try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent("你的性格是不是更温柔了？")
+    }
+    #expect(throws: ConnorPersonalityProposalError.explicitPersistentRequestRequired) {
+        try ConnorPersonalitySafetyPolicy.validatePersistentMutationIntent("你的人格变得更主动了吗？")
     }
 }
 
@@ -170,11 +199,15 @@ private let unrestrictedPersonalityProvider = AnyAgentModelProvider(modelID: "pe
     let tool = ConnorPersonalityUpdateTool(runtime: personalityRuntime(state), provider: personalityProvider)
     let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
     let mode = try #require(properties["mode"] as? [String: Any])
+    let request = try #require(properties["request"] as? [String: Any])
     let description = try #require(mode["description"] as? String)
+    let requestDescription = try #require(request["description"] as? String)
 
     #expect(description.contains("merge preserves"))
     #expect(description.contains("replace generates"))
     #expect(description.contains("reset restores"))
+    #expect(requestDescription.contains("latest user message"))
+    #expect(requestDescription.contains("Do not add a persistence keyword"))
     #expect(tool.inputSchema.isOpenAIStrictCompatible)
 }
 

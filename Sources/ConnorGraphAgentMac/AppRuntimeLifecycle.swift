@@ -229,7 +229,7 @@ final class AppRuntimeLifecycle {
     }
 
     func copyAssistantMessageToPasteboard(_ message: AgentChatMessagePresentation) {
-        let content = message.message.content
+        let content = AssistantMessageFullContentProvider.markdown(for: message)
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -242,7 +242,7 @@ final class AppRuntimeLifecycle {
     }
 
     func exportAssistantMessageToFile(_ message: AgentChatMessagePresentation, now: Date = Date()) {
-        let content = message.message.content
+        let content = AssistantMessageFullContentProvider.markdown(for: message)
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let panel = NSSavePanel()
@@ -601,6 +601,7 @@ final class AppRuntimeLifecycle {
         self.contactsFeatureModel = ContactsFeatureModel(
             profileStore: resolvedContactsProfileStore,
             relationshipStore: resolvedContactsRelationshipStore,
+            imageStore: storagePaths.map { PersonProfileImageStore(storagePaths: $0) },
             systemContactsLoader: contactsSystemLoader
         )
         let nativeSourceSearchBackend: (any NativeSourceSearchBackend)? = injectedNativeSourceSearchBackend ?? {
@@ -730,10 +731,14 @@ final class AppRuntimeLifecycle {
             guard let self else { return }
             self.connorSpeechPlaybackCoordinator.stopIfUnavailable()
             if rebuildRuntime {
+                self.aiConnectionsRuntimeCoordinator.syncCurrentSessionDisplay()
                 self.rebuildNativeSessionManagerForActiveSession()
             } else {
                 self.chatRunCoordinator.mutateManager { $0.permissionMode = self.agentPermissionMode }
             }
+        }
+        aiConnectionsModel.onDefaultConnectionChanged = { [weak self] in
+            self?.aiConnectionsRuntimeCoordinator.adoptGlobalDefaultForActiveSession()
         }
         aiConnectionsModel.onConnectionSetup = { [weak self] connection in
             self?.aiConnectionsRuntimeCoordinator.syncActiveSession(to: connection)

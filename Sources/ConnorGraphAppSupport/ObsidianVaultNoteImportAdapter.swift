@@ -18,7 +18,13 @@ public struct ObsidianVaultNoteImportAdapter: NoteImportSourceAdapter {
                         let aliases = Self.aliases(in: note.markdownContent)
                         note.sourceMetadata["obsidian_aliases"] = aliases.joined(separator: "|")
                         let parsed = Self.parseLinks(in: note.markdownContent, current: note, index: index, assetIndex: assetIndex)
-                        note.links = parsed.links; note.attachments = parsed.attachments; note.diagnostics.append(contentsOf: parsed.diagnostics)
+                        note.links = parsed.links
+                        var attachmentPaths = Set(note.attachments.compactMap(\.sourcePath))
+                        note.attachments.append(contentsOf: parsed.attachments.filter { attachment in
+                            guard let path = attachment.sourcePath else { return true }
+                            return attachmentPaths.insert(path).inserted
+                        })
+                        note.diagnostics.append(contentsOf: parsed.diagnostics)
                         continuation.yield(note)
                     }
                     continuation.finish()
@@ -52,11 +58,12 @@ public struct ObsidianVaultNoteImportAdapter: NoteImportSourceAdapter {
             self.root = root.standardizedFileURL
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { return }
             for case let url as URL in enumerator {
-                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                guard values?.isRegularFile == true, values?.isSymbolicLink != true else { continue }
                 let standardized = url.standardizedFileURL
                 let relative = String(standardized.path.dropFirst(self.root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                 byRelativePath[Self.key(relative)] = standardized

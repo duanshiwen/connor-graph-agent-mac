@@ -50,7 +50,7 @@ public final class AppNoteImportRepository: @unchecked Sendable {
         .completed
     ]
     private static let failedItemStatuses: Set<NoteImportItemStatus> = [
-        .parseFailed, .sessionFailed, .attachmentFailed, .llmFailed
+        .needsEncodingReview, .parseFailed, .sessionFailed, .attachmentFailed, .llmFailed
     ]
 
     private var db: OpaquePointer?

@@ -48,6 +48,36 @@ struct SQLitePersonProfileStoreTests {
         let loaded = try await store.loadProfiles(includeInactive: false)
 
         #expect(loaded == [profile])
+        #expect(loaded.first?.imageRelativePaths == nil)
+    }
+
+    @Test func upsertRoundTripsOptionalPersonImagePath() async throws {
+        let store = try makeStore()
+        let profile = PersonProfile(
+            id: ContactID(rawValue: "person-photo"),
+            displayName: "Photo Person",
+            imageRelativePaths: [
+                "contacts/images/person-photo/photo-1.png",
+                "contacts/images/person-photo/photo-2.jpg"
+            ]
+        )
+
+        _ = try await store.upsert(profile)
+
+        #expect(try await store.profile(id: profile.id)?.imageRelativePaths == profile.imageRelativePaths)
+    }
+
+    @Test func legacyProfileJSONWithoutImagesStillDecodes() throws {
+        let profile = PersonProfile(id: ContactID(rawValue: "legacy-person"), displayName: "Legacy")
+        let encoded = try JSONEncoder().encode(profile)
+        var object = try #require(try JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["imageRelativePaths"] = nil
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(PersonProfile.self, from: legacyData)
+
+        #expect(decoded.id == profile.id)
+        #expect(decoded.imageRelativePaths == nil)
     }
 
     @Test func upsertUpdatesExistingProfile() async throws {

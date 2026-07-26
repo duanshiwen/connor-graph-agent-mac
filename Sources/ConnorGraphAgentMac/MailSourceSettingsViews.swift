@@ -112,7 +112,7 @@ struct MailSettingsSummaryPresentation: Equatable {
     }
 
     var emptyStateMessage: String? {
-        accountCount == 0 ? "添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。" : nil
+        accountCount == 0 ? "添加 IMAP/SMTP 账户后，康纳同学会全量同步全部邮箱文件夹并创建定时增量刷新任务。" : nil
     }
 
     func defaultSendAccountText(preferences: MailPreferences) -> String {
@@ -241,7 +241,7 @@ struct SettingsMailSection: View {
                 SettingsValueRow(title: "最近同步", value: lastSyncedText)
             }
             Divider()
-            SettingsValueRow(title: "默认策略", value: "添加后立即同步最近 50 封，后台定时刷新")
+            SettingsValueRow(title: "默认策略", value: "添加后立即全量同步，后台定时增量刷新")
             if let message = model.syncMessage {
                 Divider()
                 Text(message)
@@ -403,7 +403,7 @@ private struct MailSettingsEmptyStateCard: View {
                 VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                     Text("暂无邮件账户")
                         .font(SettingsListTypography.rowTitleSelected)
-                    Text("添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。")
+                    Text("添加 IMAP/SMTP 账户后，康纳同学会全量同步全部邮箱文件夹并创建定时增量刷新任务。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1073,7 +1073,7 @@ struct AddMailAccountSheet: View {
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text("添加邮件账户")
                     .font(SettingsListTypography.header)
-                Text("选择服务商后，康纳同学会预填常见 IMAP/SMTP 配置。添加后会创建账户并开始准备同步。")
+                Text("选择服务商后，康纳同学会预填常见 IMAP/SMTP 配置。添加后会创建账户并立即开始全量同步。")
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1404,7 +1404,7 @@ private struct MailAccountSetupHintCard: View {
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("添加后会创建本地账户并尝试首次同步。请使用服务商提供的授权码或 App Password；Connor 不保存邮箱主密码。")
+                Text("添加后会创建本地账户并全量同步全部邮箱文件夹。请使用服务商提供的授权码或 App Password；Connor 不保存邮箱主密码。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

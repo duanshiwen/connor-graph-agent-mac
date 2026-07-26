@@ -71,6 +71,68 @@ struct AssistantMessageExportFormatterTests {
         #expect(presentation.exportHelp == "选择保存位置和文件名，导出为 Markdown 文件")
     }
 
+    @Test("long assistant replies expose reversible expansion controls")
+    func longAssistantRepliesExposeReversibleExpansionControls() {
+        let content = String(
+            repeating: "a",
+            count: AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        )
+        let message = AgentMessage(role: .assistant, content: content)
+
+        let collapsed = AgentAssistantMessageExpansionPresentation(message: message, isExpanded: false)
+        let expanded = AgentAssistantMessageExpansionPresentation(message: message, isExpanded: true)
+
+        #expect(collapsed.isAvailable)
+        #expect(collapsed.title == "展开完整回复")
+        #expect(collapsed.systemImage == "chevron.down")
+        #expect(collapsed.accessibilityLabel == "展开这条助理回复")
+        #expect(expanded.isAvailable)
+        #expect(expanded.title == "收起回复")
+        #expect(expanded.systemImage == "chevron.up")
+        #expect(expanded.accessibilityLabel == "收起这条助理回复")
+    }
+
+    @Test("long user messages also expose expansion controls")
+    func longUserMessagesAlsoExposeExpansionControls() {
+        let threshold = AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        let shortReply = AgentMessage(role: .assistant, content: String(repeating: "a", count: threshold - 1))
+        let longUserMessage = AgentMessage(role: .user, content: String(repeating: "a", count: threshold))
+        let longSystemMessage = AgentMessage(role: .system, content: String(repeating: "a", count: threshold))
+
+        let userPresentation = AgentAssistantMessageExpansionPresentation(
+            message: longUserMessage,
+            isExpanded: false
+        )
+
+        #expect(!AgentAssistantMessageExpansionPresentation(message: shortReply, isExpanded: false).isAvailable)
+        #expect(userPresentation.isAvailable)
+        #expect(userPresentation.title == "展开完整消息")
+        #expect(userPresentation.accessibilityLabel == "展开这条用户消息")
+        #expect(!AgentAssistantMessageExpansionPresentation(message: longSystemMessage, isExpanded: false).isAvailable)
+    }
+
+    @Test("copy and export payload preserves the complete long reply")
+    func fullContentPayloadPreservesTheCompleteLongReply() {
+        let body = String(
+            repeating: "正文段落\n",
+            count: AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
+        )
+        let content = "# 开头\n\n\(body)\n完整结尾"
+        let message = presentation(
+            id: "long-reply",
+            role: .assistant,
+            content: content,
+            turnNumber: 1
+        )
+
+        let payload = AssistantMessageFullContentProvider.markdown(for: message)
+
+        #expect(payload == content)
+        #expect(payload.count == content.count)
+        #expect(payload.hasPrefix("# 开头"))
+        #expect(payload.hasSuffix("完整结尾"))
+    }
+
     @Test("only the first message in a note session uses note body presentation")
     func noteBodyPresentationIsLimitedToFirstNoteMessage() {
         #expect(AgentChatMessagePresentationPolicy.isNoteBody(sessionKind: .note, firstMessageID: "first", messageID: "first"))
