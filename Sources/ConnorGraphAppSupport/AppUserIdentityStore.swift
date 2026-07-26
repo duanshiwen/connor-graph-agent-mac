@@ -98,6 +98,16 @@ public enum ConnorAuthenticationState: Sendable, Equatable {
     case expired
 }
 
+public enum ConnorAccountSyncStatus: Sendable, Equatable {
+    case disabled
+    case waitingForLogin
+    case offline
+    case connecting
+    case syncing
+    case upToDate(Date)
+    case failed(String)
+}
+
 public enum ConnorBackendAPIError: Error, Sendable, Equatable, LocalizedError {
     case invalidResponse
     case server(status: Int, message: String)
@@ -137,6 +147,112 @@ private struct LoginRequest: Encodable { var username: String; var password: Str
 private struct RegisterRequest: Encodable { var username: String; var email: String; var password: String }
 private struct RefreshRequest: Encodable { var refreshToken: String }
 private struct LogoutRequest: Encodable { var refreshToken: String }
+private struct SyncHeartbeatRequest: Encodable { var deviceId: String; var platform: String; var name: String; var appVersion: String }
+private struct L1LeaseRequest: Encodable { var deviceId: String }
+
+public struct ConnorSyncDevice: Codable, Sendable, Equatable {
+    public var deviceId: String
+    public var platform: String
+    public var name: String
+    public var appVersion: String
+    public var lastSeenAt: Date
+}
+
+public struct ConnorSyncChange: Codable, Sendable, Equatable {
+    public var cursor: Int64?
+    public var mutationId: String?
+    public var collection: String
+    public var recordId: String
+    public var baseVersion: Int64?
+    public var payload: ConnorJSONValue
+    public var deleted: Bool
+    public var version: Int64?
+    public var sourceDeviceId: String?
+    public var changedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case cursor, mutationId, collection, recordId, baseVersion, payload, deleted, version, sourceDeviceId, changedAt
+    }
+
+    public init(mutationId: String = UUID().uuidString, collection: String, recordId: String, baseVersion: Int64 = 0, payload: ConnorJSONValue = .object([:]), deleted: Bool = false) throws {
+        guard Self.isSyncable(collection: collection) else { throw ConnorSyncError.excludedCollection(collection) }
+        self.cursor = nil; self.mutationId = mutationId; self.collection = collection; self.recordId = recordId
+        self.baseVersion = baseVersion; self.payload = payload; self.deleted = deleted
+        self.version = nil; self.sourceDeviceId = nil; self.changedAt = nil
+    }
+
+    public static func isSyncable(collection: String) -> Bool {
+        let excluded: Set<String> = ["mail", "mail_accounts", "mail_messages", "calendar", "calendar_events", "rss", "rss_feeds", "rss_items", "scheduled_tasks", "event_driven_tasks"]
+        return collection.range(of: "^[a-z][a-z0-9_]{0,63}$", options: .regularExpression) != nil && !excluded.contains(collection)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        cursor = try values.decodeIfPresent(Int64.self, forKey: .cursor)
+        mutationId = try values.decodeIfPresent(String.self, forKey: .mutationId)
+        collection = try values.decode(String.self, forKey: .collection)
+        recordId = try values.decode(String.self, forKey: .recordId)
+        baseVersion = try values.decodeIfPresent(Int64.self, forKey: .baseVersion)
+        payload = try values.decodeIfPresent(ConnorJSONValue.self, forKey: .payload) ?? .object([:])
+        deleted = try values.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+        version = try values.decodeIfPresent(Int64.self, forKey: .version)
+        sourceDeviceId = try values.decodeIfPresent(String.self, forKey: .sourceDeviceId)
+        changedAt = try values.decodeIfPresent(Date.self, forKey: .changedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(cursor, forKey: .cursor); try values.encodeIfPresent(mutationId, forKey: .mutationId)
+        try values.encode(collection, forKey: .collection); try values.encode(recordId, forKey: .recordId)
+        try values.encodeIfPresent(baseVersion, forKey: .baseVersion); try values.encode(payload, forKey: .payload)
+        try values.encode(deleted, forKey: .deleted); try values.encodeIfPresent(version, forKey: .version)
+        try values.encodeIfPresent(sourceDeviceId, forKey: .sourceDeviceId); try values.encodeIfPresent(changedAt, forKey: .changedAt)
+    }
+}
+
+public enum ConnorJSONValue: Codable, Sendable, Equatable {
+    case object([String: ConnorJSONValue])
+    case array([ConnorJSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([ConnorJSONValue].self) { self = .array(value) }
+        else if let value = try? container.decode([String: ConnorJSONValue].self) { self = .object(value) }
+        else { throw ConnorBackendAPIError.invalidResponse }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case let .object(value): try container.encode(value)
+        case let .array(value): try container.encode(value)
+        case let .string(value): try container.encode(value)
+        case let .number(value): try container.encode(value)
+        case let .bool(value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+}
+
+public enum ConnorSyncError: Error, LocalizedError, Equatable {
+    case excludedCollection(String)
+    public var errorDescription: String? {
+        switch self { case let .excludedCollection(collection): "集合 \(collection) 不允许跨设备同步。" }
+    }
+}
+
+public struct ConnorSyncPullPage: Codable, Sendable, Equatable { public var changes: [ConnorSyncChange]; public var nextCursor: Int64; public var hasMore: Bool }
+public struct ConnorL1Lease: Codable, Sendable, Equatable { public var granted: Bool; public var token: String?; public var expiresAt: Date?; public var reason: String? }
+private struct SyncPushRequest: Encodable { var deviceId: String; var changes: [ConnorSyncChange] }
+private struct SyncPushResponse: Decodable, Sendable { var results: [SyncPushResult] }
+public struct SyncPushResult: Decodable, Sendable, Equatable { public var mutationId: String; public var applied: Bool; public var cursor: Int64?; public var conflict: ConnorSyncChange? }
 
 public struct ConnorBackendAPIClient: Sendable {
     public var baseURL: URL
@@ -186,6 +302,23 @@ public struct ConnorBackendAPIClient: Sendable {
             token: accessToken,
             body: LogoutRequest(refreshToken: refreshToken ?? "")
         )
+    }
+
+    public func syncHeartbeat(token: String, deviceID: String, name: String, appVersion: String) async throws -> ConnorSyncDevice {
+        try await request("sync/devices/heartbeat", method: "POST", token: token, body: SyncHeartbeatRequest(deviceId: deviceID, platform: "macos", name: name, appVersion: appVersion))
+    }
+
+    public func pushSyncChanges(token: String, deviceID: String, changes: [ConnorSyncChange]) async throws -> [SyncPushResult] {
+        let response: SyncPushResponse = try await request("sync/push", method: "POST", token: token, body: SyncPushRequest(deviceId: deviceID, changes: changes))
+        return response.results
+    }
+
+    public func pullSyncChanges(token: String, cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
+        try await request("sync/pull?cursor=\(cursor)&limit=\(limit)", token: token)
+    }
+
+    public func acquireL1Lease(token: String, deviceID: String) async throws -> ConnorL1Lease {
+        try await request("sync/l1-lease/acquire", method: "POST", token: token, body: L1LeaseRequest(deviceId: deviceID))
     }
 
     private struct EmptyResponse: Decodable {}
@@ -294,6 +427,22 @@ public actor ConnorBackendAuthenticatedSession {
         try await authenticated { try await api.subscriptions(token: $0) }
     }
 
+    public func syncHeartbeat(deviceID: String, name: String, appVersion: String) async throws -> ConnorSyncDevice {
+        try await authenticated { try await api.syncHeartbeat(token: $0, deviceID: deviceID, name: name, appVersion: appVersion) }
+    }
+
+    public func pushSyncChanges(deviceID: String, changes: [ConnorSyncChange]) async throws -> [SyncPushResult] {
+        try await authenticated { try await api.pushSyncChanges(token: $0, deviceID: deviceID, changes: changes) }
+    }
+
+    public func pullSyncChanges(cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
+        try await authenticated { try await api.pullSyncChanges(token: $0, cursor: cursor, limit: limit) }
+    }
+
+    public func acquireL1Lease(deviceID: String) async throws -> ConnorL1Lease {
+        try await authenticated { try await api.acquireL1Lease(token: $0, deviceID: deviceID) }
+    }
+
     public func clearRefreshState() {
         refreshTask?.cancel()
         refreshTask = nil
@@ -334,6 +483,67 @@ public actor ConnorBackendAuthenticatedSession {
     }
 }
 
+private actor ConnorAccountSyncEventSocket {
+    private struct EventEnvelope: Decodable { var type: String }
+
+    private let baseURL: URL
+    private var webSocket: URLSessionWebSocketTask?
+
+    init(baseURL: URL) {
+        self.baseURL = baseURL
+    }
+
+    func listen(accessToken: String, deviceID: String, onWake: @escaping @Sendable () async -> Void) async throws {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.scheme = baseURL.scheme == "https" ? "wss" : "ws"
+        components?.path = "/ws/device"
+        components?.queryItems = [URLQueryItem(name: "device_id", value: deviceID)]
+        guard let url = components?.url else { throw ConnorBackendAPIError.invalidResponse }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let socket = URLSession.shared.webSocketTask(with: request)
+        webSocket = socket
+        socket.resume()
+
+        let heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                try await self?.sendHeartbeat()
+            }
+        }
+        defer {
+            heartbeatTask.cancel()
+            socket.cancel(with: .goingAway, reason: nil)
+            if webSocket === socket { webSocket = nil }
+        }
+
+        while !Task.isCancelled {
+            let message = try await socket.receive()
+            let data: Data
+            switch message {
+            case .data(let value): data = value
+            case .string(let value): data = Data(value.utf8)
+            @unknown default: continue
+            }
+            guard let event = try? JSONDecoder().decode(EventEnvelope.self, from: data) else { continue }
+            if event.type == "connected" || event.type == "sync_changed" || event.type == "sync_peer_online" {
+                await onWake()
+            }
+        }
+    }
+
+    func stop() {
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+    }
+
+    private func sendHeartbeat() async throws {
+        try await webSocket?.send(.string("{\"type\":\"heartbeat\"}"))
+    }
+}
+
 @MainActor
 public final class AppUserIdentityStore: ObservableObject {
     @Published public private(set) var authenticationState: ConnorAuthenticationState = .signedOut
@@ -341,26 +551,61 @@ public final class AppUserIdentityStore: ObservableObject {
     @Published public private(set) var subscribedKnowledgeBases: [ConnorKnowledgeBaseSubscription] = []
     @Published public private(set) var isLoadingLibraries = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var isDeviceSyncEnabled: Bool
+    @Published public private(set) var deviceSyncStatus: ConnorAccountSyncStatus
 
     private let api: ConnorBackendAPIClient
+    private let baseURL: URL
     private let credentials: AppConnorAccountCredentialStore
     private let authenticatedSession: ConnorBackendAuthenticatedSession
     private let networkIsAvailable: @MainActor () -> Bool
     private let serverIsReachable: @MainActor () -> Bool
+    private let syncDefaults: UserDefaults
+    private var syncAvailabilityCancellable: AnyCancellable?
+    private var deviceSyncTask: Task<Void, Never>?
+    private var syncSocketTask: Task<Void, Never>?
+    private var syncPassTask: Task<Void, Never>?
+    private var localChangeDebounceTask: Task<Void, Never>?
+    private var localChangeObserver: NSObjectProtocol?
+    private var syncEventSocket: ConnorAccountSyncEventSocket?
+    private var syncPassRequested = false
+    private let deviceID: String
+    public var onDeviceSyncPass: (@MainActor () async throws -> Void)?
 
     public init(
         baseURL: URL = URL(string: ProcessInfo.processInfo.environment["CONNOR_BACKEND_BASE_URL"] ?? "http://localhost:8080")!,
         credentials: AppConnorAccountCredentialStore = .init(),
         transport: any ConnorBackendHTTPTransport = URLSession.shared,
         networkIsAvailable: @escaping @MainActor () -> Bool = { true },
-        serverIsReachable: @escaping @MainActor () -> Bool = { true }
+        serverIsReachable: @escaping @MainActor () -> Bool = { true },
+        syncAvailability: AnyPublisher<Bool, Never>? = nil,
+        syncDefaults: UserDefaults = .standard
     ) {
         let api = ConnorBackendAPIClient(baseURL: baseURL, transport: transport)
         self.api = api
+        self.baseURL = baseURL
         self.credentials = credentials
         self.authenticatedSession = ConnorBackendAuthenticatedSession(api: api, credentials: credentials)
         self.networkIsAvailable = networkIsAvailable
         self.serverIsReachable = serverIsReachable
+        self.syncDefaults = syncDefaults
+        self.isDeviceSyncEnabled = syncDefaults.bool(forKey: "ConnorDeviceSyncEnabled")
+        self.deviceSyncStatus = syncDefaults.bool(forKey: "ConnorDeviceSyncEnabled") ? .waitingForLogin : .disabled
+        let storedDeviceID = syncDefaults.string(forKey: "ConnorSyncDeviceID")
+        self.deviceID = storedDeviceID ?? UUID().uuidString
+        if storedDeviceID == nil { syncDefaults.set(self.deviceID, forKey: "ConnorSyncDeviceID") }
+        localChangeObserver = NotificationCenter.default.addObserver(
+            forName: AppAccountSyncSignal.localDataDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.scheduleLocalChangeSync() }
+        }
+        syncAvailabilityCancellable = syncAvailability?
+            .removeDuplicates()
+            .sink { [weak self] available in
+                Task { @MainActor [weak self] in self?.syncAvailabilityDidChange(available) }
+            }
     }
 
     public var currentUser: ConnorRemoteUserIdentity? {
@@ -370,6 +615,48 @@ public final class AppUserIdentityStore: ObservableObject {
 
     public var hasStoredSession: Bool {
         (try? credentials.tokens()) != nil
+    }
+
+    public var syncDeviceID: String { deviceID }
+
+    public func setDeviceSyncEnabled(_ enabled: Bool) {
+        guard enabled != isDeviceSyncEnabled else { return }
+        isDeviceSyncEnabled = enabled
+        syncDefaults.set(enabled, forKey: "ConnorDeviceSyncEnabled")
+        if enabled {
+            guard currentUser != nil else {
+                deviceSyncStatus = .waitingForLogin
+                return
+            }
+            startDeviceSync()
+        } else {
+            stopDeviceSync()
+            deviceSyncStatus = .disabled
+        }
+    }
+
+    public func syncNow() {
+        guard isDeviceSyncEnabled else {
+            deviceSyncStatus = .disabled
+            return
+        }
+        guard currentUser != nil else {
+            deviceSyncStatus = .waitingForLogin
+            return
+        }
+        guard networkIsAvailable(), serverIsReachable() else {
+            deviceSyncStatus = .offline
+            return
+        }
+        requestDeviceSyncPass()
+    }
+
+    public func pullSyncChanges(cursor: Int64, limit: Int = 200) async throws -> ConnorSyncPullPage {
+        try await authenticatedSession.pullSyncChanges(cursor: cursor, limit: limit)
+    }
+
+    public func pushSyncChanges(_ changes: [ConnorSyncChange]) async throws -> [SyncPushResult] {
+        try await authenticatedSession.pushSyncChanges(deviceID: deviceID, changes: changes)
     }
 
     public func restoreSession() async {
@@ -382,6 +669,7 @@ public final class AppUserIdentityStore: ObservableObject {
             }
             let user = try await authenticatedSession.currentUser()
             authenticationState = .signedIn(user)
+            if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch ConnorBackendAPIError.unauthorized, ConnorBackendAPIError.missingRefreshToken {
             clearLocalSession(state: .expired)
@@ -408,6 +696,7 @@ public final class AppUserIdentityStore: ObservableObject {
             guard !identity.tokens.refreshToken.isEmpty else { throw ConnorBackendAPIError.invalidResponse }
             try credentials.saveTokens(identity.tokens)
             authenticationState = .signedIn(identity.user)
+            if isDeviceSyncEnabled { startDeviceSync() }
             await refreshLibraries()
         } catch {
             errorMessage = error.localizedDescription
@@ -441,6 +730,7 @@ public final class AppUserIdentityStore: ObservableObject {
             )
         }
         await authenticatedSession.clearRefreshState()
+        stopDeviceSync()
         clearLocalSession(state: .signedOut)
         errorMessage = nil
     }
@@ -459,10 +749,149 @@ public final class AppUserIdentityStore: ObservableObject {
     }
 
     private func clearLocalSession(state: ConnorAuthenticationState) {
+        stopDeviceSync()
         try? credentials.clearTokens()
         authenticationState = state
         ownedKnowledgeBases = []
         subscribedKnowledgeBases = []
         isLoadingLibraries = false
+        deviceSyncStatus = isDeviceSyncEnabled ? .waitingForLogin : .disabled
+    }
+
+    private func syncAvailabilityDidChange(_ available: Bool) {
+        guard isDeviceSyncEnabled, currentUser != nil else { return }
+        if available {
+            startDeviceSync()
+        } else {
+            stopDeviceSync()
+            deviceSyncStatus = .offline
+        }
+    }
+
+    private func startDeviceSync() {
+        stopDeviceSync()
+        guard isDeviceSyncEnabled, currentUser != nil else {
+            deviceSyncStatus = isDeviceSyncEnabled ? .waitingForLogin : .disabled
+            return
+        }
+        guard networkIsAvailable(), serverIsReachable() else {
+            deviceSyncStatus = .offline
+            return
+        }
+        deviceSyncStatus = .connecting
+        let session = authenticatedSession
+        let deviceID = deviceID
+        startSyncEventSocket(session: session, deviceID: deviceID)
+        deviceSyncTask = Task {
+            var needsInitialReconcile = true
+            while !Task.isCancelled {
+                do {
+                    _ = try await session.syncHeartbeat(deviceID: deviceID, name: Host.current().localizedName ?? "Mac", appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
+                    let lease = try await session.acquireL1Lease(deviceID: deviceID)
+                    L1ExtractionEligibility.shared.update(granted: lease.granted, expiresAt: lease.expiresAt)
+                    if needsInitialReconcile {
+                        needsInitialReconcile = false
+                        requestDeviceSyncPass()
+                    }
+                } catch {
+                    L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
+                    if !networkIsAvailable() || !serverIsReachable() {
+                        deviceSyncStatus = .offline
+                    }
+                }
+                try? await Task.sleep(for: .seconds(45))
+            }
+        }
+    }
+
+    private func stopDeviceSync() {
+        deviceSyncTask?.cancel(); deviceSyncTask = nil
+        syncSocketTask?.cancel(); syncSocketTask = nil
+        syncPassTask?.cancel(); syncPassTask = nil
+        localChangeDebounceTask?.cancel(); localChangeDebounceTask = nil
+        syncPassRequested = false
+        if let syncEventSocket { Task { await syncEventSocket.stop() } }
+        syncEventSocket = nil
+        L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
+    }
+
+    private func startSyncEventSocket(session: ConnorBackendAuthenticatedSession, deviceID: String) {
+        let socket = ConnorAccountSyncEventSocket(baseURL: baseURL)
+        syncEventSocket = socket
+        syncSocketTask = Task { [weak self] in
+            guard let self else { return }
+            var retryDelay = 1
+            while !Task.isCancelled {
+                do {
+                    let token = try await session.accessToken()
+                    try await socket.listen(accessToken: token, deviceID: deviceID) { [weak self] in
+                        await MainActor.run { self?.requestDeviceSyncPass() }
+                    }
+                    retryDelay = 1
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    deviceSyncStatus = networkIsAvailable() && serverIsReachable()
+                        ? .failed(error.localizedDescription)
+                        : .offline
+                    try? await Task.sleep(for: .seconds(retryDelay))
+                    retryDelay = min(retryDelay * 2, 30)
+                }
+            }
+        }
+    }
+
+    private func scheduleLocalChangeSync() {
+        guard isDeviceSyncEnabled, currentUser != nil else { return }
+        localChangeDebounceTask?.cancel()
+        localChangeDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled else { return }
+            self?.requestDeviceSyncPass()
+        }
+    }
+
+    private func requestDeviceSyncPass() {
+        guard isDeviceSyncEnabled else { return }
+        guard currentUser != nil else {
+            deviceSyncStatus = .waitingForLogin
+            return
+        }
+        guard networkIsAvailable(), serverIsReachable() else {
+            deviceSyncStatus = .offline
+            return
+        }
+        syncPassRequested = true
+        guard syncPassTask == nil else { return }
+        syncPassTask = Task { [weak self] in
+            guard let self else { return }
+            var retryDelay = 1
+            while syncPassRequested, !Task.isCancelled {
+                syncPassRequested = false
+                deviceSyncStatus = .syncing
+                do {
+                    try await onDeviceSyncPass?()
+                    guard !Task.isCancelled else { return }
+                    deviceSyncStatus = .upToDate(Date())
+                    retryDelay = 1
+                } catch ConnorBackendAPIError.unauthorized {
+                    clearLocalSession(state: .expired)
+                    return
+                } catch ConnorBackendAPIError.missingRefreshToken {
+                    clearLocalSession(state: .expired)
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    deviceSyncStatus = networkIsAvailable() && serverIsReachable()
+                        ? .failed(error.localizedDescription)
+                        : .offline
+                    if networkIsAvailable(), serverIsReachable(), isDeviceSyncEnabled, currentUser != nil {
+                        syncPassRequested = true
+                        try? await Task.sleep(for: .seconds(retryDelay))
+                        retryDelay = min(retryDelay * 2, 30)
+                    }
+                }
+            }
+            syncPassTask = nil
+        }
     }
 }

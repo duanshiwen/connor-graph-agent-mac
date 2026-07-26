@@ -3610,4 +3610,21 @@ extension AppRuntimeLifecycle {
             commercialReadinessDashboard: { [weak model] in model?.commercialReadinessDashboard ?? CommercialReadinessDashboard(cards: []) }
         )
     }
+
+    func syncAccountData(using identityStore: AppUserIdentityStore) async throws {
+        guard let chatSessionRepository, let storagePaths else { return }
+        let coordinator = AppAccountDataSyncCoordinator(
+            sessions: chatSessionRepository,
+            settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
+            identity: identityStore
+        )
+        let result = try await Task.detached(priority: .utility) {
+            try await coordinator.reconcile()
+        }.value
+        if result.settingsChanged { loadRuntimeSettings() }
+        if result.sessionsChanged {
+            scheduleChatSessionListRefresh(reason: "account-sync")
+            chatSessionCoordinator.refreshSelectedSessionIfChanged(sessionIDs: result.appliedSessionIDs)
+        }
+    }
 }

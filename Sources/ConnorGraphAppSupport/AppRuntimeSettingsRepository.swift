@@ -580,6 +580,7 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(updated).write(to: fileURL, options: .atomic)
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     /// Persists a personality change only if the on-disk revision still matches the
