@@ -18,7 +18,13 @@ public struct ObsidianVaultNoteImportAdapter: NoteImportSourceAdapter {
                         let aliases = Self.aliases(in: note.markdownContent)
                         note.sourceMetadata["obsidian_aliases"] = aliases.joined(separator: "|")
                         let parsed = Self.parseLinks(in: note.markdownContent, current: note, index: index, assetIndex: assetIndex)
-                        note.links = parsed.links; note.attachments = parsed.attachments; note.diagnostics.append(contentsOf: parsed.diagnostics)
+                        note.links = parsed.links
+                        var attachmentPaths = Set(note.attachments.compactMap(\.sourcePath))
+                        note.attachments.append(contentsOf: parsed.attachments.filter { attachment in
+                            guard let path = attachment.sourcePath else { return true }
+                            return attachmentPaths.insert(path).inserted
+                        })
+                        note.diagnostics.append(contentsOf: parsed.diagnostics)
                         continuation.yield(note)
                     }
                     continuation.finish()

@@ -72,6 +72,7 @@ public actor NoteImportCoordinator {
         var batch: [NoteImportItemRecord] = []
         batch.reserveCapacity(Self.scanBatchSize)
 
+        do {
         for try await note in adapter.scan(request) {
             try Task.checkCancellation()
             if try requireJob(jobID).cancelRequestedAt != nil { break }
@@ -83,6 +84,10 @@ public actor NoteImportCoordinator {
             } else {
                 metadata = [Self.payloadMetadataKey: try Self.encodePayload(note)]
             }
+            metadata["imported_note_tags"] = try Self.encodeMetadata(note.tags)
+            metadata["imported_note_hierarchy"] = try Self.encodeMetadata(note.hierarchy)
+            metadata["imported_note_links"] = try Self.encodeMetadata(note.links)
+            metadata["imported_note_source_metadata"] = try Self.encodeMetadata(note.sourceMetadata)
             var previousSessionID: String?
             if status == .ready, request.options.duplicatePolicy != .createCopy,
                let previous = try ledger.latestItem(sourceID: request.sourceID, sourceIdentity: note.sourceIdentity) {
@@ -112,6 +117,12 @@ public actor NoteImportCoordinator {
         _ = try ledger.recalculateJobCounts(jobID: jobID)
         if try requireJob(jobID).cancelRequestedAt != nil { return try ledger.transitionJob(id: jobID, to: .cancelling) }
         return try ledger.transitionJob(id: jobID, to: .awaitingReview)
+        } catch {
+            if let current = try? requireJob(jobID), current.status == .scanning {
+                _ = try? ledger.transitionJob(id: jobID, to: .failed)
+            }
+            throw error
+        }
     }
 
     public func execute(jobID: String) async throws -> NoteImportJobRecord {
@@ -165,7 +176,7 @@ public actor NoteImportCoordinator {
                 try await Self.waitForJobControl(jobID: jobID, ledger: ledger)
                 guard var current = try ledger.item(id: item.id) else { return false }
                 if let retryAt = current.nextRetryAt, retryAt > Date() {
-                    try await Self.sleep(retryAt.timeIntervalSinceNow)
+                    try await Self.sleep(retryAt.timeIntervalSinceNow, jobID: jobID, ledger: ledger)
                 }
                 guard let claimed = try ledger.claimItem(id: current.id, owner: owner, leaseDuration: 300) else { return false }
                 current = claimed
@@ -234,8 +245,7 @@ public actor NoteImportCoordinator {
                             messageID: messageID
                         )
                         while let delay = await rateLimiter.acquire(providerKey) {
-                            try await Self.sleep(delay)
-                            try await Self.waitForJobControl(jobID: jobID, ledger: ledger)
+                            try await Self.sleep(delay, jobID: jobID, ledger: ledger)
                         }
                         limiterAcquired = true
                         current = try ledger.transitionItem(id: current.id, to: .runningLLM)
@@ -283,7 +293,7 @@ public actor NoteImportCoordinator {
                         let delay = retryPolicy.delay(attempt: failed.attemptCount, retryAfter: failure.retryAfter)
                         if failure.retryAfter != nil { await rateLimiter.block(providerKey, retryAfter: delay) }
                         _ = try ledger.releaseItemLease(id: failed.id, nextRetryAt: Date().addingTimeInterval(delay))
-                        try await Self.sleep(delay)
+                        try await Self.sleep(delay, jobID: jobID, ledger: ledger)
                         continue
                     }
                     if failed.status == .runningLLM || failed.status == .queuedForLLM {
@@ -339,6 +349,11 @@ public actor NoteImportCoordinator {
         }
     }
     public func recoverableJobs() throws -> [NoteImportJobRecord] { try ledger.recoverableJobs() }
+    public func failInterruptedPreparation(jobID: String) throws {
+        let job = try requireJob(jobID)
+        guard [.created, .scanning].contains(job.status) else { return }
+        _ = try ledger.transitionJob(id: jobID, to: .failed)
+    }
     public func delete(jobID: String) throws {
         guard try requireJob(jobID).status.isTerminal else {
             throw AppNoteImportRepositoryError.jobControlUnavailable("Active import tasks cannot be deleted")
@@ -404,9 +419,15 @@ public actor NoteImportCoordinator {
         }
     }
 
-    private static func sleep(_ seconds: TimeInterval) async throws {
-        guard seconds > 0 else { await Task.yield(); return }
-        try await Task.sleep(nanoseconds: UInt64(min(seconds, 86_400) * 1_000_000_000))
+    private static func sleep(_ seconds: TimeInterval, jobID: String, ledger: AppNoteImportRepository) async throws {
+        var remaining = min(max(seconds, 0), 86_400)
+        guard remaining > 0 else { await Task.yield(); return }
+        while remaining > 0 {
+            try await waitForJobControl(jobID: jobID, ledger: ledger)
+            let interval = min(remaining, 0.25)
+            try await Task.sleep(for: .seconds(interval))
+            remaining -= interval
+        }
     }
 
     private static func classify(_ error: Error) -> (retryable: Bool, code: NoteImportErrorCode, retryAfter: TimeInterval?) {
@@ -443,6 +464,10 @@ public actor NoteImportCoordinator {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(note).base64EncodedString()
+    }
+
+    private static func encodeMetadata<T: Encodable>(_ value: T) throws -> String {
+        String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
     }
 
     private static func decodePayload(_ item: NoteImportItemRecord, payloadStore: NoteImportPayloadStore?) throws -> ImportedNote {
