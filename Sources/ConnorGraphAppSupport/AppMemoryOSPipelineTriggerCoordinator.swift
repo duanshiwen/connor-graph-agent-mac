@@ -18,10 +18,12 @@ public struct AppMemoryOSPipelineTriggerCoordinator: @unchecked Sendable {
     }
 
     public func evaluateAfterL1Capture(now: Date = Date()) throws -> [MemoryOSQueueItem] {
-        try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1CountPolicy, now: now)
+        guard L1ExtractionEligibility.shared.canRun(now: now) else { return [] }
+        return try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1CountPolicy, now: now)
     }
 
     public func runDailySweep(now: Date = Date()) throws -> [MemoryOSQueueItem] {
-        try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
+        guard L1ExtractionEligibility.shared.canRun(now: now) else { return [] }
+        return try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
     }
 }
