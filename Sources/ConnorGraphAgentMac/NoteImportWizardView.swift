@@ -153,17 +153,6 @@ struct NoteImportWizardView: View {
                     Text("创建副本").tag(NoteImportDuplicatePolicy.createCopy)
                 }
             }
-            Section("AI 处理") {
-                Toggle("导入后自动理解和整理", isOn: Binding(get: { model.options.llmMode == .automatic }, set: { model.options.llmMode = $0 ? .automatic : .disabled }))
-                Text("原始笔记始终会先保存。关闭 AI 不会影响正文和附件导入。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.options.llmMode == .automatic {
-                    Stepper("并行处理：\(model.options.llmConcurrency)", value: $model.options.llmConcurrency, in: 1...3)
-                    Toggle("允许 AI 使用网络读取工具", isOn: $model.options.allowNetworkReadTools)
-                    Text("网络读取默认关闭；开启后，AI 可能根据笔记内容访问外部网页。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
         }.formStyle(.grouped)
     }
 
@@ -178,8 +167,6 @@ struct NoteImportWizardView: View {
                 confirmationRow("笔记", "\(model.notes.count) 篇", "doc.text")
                 Divider()
                 confirmationRow("附件", model.options.importAttachments ? "\(model.attachmentCount) 个" : "不导入", "paperclip")
-                Divider()
-                confirmationRow("AI 处理", model.options.llmMode == .automatic ? "自动，最多并行 \(model.options.llmConcurrency) 项" : "关闭", "sparkles")
             }.background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
             Label("导入会在后台继续。你可以关闭此窗口，并在“笔记导入中心”查看、暂停或取消任务。", systemImage: "clock.arrow.circlepath")
                 .foregroundStyle(.secondary)

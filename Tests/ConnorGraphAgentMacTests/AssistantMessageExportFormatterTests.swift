@@ -83,11 +83,11 @@ struct AssistantMessageExportFormatterTests {
         let expanded = AgentAssistantMessageExpansionPresentation(message: message, isExpanded: true)
 
         #expect(collapsed.isAvailable)
-        #expect(collapsed.title == "展开")
+        #expect(collapsed.title == "展开完整回复")
         #expect(collapsed.systemImage == "chevron.down")
         #expect(collapsed.accessibilityLabel == "展开这条助理回复")
         #expect(expanded.isAvailable)
-        #expect(expanded.title == "收起")
+        #expect(expanded.title == "收起回复")
         #expect(expanded.systemImage == "chevron.up")
         #expect(expanded.accessibilityLabel == "收起这条助理回复")
     }
@@ -106,6 +106,7 @@ struct AssistantMessageExportFormatterTests {
 
         #expect(!AgentAssistantMessageExpansionPresentation(message: shortReply, isExpanded: false).isAvailable)
         #expect(userPresentation.isAvailable)
+        #expect(userPresentation.title == "展开完整消息")
         #expect(userPresentation.accessibilityLabel == "展开这条用户消息")
         #expect(!AgentAssistantMessageExpansionPresentation(message: longSystemMessage, isExpanded: false).isAvailable)
     }

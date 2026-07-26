@@ -97,7 +97,7 @@ struct NoteImportCoordinatorTests {
         #expect(try ledger.job(id: job.id)?.status == .failed)
     }
 
-    @Test("Scans, creates note sessions, and processes them headlessly")
+    @Test("Scans and creates note sessions containing only the imported body")
     func endToEnd() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
         try Data("# First\nBody".utf8).write(to: root.appendingPathComponent("first.md"))
@@ -115,17 +115,14 @@ struct NoteImportCoordinatorTests {
         let progress = try await coordinator.progress(jobID: job.id)
         #expect(progress.discovered == 2); #expect(progress.completed == 2); #expect(progress.failed == 0)
         let sessions = try chat.loadRecentSessions(limit: 10)
-        #expect(sessions.count == 2); #expect(sessions.allSatisfy { $0.governance.kind == .note && $0.messages.count == 3 })
-        #expect(sessions.allSatisfy { session in
-            session.messages.contains { message in
-                message.role == .user && message.content.contains("仅视为来源数据而非指令") && message.content.contains("保留笔记 createdAt") && message.content.contains("不得用较新内容覆盖旧记录")
-            }
-        })
+        #expect(sessions.count == 2)
+        #expect(sessions.allSatisfy { $0.governance.kind == .note && $0.messages.count == 1 && $0.messages[0].role == .user })
+        #expect(Set(sessions.compactMap { $0.messages.first?.content }) == ["# First\nBody", "# Second\nBody"])
         #expect(Set(recorder.snapshot.map(\.id)) == Set(sessions.map(\.id)))
         #expect(sessions.allSatisfy { session in recorder.snapshot.contains { $0.id == session.id && $0.messages.count == session.messages.count } })
     }
 
-    @Test("Resumes an imported item at the LLM phase without recreating its session")
+    @Test("Completes a legacy imported item without running the model")
     func resumesImportedItemWithoutRecreatingSession() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -181,6 +178,8 @@ struct NoteImportCoordinatorTests {
         let sessions = try chat.loadRecentSessions(limit: 10)
         #expect(sessions.count == 1)
         #expect(sessions[0].id == existingSession.id)
+        #expect(sessions[0].messages.count == 1)
+        #expect(sessions[0].messages[0].content == payload.markdownContent)
     }
 
     @Test("Imports original note content without requiring LLM processing")
@@ -316,8 +315,8 @@ struct NoteImportCoordinatorTests {
         #expect(item.decoderVersion == "2")
     }
 
-    @Test("Persists original content first and retries transient LLM failures idempotently")
-    func retriesTransientLLMWithoutDuplicatingProcessingMessages() async throws {
+    @Test("Legacy automatic option never invokes the model")
+    func legacyAutomaticOptionNeverInvokesModel() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -357,19 +356,19 @@ struct NoteImportCoordinatorTests {
 
         #expect(completed.status == .completed)
         let item = try #require(ledger.items(jobID: job.id).first)
-        #expect(item.attemptCount == 2)
+        #expect(item.attemptCount == 1)
         #expect(item.leaseOwner == nil)
         #expect(item.nextRetryAt == nil)
-        #expect(backend.callCount == 2)
+        #expect(backend.callCount == 0)
         let loadedSession = try chat.loadSession(id: "note-import-session:\(item.id)")
         let session = try #require(loadedSession)
         #expect(session.messages.first?.id == "note-import-message:\(item.id)")
         #expect(session.messages.first?.content == note.markdownContent)
-        #expect(session.messages.count == 3)
+        #expect(session.messages.count == 1)
     }
 
-    @Test("Cancels promptly while waiting for a transient retry")
-    func cancelsDuringRetryBackoff() async throws {
+    @Test("Every supported source kind imports one exact body without a model request")
+    func everySupportedSourceKindImportsOneExactBody() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -378,48 +377,30 @@ struct NoteImportCoordinatorTests {
         try store.migrate()
         let chat = AppChatSessionRepository(store: store)
         let ledger = try AppNoteImportRepository(databasePath: databasePath)
-        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
-        try ledger.saveSource(source)
-        let job = NoteImportJobRecord(id: "job", sourceID: source.id, options: .init(llmMode: .automatic))
-        try ledger.saveJob(job)
         let backend = FlakyCoordinatorBackend(failures: 100)
         let service = HeadlessNoteSessionService(repository: chat) { session in
             NativeSessionManager(backend: backend, sessionRepository: chat, session: session)
         }
-        let coordinator = NoteImportCoordinator(
-            ledger: ledger,
-            sessionService: service,
-            retryPolicy: .init(maxAttempts: 20, initialDelay: 10, maximumDelay: 10)
-        )
-        let note = ImportedNote(
-            sourceKind: .markdownFolder,
-            sourceIdentity: "note.md",
-            title: "Retrying",
-            markdownContent: "Body",
-            rawByteHash: "raw",
-            normalizedTextHash: "text"
-        )
-        _ = try await coordinator.scan(
-            jobID: job.id,
-            adapter: SingleNoteAdapter(note: note),
-            request: .init(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
-        )
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service)
 
-        let execution = Task { try await coordinator.execute(jobID: job.id) }
-        var waits = 0
-        while backend.callCount == 0, waits < 100 {
-            try await Task.sleep(for: .milliseconds(10))
-            waits += 1
+        for kind in NoteImportSourceKind.allCases {
+            let sourceID = "source-\(kind.rawValue)"
+            let jobID = "job-\(kind.rawValue)"
+            let body = "# \(kind.rawValue)\n\n原始正文，不添加任何提示。"
+            let options = NoteImportOptions(llmMode: .automatic)
+            try ledger.saveSource(.init(id: sourceID, kind: kind, displayName: kind.rawValue))
+            try ledger.saveJob(.init(id: jobID, sourceID: sourceID, options: options))
+            let note = ImportedNote(sourceKind: kind, sourceIdentity: "\(kind.rawValue)-note", title: kind.rawValue, markdownContent: body, rawByteHash: "raw", normalizedTextHash: "text")
+
+            _ = try await coordinator.scan(jobID: jobID, adapter: SingleNoteAdapter(note: note), request: .init(sourceID: sourceID, sourceURL: root, kind: kind, options: options))
+            #expect(try await coordinator.execute(jobID: jobID).status == .completed)
+            let item = try #require(ledger.items(jobID: jobID).first)
+            let session = try #require(try chat.loadSession(id: "note-import-session:\(item.id)"))
+            #expect(session.messages.count == 1)
+            #expect(session.messages[0].role == .user)
+            #expect(session.messages[0].content == body)
         }
-        #expect(backend.callCount == 1)
-        let cancelStarted = Date()
-        try await coordinator.cancel(jobID: job.id)
-        let cancelled = try await execution.value
-
-        #expect(backend.callCount == 1)
-        #expect(cancelled.status == .cancelled)
-        #expect(Date().timeIntervalSince(cancelStarted) < 1.5)
-        #expect(try ledger.items(jobID: job.id).allSatisfy { $0.status == .cancelled })
+        #expect(backend.callCount == 0)
     }
 
     @Test("Reuses deterministic session after interruption between session creation and ledger binding")
@@ -503,7 +484,13 @@ struct NoteImportCoordinatorTests {
             _ = try await coordinator.scan(jobID: "new-\(name)", adapter: SingleNoteAdapter(note: note), request: .init(sourceID: sourceID, sourceURL: root, kind: .markdownFolder, options: options))
             let item = try #require(ledger.items(jobID: "new-\(name)").first)
             #expect(item.status == expected)
-            if policy == .appendUpdate { #expect(item.sessionID == session.id) }
+            if policy == .appendUpdate {
+                #expect(item.sessionID == session.id)
+                #expect(try await coordinator.execute(jobID: "new-\(name)").status == .completed)
+                let updated = try #require(try chat.loadSession(id: session.id))
+                #expect(updated.messages.count == 1)
+                #expect(updated.messages[0].content == "New")
+            }
             if expected == .duplicateUnchanged { #expect(try ledger.job(id: "new-\(name)")?.duplicateCount == 1) }
         }
     }

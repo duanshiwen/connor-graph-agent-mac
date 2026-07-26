@@ -38,6 +38,17 @@ struct NoteImportControlStyleContractTests {
         #expect(coordinator.contains("flattenedOptions.preserveHierarchy = false"))
     }
 
+    @Test("Import mode stores only the note body and exposes no AI processing option")
+    func bodyOnlyImportMode() throws {
+        let wizard = try source("NoteImportWizardView.swift")
+        let coordinator = try appSupportSource("NoteImportCoordinator.swift")
+        #expect(!wizard.contains("导入后自动理解和整理"))
+        #expect(!wizard.contains("允许 AI 使用网络读取工具"))
+        #expect(coordinator.contains("flattenedOptions.llmMode = .disabled"))
+        #expect(!coordinator.contains("请将上一条已导入笔记"))
+        #expect(!coordinator.contains("sessionService.run("))
+    }
+
     @Test("Import center owns transient list selection without publishing during view updates")
     func localListSelection() throws {
         let center = try source("NoteImportCenterView.swift")

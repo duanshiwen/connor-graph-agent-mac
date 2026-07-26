@@ -57,11 +57,12 @@ struct AgentAssistantMessageExpansionPresentation: Equatable {
         self.isAvailable = (message.role == .assistant || message.role == .user)
             && message.content.utf8.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
         self.isExpanded = isExpanded
-        self.title = isExpanded ? "收起" : "展开"
+        let contentName = message.role == .user ? "消息" : "回复"
+        self.title = isExpanded ? "收起\(contentName)" : "展开完整\(contentName)"
         self.systemImage = isExpanded ? "chevron.up" : "chevron.down"
-        let contentName = message.role == .user ? "用户消息" : "助理回复"
-        self.accessibilityLabel = isExpanded ? "收起这条\(contentName)" : "展开这条\(contentName)"
-        self.help = isExpanded ? "收起长回复，显示轻量预览" : "展开并显示完整回复"
+        let accessibilityContentName = message.role == .user ? "用户消息" : "助理回复"
+        self.accessibilityLabel = isExpanded ? "收起这条\(accessibilityContentName)" : "展开这条\(accessibilityContentName)"
+        self.help = isExpanded ? "收起长\(contentName)，显示轻量预览" : "展开并显示完整\(contentName)"
     }
 }
 
@@ -229,6 +230,9 @@ struct AgentChatMessageRow: View {
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
                     }
+                    if assistantExpansionPresentation.isAvailable, isMessageExpanded {
+                        messageExpansionControl
+                    }
                     messageContent
                     if !row.attachments.isEmpty {
                         AgentMessageAttachmentRefsView(
@@ -237,6 +241,9 @@ struct AgentChatMessageRow: View {
                             onPreview: onPreviewAttachment,
                             onSaveImage: onSaveImageAttachment
                         )
+                    }
+                    if assistantExpansionPresentation.isAvailable, !isMessageExpanded {
+                        messageExpansionControl
                     }
                 }
                 .foregroundStyle(Color.primary)
@@ -249,12 +256,10 @@ struct AgentChatMessageRow: View {
                         .stroke(messageBorder, lineWidth: 1)
                 )
 
-                if assistantActionsPresentation.showsActions || assistantExpansionPresentation.isAvailable {
+                if assistantActionsPresentation.showsActions {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
-                        expansionPresentation: assistantExpansionPresentation,
                         speechPresentation: speechPresentation,
-                        onToggleExpansion: toggleMessageExpansion,
                         onToggleSpeech: { onToggleSpeech(row) },
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
@@ -343,6 +348,34 @@ struct AgentChatMessageRow: View {
         }
     }
 
+    private var messageExpansionControl: some View {
+        Button(action: toggleMessageExpansion) {
+            HStack(spacing: 7) {
+                Image(systemName: assistantExpansionPresentation.systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(assistantExpansionPresentation.title)
+                    .font(AgentChatTypography.metaEmphasis)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 32)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.09))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(assistantExpansionPresentation.accessibilityLabel)
+        .help(assistantExpansionPresentation.help)
+    }
+
     private var messageBackground: Color {
         if isNoteBody { return Color(nsColor: .textBackgroundColor).opacity(0.72) }
         if isUser { return ConnorCraftPalette.userBubble }
@@ -357,24 +390,13 @@ struct AgentChatMessageRow: View {
 
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
-    var expansionPresentation: AgentAssistantMessageExpansionPresentation
     var speechPresentation: ConnorSpeechActionPresentation
-    var onToggleExpansion: () -> Void
     var onToggleSpeech: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceM) {
-            if expansionPresentation.isAvailable {
-                actionButton(
-                    title: expansionPresentation.title,
-                    systemImage: expansionPresentation.systemImage,
-                    accessibilityLabel: expansionPresentation.accessibilityLabel,
-                    help: expansionPresentation.help,
-                    action: onToggleExpansion
-                )
-            }
             if presentation.showsActions, speechPresentation.isVisible {
                 actionButton(
                     title: speechPresentation.title,

@@ -106,7 +106,7 @@ public struct NoteImportOptions: Codable, Sendable, Equatable {
         importAttachments: Bool = true,
         preserveHierarchy: Bool = false,
         duplicatePolicy: NoteImportDuplicatePolicy = .skipUnchanged,
-        llmMode: NoteImportLLMMode = .automatic,
+        llmMode: NoteImportLLMMode = .disabled,
         llmConcurrency: Int = 1,
         allowNetworkReadTools: Bool = false,
         allowLossyDecoding: Bool = false,
@@ -344,10 +344,10 @@ public struct NoteImportStateMachine: Sendable {
         .duplicateChanged: [.creatingSession, .cancelled],
         .creatingSession: [.ready, .imported, .sessionFailed, .cancelled],
         .imported: [.queuedForLLM, .completed, .attachmentFailed, .cancelled],
-        .queuedForLLM: [.runningLLM, .cancelled],
+        .queuedForLLM: [.runningLLM, .completed, .cancelled],
         .runningLLM: [.queuedForLLM, .completed, .llmFailed, .cancelled],
         .sessionFailed: [.ready, .cancelled],
-        .llmFailed: [.queuedForLLM, .cancelled],
+        .llmFailed: [.queuedForLLM, .imported, .cancelled],
         .attachmentFailed: [.imported, .cancelled],
         .parseFailed: [.validating, .cancelled]
     ]
