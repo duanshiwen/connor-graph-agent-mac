@@ -132,6 +132,7 @@ struct MailFeatureModelTests {
         #expect(reconciliationCount == 1)
         #expect(f.model.isSyncing == false)
         #expect(f.model.presentation.accounts.first?.health.status == .blocked)
+        #expect(f.model.syncMessage?.contains("全量同步完成") == true)
         #expect(f.model.syncMessage?.contains("定时刷新任务创建失败") == true)
     }
 

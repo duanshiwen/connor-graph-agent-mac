@@ -227,7 +227,7 @@ final class MailFeatureModel {
         try credentialStore.saveCredential(password, binding: binding)
         try await store.saveAccount(account); try await store.saveMailbox(inbox)
         selectedAccountID = accountID; selectedMailboxID = inbox.id
-        syncMessage = "已添加邮箱：\(account.displayName)，正在同步最近邮件…"
+        syncMessage = "已添加邮箱：\(account.displayName)，正在全量同步全部邮箱文件夹…"
         await reload()
         isPresentingAddAccountSheet = false
         isSyncing = true
@@ -294,7 +294,7 @@ final class MailFeatureModel {
     private func syncNewAccount(_ accountID: MailAccountID) async {
         defer { isSyncing = false }
         do {
-            let summary = try await refreshForScheduledTask(sourceInstanceID: accountID.rawValue, runID: nil)
+            let summary = try await performFullSync(accountID: accountID)
             syncMessage = summary
         } catch {
             let message = error.localizedDescription
@@ -310,6 +310,28 @@ final class MailFeatureModel {
             syncMessage = "\(prefix)定时刷新任务创建失败：\(message)"
             reportFailure(message)
         }
+    }
+
+    private func performFullSync(accountID: MailAccountID) async throws -> String {
+        guard let store else { throw ModelError.storeUnavailable }
+        guard let account = try await store.account(id: accountID) else {
+            throw NSError(
+                domain: "Connor.MailSync",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "找不到刚添加的邮件账户：\(accountID.rawValue)"]
+            )
+        }
+
+        let result = try await syncServiceFactory().sync(account: account)
+        try await store.saveAccount(result.account)
+        for mailbox in result.mailboxes {
+            try await store.saveMailbox(mailbox)
+        }
+        if !result.messages.isEmpty {
+            try await store.saveMessagesBatch(result.messages)
+        }
+        await reload()
+        return "邮箱 \(accountID.rawValue) 全量同步完成；已同步 \(result.messages.count) 封邮件。\(result.account.health.summary)"
     }
 
     private func reloadForCurrentListFilters() {

@@ -44,7 +44,7 @@ struct MailSettingsSectionTests {
         #expect(summary.messageCountText == "0 封")
         #expect(summary.unreadCountText == "0 未读")
         #expect(summary.emptyStateTitle == "暂无邮件账户")
-        #expect(summary.emptyStateMessage == "添加 IMAP/SMTP 账户后，康纳同学会同步最近邮件并创建定时刷新任务。")
+        #expect(summary.emptyStateMessage == "添加 IMAP/SMTP 账户后，康纳同学会全量同步全部邮箱文件夹并创建定时增量刷新任务。")
         #expect(summary.defaultSendAccountText(preferences: MailPreferences()) == "尚未设置")
     }
 
