@@ -15,6 +15,14 @@ struct PersonProfileDomainTests {
         #expect(profile.contactSubtitle == "暂无联系方式")
     }
 
+    @Test func llmDiscoveredPersonDefaultsToActive() {
+        let profile = PersonProfile(displayName: "小李", discoveredBy: "llm")
+
+        #expect(profile.status == .active)
+        #expect(profile.discoveredBy == "llm")
+        #expect(profile.source == "person-registry")
+    }
+
     @Test func personProfileStatusCodableRoundTrips() throws {
         let statuses: [PersonProfileStatus] = [.active, .pending, .merged, .deleted]
         let data = try JSONEncoder().encode(statuses)

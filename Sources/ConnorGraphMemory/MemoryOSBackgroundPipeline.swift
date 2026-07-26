@@ -240,14 +240,17 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - If person identity is ambiguous, do not write it as a stable person entity. Report ambiguity as a warning instead.
 
         Person Registry identity model:
-        - Connor Contacts are a Person Registry. A person does not need contact methods such as email, phone, address, or social account to be a useful person anchor.
-        - For other people, create or update a person L2 entity only when evidence names or describes a named or described independent person likely to be used again.
+        - Connor's 人际关系 layer is a relationship-aware Person Registry. A relationship person does not need contact methods such as email, phone, address, or social account to be a useful person anchor.
+        - For other people, create or update a person L2 entity only when evidence names or describes a named or described independent relationship person likely to be used again.
+        - LLM-discovered relationship people do not use pending review; when the conversation layer creates them, they are active relationship-aware Person Registry entries unless later merged or deleted by the user.
         - Do not create a person entity for incidental noun phrases, vague roles, organizations, projects, assistant guesses, or one-off mentions without future retrieval value.
-        - @person and @人物 mentions are a strong identity anchor for the referenced person in that turn.
+        - @person and @人物 mentions are a strong relationship identity anchor for the referenced person in that turn.
 
         Person governance events:
         - If evidence says person A was merged into person B, preserve the merged into identity/governance fact and route future active context to B.
         - If evidence says there is a deleted person, preserve that the person should be not active retrieval context and should not be used as active LLM context.
+        - Person memory can be archived, deleted, or moved by the user; archived/deleted/moved person memory is not active default retrieval context.
+        - If a memory appears attached to the wrong person, prefer move or merge governance instead of inventing conflicting duplicate facts.
         - Merge/delete governance should not erase historical evidence; it changes active use and attribution.
 
         Person feature extraction policy:
