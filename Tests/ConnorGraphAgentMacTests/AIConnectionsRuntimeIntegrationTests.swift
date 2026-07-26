@@ -59,7 +59,7 @@ private func makeRuntime(
 }
 
 @MainActor
-@Test func sessionDisplayBackgroundSyncPreservesDefaultOverrideBehavior() async throws {
+@Test func sessionDisplayBackgroundSyncUsesGlobalDefaultWithoutCreatingOverride() async throws {
     let settingsStore = WelcomeStateFakeSettingsStore()
     let credentialStore = WelcomeStateFakeCredentialStore()
     let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
@@ -88,14 +88,13 @@ private func makeRuntime(
 
     coordinator.syncDisplayInBackground(sessionID: sessionID)
     for _ in 0..<100 {
-        if workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride != nil { break }
+        if model.selectedModel == connection.effectiveModel { break }
         try await Task.sleep(for: .milliseconds(10))
     }
 
-    let override = try #require(workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride)
-    #expect(override.connectionID == connection.id)
-    #expect(override.model == connection.effectiveModel)
+    #expect(workspace.stateSnapshotsBySessionID[sessionID]?.llmOverride == nil)
     #expect(model.defaultConnectionID == connection.id)
+    #expect(model.activeConnectionID == connection.id)
     #expect(model.selectedModel == connection.effectiveModel)
     #expect(model.thinkingLevel == .high)
 }
@@ -129,15 +128,59 @@ private func makeRuntime(
     runtime.newChatSession()
 
     let sessionID = try #require(runtime.chatFeatureModel.sessions.selectedSessionID)
-    let override = try #require(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride)
-    #expect(override.connectionID == connection.id)
-    #expect(override.model == "default-model")
+    #expect(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride == nil)
     #expect(runtime.aiConnectionsModel.selectedModel == "default-model")
 
     await runtime.waitForNewSessionPreparation(sessionID: sessionID)
-    let preparedOverride = try #require(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride)
-    #expect(preparedOverride.connectionID == connection.id)
-    #expect(preparedOverride.model == "default-model")
+    #expect(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride == nil)
+}
+
+@MainActor
+@Test func changingGlobalDefaultUnifiesSettingsActiveSessionAndRuntimeSelection() throws {
+    let settingsStore = WelcomeStateFakeSettingsStore()
+    let credentialStore = WelcomeStateFakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let first = AppLLMConnectionConfig(
+        id: "first",
+        name: "First",
+        providerMode: .openAICompatible,
+        baseURLString: "https://first.example/v1",
+        model: "model-a",
+        selectedModel: "model-a",
+        hasAPIKey: true
+    )
+    let second = AppLLMConnectionConfig(
+        id: "xiaomi",
+        name: "Xiaomi MiMo",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://token-plan-cn.xiaomimimo.com/anthropic",
+        model: "mimo-v2.5-pro",
+        selectedModel: "mimo-v2.5-pro",
+        hasAPIKey: true
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [first, second], defaultConnectionID: first.id),
+        apiKey: "first-key"
+    )
+    try repository.saveAPIKey("xiaomi-key", connectionID: second.id)
+    let runtime = try makeRuntime(settingsStore: settingsStore, credentialStore: credentialStore)
+    runtime.aiConnectionsModel.loadSettings()
+    runtime.aiConnectionsRuntimeCoordinator.selectModel(
+        first.effectiveModel,
+        providerMode: first.providerMode,
+        connectionID: first.id
+    )
+
+    runtime.aiConnectionsModel.selectDefaultConnection(second.id)
+
+    let sessionID = try #require(runtime.chatFeatureModel.sessions.selectedSessionID)
+    #expect(try repository.loadSettings().defaultConnectionID == second.id)
+    #expect(runtime.aiConnectionsModel.defaultConnectionID == second.id)
+    #expect(runtime.aiConnectionsModel.activeConnectionID == second.id)
+    #expect(runtime.aiConnectionsModel.selectedModel == second.effectiveModel)
+    #expect(runtime.chatWorkspaceCoordinator.stateSnapshotsBySessionID[sessionID]?.llmOverride == nil)
+    #expect(runtime.aiConnectionsRuntimeCoordinator.sessionHasOverride == false)
 }
 
 @MainActor

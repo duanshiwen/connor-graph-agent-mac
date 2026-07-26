@@ -113,8 +113,8 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         case "memory_os_recent_context", "memory_os_knowledge_context":
             let isRecent = call.name == "memory_os_recent_context"
             let allowedArguments: Set<String> = isRecent
-                ? ["query", "startDate", "endDate", "page"]
-                : ["query", "startDate", "endDate", "page", "depth"]
+                ? ["query", "startDate", "endDate", "page", "pageSize"]
+                : ["query", "startDate", "endDate", "page", "pageSize", "depth"]
             let unsupportedArguments = Set(args.values.keys).subtracting(allowedArguments).sorted()
             guard unsupportedArguments.isEmpty else {
                 throw MemoryOSBackgroundToolExecutionError.invalidArguments(
@@ -122,6 +122,12 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                 )
             }
             let page = args.values["page"] == nil ? 1 : (args.strictInt("page") ?? Int.min)
+            let effectiveConfiguration: MemoryOSContextToolConfiguration
+            do {
+                effectiveConfiguration = try MemoryOSLayeredContextSupport.configuration(from: agentArguments, base: contextToolConfiguration)
+            } catch {
+                throw MemoryOSBackgroundToolExecutionError.invalidArguments(String(describing: error))
+            }
             let depth = isRecent ? 1 : max(1, min(args.int("depth") ?? 1, contextToolConfiguration.maxDepth))
             let layers: [MemoryOSRetrievalLayer] = isRecent ? [.l1, .l2] : [.l3, .l4]
             let query = try Self.retrievalQuery(args: args, layers: layers, limit: Int.max, depth: depth)
@@ -141,7 +147,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                 query: query.text,
                 page: page,
                 candidates: candidates,
-                configuration: contextToolConfiguration
+                configuration: effectiveConfiguration
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]

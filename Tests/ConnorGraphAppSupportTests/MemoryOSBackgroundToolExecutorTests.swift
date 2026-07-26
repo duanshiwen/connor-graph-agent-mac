@@ -141,7 +141,7 @@ struct MemoryOSBackgroundToolExecutorTests {
         let executor = MemoryOSBackgroundToolExecutor(facade: AppMemoryOSFacade(store: store))
         let context = MemoryOSBackgroundToolExecutionContext(runID: "run", iteration: 1)
 
-        let recent = try executor.execute(MemoryOSBackgroundToolCall(id: "recent", name: "memory_os_recent_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
+        let recent = try executor.execute(MemoryOSBackgroundToolCall(id: "recent", name: "memory_os_recent_context", argumentsJSON: #"{"query":"Context Split","pageSize":125}"#), context: context)
         let knowledge = try executor.execute(MemoryOSBackgroundToolCall(id: "knowledge", name: "memory_os_knowledge_context", argumentsJSON: #"{"query":"Context Split"}"#), context: context)
 
         #expect(recent.contentText.contains("currently active"))
@@ -150,7 +150,7 @@ struct MemoryOSBackgroundToolExecutorTests {
         #expect(!knowledge.contentText.contains("currently active"))
         let recentResponse = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(recent.contentJSON.utf8))
         #expect(recentResponse.page == 1)
-        #expect(recentResponse.pageSize == 40)
+        #expect(recentResponse.pageSize == 125)
         #expect(recentResponse.records.contains { $0.recordID == "status" && $0.layer == "L2" })
         #expect(recent.citations.contains("status"))
         #expect(recentResponse.hasNextPage == false)

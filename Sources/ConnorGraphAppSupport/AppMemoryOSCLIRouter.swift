@@ -255,6 +255,10 @@ public enum AppMemoryOSCLIRouter {
         let maxToolIterations = intOption("--max-tool-iterations", in: args, default: MemoryOSBackgroundToolLoopConfiguration().maxToolIterations)
         let maxToolResultBytes = intOption("--max-tool-result-bytes", in: args, default: MemoryOSBackgroundToolLoopConfiguration().maxToolResultBytes)
         let result: MemoryOSCLIDebugAIRunResult
+        let recoveredLeaseCount = try inspector.recoverExpiredBackgroundAIJobs()
+        if recoveredLeaseCount > 0 {
+            print("Recovered \(recoveredLeaseCount) expired background AI lease(s).")
+        }
         if try inspector.hasRunnableBackgroundAIJob(kind: kind, limit: limit) {
             let model = try makeLiveDebugLoopModel()
             result = try inspector.debugRunNextBackgroundAI(

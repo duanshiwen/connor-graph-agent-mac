@@ -731,10 +731,14 @@ final class AppRuntimeLifecycle {
             guard let self else { return }
             self.connorSpeechPlaybackCoordinator.stopIfUnavailable()
             if rebuildRuntime {
+                self.aiConnectionsRuntimeCoordinator.syncCurrentSessionDisplay()
                 self.rebuildNativeSessionManagerForActiveSession()
             } else {
                 self.chatRunCoordinator.mutateManager { $0.permissionMode = self.agentPermissionMode }
             }
+        }
+        aiConnectionsModel.onDefaultConnectionChanged = { [weak self] in
+            self?.aiConnectionsRuntimeCoordinator.adoptGlobalDefaultForActiveSession()
         }
         aiConnectionsModel.onConnectionSetup = { [weak self] connection in
             self?.aiConnectionsRuntimeCoordinator.syncActiveSession(to: connection)
