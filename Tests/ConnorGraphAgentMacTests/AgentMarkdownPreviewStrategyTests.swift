@@ -108,7 +108,10 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(preview.contains("deferredPreviewView(statusText: \"正在展开完整内容…\", showsProgress: true)"))
         #expect(messageRows.components(separatedBy: "allowsDeferredPreview: !isMessageExpanded").count == 3)
         #expect(messageRows.contains("transaction.disablesAnimations = true"))
-        #expect(messageRows.contains("action: onToggleExpansion"))
+        #expect(messageRows.contains("if assistantExpansionPresentation.isAvailable, !isMessageExpanded"))
+        #expect(messageRows.contains("private var messageExpansionControl: some View"))
+        #expect(messageRows.contains(".foregroundStyle(Color.accentColor)"))
+        #expect(messageRows.contains(".frame(minHeight: 32)"))
         #expect(!messageRows.contains("allowsDeferredPreview: false"))
         #expect(!messageRows.contains("content.trimmingCharacters"))
     }
