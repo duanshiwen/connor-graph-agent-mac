@@ -1554,6 +1554,26 @@ struct CraftMailListPane: View {
                 model.searchQuery = ""
             }
 
+            if let syncMessage = model.syncMessage {
+                HStack(spacing: AppShellLayout.spaceS) {
+                    if model.isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: model.errorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                            .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.orange)
+                    }
+                    Text(syncMessage)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(AppShellColors.cardBackground)
+            }
+
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。"))
                     .padding(.top, 80)
