@@ -58,11 +58,12 @@ public struct ObsidianVaultNoteImportAdapter: NoteImportSourceAdapter {
             self.root = root.standardizedFileURL
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { return }
             for case let url as URL in enumerator {
-                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                guard values?.isRegularFile == true, values?.isSymbolicLink != true else { continue }
                 let standardized = url.standardizedFileURL
                 let relative = String(standardized.path.dropFirst(self.root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                 byRelativePath[Self.key(relative)] = standardized

@@ -101,7 +101,7 @@ public struct MarkdownFolderNoteImportAdapter: NoteImportSourceAdapter, Sendable
             }
             guard !raw.isEmpty, !raw.hasPrefix("#"), URL(string: raw)?.scheme == nil else { continue }
             let decoded = raw.removingPercentEncoding ?? raw
-            let candidate = noteURL.deletingLastPathComponent().appendingPathComponent(decoded)
+            let candidate = noteURL.resolvingSymlinksInPath().deletingLastPathComponent().appendingPathComponent(decoded)
             let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
             guard resolved.path == rootURL.path || resolved.path.hasPrefix(rootPrefix) else {
                 diagnostics.append(.init(code: .unsafePath, severity: .warning, message: "Attachment escapes the selected folder: \(raw)"))
@@ -109,6 +109,11 @@ public struct MarkdownFolderNoteImportAdapter: NoteImportSourceAdapter, Sendable
             }
             guard FileManager.default.fileExists(atPath: resolved.path) else {
                 diagnostics.append(.init(code: .attachmentMissing, severity: .warning, message: "Missing Markdown attachment: \(raw)"))
+                continue
+            }
+            let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+                diagnostics.append(.init(code: .unsafePath, severity: .warning, message: "Markdown attachment is not a regular file: \(raw)"))
                 continue
             }
             guard !["md", "markdown"].contains(resolved.pathExtension.lowercased()), seen.insert(resolved.path).inserted else { continue }

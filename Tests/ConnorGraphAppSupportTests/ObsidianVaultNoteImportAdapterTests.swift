@@ -53,5 +53,29 @@ struct ObsidianVaultNoteImportAdapterTests {
         #expect(notes.count == 2); #expect(notes.allSatisfy { $0.links.count == 1 && $0.links[0].metadata["embed"] == "true" })
     }
 
+    @Test("Merges Markdown and wikilink attachments without duplicates and skips symlinks")
+    func mergesAttachmentSyntaxSafely() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        try Data("outside".utf8).write(to: outside)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try Data("image".utf8).write(to: root.appendingPathComponent("image.png"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("linked.png"), withDestinationURL: outside)
+        try "# Mixed\n![Markdown](image.png)\n![[image.png]]\n![[linked.png]]".write(
+            to: root.appendingPathComponent("Mixed.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        var notes: [ImportedNote] = []
+        for try await note in ObsidianVaultNoteImportAdapter().scan(.init(sourceID: "v", sourceURL: root, kind: .obsidianVault, options: .init())) {
+            notes.append(note)
+        }
+        let mixed = try #require(notes.first { $0.title == "Mixed" })
+
+        #expect(mixed.attachments.map(\.displayName) == ["image.png"])
+        #expect(mixed.diagnostics.contains { $0.code == .attachmentMissing && $0.message.contains("linked.png") })
+    }
+
     private func directory() throws -> URL { let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true); return url }
 }
