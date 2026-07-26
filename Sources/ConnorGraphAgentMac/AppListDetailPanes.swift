@@ -2522,36 +2522,25 @@ private struct PersonProfilePhotoGallery: View {
         PersonProfileInfoSection(title: "照片（\(imageURLs.count)）", systemImage: "photo.on.rectangle.angled") {
             LazyVGrid(columns: columns, alignment: .leading, spacing: AppShellLayout.spaceM) {
                 ForEach(imageURLs, id: \.path) { imageURL in
-                    if let image = NSImage(contentsOf: imageURL) {
+                    GeometryReader { geometry in
                         ZStack(alignment: .topTrailing) {
-                            Image(nsImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(minHeight: 120)
-                                .aspectRatio(1, contentMode: .fill)
-                                .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
-
-                            Button(role: .destructive) { onRemove(imageURL) } label: {
-                                Image(systemName: "trash")
-                                    .frame(width: 28, height: 28)
+                            if let image = NSImage(contentsOf: imageURL) {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: geometry.size.width, height: geometry.size.height)
+                                    .clipped()
+                            } else {
+                                VStack(spacing: AppShellLayout.spaceS) {
+                                    Image(systemName: "photo.badge.exclamationmark")
+                                        .font(.system(size: 24, weight: .medium))
+                                    Text("图片无法读取")
+                                        .font(AgentChatTypography.meta)
+                                }
+                                .foregroundStyle(.secondary)
+                                .frame(width: geometry.size.width, height: geometry.size.height)
+                                .background(Color.secondary.opacity(0.08))
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help("移除这张图片")
-                            .padding(AppShellLayout.spaceS)
-                        }
-                    } else {
-                        ZStack(alignment: .topTrailing) {
-                            VStack(spacing: AppShellLayout.spaceS) {
-                                Image(systemName: "photo.badge.exclamationmark")
-                                    .font(.system(size: 24, weight: .medium))
-                                Text("图片无法读取")
-                                    .font(AgentChatTypography.meta)
-                            }
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 120)
-                            .aspectRatio(1, contentMode: .fit)
-                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
 
                             Button(role: .destructive) { onRemove(imageURL) } label: {
                                 Image(systemName: "trash")
@@ -2563,6 +2552,8 @@ private struct PersonProfilePhotoGallery: View {
                             .padding(AppShellLayout.spaceS)
                         }
                     }
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
                 }
 
                 Button(action: onAdd) {
@@ -2573,14 +2564,14 @@ private struct PersonProfilePhotoGallery: View {
                             .font(AgentChatTypography.meta)
                     }
                     .foregroundStyle(Color.accentColor)
-                    .frame(maxWidth: .infinity, minHeight: 120)
-                    .aspectRatio(1, contentMode: .fit)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
-                            .stroke(Color.accentColor.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .aspectRatio(1, contentMode: .fit)
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                )
                 .buttonStyle(.plain)
                 .help("为此人物添加一张或多张图片")
             }

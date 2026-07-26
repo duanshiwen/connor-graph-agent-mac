@@ -91,6 +91,31 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
         #expect(response.assistantText == "{\"artifactType\":\"memory.l1.unified_projection\"}")
     }
 
+    @Test("Completes when invoked from an actor", .timeLimit(.minutes(1)))
+    func agentModelBackgroundToolLoopModelDoesNotDeadlockCallingActor() async throws {
+        let provider = AnyAgentModelProvider(modelID: "actor-test-model") { _ in
+            await Task.yield()
+            return AgentModelResponse(text: "completed", toolCalls: [])
+        }
+        let model = AgentModelBackgroundToolLoopModel(provider: provider)
+        let request = MemoryOSBackgroundLoopModelRequest(
+            runID: "actor-run",
+            job: MemoryOSBackgroundModelRequest(
+                jobID: "actor-job",
+                kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+                schemaName: "schema",
+                artifactType: "artifact",
+                prompt: "Prompt"
+            ),
+            messages: [MemoryOSBackgroundLoopMessage(role: .user, content: "Prompt")],
+            availableTools: []
+        )
+
+        let response = try await BackgroundModelActorHarness().complete(model: model, request: request)
+
+        #expect(response.assistantText == "completed")
+    }
+
     @Test func backgroundDescriptorsMatchExecutorToolSchemas() throws {
         let store = try SQLiteMemoryOSStore(path: ":memory:")
         try store.migrate()
@@ -107,6 +132,15 @@ struct MemoryOSBackgroundAgentModelAdapterTests {
             let executionShape = try contractShapeJSON(executionSchema.jsonObject)
             #expect(advertisedShape == executionShape, "Schema mismatch for \(descriptor.name): advertised=\(advertisedShape) execution=\(executionShape)")
         }
+    }
+}
+
+private actor BackgroundModelActorHarness {
+    func complete(
+        model: AgentModelBackgroundToolLoopModel,
+        request: MemoryOSBackgroundLoopModelRequest
+    ) throws -> MemoryOSBackgroundLoopModelResponse {
+        try model.complete(request)
     }
 }
 

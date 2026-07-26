@@ -159,7 +159,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
     }
 
     public func traceEvidence(_ query: MemoryOSEvidenceTraceQuery) throws -> MemoryOSGraphSubgraph {
-        let limit = min(max(query.limit, 1), 500)
+        let limit = max(query.limit, 1)
         var spanIDs = Set(query.spanIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         let statementIDs = Set(query.statementIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
         let beliefIDs = Set(query.beliefIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
@@ -241,7 +241,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         guard !text.isEmpty || !(subjectID?.isEmpty ?? true) || !predicates.isEmpty else {
             return MemoryOSGraphSubgraph(explanation: "No L2 statement query, subject id, or predicate filter was provided.")
         }
-        let limit = min(max(query.limit, 1), 500)
+        let limit = max(query.limit, 1)
         var clauses: [String] = []
         if let subjectID, !subjectID.isEmpty { clauses.append("s.subject_id = \(store.quote(subjectID))") }
         if !predicates.isEmpty { clauses.append("s.predicate IN (\(predicates.map(store.quote).joined(separator: ",")))") }
@@ -295,7 +295,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         guard !(beliefID?.isEmpty ?? true) || !(domain?.isEmpty ?? true) || !(text?.isEmpty ?? true) else {
             return MemoryOSGraphSubgraph(explanation: "No L3 belief id, domain, or text query was provided.")
         }
-        let limit = min(max(query.limit, 1), 100)
+        let limit = max(query.limit, 1)
         var clauses: [String] = []
         if let beliefID, !beliefID.isEmpty { clauses.append("b.id = \(store.quote(beliefID))") }
         if let domain, !domain.isEmpty { clauses.append("b.domain = \(store.quote(MemoryOSBelief.normalizedDisciplineDomain(domain)))") }
@@ -329,7 +329,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
     public func l4FindEntity(_ query: MemoryOSL4EntityFindQuery) throws -> MemoryOSGraphSubgraph {
         let text = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return MemoryOSGraphSubgraph(explanation: "No entity search text was provided.") }
-        let limit = min(max(query.limit, 1), 100)
+        let limit = max(query.limit, 1)
         let quoted = store.quote(text)
         let like = store.quote("%\(text)%")
         let rows = try store.query(sql: """
@@ -363,7 +363,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
     public func l4Neighbors(_ query: MemoryOSL4NeighborsQuery) throws -> MemoryOSGraphSubgraph {
         let entityID = query.entityID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !entityID.isEmpty else { return MemoryOSGraphSubgraph(explanation: "No entity id was provided.") }
-        let limit = min(max(query.limit, 1), 1_000)
+        let limit = max(query.limit, 1)
         let predicateClause = query.predicates.isEmpty ? "" : " AND s.predicate IN (\(query.predicates.map(store.quote).joined(separator: ",")))"
         var statements: [[String]] = []
         if query.direction == .outgoing || query.direction == .both {
@@ -420,7 +420,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         let predicates = query.predicates.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         let quotedClassIDs = classIDs.map(store.quote).joined(separator: ",")
         let quotedPredicates = predicates.map(store.quote).joined(separator: ",")
-        let limit = min(max(query.limit, 1), 1_000)
+        let limit = max(query.limit, 1)
 
         let classRows = try store.query(sql: """
         SELECT id, entity_type, name, summary, COALESCE(updated_at, '')

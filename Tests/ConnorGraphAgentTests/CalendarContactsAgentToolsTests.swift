@@ -421,7 +421,9 @@ struct CalendarContactsAgentToolsTests {
         #expect(readTool.description.contains("Referenced People"))
         #expect(readTool.description.contains("personID"))
         #expect(readTool.description.contains("do not guess IDs from display names"))
-        #expect(writeTool.description.contains("Referenced People"))
+        #expect(writeTool.description.contains("User Attachments"))
+        #expect(writeTool.description.contains("personID"))
+        #expect(writeTool.description.contains("attachmentIDs"))
         #expect(writeTool.description.contains("never guess IDs from display names"))
 
         guard case .closedObject(let readProperties, _) = readTool.inputSchema,
