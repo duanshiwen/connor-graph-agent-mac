@@ -395,8 +395,8 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptDocumentsPersonRegistrySemantics() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("## Person Registry and Contacts"))
-    #expect(prompt.contains("not only an address book"))
+    #expect(prompt.contains("## Person Registry and Relationships"))
+    #expect(prompt.contains("relationship-aware Person Registry"))
     #expect(prompt.contains("people without contact methods"))
     #expect(prompt.contains("correct, merge, or delete people"))
     #expect(prompt.contains("merged people should resolve to the target person"))
@@ -412,12 +412,81 @@ import ConnorGraphAgent
     #expect(prompt.contains("status: deleted"))
 }
 
+@Test func defaultSystemPromptAllowsAutomaticActivePersonCreation() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("LLM may create active relationship-aware Person Registry entries without pending review"))
+    #expect(prompt.contains("contacts_write.create_person"))
+    #expect(prompt.contains("Do not create people for incidental noun phrases"))
+}
+
 @Test func defaultSystemPromptDocumentsAtMentionPersonContext() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("@person"))
     #expect(prompt.contains("@人物"))
-    #expect(prompt.contains("default attribution anchor"))
+    #expect(prompt.contains("default relationship identity anchor"))
+}
+
+@Test func defaultSystemPromptPrioritizesPersonRegistryContactMethodsOverMemoryHistory() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Person Registry active profile contact methods are authoritative"))
+    #expect(prompt.contains("Historical Memory OS conversation events are background only"))
+    #expect(prompt.contains("must not override current Person Registry email, phone, or address fields"))
+}
+
+@Test func defaultSystemPromptPrefersPersonAwareMailDraftToolForMentionedPeople() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("mail_create_draft_to_people"))
+    #expect(prompt.contains("exact person IDs"))
+    #expect(prompt.contains("Prefer it over raw `mail_create_draft.to`"))
+}
+
+@Test func defaultSystemPromptDocumentsUserGovernedPersonMemoryRules() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Person memory can be archived, deleted, or moved by the user"))
+    #expect(prompt.contains("Archived, deleted, and moved person memories are not active default retrieval context"))
+    #expect(prompt.contains("prefer move or merge governance instead of inventing conflicting duplicate facts"))
+}
+
+@Test func defaultSystemPromptRequiresPerTurnRelationshipMaintenance() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("In every conversation turn"))
+    #expect(prompt.contains("create an active Person Registry entry"))
+    #expect(prompt.contains("contacts_write.create_person"))
+    #expect(prompt.contains("Do not wait for background L1 processing"))
+}
+
+@Test func defaultSystemPromptDocumentsImmediateFactualPersonProfileUpdates() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Immediate factual profile updates"))
+    #expect(prompt.contains("contacts_read"))
+    #expect(prompt.contains("contacts_write.update_person"))
+    #expect(prompt.contains("name, aliases, email, organization, jobTitle, and notes"))
+}
+
+@Test func defaultSystemPromptDocumentsUnsupportedPersonFieldsFallback() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("does not expose structured phone/address/gender arguments"))
+    #expect(prompt.contains("preserve it in notes with clear labels"))
+    #expect(prompt.contains("phone numbers"))
+    #expect(prompt.contains("home/family addresses"))
+    #expect(prompt.contains("gender/pronoun/title"))
+}
+
+@Test func defaultSystemPromptSeparatesConversationProfileFactsFromL1PersonalitySynthesis() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("concrete, explicitly evidenced profile facts"))
+    #expect(prompt.contains("Do not use contacts_write to store personality analysis"))
+    #expect(prompt.contains("Multi-turn synthesis of personality traits"))
+    #expect(prompt.contains("belongs to L1/background Memory OS projection"))
 }
 
 @Test func defaultSystemPromptDoesNotAdvertiseUnavailablePersonRelationshipTools() {

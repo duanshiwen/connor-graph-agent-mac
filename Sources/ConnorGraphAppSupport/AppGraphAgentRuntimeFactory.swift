@@ -181,6 +181,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         return PersonRegistryAgentContactRuntime(profileStore: profileStore, memoryOSFacade: memoryOSFacade, storagePaths: storagePaths)
     }
 
+    private func makeContactRuntime() -> any AgentContactRuntime {
+        guard let storagePaths else { return InMemoryAgentContactRuntime() }
+        let databaseURL = storagePaths.applicationSupportDirectory
+            .appendingPathComponent("contacts", isDirectory: true)
+            .appendingPathComponent("person-profiles.sqlite")
+        do {
+            try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            return PersonProfileStoreAgentContactRuntime(store: try SQLitePersonProfileStore(databaseURL: databaseURL))
+        } catch {
+            return InMemoryAgentContactRuntime()
+        }
+    }
 
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
@@ -263,6 +275,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceOptimizeTool())
         registry.register(ScienceTableComputeTool())
         registry.registerTimeAnalysisTool()
+        let contactRuntime = makeContactRuntime()
         if let storagePaths {
             let calendarStore = calendarRuntimeStore ?? FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             let calendarCredentialStore = calendarCredentialStore ?? AppCalendarCredentialStore()
@@ -292,12 +305,23 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 effectiveMailRuntime = MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths))
             }
             registry.registerNativeMailTools(runtime: effectiveMailRuntime, recorder: nativeSourceReferenceRecorder)
+            ), recorder: nativeSourceReferenceRecorder)
+            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            registry.registerNativeMailTools(
+                runtime: MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths)),
+                contactRuntime: contactRuntime,
+                recorder: nativeSourceReferenceRecorder
+            )
+
             registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }
         registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime(memoryOSFacade: memoryOSFacade) ?? InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
+        registry.registerNativeContactsAggregateTools(runtime: contactRuntime)
+        registry.register(BrowserFetchTool())
+
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         if let browserControlHandler {

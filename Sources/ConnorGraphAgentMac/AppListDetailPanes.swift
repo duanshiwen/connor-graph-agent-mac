@@ -511,15 +511,31 @@ struct CraftContactsListPane: View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "人际关系") {
                 Button(action: { model.presentNewProfileEditor() }) {
+            HStack {
+                Spacer(minLength: 24)
+                Text("人际关系")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.presentNewPersonProfileEditor() }) {
+
                     Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.appIcon)
                 .help("新建人物")
                 .accessibilityLabel("新建人物")
+                .buttonStyle(.plain)
+                .help("新建人物档案")
+                .accessibilityLabel("新建人物档案")
+
             }
 
             if model.presentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
+            if viewModel.contactsBrowserPresentation.rows.isEmpty {
+                ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.crop.circle.badge", description: Text("连接通讯录后，康纳同学会把可用人际关系整理在这里，方便之后检索和关联会话。"))
+
                     .padding(.top, 80)
             } else {
                 ContactsRowsScrollView(
@@ -727,7 +743,6 @@ extension View {
             .listRowBackground(Color.clear)
     }
 }
-
 
 private enum RSSSourcePreset: String, CaseIterable, Identifiable {
     case appleDeveloper
@@ -2343,6 +2358,34 @@ struct ContactsSourceSettingsView: View {
                                     }
                                 }
                             }
+                let profile = selectedPersonProfile
+                let memoryItems = profile.map { viewModel.personMemoryItemsByPersonID[$0.id] ?? [] } ?? []
+                let detail = profile.map { PersonProfileDetailPresentation(profile: $0, memoryItems: memoryItems) }
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "人物档案", subtitle: "人际关系现在是人物列表：人可以先存在，联系方式后补充。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.displayName, systemImage: "person.crop.circle")
+                            .font(AgentChatTypography.title)
+                        Text(selected.subtitle).font(AgentChatTypography.meta).textSelection(.enabled)
+                        if let organization = selected.organizationName {
+                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+                        }
+                        if let detail {
+                            PersonDetailInfoRow(title: "别名", value: detail.aliasesText, systemImage: "tag")
+                            PersonDetailInfoRow(title: detail.memoryBindingTitle, value: detail.memoryBindingDetail, systemImage: "brain.head.profile")
+                            PersonDetailInfoRow(title: "人物记忆摘要", value: detail.memorySummary, systemImage: "text.alignleft")
+                            PersonDetailInfoRow(title: "人物记忆", value: detail.activeMemoryCountText, systemImage: "list.bullet.rectangle")
+                            PersonMemoryItemsList(
+                                items: detail.memoryItems,
+                                onArchive: { item in Task { @MainActor in await viewModel.archivePersonMemoryItem(item.id, for: item.personID) } },
+                                onDelete: { item in Task { @MainActor in await viewModel.deletePersonMemoryItem(item.id, for: item.personID) } }
+                            )
+                        }
+                        HStack {
+                            Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
+                            Button("删除", role: .destructive) { viewModel.pendingPersonProfileDeletionID = selected.id }
+
                         }
                     }
                     .padding(AppShellLayout.spaceXL)
@@ -2351,6 +2394,9 @@ struct ContactsSourceSettingsView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .task(id: selected.id) {
+                    await viewModel.reloadPersonMemoryItems(for: selected.id)
+                }
             } else {
                 Color.clear
             }
@@ -2398,6 +2444,73 @@ struct ContactsSourceSettingsView: View {
     private var selectedContactRow: NativeContactRowPresentation? {
         guard let id = model.selectedContactID else { return nil }
         return model.presentation.rows.first { $0.id == id }
+    }
+
+    private var selectedPersonProfile: PersonProfile? {
+        guard let id = viewModel.selectedContactID else { return nil }
+        return viewModel.personProfiles.first { $0.id == id }
+    }
+}
+
+private struct PersonMemoryItemsList: View {
+    var items: [PersonMemoryItem]
+    var onArchive: (PersonMemoryItem) -> Void
+    var onDelete: (PersonMemoryItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if items.isEmpty {
+                Text("暂无 active 人物记忆")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.predicate)
+                                .font(AgentChatTypography.metaEmphasis)
+                                .foregroundStyle(.secondary)
+                            Text(item.text)
+                                .font(AgentChatTypography.meta)
+                                .textSelection(.enabled)
+                        }
+                        Spacer(minLength: 12)
+                        Menu {
+                            Button("归档，不再主动使用") { onArchive(item) }
+                            Button("删除", role: .destructive) { onDelete(item) }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
+        }
+    }
+}
+
+private struct PersonDetailInfoRow: View {
+    var title: String
+    var value: String
+    var systemImage: String
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(AgentChatTypography.metaEmphasis)
+                Text(value)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -3111,7 +3224,6 @@ private struct RSSStatusPill: View {
     }
 }
 
-
 private struct SessionCardAttentionStyle {
     var dotColor: Color?
     var backgroundColor: Color
@@ -3503,7 +3615,6 @@ struct CraftSessionRow: View {
         }
     }
 
-
     private func beginTitleEdit() {
         titleDraft = row.title
         isEditingTitle = true
@@ -3520,7 +3631,6 @@ struct CraftSessionRow: View {
         }
         onRename(trimmed)
     }
-
 
     private func icon(for status: AgentSessionStatus) -> String {
         switch status {
@@ -3548,7 +3658,6 @@ struct CraftSessionRow: View {
         }
     }
 }
-
 
 struct CraftSettingsListPane: View {
     @Bindable var shellModel: AppShellFeatureModel

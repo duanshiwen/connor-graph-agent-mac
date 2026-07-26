@@ -1,10 +1,25 @@
 import Foundation
 import ConnorGraphCore
 
+public struct PersonContextSnapshot: Sendable, Codable, Equatable, Hashable {
+    public var profile: PersonProfile
+    public var memorySummary: String?
+    public var activeAliases: [String]
+    public var activeMemoryItems: [String]
+
+    public init(profile: PersonProfile, memorySummary: String? = nil, activeAliases: [String]? = nil, activeMemoryItems: [String] = []) {
+        self.profile = profile
+        self.memorySummary = memorySummary
+        self.activeAliases = activeAliases ?? profile.aliases
+        self.activeMemoryItems = activeMemoryItems
+    }
+}
+
 public struct AgentChatPromptContext: Sendable, Equatable {
     public var userPrompt: String
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
+    public var explicitPersonContexts: [PersonContextSnapshot]
     /// Compression anchor state — takes priority over `sessionSummary`
     /// when both are present.
     public var anchorState: SessionAnchorState?
@@ -13,11 +28,13 @@ public struct AgentChatPromptContext: Sendable, Equatable {
         userPrompt: String,
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
+        explicitPersonContexts: [PersonContextSnapshot] = [],
         anchorState: SessionAnchorState? = nil
     ) {
         self.userPrompt = userPrompt
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
+        self.explicitPersonContexts = explicitPersonContexts
         self.anchorState = anchorState
     }
 
@@ -40,6 +57,10 @@ public struct AgentChatPromptContext: Sendable, Equatable {
             Recent conversation:
             \(renderedMessages)
             """)
+        }
+
+        if !explicitPersonContexts.isEmpty {
+            blocks.append(renderExplicitPersonContexts(explicitPersonContexts))
         }
 
         // Only add the "Current user request" prefix if there's context to prepend
@@ -78,6 +99,61 @@ public struct AgentChatPromptContext: Sendable, Equatable {
 
     private var trimmedSummaryContent: String {
         sessionSummary?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func renderExplicitPersonContexts(_ contexts: [PersonContextSnapshot]) -> String {
+        var lines: [String] = [
+            "Explicit Relationship Context:",
+            "The user explicitly mentioned these relationship-aware Person Registry entries in the current message. Treat each entry as a relationship identity anchor for this turn and prefer it for person fact attribution.",
+            "Person Registry active profile contact methods are authoritative for email/phone/address decisions in this turn; historical Memory OS conversation events are background only and must not override these contact methods."
+        ]
+        for context in contexts {
+            let profile = context.profile
+            let aliases = context.activeAliases.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ", ")
+            var parts: [String] = [
+                "- \(profile.displayName) (person_id: \(profile.id.rawValue))"
+            ]
+            if !aliases.isEmpty { parts.append("aliases: \(aliases)") }
+            let emails = profile.emails
+                .map { $0.email.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+            if !emails.isEmpty { parts.append("emails: \(emails)") }
+            let phones = profile.phones
+                .map { $0.number.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+            if !phones.isEmpty { parts.append("phones: \(phones)") }
+            let addresses = profile.addresses
+                .map { $0.value.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+            if !addresses.isEmpty { parts.append("addresses: \(addresses)") }
+            if let organization = profile.organizationName, !organization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("organization: \(organization)")
+            }
+            if let jobTitle = profile.jobTitle, !jobTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("job_title: \(jobTitle)")
+            }
+            if let notes = profile.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("notes: \(notes)")
+            }
+            if let memorySummary = context.memorySummary, !memorySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("memory: \(memorySummary)")
+            }
+            let activeMemoryItems = context.activeMemoryItems
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !activeMemoryItems.isEmpty {
+                let bullets = activeMemoryItems.prefix(8).map { "- \($0)" }.joined(separator: "\n")
+                parts.append("active person memory (archived/deleted/moved person memories are not active default context): \n\(bullets)")
+            }
+            if let memoryStableKey = profile.memoryStableKey, !memoryStableKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                parts.append("memory_stable_key: \(memoryStableKey)")
+            }
+            lines.append(parts.joined(separator: "; "))
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func renderAnchorState(_ anchor: SessionAnchorState) -> String {

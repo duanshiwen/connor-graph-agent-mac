@@ -155,6 +155,8 @@ public struct NativeSessionManager: Sendable {
         attachments: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
         personReferences: [PersonReference] = [],
+        explicitPersonContexts: [PersonContextSnapshot] = [],
+
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil,
@@ -184,6 +186,7 @@ public struct NativeSessionManager: Sendable {
             attachmentRefs: attachments,
             attachmentContextPlan: attachmentContextPlan,
             anchorState: anchorState,
+            explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
             activeSkillSlug: activeSkillSlug,
             activeSkillDisplayName: activeSkillDisplayName,
