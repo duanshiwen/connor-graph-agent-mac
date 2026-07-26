@@ -172,6 +172,48 @@ struct NoteImportCoordinatorTests {
         #expect(try ledger.sources().map(\.id) == [source.id])
     }
 
+    @Test("Encoding review items finish with issues instead of silent success")
+    func encodingReviewPreventsSilentCompletion() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(id: "job", sourceID: source.id, options: .init(llmMode: .disabled))
+        try ledger.saveJob(job)
+        let service = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: CoordinatorBackend(), sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(ledger: ledger, sessionService: service)
+        let note = ImportedNote(
+            sourceKind: .markdownFolder,
+            sourceIdentity: "ambiguous.md",
+            title: "Ambiguous",
+            markdownContent: "Review before importing",
+            rawByteHash: "raw",
+            normalizedTextHash: "text",
+            diagnostics: [.init(code: .decodingAmbiguous, severity: .warning, message: "Encoding needs review")]
+        )
+
+        let scanned = try await coordinator.scan(
+            jobID: job.id,
+            adapter: SingleNoteAdapter(note: note),
+            request: .init(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
+        )
+        let item = try #require(ledger.items(jobID: job.id).first)
+
+        #expect(scanned.status == .awaitingReview)
+        #expect(scanned.failedCount == 1)
+        #expect(item.status == .needsEncodingReview)
+        #expect(try await coordinator.execute(jobID: job.id).status == .completedWithIssues)
+        #expect(try chat.loadRecentSessions(limit: 10).isEmpty)
+    }
+
     @Test("Persists original content first and retries transient LLM failures idempotently")
     func retriesTransientLLMWithoutDuplicatingProcessingMessages() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
