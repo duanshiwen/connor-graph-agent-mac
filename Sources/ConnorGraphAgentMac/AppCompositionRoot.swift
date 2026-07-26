@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import ConnorGraphAppSupport
 
 @MainActor
@@ -51,7 +52,13 @@ final class AppCompositionRoot: ObservableObject {
                     baseURL: backendBaseURL,
                     transport: BackendConnectivityTrackingTransport(),
                     networkIsAvailable: { AppNetworkConnectivity.shared.isConnected },
-                    serverIsReachable: { AppBackendConnectivity.shared.isReachable }
+                    serverIsReachable: { AppBackendConnectivity.shared.isReachable },
+                    syncAvailability: Publishers.CombineLatest(
+                        AppNetworkConnectivity.shared.$isConnected,
+                        AppBackendConnectivity.shared.$state
+                    )
+                    .map { isConnected, backendState in isConnected && backendState != .unreachable }
+                    .eraseToAnyPublisher()
                 ),
                 noteImportModel: NoteImportViewModel(configurationError: "导入功能正在准备中…"),
                 featureFlags: AppFeatureFlags.load(),
@@ -61,7 +68,12 @@ final class AppCompositionRoot: ObservableObject {
             root.bindCommandRouting(to: placeholder)
             root.identityStore.onDeviceSyncPass = { [weak root] in
                 guard let root else { return }
-                await root.runtime.syncAccountData(using: root.identityStore)
+                do {
+                    try await root.runtime.syncAccountData(using: root.identityStore)
+                } catch {
+                    AppPerformanceLog.chatTurnLogger.warning("account.sync.failed error=\(String(describing: error), privacy: .public)")
+                    throw error
+                }
             }
             AppStartupPerformance.event("AppCompositionLightConstructed")
             return root

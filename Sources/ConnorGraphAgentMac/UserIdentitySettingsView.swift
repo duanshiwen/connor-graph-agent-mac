@@ -22,12 +22,15 @@ struct UserIdentitySettingsView: View {
     }
 
     var body: some View {
-        Group {
-            switch identityStore.authenticationState {
-            case .signedIn(let user): signedInContent(user)
-            case .restoring: restoringView
-            case .signedOut, .expired: authenticationView
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            Group {
+                switch identityStore.authenticationState {
+                case .signedIn(let user): signedInContent(user)
+                case .restoring: restoringView
+                case .signedOut, .expired: authenticationView
+                }
             }
+            deviceSyncSettings
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .task(id: identityStore.currentUser?.id) {
@@ -117,11 +120,6 @@ struct UserIdentitySettingsView: View {
                 }
             }
 
-            SettingsGroup(title: "同步与隐私") {
-                accountCapabilityRow(systemImage: "arrow.triangle.2.circlepath", title: "账号同步", subtitle: "同步账号资料和登录状态。")
-                Divider()
-                accountCapabilityRow(systemImage: "lock.shield", title: "设备间同步", subtitle: "本地数据、设置和 Memory OS 会在你的不同设备间同步，但不会上传到云端。")
-            }
         }
     }
 
@@ -204,6 +202,97 @@ struct UserIdentitySettingsView: View {
             Spacer()
         }
         .frame(minHeight: SettingsListLayout.rowMinHeight)
+    }
+
+    private var deviceSyncSettings: some View {
+        SettingsGroup(title: "设备间同步") {
+            HStack(spacing: SettingsListLayout.spaceM) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(SettingsListTypography.icon)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                    Text("在不同客户端同步我的数据")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("同步账号资料、设置和会话；本机数据仍可离线使用。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle(
+                    "在不同客户端同步我的数据",
+                    isOn: Binding(
+                        get: { identityStore.isDeviceSyncEnabled },
+                        set: { identityStore.setDeviceSyncEnabled($0) }
+                    )
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+            .frame(minHeight: SettingsListLayout.rowMinHeight)
+
+            Divider()
+
+            HStack(spacing: SettingsListLayout.spaceM) {
+                let presentation = syncStatusPresentation
+                Image(systemName: presentation.systemImage)
+                    .font(SettingsListTypography.icon)
+                    .foregroundStyle(presentation.color)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                    Text("同步状态")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text(presentation.text)
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(presentation.color)
+                }
+                Spacer()
+                if identityStore.isDeviceSyncEnabled, identityStore.currentUser != nil {
+                    Button("立即同步") { identityStore.syncNow() }
+                        .buttonStyle(.bordered)
+                        .controlSize(AppButtonLayout.controlSize)
+                        .disabled(!canUseAccountService || isSyncing)
+                }
+            }
+            .frame(minHeight: SettingsListLayout.rowMinHeight)
+        }
+    }
+
+    private var isSyncing: Bool {
+        if case .syncing = identityStore.deviceSyncStatus { return true }
+        if case .connecting = identityStore.deviceSyncStatus { return true }
+        return false
+    }
+
+    private var syncStatusPresentation: (text: String, systemImage: String, color: Color) {
+        guard identityStore.isDeviceSyncEnabled else {
+            return ("已关闭，不会上传或下载设备数据。", "pause.circle", .secondary)
+        }
+        guard identityStore.currentUser != nil else {
+            return ("登录康纳账号后可以开启同步。", "person.crop.circle.badge.questionmark", .secondary)
+        }
+        guard connectivity.isConnected else {
+            return ("当前离线，将在网络恢复后继续。", "wifi.slash", .orange)
+        }
+        guard backendConnectivity.state != .unreachable else {
+            return ("无法连接康纳服务器，将自动重试。", "exclamationmark.icloud", .orange)
+        }
+        switch identityStore.deviceSyncStatus {
+        case .disabled:
+            return ("已关闭，不会上传或下载设备数据。", "pause.circle", .secondary)
+        case .waitingForLogin:
+            return ("登录康纳账号后可以开启同步。", "person.crop.circle.badge.questionmark", .secondary)
+        case .offline:
+            return ("连接暂不可用，将自动重试。", "wifi.slash", .orange)
+        case .connecting:
+            return ("正在连接同步服务…", "network", .secondary)
+        case .syncing:
+            return ("正在后台同步…", "arrow.triangle.2.circlepath", .accentColor)
+        case .upToDate(let date):
+            return ("已同步 · \(date.formatted(date: .abbreviated, time: .shortened))", "checkmark.circle.fill", .green)
+        case .failed(let message):
+            return ("同步失败：\(message)", "exclamationmark.triangle", .red)
+        }
     }
 
     private var formError: String? {

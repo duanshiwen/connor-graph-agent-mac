@@ -155,6 +155,7 @@ public struct AppChatSessionRepository: Sendable {
         let session = AgentSession(id: UUID().uuidString, title: title, messages: [], createdAt: now, updatedAt: now, governance: .default)
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+        AppAccountSyncSignal.postLocalDataDidChange()
         return session
     }
 
@@ -169,6 +170,7 @@ public struct AppChatSessionRepository: Sendable {
     public func persistNewSession(_ session: AgentSession) throws -> AgentSessionArtifactDirectories? {
         try store.upsertSession(session)
         synchronizeNoteBestEffort(session)
+        AppAccountSyncSignal.postLocalDataDidChange()
         return try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
     }
 
@@ -177,6 +179,7 @@ public struct AppChatSessionRepository: Sendable {
     /// background tasks, so no task lookup or governance event is required.
     public func rollbackNewSession(sessionID: String) throws {
         try store.deleteSession(id: sessionID)
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     /// Creates an imported note session in one database write. This avoids the
@@ -213,6 +216,7 @@ public struct AppChatSessionRepository: Sendable {
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
         synchronizeNoteBestEffort(session, origin: .imported)
+        AppAccountSyncSignal.postLocalDataDidChange()
         return session
     }
 
@@ -249,6 +253,7 @@ public struct AppChatSessionRepository: Sendable {
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
         try prewarmMarkdownRenderCacheIfNeeded(for: session, previousMessageCount: previousMessageCount)
         synchronizeNoteBestEffort(session)
+        AppAccountSyncSignal.postLocalDataDidChange()
         return session
     }
 
@@ -290,6 +295,7 @@ public struct AppChatSessionRepository: Sendable {
         try store.upsertSession(session)
         synchronizeNoteBestEffort(session)
         try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_title_changed", message: "Session title changed", metadata: ["title": title])
+        AppAccountSyncSignal.postLocalDataDidChange()
         return session
     }
 
@@ -304,6 +310,7 @@ public struct AppChatSessionRepository: Sendable {
         let deletedAt = Date()
         try store.deleteSession(id: sessionID, deletedAt: deletedAt)
         try? noteProjection?.remove(sessionID: sessionID, deletedAt: deletedAt)
+        AppAccountSyncSignal.postLocalDataDidChange()
     }
 
     @discardableResult
@@ -312,6 +319,7 @@ public struct AppChatSessionRepository: Sendable {
         try store.restoreSession(id: sessionID, restoredAt: now)
         guard let restored = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
         synchronizeNoteBestEffort(restored)
+        AppAccountSyncSignal.postLocalDataDidChange()
         return restored
     }
 
@@ -356,6 +364,7 @@ public struct AppChatSessionRepository: Sendable {
         session.governance = governance
         session.updatedAt = Date()
         try store.upsertSession(session)
+        AppAccountSyncSignal.postLocalDataDidChange()
         return session
     }
 
@@ -401,6 +410,7 @@ public struct AppChatSessionRepository: Sendable {
             }
             return .conflict(latest)
         }
+        AppAccountSyncSignal.postLocalDataDidChange()
         let warning: String?
         do {
             try appendJournalEvent(
@@ -598,6 +608,7 @@ public struct AppChatSessionRepository: Sendable {
         )
         try store.upsertSession(target)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: target.id)
+        AppAccountSyncSignal.postLocalDataDidChange()
         let record = SessionBranchRecord(
             sourceSessionID: sourceSessionID,
             targetSessionID: target.id,

@@ -4,6 +4,28 @@ import ConnorGraphAppSupport
 
 @Suite("App User Identity Store Tests")
 struct AppUserIdentityStoreTests {
+    @Test @MainActor func deviceSyncIsOptInAndWaitsForLogin() {
+        let suiteName = "ConnorIdentitySyncPreferenceTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = AppUserIdentityStore(
+            baseURL: URL(string: "https://backend.example")!,
+            transport: IdentityTestTransport(),
+            syncDefaults: defaults
+        )
+
+        #expect(!store.isDeviceSyncEnabled)
+        #expect(store.deviceSyncStatus == .disabled)
+
+        store.setDeviceSyncEnabled(true)
+        #expect(store.isDeviceSyncEnabled)
+        #expect(store.deviceSyncStatus == .waitingForLogin)
+        #expect(defaults.bool(forKey: "ConnorDeviceSyncEnabled"))
+
+        store.setDeviceSyncEnabled(false)
+        #expect(store.deviceSyncStatus == .disabled)
+    }
+
     @Test func remoteIdentityUsesNicknameThenUsernameAsDisplayName() {
         let date = Date(timeIntervalSince1970: 0)
         let named = ConnorRemoteUserIdentity(id: 1, username: "shiwen", nickname: "诗闻", email: "s@example.com", avatarURL: nil, role: "user", createdAt: date, updatedAt: date)
