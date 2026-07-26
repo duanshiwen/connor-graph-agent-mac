@@ -57,6 +57,25 @@ struct MarkdownFolderNoteImportAdapterTests {
         #expect(a.normalizedTextHash == b.normalizedTextHash)
     }
 
+    @Test("Imports local Markdown attachments once and reports unsafe or missing targets")
+    func localAttachments() async throws {
+        let fixture = try Fixture()
+        try fixture.writeData(Data("image".utf8), at: "assets/my image.png")
+        try fixture.write(
+            "# Attachments\n![Image](assets/my%20image.png)\n[Duplicate](<assets/my image.png> \"Title\")\n[Missing](missing.pdf)\n[Escape](../../outside.pdf)\n[Folder](assets)",
+            at: "note.md"
+        )
+
+        let note = try #require(try await fixture.scan().first)
+
+        #expect(note.attachments.count == 1)
+        #expect(note.attachments.first?.displayName == "my image.png")
+        #expect(note.attachments.first?.byteCount == 5)
+        #expect(note.diagnostics.contains { $0.code == .attachmentMissing && $0.message.contains("missing.pdf") })
+        #expect(note.diagnostics.contains { $0.code == .unsafePath && $0.message.contains("outside.pdf") })
+        #expect(note.diagnostics.contains { $0.code == .unsafePath && $0.message.contains("assets") })
+    }
+
     private final class Fixture {
         let root: URL
         init() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
