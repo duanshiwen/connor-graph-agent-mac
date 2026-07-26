@@ -1199,7 +1199,12 @@ private struct InstructionPromotionTool: AgentTool {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "web", name: "web_search", argumentsJSON: "{}")] + memoryCalls,
+            toolCalls: memoryCalls,
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "web", name: "web_search", argumentsJSON: "{}")],
             finishReason: .toolCalls
         ),
         AgentModelResponse(text: "补充说明：记忆中存在无关的学历冲突。"),
@@ -1218,10 +1223,10 @@ private struct InstructionPromotionTool: AgentTool {
     }
 
     let requests = await provider.requests
-    #expect(requests.count == 3)
+    #expect(requests.count == 4)
     #expect(requests[1].messages.contains(where: { $0.content.contains("Trusted runtime answer constraint") }) == false)
-    #expect(requests[2].messages.last?.role == .system)
-    #expect(requests[2].messages.last?.content.contains("draft answer omitted the researched findings") == true)
+    #expect(requests[3].messages.last?.role == .system)
+    #expect(requests[3].messages.last?.content.contains("draft answer omitted the researched findings") == true)
     #expect(completed?.text.contains("杭州 AI 产品经理岗位结果") == true)
     #expect(completed?.citations == ["https://example.com/research"])
 }

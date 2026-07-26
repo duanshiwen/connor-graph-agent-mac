@@ -390,7 +390,7 @@ import ConnorGraphStore
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Capacity complete record"}"#), context: memoryOSToolContext())
     let payload = try JSONDecoder().decode(MemoryOSContextToolResponse.self, from: Data(try #require(result.contentJSON).utf8))
 
-    #expect(payload.pageSize == 40)
+    #expect(payload.pageSize == 100)
     #expect(payload.returnedItems == 1)
     #expect(payload.totalItems == 1)
     #expect(payload.records.first?.recordID == "capacity-record")
@@ -439,6 +439,58 @@ import ConnorGraphStore
         }
     }
     #expect(collected == Set(records.map(\.recordID)))
+}
+
+@Test func memoryOSRecentAndKnowledgeContextUseModelControlledPageSize() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let arguments = AgentToolArguments(values: ["pageSize": .int(125)])
+
+    let recent = try await MemoryOSRecentContextTool(facade: facade).execute(
+        arguments: arguments,
+        context: memoryOSToolContext()
+    )
+    let knowledge = try await MemoryOSKnowledgeContextTool(facade: facade).execute(
+        arguments: arguments,
+        context: memoryOSToolContext()
+    )
+    let recentPage = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(recent.contentJSON).utf8)
+    )
+    let knowledgePage = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(knowledge.contentJSON).utf8)
+    )
+
+    #expect(recentPage.pageSize == 125)
+    #expect(knowledgePage.pageSize == 125)
+}
+
+@Test func memoryOSL3QueryHonorsModelLimitBeyondLegacyMaximum() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 14_000)
+    for index in 0..<120 {
+        try store.upsert(belief: MemoryOSBelief(
+            id: "uncapped-belief-\(index)",
+            statement: "Uncapped belief \(index)",
+            domain: "uncapped-query",
+            createdAt: now.addingTimeInterval(Double(index)),
+            updatedAt: now.addingTimeInterval(Double(index))
+        ))
+    }
+    let tool = MemoryOSL3ExpandBeliefTool(facade: AppMemoryOSFacade(store: store))
+
+    let result = try await tool.execute(
+        arguments: AgentToolArguments(values: ["domain": .string("uncapped-query"), "limit": .int(120)]),
+        context: memoryOSToolContext()
+    )
+    let json = try #require(result.contentJSON)
+    let payload = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+
+    #expect(payload["nodeCount"] as? Int == 120)
 }
 
 @Test func memoryOSContextRejectsInvalidPage() async throws {
@@ -574,6 +626,85 @@ import ConnorGraphStore
 
     #expect(collected.count == 8)
     #expect(Set(collected) == Set((0..<8).map { "profile-page-record-\($0)" }))
+}
+
+@Test func memoryOSGetCurrentUserProfilePaginatesBeyondLegacyTwoHundredRowLimit() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 12_000)
+    let user = MemoryOSEntity(
+        id: "person-current-large-profile",
+        stableKey: "current_user",
+        entityType: "person",
+        name: "Current User",
+        createdAt: now,
+        updatedAt: now,
+        metadata: ["role": "current_user"]
+    )
+    try store.upsert(entity: user)
+    try store.upsert(node: MemoryOSNode(
+        id: "node-current-user-large-profile",
+        stableKey: "current_user_profile",
+        nodeType: "person_profile",
+        name: "current_user profile"
+    ))
+    for index in 0..<250 {
+        try store.upsert(statement: MemoryOSStatement(
+            id: "large-profile-record-\(index)",
+            subjectID: "node-current-user-large-profile",
+            predicate: "has_context",
+            text: "Current user context \(index).",
+            confidence: 0.9,
+            validAt: now.addingTimeInterval(Double(index)),
+            committedAt: now.addingTimeInterval(Double(index)),
+            evidenceSpanIDs: [],
+            metadata: ["person_role": "current_user", "l2_fact_type": index.isMultiple(of: 2) ? "profile_preference" : "project_state"]
+        ))
+    }
+    let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
+
+    let defaultResult = try await tool.execute(
+        arguments: AgentToolArguments(values: ["page": .int(1)]),
+        context: memoryOSToolContext()
+    )
+    let defaultPage = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(defaultResult.contentJSON).utf8)
+    )
+    #expect(defaultPage.pageSize == 100)
+    #expect(defaultPage.returnedItems == 100)
+    #expect(defaultPage.totalItems == 250)
+    #expect(defaultPage.totalPages == 3)
+    #expect(defaultPage.nextPage == 2)
+
+    let modelControlledResult = try await tool.execute(
+        arguments: AgentToolArguments(values: ["page": .int(2), "pageSize": .int(125)]),
+        context: memoryOSToolContext()
+    )
+    let modelControlledPage = try JSONDecoder().decode(
+        MemoryOSContextToolResponse.self,
+        from: Data(try #require(modelControlledResult.contentJSON).utf8)
+    )
+    #expect(modelControlledPage.page == 2)
+    #expect(modelControlledPage.pageSize == 125)
+    #expect(modelControlledPage.returnedItems == 125)
+    #expect(modelControlledPage.totalItems == 250)
+    #expect(modelControlledPage.totalPages == 2)
+    #expect(modelControlledPage.nextPage == nil)
+}
+
+@Test func memoryOSGetCurrentUserProfileRejectsInvalidModelControlledPageSize() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let tool = MemoryOSGetCurrentUserProfileTool(facade: AppMemoryOSFacade(store: store))
+
+    await #expect(throws: AgentToolError.self) {
+        try await tool.execute(
+            arguments: AgentToolArguments(values: ["pageSize": .int(501)]),
+            context: memoryOSToolContext()
+        )
+    }
 }
 
 @Test func memoryOSBootstrapEnsuresCurrentUserAnchorWithoutGenericAliases() throws {

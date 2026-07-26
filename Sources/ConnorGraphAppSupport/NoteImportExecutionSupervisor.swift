@@ -43,6 +43,10 @@ public actor NoteImportExecutionSupervisor {
             let jobs = try await coordinator.recoverableJobs()
             NoteImportPerformanceLog.event("Recoverable Jobs", jobID: "startup", itemCount: jobs.count)
             for job in jobs {
+                if [.created, .scanning].contains(job.status) {
+                    try await coordinator.failInterruptedPreparation(jobID: job.id)
+                    continue
+                }
                 guard shouldRecover(job) else { continue }
                 if job.cancelRequestedAt != nil || job.status == .cancelling {
                     NoteImportPerformanceLog.event("Cancellation Recovery", jobID: job.id)

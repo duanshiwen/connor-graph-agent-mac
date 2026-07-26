@@ -98,12 +98,86 @@ struct MailFeatureModelTests {
         #expect(f.model.presentation == .empty)
     }
 
+    @Test func addingAccountRefreshesImmediatelyAndSyncsBeforeTaskReconciliation() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        var reconciliationCount = 0
+        f.model.sourceSetChanged = {
+            reconciliationCount += 1
+            throw MailFeatureModelTestError.reconciliationFailed
+        }
+        f.model.presentAddAccountSheet()
+
+        try await f.model.addAccountAndPrepareSync(
+            displayName: "Test Mail",
+            email: "test@example.com",
+            provider: .genericIMAPSMTP,
+            incomingHost: "imap.example.com",
+            incomingPort: 143,
+            incomingSecurity: .startTLS,
+            outgoingHost: "smtp.example.com",
+            outgoingPort: 587,
+            outgoingSecurity: .startTLS,
+            username: "test@example.com",
+            password: "app-password",
+            authMode: .password
+        )
+
+        #expect(f.model.presentation.accounts.map(\.id.rawValue) == ["test@example.com"])
+        #expect(f.model.presentation.mailboxes.map(\.path) == ["INBOX"])
+        #expect(f.model.isPresentingAddAccountSheet == false)
+        #expect(f.model.isSyncing)
+
+        await f.model.waitForPendingOperations()
+
+        #expect(reconciliationCount == 1)
+        #expect(f.model.isSyncing == false)
+        #expect(f.model.presentation.accounts.first?.health.status == .blocked)
+        #expect(f.model.syncMessage?.contains("全量同步完成") == true)
+        #expect(f.model.syncMessage?.contains("定时刷新任务创建失败") == true)
+    }
+
+    @Test func addingAccountFailsExplicitlyWhenMailStoreIsUnavailable() async throws {
+        let credentials = MailFeatureMemoryCredentialStore()
+        let model = MailFeatureModel(
+            store: nil,
+            preferencesStore: nil,
+            credentialStore: AppMailCredentialStore(credentialStore: credentials)
+        )
+
+        await #expect(throws: MailFeatureModel.ModelError.storeUnavailable) {
+            try await model.addAccountAndPrepareSync(
+                displayName: "Test Mail",
+                email: "test@example.com",
+                provider: .genericIMAPSMTP,
+                incomingHost: "imap.example.com",
+                incomingPort: 993,
+                incomingSecurity: .tls,
+                outgoingHost: "smtp.example.com",
+                outgoingPort: 587,
+                outgoingSecurity: .startTLS,
+                username: "test@example.com",
+                password: "app-password",
+                authMode: .password
+            )
+        }
+        #expect(credentials.savedSecretCount == 0)
+    }
+
     private func fixture() throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("mail-feature-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let store = FileBackedMailSourceStore(storeURL: root.appendingPathComponent("mail.json"))
         let preferences = FileBackedMailPreferencesStore(preferencesURL: root.appendingPathComponent("preferences.json"))
-        return Fixture(root: root, store: store, model: MailFeatureModel(store: store, preferencesStore: preferences))
+        let credentials = MailFeatureMemoryCredentialStore()
+        return Fixture(
+            root: root,
+            store: store,
+            model: MailFeatureModel(
+                store: store,
+                preferencesStore: preferences,
+                credentialStore: AppMailCredentialStore(credentialStore: credentials)
+            )
+        )
     }
 
     private func mailFixture(id: String) -> (account: MailAccount, mailbox: MailMailbox, detail: MailMessageDetail) {
@@ -116,4 +190,29 @@ struct MailFeatureModelTests {
     }
 
     private struct Fixture { let root: URL; let store: FileBackedMailSourceStore; let model: MailFeatureModel; func cleanup() { try? FileManager.default.removeItem(at: root) } }
+}
+
+private enum MailFeatureModelTestError: Error {
+    case reconciliationFailed
+}
+
+private final class MailFeatureMemoryCredentialStore: CredentialStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var secrets: [String: String] = [:]
+
+    var savedSecretCount: Int {
+        lock.withLock { secrets.count }
+    }
+
+    func saveSecret(_ secret: String, service: String, account: String) throws {
+        lock.withLock { secrets["\(service):\(account)"] = secret }
+    }
+
+    func readSecret(service: String, account: String) throws -> String? {
+        lock.withLock { secrets["\(service):\(account)"] }
+    }
+
+    func deleteSecret(service: String, account: String) throws {
+        _ = lock.withLock { secrets.removeValue(forKey: "\(service):\(account)") }
+    }
 }

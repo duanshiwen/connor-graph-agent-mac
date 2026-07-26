@@ -57,6 +57,22 @@ struct PersonContactAgentToolsTests {
         #expect(loaded.contentText.contains("displayName: 张霞"))
     }
 
+    @Test func contactsReadReturnsEveryPersonPhoto() async throws {
+        let paths = ["contacts/images/person-photo/one.png", "contacts/images/person-photo/two.jpg"]
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(id: ContactID(rawValue: "person-photo"), displayName: "多图联系人", imageRelativePaths: paths)
+        ])
+        let result = try await ContactsReadTool(runtime: runtime).execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"personID\":\"person-photo\"}"),
+            context: Self.context(toolCallID: "call-get-person-photos")
+        )
+
+        let data = try #require(result.contentJSON?.data(using: .utf8))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["imageRelativePaths"] as? [String] == paths)
+        #expect(object["photos"] as? [String] == paths)
+    }
+
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
         let runtime = InMemoryAgentContactRuntime(people: [
             PersonProfile(id: ContactID(rawValue: "person-a"), displayName: "小王", aliases: ["王同学"]),
@@ -95,6 +111,19 @@ struct PersonContactAgentToolsTests {
             context: Self.context(toolCallID: "call-after-delete")
         )
         #expect(afterDelete.contentText.contains("Found 0 people"))
+    }
+
+    @Test func contactsWriteSchemaDocumentsOptionalPersonImages() throws {
+        let tool = ContactsWriteTool(runtime: InMemoryAgentContactRuntime())
+        let properties = try #require(tool.inputSchema.jsonObject["properties"] as? [String: Any])
+        let operation = try #require(properties["operation"] as? [String: Any])
+        let operations = try #require(operation["enum"] as? [String])
+        let attachments = try #require(properties["attachmentIDs"] as? [String: Any])
+
+        #expect(operations.contains("add_person_images"))
+        #expect(operations.contains("remove_all_person_images"))
+        #expect(attachments["type"] as? String == "array")
+        #expect((attachments["description"] as? String)?.contains("one or more exact image IDs") == true)
     }
 
     private static func context(toolCallID: String) -> AgentToolExecutionContext {

@@ -825,7 +825,7 @@ struct AgentChatComposerView: View {
                                 Button {
                                     chatActions.run.selectLLMModel(model.id, providerMode: connection.providerMode, connectionID: connection.id)
                                 } label: {
-                                    if model.id == composerState.selectedModel && connection.id == chatActions.dependencies.aiConnections.defaultConnectionID {
+                                    if model.id == composerState.selectedModel && connection.id == chatActions.dependencies.aiConnections.activeConnectionID {
                                         Label(model.displayName, systemImage: "checkmark")
                                     } else {
                                         Text(model.displayName)

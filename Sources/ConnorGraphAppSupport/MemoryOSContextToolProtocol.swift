@@ -6,7 +6,7 @@ public struct MemoryOSContextToolConfiguration: Sendable, Equatable {
     public var maxDepth: Int
 
     public init(
-        pageSize: Int = 40,
+        pageSize: Int = 100,
         maxDepth: Int = 6
     ) {
         self.pageSize = max(1, pageSize)

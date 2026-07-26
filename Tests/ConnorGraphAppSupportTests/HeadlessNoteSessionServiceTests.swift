@@ -75,6 +75,32 @@ struct HeadlessNoteSessionServiceTests {
         #expect(associated.relativePath == "note.md")
     }
 
+    @Test("Reimport replaces every prior conversation message with one exact note body")
+    func reimportKeepsOnlyOneBodyMessage() async throws {
+        let fixture = try Fixture()
+        let service = fixture.service()
+        let original = try await service.createImportedNoteSession(
+            id: "stable-note",
+            title: "Original",
+            content: "Original body",
+            messageID: "old-message"
+        )
+        _ = try await service.saveImportedNote(sessionID: original.id, content: "Unwanted follow-up")
+
+        let updated = try await service.createImportedNoteSession(
+            id: original.id,
+            title: "Updated",
+            content: "Exact updated body",
+            messageID: "new-message"
+        )
+
+        #expect(updated.title == "Updated")
+        #expect(updated.messages.count == 1)
+        #expect(updated.messages[0].id == "new-message")
+        #expect(updated.messages[0].role == .user)
+        #expect(updated.messages[0].content == "Exact updated body")
+    }
+
     @Test("Persists display prompt while sending augmented note instructions to backend")
     func submitsHeadlessly() async throws {
         let fixture = try Fixture()

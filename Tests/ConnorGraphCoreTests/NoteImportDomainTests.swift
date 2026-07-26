@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Note import domain")
 struct NoteImportDomainTests {
+    @Test("Imports disable model processing by default")
+    func modelProcessingIsDisabledByDefault() {
+        let options = NoteImportOptions()
+        #expect(options.llmMode == .disabled)
+        #expect(!options.allowNetworkReadTools)
+    }
+
     @Test("LLM concurrency is bounded for commercial background execution")
     func boundsLLMConcurrency() {
         #expect(NoteImportOptions(llmConcurrency: 0).llmConcurrency == 1)
@@ -40,13 +47,13 @@ struct NoteImportDomainTests {
         }
     }
 
-    @Test("Imported item may complete without LLM or enter the LLM queue")
-    func supportsOptionalLLMProcessing() throws {
+    @Test("Legacy LLM states can be completed without another model request")
+    func completesLegacyLLMStates() throws {
         let machine = NoteImportStateMachine()
         try machine.validate(itemFrom: .imported, to: .completed)
-        try machine.validate(itemFrom: .imported, to: .queuedForLLM)
-        try machine.validate(itemFrom: .queuedForLLM, to: .runningLLM)
+        try machine.validate(itemFrom: .queuedForLLM, to: .completed)
         try machine.validate(itemFrom: .runningLLM, to: .completed)
+        try machine.validate(itemFrom: .llmFailed, to: .imported)
     }
 
     @Test("Low confidence decoding requires review before session creation")

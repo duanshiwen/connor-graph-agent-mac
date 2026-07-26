@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -524,6 +525,7 @@ struct CraftContactsListPane: View {
                 ContactsRowsScrollView(
                     rows: model.presentation.rows,
                     selectedID: model.selectedContactID,
+                    imageURL: { model.imageURLs(for: $0).first },
                     onSelect: { model.selectedContactID = $0 },
                     onLoadMore: { id in Task { await model.loadMoreProfilesIfNeeded(currentProfileID: id) } }
                 )
@@ -536,6 +538,7 @@ struct CraftContactsListPane: View {
 private struct ContactsRowsScrollView: View {
     var rows: [NativeContactRowPresentation]
     var selectedID: ContactID?
+    var imageURL: (ContactID) -> URL?
     var onSelect: (ContactID) -> Void
     var onLoadMore: (ContactID) -> Void
 
@@ -543,7 +546,12 @@ private struct ContactsRowsScrollView: View {
         ScrollView {
             LazyVStack(spacing: AppListCardLayout.spacing) {
                 ForEach(rows) { row in
-                    ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
+                    ContactRowButton(
+                        row: row,
+                        imageURL: imageURL(row.id),
+                        isSelected: row.id == selectedID,
+                        onSelect: { onSelect(row.id) }
+                    )
                         .onAppear { onLoadMore(row.id) }
                 }
             }
@@ -556,12 +564,15 @@ private struct ContactsRowsScrollView: View {
 
 private struct ContactRowButton: View {
     var row: NativeContactRowPresentation
+    var imageURL: URL?
     var isSelected: Bool
     var onSelect: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 8) {
+                ContactProfileThumbnail(imageURL: imageURL, displayName: row.displayName)
+
                 VStack(alignment: .leading, spacing: AppListCardLayout.contentSpacing) {
                     Text(row.displayName)
                         .font(AppListTypography.rowTitle)
@@ -579,6 +590,31 @@ private struct ContactRowButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityHint("打开人物详情")
+    }
+}
+
+private struct ContactProfileThumbnail: View {
+    var imageURL: URL?
+    var displayName: String
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.accentColor.opacity(0.14))
+            if let imageURL, let image = NSImage(contentsOf: imageURL) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(displayName.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init) ?? "?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(AppShellColors.hairline, lineWidth: 1))
+        .accessibilityHidden(true)
     }
 }
 
@@ -1518,6 +1554,26 @@ struct CraftMailListPane: View {
                 model.searchQuery = ""
             }
 
+            if let syncMessage = model.syncMessage {
+                HStack(spacing: AppShellLayout.spaceS) {
+                    if model.isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: model.errorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                            .foregroundStyle(model.errorMessage == nil ? Color.secondary : Color.orange)
+                    }
+                    Text(syncMessage)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(AppShellColors.cardBackground)
+            }
+
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加 IMAP/SMTP 邮件账户。"))
                     .padding(.top, 80)
@@ -2239,6 +2295,7 @@ private extension CalendarAttendeeResponseStatus {
 
 struct ContactsSourceSettingsView: View {
     @Bindable var model: ContactsFeatureModel
+    @State private var imageImporter = ContactImageImporterState()
 
     var body: some View {
         Group {
@@ -2251,6 +2308,16 @@ struct ContactsSourceSettingsView: View {
                             onAddRelationship: { model.presentNewRelationshipEditor(sourcePersonID: selected.id) },
                             onDelete: { model.pendingProfileDeletionID = selected.id }
                         )
+
+                        let imageURLs = model.imageURLs(for: selected.id)
+                        PersonProfilePhotoGallery(
+                            imageURLs: imageURLs,
+                            onAdd: { imageImporter.present(for: selected.id) }
+                        ) { imageURL in
+                            Task { @MainActor in
+                                await model.removeProfileImage(at: imageURL, for: selected.id)
+                            }
+                        }
 
                         PersonProfileInfoSection(title: "人物信息", systemImage: "person.text.rectangle") {
                             VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
@@ -2317,6 +2384,15 @@ struct ContactsSourceSettingsView: View {
         } message: {
             Text("删除后，该人物不会再出现在人物列表和默认人物上下文中。")
         }
+        .fileImporter(
+            isPresented: $imageImporter.isPresented,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: true
+        ) { result in
+            guard let personID = imageImporter.consumeTargetPersonID() else { return }
+            guard case .success(let urls) = result, !urls.isEmpty else { return }
+            Task { @MainActor in await model.addProfileImages(from: urls, for: personID) }
+        }
     }
 
     private var selectedContactRow: NativeContactRowPresentation? {
@@ -2381,16 +2457,6 @@ private struct PersonProfileDetailHero: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
-            ZStack {
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.14))
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 24, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color.accentColor)
-            }
-            .frame(width: 56, height: 56)
-
             VStack(alignment: .center, spacing: AppShellLayout.spaceS) {
                 Text(row.displayName)
                     .font(AgentChatTypography.title)
@@ -2442,7 +2508,7 @@ private struct PersonProfileDetailHero: View {
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
                 .stroke(AppShellColors.hairline, lineWidth: 1)
         )
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var statusTitle: String {
@@ -2459,6 +2525,76 @@ private struct PersonProfileDetailHero: View {
             return .blue
         case .deleted:
             return .red
+        }
+    }
+}
+
+private struct PersonProfilePhotoGallery: View {
+    var imageURLs: [URL]
+    var onAdd: () -> Void
+    var onRemove: (URL) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 120, maximum: 180), spacing: AppShellLayout.spaceM)
+    ]
+
+    var body: some View {
+        PersonProfileInfoSection(title: "照片（\(imageURLs.count)）", systemImage: "photo.on.rectangle.angled") {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: AppShellLayout.spaceM) {
+                ForEach(imageURLs, id: \.path) { imageURL in
+                    GeometryReader { geometry in
+                        ZStack(alignment: .topTrailing) {
+                            if let image = NSImage(contentsOf: imageURL) {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: geometry.size.width, height: geometry.size.height)
+                                    .clipped()
+                            } else {
+                                VStack(spacing: AppShellLayout.spaceS) {
+                                    Image(systemName: "photo.badge.exclamationmark")
+                                        .font(.system(size: 24, weight: .medium))
+                                    Text("图片无法读取")
+                                        .font(AgentChatTypography.meta)
+                                }
+                                .foregroundStyle(.secondary)
+                                .frame(width: geometry.size.width, height: geometry.size.height)
+                                .background(Color.secondary.opacity(0.08))
+                            }
+
+                            Button(role: .destructive) { onRemove(imageURL) } label: {
+                                Image(systemName: "trash")
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("移除这张图片")
+                            .padding(AppShellLayout.spaceS)
+                        }
+                    }
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                }
+
+                Button(action: onAdd) {
+                    VStack(spacing: AppShellLayout.spaceS) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 26, weight: .medium))
+                        Text("添加图片")
+                            .font(AgentChatTypography.meta)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .aspectRatio(1, contentMode: .fit)
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                )
+                .buttonStyle(.plain)
+                .help("为此人物添加一张或多张图片")
+            }
         }
     }
 }

@@ -917,7 +917,7 @@ private struct AgentChatConversationView: View {
             }
             .onChange(of: model.run.isSubmitting) { _, isSubmitting in
                 guard isSubmitting else { return }
-                chatViewportController.scrollToBottom()
+                chatViewportController.followLatestIfPinned()
             }
 
 

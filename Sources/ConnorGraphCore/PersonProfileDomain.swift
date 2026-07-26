@@ -44,6 +44,7 @@ public struct PersonProfile: Codable, Sendable, Equatable, Hashable, Identifiabl
     public var organizationName: String?
     public var jobTitle: String?
     public var notes: String?
+    public var imageRelativePaths: [String]?
     public var status: PersonProfileStatus
     public var mergedIntoID: ContactID?
     public var memoryEntityID: String?
@@ -65,6 +66,7 @@ public struct PersonProfile: Codable, Sendable, Equatable, Hashable, Identifiabl
         organizationName: String? = nil,
         jobTitle: String? = nil,
         notes: String? = nil,
+        imageRelativePaths: [String]? = nil,
         status: PersonProfileStatus = .active,
         mergedIntoID: ContactID? = nil,
         memoryEntityID: String? = nil,
@@ -85,6 +87,7 @@ public struct PersonProfile: Codable, Sendable, Equatable, Hashable, Identifiabl
         self.organizationName = organizationName
         self.jobTitle = jobTitle
         self.notes = notes
+        self.imageRelativePaths = imageRelativePaths?.isEmpty == false ? imageRelativePaths : nil
         self.status = status
         self.mergedIntoID = mergedIntoID
         self.memoryEntityID = memoryEntityID
@@ -162,6 +165,7 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
     public var organizationName: String?
     public var jobTitle: String?
     public var notes: String?
+    public var imageRelativePaths: [String]?
     public var status: PersonProfileStatus
 
     public init(
@@ -177,6 +181,7 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
         organizationName: String? = nil,
         jobTitle: String? = nil,
         notes: String? = nil,
+        imageRelativePaths: [String]? = nil,
         status: PersonProfileStatus = .active
     ) {
         self.id = id
@@ -191,6 +196,7 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
         self.organizationName = organizationName
         self.jobTitle = jobTitle
         self.notes = notes
+        self.imageRelativePaths = imageRelativePaths?.isEmpty == false ? imageRelativePaths : nil
         self.status = status
     }
 
@@ -208,6 +214,7 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
             organizationName: profile.organizationName,
             jobTitle: profile.jobTitle,
             notes: profile.notes,
+            imageRelativePaths: profile.imageRelativePaths,
             status: profile.status
         )
     }
@@ -226,6 +233,7 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
             organizationName: organizationName,
             jobTitle: jobTitle,
             notes: notes,
+            imageRelativePaths: imageRelativePaths,
             status: status,
             mergedIntoID: existing?.mergedIntoID,
             memoryEntityID: existing?.memoryEntityID,

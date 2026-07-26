@@ -123,7 +123,7 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
     private func runBlocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
         let semaphore = DispatchSemaphore(value: 0)
         let box = AgentModelBackgroundToolLoopBlockingResultBox<T>()
-        Task {
+        Task.detached {
             do {
                 box.result = Result<T, Error>.success(try await operation())
             } catch {

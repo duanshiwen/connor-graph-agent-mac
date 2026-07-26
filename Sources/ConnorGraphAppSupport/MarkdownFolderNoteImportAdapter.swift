@@ -58,7 +58,8 @@ public struct MarkdownFolderNoteImportAdapter: NoteImportSourceAdapter, Sendable
         sourceMetadata["decoder_version"] = TextDecodingService.decoderVersion
         sourceMetadata["had_bom"] = String(decoded.hadBOM)
         sourceMetadata["was_lossy"] = String(decoded.wasLossy)
-        return ImportedNote(sourceKind: request.kind, sourceIdentity: "\(request.sourceID):\(relative.precomposedStringWithCanonicalMapping.lowercased())", sourcePath: url.path, relativePath: relative, title: title, markdownContent: decoded.text, hierarchy: hierarchy, sourceMetadata: sourceMetadata, rawByteHash: hash(data), normalizedTextHash: hash(Data(normalized.utf8)), diagnostics: diagnostics(decoded))
+        let localAssets = attachments(in: decoded.text, noteURL: url, root: root)
+        return ImportedNote(sourceKind: request.kind, sourceIdentity: "\(request.sourceID):\(relative.precomposedStringWithCanonicalMapping.lowercased())", sourcePath: url.path, relativePath: relative, title: title, markdownContent: decoded.text, hierarchy: hierarchy, attachments: localAssets.attachments, sourceMetadata: sourceMetadata, rawByteHash: hash(data), normalizedTextHash: hash(Data(normalized.utf8)), diagnostics: diagnostics(decoded) + localAssets.diagnostics)
     }
 
     private func diagnostics(_ result: TextDecodingResult) -> [NoteImportDiagnostic] {
@@ -80,6 +81,51 @@ public struct MarkdownFolderNoteImportAdapter: NoteImportSourceAdapter, Sendable
             if !key.isEmpty { result[key] = value }
         }
         return result
+    }
+
+    private func attachments(in text: String, noteURL: URL, root: URL) -> (attachments: [ImportedNoteAttachment], diagnostics: [NoteImportDiagnostic]) {
+        let regex = try! NSRegularExpression(pattern: "!?\\[[^\\]]*\\]\\(([^)\\n]+)\\)")
+        let ns = text as NSString
+        let rootURL = root.resolvingSymlinksInPath().standardizedFileURL
+        let rootPrefix = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
+        var attachments: [ImportedNoteAttachment] = []
+        var diagnostics: [NoteImportDiagnostic] = []
+        var seen = Set<String>()
+
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            var raw = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.hasPrefix("<"), let closing = raw.firstIndex(of: ">") {
+                raw = String(raw[raw.index(after: raw.startIndex)..<closing])
+            } else if let titleRange = raw.range(of: #"\s+["']"#, options: .regularExpression) {
+                raw = String(raw[..<titleRange.lowerBound])
+            }
+            guard !raw.isEmpty, !raw.hasPrefix("#"), URL(string: raw)?.scheme == nil else { continue }
+            let decoded = raw.removingPercentEncoding ?? raw
+            let candidate = noteURL.resolvingSymlinksInPath().deletingLastPathComponent().appendingPathComponent(decoded)
+            let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
+            guard resolved.path == rootURL.path || resolved.path.hasPrefix(rootPrefix) else {
+                diagnostics.append(.init(code: .unsafePath, severity: .warning, message: "Attachment escapes the selected folder: \(raw)"))
+                continue
+            }
+            guard FileManager.default.fileExists(atPath: resolved.path) else {
+                diagnostics.append(.init(code: .attachmentMissing, severity: .warning, message: "Missing Markdown attachment: \(raw)"))
+                continue
+            }
+            let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+                diagnostics.append(.init(code: .unsafePath, severity: .warning, message: "Markdown attachment is not a regular file: \(raw)"))
+                continue
+            }
+            guard !["md", "markdown"].contains(resolved.pathExtension.lowercased()), seen.insert(resolved.path).inserted else { continue }
+            attachments.append(.init(
+                sourcePath: resolved.path,
+                displayName: resolved.lastPathComponent,
+                byteCount: try? AppSessionAttachmentStore.byteCount(forItemAt: resolved),
+                contentHash: try? AppSessionAttachmentStore.sha256Hex(forItemAt: resolved),
+                metadata: ["markdown_target": raw]
+            ))
+        }
+        return (attachments, diagnostics)
     }
 
     private func firstHeading(_ text: String) -> String? { text.components(separatedBy: .newlines).first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)).trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 } }

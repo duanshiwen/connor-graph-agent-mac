@@ -34,6 +34,16 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(strategy == .compiledDocument)
     }
 
+    @Test func deferredPreviewOnlyCopiesABoundedMarkdownPrefix() {
+        let limit = AgentMarkdownDeferredPreviewPolicy.characterLimit
+        let markdown = String(repeating: "前", count: limit) + "不应进入折叠预览"
+
+        let preview = AgentMarkdownDeferredPreviewPolicy.source(for: markdown)
+
+        #expect(preview.count == limit)
+        #expect(!preview.contains("不应进入折叠预览"))
+    }
+
     @Test func messageBodyPointSizeIsDisplayedAndClamped() {
         #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)
@@ -59,7 +69,6 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(messageRows.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(messageRows.contains("@AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)"))
         #expect(messageRows.components(separatedBy: "bodyPointSize: messageBodyPointSize").count >= 3)
-        #expect(messageRows.contains("allowsDeferredPreview: false"))
         #expect(preview.contains("bodyPointSize + semanticSize - systemBodySize"))
     }
 
@@ -78,6 +87,33 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(preview.contains("loadTask.cancel()"))
         #expect(preview.contains("guard !Task.isCancelled, document.source == markdown else { return }"))
         #expect(preview.contains("persistentCacheContext.store.loadBlocks"))
+    }
+
+    @Test func longAssistantReplyExpansionKeepsPreviewUntilTheFullDocumentLoads() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let root = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let preview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift"),
+            encoding: .utf8
+        )
+        let messageRows = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift"),
+            encoding: .utf8
+        )
+
+        #expect(preview.contains("deferred:\\(allowsDeferredPreview)"))
+        #expect(preview.contains("deferredPreviewView(statusText: \"正在展开完整内容…\", showsProgress: true)"))
+        #expect(messageRows.components(separatedBy: "allowsDeferredPreview: !isMessageExpanded").count == 3)
+        #expect(messageRows.contains("transaction.disablesAnimations = true"))
+        #expect(messageRows.contains("if assistantExpansionPresentation.isAvailable, !isMessageExpanded"))
+        #expect(messageRows.contains("private var messageExpansionControl: some View"))
+        #expect(messageRows.contains(".foregroundStyle(Color.accentColor)"))
+        #expect(messageRows.contains(".frame(minHeight: 32)"))
+        #expect(!messageRows.contains("allowsDeferredPreview: false"))
+        #expect(!messageRows.contains("content.trimmingCharacters"))
     }
 
     @Test @MainActor func markdownLinksUseTheNativePointingHandCursorAttribute() throws {

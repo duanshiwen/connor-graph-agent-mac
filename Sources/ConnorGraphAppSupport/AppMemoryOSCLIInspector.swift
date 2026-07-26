@@ -314,6 +314,10 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return false
     }
 
+    public func recoverExpiredBackgroundAIJobs(now: Date = Date()) throws -> Int {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).recoverExpiredBackgroundQueueLeases(now: now)
+    }
+
     public func debugRunNextBackgroundAI(kind: String? = nil, limit: Int = 1) throws -> MemoryOSCLIDebugAIRunResult {
         MemoryOSCLIDebugAIRunResult(
             status: "no_runnable_jobs",

@@ -5,11 +5,13 @@ import ConnorGraphCore
 public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
     private let profileStore: any PersonProfileStore
     private let memoryOSFacade: AppMemoryOSFacade?
+    private let storagePaths: AppStoragePaths?
     private var drafts: [String: ContactMutationDraft] = [:]
 
-    public init(profileStore: any PersonProfileStore, memoryOSFacade: AppMemoryOSFacade? = nil) {
+    public init(profileStore: any PersonProfileStore, memoryOSFacade: AppMemoryOSFacade? = nil, storagePaths: AppStoragePaths? = nil) {
         self.profileStore = profileStore
         self.memoryOSFacade = memoryOSFacade
+        self.storagePaths = storagePaths
     }
 
     public func search(query: String) async throws -> [ContactRecord] {
@@ -35,15 +37,15 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
     }
 
     public func listPeople() async throws -> [PersonProfile] {
-        try await profileStore.loadProfiles(includeInactive: false)
+        try await profileStore.loadProfiles(includeInactive: false).map(resolvingStoredImages(in:))
     }
 
     public func searchPeople(query: String) async throws -> [PersonProfile] {
-        try await profileStore.searchProfiles(query: query, includeInactive: false)
+        try await profileStore.searchProfiles(query: query, includeInactive: false).map(resolvingStoredImages(in:))
     }
 
     public func getPerson(id: ContactID) async throws -> PersonProfile? {
-        try await profileStore.profile(id: id)
+        try await profileStore.profile(id: id).map(resolvingStoredImages(in:))
     }
 
     public func createPerson(_ profile: PersonProfile, approved: Bool) async throws -> PersonProfile {
@@ -55,12 +57,73 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
 
     public func updatePerson(id: ContactID, update: PersonProfileDraft, approved: Bool) async throws -> PersonProfile {
         guard approved else { throw AgentToolError.permissionDenied("Person profile write approval required") }
-        guard let existing = try await profileStore.profile(id: id) else {
+        guard let stored = try await profileStore.profile(id: id) else {
             throw AgentToolError.invalidArguments("Unknown person")
         }
+        let existing = resolvingStoredImages(in: stored)
         let updated = update.makeProfile(existing: existing)
         let saved = try await profileStore.upsert(updated)
         captureInMemoryOS(saved, operation: "update")
+        return saved
+    }
+
+    public func addPersonImages(id: ContactID, sessionID: String, attachmentIDs: [String], approved: Bool) async throws -> PersonProfile {
+        guard approved else { throw AgentToolError.permissionDenied("Person profile image write approval required") }
+        guard let storagePaths else { throw AgentToolError.invalidArguments("Person image storage is unavailable") }
+        guard !attachmentIDs.isEmpty else { throw AgentToolError.invalidArguments("attachmentIDs must contain at least one image ID") }
+        guard let stored = try await profileStore.profile(id: id) else {
+            throw AgentToolError.invalidArguments("Unknown person")
+        }
+        var existing = resolvingStoredImages(in: stored)
+        let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
+        let imageStore = PersonProfileImageStore(storagePaths: storagePaths)
+        var newPaths: [String] = []
+        do {
+            for attachmentID in attachmentIDs {
+                let manifest: AgentAttachmentManifest
+                do {
+                    manifest = try attachmentStore.loadManifest(sessionID: sessionID, attachmentID: attachmentID)
+                } catch {
+                    throw AgentToolError.invalidArguments("Unknown image attachmentID in the current session: \(attachmentID)")
+                }
+                guard manifest.kind == .image else {
+                    throw AgentToolError.invalidArguments("Every attachmentID must refer to an image")
+                }
+                let sourceURL = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root
+                    .appendingPathComponent(manifest.storedRelativePath)
+                newPaths.append(try imageStore.importImage(at: sourceURL, personID: id))
+            }
+        } catch {
+            for path in newPaths { try? imageStore.removeImage(at: path) }
+            throw error
+        }
+        existing.imageRelativePaths = uniqueImagePaths((existing.imageRelativePaths ?? []) + newPaths)
+        existing.updatedAt = Date()
+        do {
+            let saved = try await profileStore.upsert(existing)
+            captureInMemoryOS(saved, operation: "add_images")
+            return saved
+        } catch {
+            for path in newPaths { try? imageStore.removeImage(at: path) }
+            throw error
+        }
+    }
+
+    public func removeAllPersonImages(id: ContactID, approved: Bool) async throws -> PersonProfile {
+        guard approved else { throw AgentToolError.permissionDenied("Person profile image write approval required") }
+        guard let stored = try await profileStore.profile(id: id) else {
+            throw AgentToolError.invalidArguments("Unknown person")
+        }
+        var existing = resolvingStoredImages(in: stored)
+        let previousPaths = existing.imageRelativePaths ?? []
+        existing.imageRelativePaths = nil
+        existing.updatedAt = Date()
+        let saved = try await profileStore.upsert(existing)
+        if let storagePaths {
+            let imageStore = PersonProfileImageStore(storagePaths: storagePaths)
+            for path in previousPaths { try? imageStore.removeImage(at: path) }
+        }
+        captureInMemoryOS(saved, operation: "remove_all_images")
         return saved
     }
 
@@ -124,5 +187,20 @@ public actor PersonRegistryAgentContactRuntime: AgentContactRuntime {
     private func nonEmpty(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func uniqueImagePaths(_ paths: [String]) -> [String]? {
+        var seen: Set<String> = []
+        let unique = paths.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return unique.isEmpty ? nil : unique
+    }
+
+    private func resolvingStoredImages(in profile: PersonProfile) -> PersonProfile {
+        guard let storagePaths else { return profile }
+        let discovered = PersonProfileImageStore(storagePaths: storagePaths).storedImageRelativePaths(for: profile.id)
+        guard !discovered.isEmpty else { return profile }
+        var resolved = profile
+        resolved.imageRelativePaths = uniqueImagePaths((profile.imageRelativePaths ?? []) + discovered)
+        return resolved
     }
 }

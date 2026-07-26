@@ -8,6 +8,7 @@ import ConnorGraphAppSupport
 final class AIConnectionsFeatureModel {
     var connectionConfigs: [AppLLMConnectionConfig] = []
     var defaultConnectionID = ""
+    var activeConnectionID = ""
     var connectionName = ""
     var providerMode: AppLLMProviderMode = .openAICompatible
     var baseURLString = ""
@@ -41,6 +42,7 @@ final class AIConnectionsFeatureModel {
     @ObservationIgnored private let capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
     @ObservationIgnored private let setupServiceFactory: @MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService
     @ObservationIgnored var onRuntimeSettingsChanged: (_ rebuildRuntime: Bool) -> Void = { _ in }
+    @ObservationIgnored var onDefaultConnectionChanged: () -> Void = {}
     @ObservationIgnored var onConnectionSetup: (AppLLMConnectionConfig) -> Void = { _ in }
 
     init(
@@ -69,6 +71,7 @@ final class AIConnectionsFeatureModel {
         let connection = settings.defaultConnection
         connectionConfigs = settings.connections
         defaultConnectionID = settings.defaultConnectionID
+        activeConnectionID = settings.defaultConnectionID
         connectionName = connection?.name ?? ""
         providerMode = connection?.providerMode ?? .openAICompatible
         baseURLString = connection?.baseURLString ?? ""
@@ -123,6 +126,7 @@ final class AIConnectionsFeatureModel {
             )
             try settingsRepository.save(settings: settings, apiKey: nil)
             apply(try settingsRepository.loadSettings())
+            onDefaultConnectionChanged()
             onRuntimeSettingsChanged(true)
             settingsMessage = "默认连接已更新。"
             errorMessage = nil

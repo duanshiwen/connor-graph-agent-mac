@@ -7,6 +7,17 @@ import ConnorGraphStore
 
 @Suite("Note import execution supervisor")
 struct NoteImportExecutionSupervisorTests {
+    @Test("Marks interrupted preparation jobs as failed", arguments: [NoteImportJobStatus.created, .scanning])
+    func failsInterruptedPreparation(status: NoteImportJobStatus) async throws {
+        let fixture = try SupervisorFixture(status: status)
+        let supervisor = NoteImportExecutionSupervisor(coordinator: fixture.coordinator)
+
+        await supervisor.recoverPersistedJobs()
+
+        #expect(try fixture.ledger.job(id: "job")?.status == .failed)
+        #expect(await !supervisor.isRunning(jobID: "job"))
+    }
+
     @Test("Recovers an orphaned cancelling job to a terminal state")
     func recoversOrphanedCancellation() async throws {
         let fixture = try SupervisorFixture(status: .processing, cancelRequestedAt: Date())

@@ -109,6 +109,8 @@ struct AppNoteImportRepositoryTests {
 
         try fixture.repository.saveItem(.init(id: "failed", jobID: "job", sourceID: source.id, sourceIdentity: "failed.md", title: "Failed", status: .sessionFailed, rawByteHash: "raw-2", normalizedTextHash: "text-2"))
         #expect(try fixture.repository.job(id: "job")?.failedCount == 1)
+        try fixture.repository.saveItem(.init(id: "encoding", jobID: "job", sourceID: source.id, sourceIdentity: "encoding.md", title: "Encoding", status: .needsEncodingReview, rawByteHash: "raw-3", normalizedTextHash: "text-3"))
+        #expect(try fixture.repository.job(id: "job")?.failedCount == 2)
 
         let loadedStale = try fixture.repository.job(id: "job")
         var stale = try #require(loadedStale)
@@ -118,7 +120,7 @@ struct AppNoteImportRepositoryTests {
         let projectedJobs = try fixture.repository.jobsWithLiveCounts()
         let projected = try #require(projectedJobs.first)
         #expect(projected.importedCount == 1)
-        #expect(projected.failedCount == 1)
+        #expect(projected.failedCount == 2)
         #expect(try fixture.repository.job(id: "job")?.importedCount == 0)
     }
 

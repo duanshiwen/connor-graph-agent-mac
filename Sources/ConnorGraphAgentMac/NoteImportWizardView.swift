@@ -103,6 +103,33 @@ struct NoteImportWizardView: View {
                     TextField("搜索标题或路径", text: $model.searchText).textFieldStyle(.roundedBorder)
                     if model.warningCount > 0 { Label("\(model.warningCount) 个问题", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
                 }
+                if !model.encodingReview.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("有 \(model.encodingReview.count) 篇笔记需要确认文本编码", systemImage: "character.cursor.ibeam")
+                            .fontWeight(.medium)
+                        HStack {
+                            Picker("重新解码为", selection: Binding(
+                                get: { model.options.defaultEncodingName ?? "" },
+                                set: { model.options.defaultEncodingName = $0.isEmpty ? nil : $0 }
+                            )) {
+                                Text("自动检测").tag("")
+                                Text("UTF-8").tag("utf-8")
+                                Text("简体中文 GB18030").tag("gb18030")
+                                Text("繁体中文 Big5").tag("big5")
+                                Text("日文 Shift-JIS").tag("shift-jis")
+                                Text("西欧 Windows-1252").tag("windows-1252")
+                            }
+                            .frame(maxWidth: 320)
+                            Toggle("允许损失性解码", isOn: $model.options.allowLossyDecoding)
+                            Button("重新扫描") { Task { await model.scanSource() } }
+                                .disabled(model.options.defaultEncodingName == nil || model.isBusy)
+                        }
+                        Text("确认编码并重新扫描后才能继续，避免未导入的笔记被误报为完成。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                }
                 Table(model.filteredNotes) {
                     TableColumn("标题") { Text($0.title).lineLimit(1) }
                     TableColumn("路径") { Text($0.relativePath ?? "—").foregroundStyle(.secondary).lineLimit(1) }
@@ -126,17 +153,6 @@ struct NoteImportWizardView: View {
                     Text("创建副本").tag(NoteImportDuplicatePolicy.createCopy)
                 }
             }
-            Section("AI 处理") {
-                Toggle("导入后自动理解和整理", isOn: Binding(get: { model.options.llmMode == .automatic }, set: { model.options.llmMode = $0 ? .automatic : .disabled }))
-                Text("原始笔记始终会先保存。关闭 AI 不会影响正文和附件导入。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.options.llmMode == .automatic {
-                    Stepper("并行处理：\(model.options.llmConcurrency)", value: $model.options.llmConcurrency, in: 1...3)
-                    Toggle("允许 AI 使用网络读取工具", isOn: $model.options.allowNetworkReadTools)
-                    Text("网络读取默认关闭；开启后，AI 可能根据笔记内容访问外部网页。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
         }.formStyle(.grouped)
     }
 
@@ -151,8 +167,6 @@ struct NoteImportWizardView: View {
                 confirmationRow("笔记", "\(model.notes.count) 篇", "doc.text")
                 Divider()
                 confirmationRow("附件", model.options.importAttachments ? "\(model.attachmentCount) 个" : "不导入", "paperclip")
-                Divider()
-                confirmationRow("AI 处理", model.options.llmMode == .automatic ? "自动，最多并行 \(model.options.llmConcurrency) 项" : "关闭", "sparkles")
             }.background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
             Label("导入会在后台继续。你可以关闭此窗口，并在“笔记导入中心”查看、暂停或取消任务。", systemImage: "clock.arrow.circlepath")
                 .foregroundStyle(.secondary)
@@ -172,7 +186,7 @@ struct NoteImportWizardView: View {
                 Button("扫描内容") { Task { await model.scanSource() } }
                     .buttonStyle(.borderedProminent).disabled(model.sourceURL == nil || model.isBusy)
             } else if model.step != .confirm {
-                Button("继续") { model.advance() }.buttonStyle(.borderedProminent).disabled(model.notes.isEmpty || model.isBusy)
+                Button("继续") { model.advance() }.buttonStyle(.borderedProminent).disabled(model.notes.isEmpty || !model.encodingReview.isEmpty || model.isBusy)
             } else {
                 Button("开始导入") {
                     Task {

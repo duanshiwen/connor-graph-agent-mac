@@ -93,13 +93,13 @@ public struct MemoryOSPersonIdentityService: Sendable {
         var lines: [String] = []
         var seen = Set<String>()
 
-        for statement in try loadEntityStatements(store: store, entityID: anchor.id) {
+        for statement in try loadEntityStatements(store: store, entityID: anchor.id, limit: Self.profileContextMaxRows) {
             guard lines.count < Self.profileContextMaxRows else { break }
             guard seen.insert(statement.id).inserted else { continue }
             lines.append(appendUpdatedAtSuffix(statement.text, updatedAt: statement.committedAt))
         }
 
-        for statement in try loadCurrentUserL2Statements(store: store, anchor: anchor) {
+        for statement in try loadCurrentUserL2Statements(store: store, anchor: anchor, limit: Self.profileContextMaxRows) {
             guard lines.count < Self.profileContextMaxRows else { break }
             let dedupKey = "l2:\(statement.id)"
             guard seen.insert(dedupKey).inserted else { continue }
@@ -115,7 +115,7 @@ public struct MemoryOSPersonIdentityService: Sendable {
     public func currentUserProfileHits(store: SQLiteMemoryOSStore) throws -> [MemoryOSRetrievalHit] {
         guard let anchor = try resolveCurrentUserAnchor(store: store) else { return [] }
         let formatter = ISO8601DateFormatter()
-        let l4 = try loadEntityStatements(store: store, entityID: anchor.id).map { statement in
+        let l4 = try loadEntityStatements(store: store, entityID: anchor.id, limit: nil).map { statement in
             let updatedAt = formatter.string(from: statement.committedAt)
             return MemoryOSRetrievalHit(
                 layer: .l4,
@@ -129,7 +129,7 @@ public struct MemoryOSPersonIdentityService: Sendable {
                 metadata: ["updated_at": updatedAt, "effective_updated_at": updatedAt, "confidence": String(statement.confidence), "status": statement.metadata["status"] ?? MemoryOSRecordTemporalStatus.active.rawValue]
             )
         }
-        let l2 = try loadCurrentUserL2Statements(store: store, anchor: anchor).map { statement in
+        let l2 = try loadCurrentUserL2Statements(store: store, anchor: anchor, limit: nil).map { statement in
             let updatedAt = formatter.string(from: statement.committedAt)
             return MemoryOSRetrievalHit(
                 layer: .l2,
@@ -192,7 +192,8 @@ public struct MemoryOSPersonIdentityService: Sendable {
         }
     }
 
-    private func loadEntityStatements(store: SQLiteMemoryOSStore, entityID: String) throws -> [MemoryOSEntityStatement] {
+    private func loadEntityStatements(store: SQLiteMemoryOSStore, entityID: String, limit: Int?) throws -> [MemoryOSEntityStatement] {
+        let limitClause = limit.map { "LIMIT \(max(1, $0))" } ?? ""
         let rows = try store.query(sql: """
         SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
         FROM memory_l4_entity_statements
@@ -200,7 +201,7 @@ public struct MemoryOSPersonIdentityService: Sendable {
            OR json_extract(metadata_json, '$.person_role') = 'current_user'
            OR json_extract(metadata_json, '$.identity_anchor_id') = \(store.quote(entityID))
         ORDER BY committed_at DESC, confidence DESC
-        LIMIT \(Self.profileContextMaxRows)
+        \(limitClause)
         """)
         return try rows.map { row in
             guard let predicate = MemoryOSL4RelationPredicate(rawValue: row[2]) else {
@@ -223,7 +224,8 @@ public struct MemoryOSPersonIdentityService: Sendable {
         }
     }
 
-    private func loadCurrentUserL2Statements(store: SQLiteMemoryOSStore, anchor: MemoryOSEntity) throws -> [MemoryOSStatement] {
+    private func loadCurrentUserL2Statements(store: SQLiteMemoryOSStore, anchor: MemoryOSEntity, limit: Int?) throws -> [MemoryOSStatement] {
+        let limitClause = limit.map { "LIMIT \(max(1, $0))" } ?? ""
         let rows = try store.query(sql: """
         SELECT s.id, s.subject_id, s.predicate, s.object_id, s.text, s.assertion_kind, s.confidence, s.valid_at, s.committed_at, s.evidence_span_ids_json, s.source_artifact_id, s.metadata_json
         FROM memory_l2_statements s
@@ -234,7 +236,7 @@ public struct MemoryOSPersonIdentityService: Sendable {
            OR n.stable_key = \(store.quote(anchor.stableKey))
            OR n.stable_key = 'current_user_profile'
         ORDER BY s.committed_at DESC, s.confidence DESC
-        LIMIT \(Self.profileContextMaxRows)
+        \(limitClause)
         """)
         return try rows.map { row in
             MemoryOSStatement(

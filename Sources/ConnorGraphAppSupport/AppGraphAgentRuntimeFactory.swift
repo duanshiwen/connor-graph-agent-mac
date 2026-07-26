@@ -171,14 +171,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     private func makePersonRegistryContactRuntime(memoryOSFacade: AppMemoryOSFacade?) -> (any AgentContactRuntime)? {
         if let personProfileStore {
-            return PersonRegistryAgentContactRuntime(profileStore: personProfileStore, memoryOSFacade: memoryOSFacade)
+            return PersonRegistryAgentContactRuntime(profileStore: personProfileStore, memoryOSFacade: memoryOSFacade, storagePaths: storagePaths)
         }
         guard let storagePaths else { return nil }
         let databaseURL = storagePaths.applicationSupportDirectory
             .appendingPathComponent("contacts", isDirectory: true)
             .appendingPathComponent("person-profiles.sqlite")
         guard let profileStore = try? SQLitePersonProfileStore(databaseURL: databaseURL) else { return nil }
-        return PersonRegistryAgentContactRuntime(profileStore: profileStore, memoryOSFacade: memoryOSFacade)
+        return PersonRegistryAgentContactRuntime(profileStore: profileStore, memoryOSFacade: memoryOSFacade, storagePaths: storagePaths)
     }
 
 
