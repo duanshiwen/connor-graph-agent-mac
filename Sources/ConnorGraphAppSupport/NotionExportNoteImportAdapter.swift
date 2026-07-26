@@ -84,12 +84,22 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
         let assets = references.compactMap { raw -> ImportedNoteAttachment? in
             guard !raw.isEmpty, !raw.hasPrefix("#"), URL(string: raw)?.scheme == nil else { return nil }
             let decoded = raw.removingPercentEncoding ?? raw
-            let url = sourceURL.deletingLastPathComponent().appendingPathComponent(decoded).resolvingSymlinksInPath().standardizedFileURL
+            let candidate = sourceURL.resolvingSymlinksInPath().deletingLastPathComponent().appendingPathComponent(decoded)
+            let url = candidate.resolvingSymlinksInPath().standardizedFileURL
             guard url.path == rootURL.path || url.path.hasPrefix(rootPrefix) else {
                 diagnostics.append(.init(code: .unsafePath, severity: .warning, message: "Notion resource escapes the export folder: \(raw)"))
                 return nil
             }
-            guard FileManager.default.fileExists(atPath: url.path), !["md", "markdown", "html", "htm", "csv"].contains(url.pathExtension.lowercased()) else { return nil }
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                diagnostics.append(.init(code: .attachmentMissing, severity: .warning, message: "Missing Notion resource: \(raw)"))
+                return nil
+            }
+            let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+                diagnostics.append(.init(code: .unsafePath, severity: .warning, message: "Notion resource is not a regular file: \(raw)"))
+                return nil
+            }
+            guard !["md", "markdown", "html", "htm", "csv"].contains(url.pathExtension.lowercased()) else { return nil }
             guard seen.insert(url.path).inserted else { return nil }
             return .init(sourcePath: url.path, displayName: url.lastPathComponent, byteCount: try? AppSessionAttachmentStore.byteCount(forItemAt: url), contentHash: try? AppSessionAttachmentStore.sha256Hex(forItemAt: url), metadata: ["notion_target": raw])
         }
@@ -129,7 +139,7 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
         let markdownRegex = try! NSRegularExpression(pattern: "!?\\[[^\\]]*\\]\\(([^)\\n]+)\\)")
         let ns = text as NSString
         values += markdownRegex.matches(in: text, range: NSRange(location: 0, length: ns.length)).map {
-            ns.substring(with: $0.range(at: 1)).components(separatedBy: "#")[0]
+            markdownTarget(ns.substring(with: $0.range(at: 1)))
         }
         if html {
             let htmlRegex = try! NSRegularExpression(pattern: "(?i)(?:src|href)\\s*=\\s*[\"']([^\"'#]+)[\"']")
@@ -138,6 +148,16 @@ public struct NotionExportNoteImportAdapter: NoteImportSourceAdapter {
             }
         }
         return values
+    }
+
+    private static func markdownTarget(_ value: String) -> String {
+        var target = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if target.hasPrefix("<"), let closing = target.firstIndex(of: ">") {
+            target = String(target[target.index(after: target.startIndex)..<closing])
+        } else if let titleRange = target.range(of: #"\s+["']"#, options: .regularExpression) {
+            target = String(target[..<titleRange.lowerBound])
+        }
+        return target.components(separatedBy: "#")[0]
     }
 
     private static func csvSummary(_ csv: String, title: String) -> String {
