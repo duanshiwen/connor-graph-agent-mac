@@ -333,7 +333,7 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptChecksUpcomingCalendarWithoutDistractingFromCurrentWork() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("always check the user's calendar from the authoritative current time through the next 24 hours"))
+    #expect(prompt.contains("always check the user's calendar from the authoritative current time through the next 48 hours"))
     #expect(prompt.contains("`timeFilterMode: intervalOverlapsRange`"))
     #expect(prompt.contains("includes events already in progress at the current time as well as events that begin later"))
     #expect(prompt.contains("Use the successful current-time result and its timezone as the local schedule frame"))
