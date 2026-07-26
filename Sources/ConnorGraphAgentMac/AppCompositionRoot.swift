@@ -59,6 +59,10 @@ final class AppCompositionRoot: ObservableObject {
             )
             root.installStartupCoordinator()
             root.bindCommandRouting(to: placeholder)
+            root.identityStore.onDeviceSyncPass = { [weak root] in
+                guard let root else { return }
+                await root.runtime.syncAccountData(using: root.identityStore)
+            }
             AppStartupPerformance.event("AppCompositionLightConstructed")
             return root
         }

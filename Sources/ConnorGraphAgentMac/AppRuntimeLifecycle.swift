@@ -3610,4 +3610,19 @@ extension AppRuntimeLifecycle {
             commercialReadinessDashboard: { [weak model] in model?.commercialReadinessDashboard ?? CommercialReadinessDashboard(cards: []) }
         )
     }
+
+    func syncAccountData(using identityStore: AppUserIdentityStore) async {
+        guard let chatSessionRepository, let storagePaths else { return }
+        do {
+            try await AppAccountDataSyncCoordinator(
+                sessions: chatSessionRepository,
+                settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
+                identity: identityStore
+            ).reconcile()
+            loadRuntimeSettings()
+            reloadChatSessions(restoreWorkspaceMode: false)
+        } catch {
+            AppPerformanceLog.chatTurnLogger.warning("account.sync.failed error=\(String(describing: error), privacy: .public)")
+        }
+    }
 }
