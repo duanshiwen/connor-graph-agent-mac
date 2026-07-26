@@ -12,13 +12,15 @@ private struct CoordinatorBackend: AgentBackend {
 private final class FlakyCoordinatorBackend: AgentBackend, @unchecked Sendable {
     private let lock = NSLock()
     private var failuresRemaining: Int
-    private(set) var callCount = 0
+    private var storedCallCount = 0
+
+    var callCount: Int { lock.withLock { storedCallCount } }
 
     init(failures: Int) { failuresRemaining = failures }
 
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         lock.lock()
-        callCount += 1
+        storedCallCount += 1
         let shouldFail = failuresRemaining > 0
         failuresRemaining = max(failuresRemaining - 1, 0)
         lock.unlock()
@@ -324,6 +326,60 @@ struct NoteImportCoordinatorTests {
         #expect(session.messages.first?.id == "note-import-message:\(item.id)")
         #expect(session.messages.first?.content == note.markdownContent)
         #expect(session.messages.count == 3)
+    }
+
+    @Test("Cancels promptly while waiting for a transient retry")
+    func cancelsDuringRetryBackoff() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databasePath = root.appendingPathComponent("db.sqlite").path
+        let store = try SQLiteGraphKernelStore(path: databasePath)
+        try store.migrate()
+        let chat = AppChatSessionRepository(store: store)
+        let ledger = try AppNoteImportRepository(databasePath: databasePath)
+        let source = NoteImportSourceRecord(id: "source", kind: .markdownFolder, displayName: "Notes")
+        try ledger.saveSource(source)
+        let job = NoteImportJobRecord(id: "job", sourceID: source.id, options: .init(llmMode: .automatic))
+        try ledger.saveJob(job)
+        let backend = FlakyCoordinatorBackend(failures: 100)
+        let service = HeadlessNoteSessionService(repository: chat) { session in
+            NativeSessionManager(backend: backend, sessionRepository: chat, session: session)
+        }
+        let coordinator = NoteImportCoordinator(
+            ledger: ledger,
+            sessionService: service,
+            retryPolicy: .init(maxAttempts: 20, initialDelay: 10, maximumDelay: 10)
+        )
+        let note = ImportedNote(
+            sourceKind: .markdownFolder,
+            sourceIdentity: "note.md",
+            title: "Retrying",
+            markdownContent: "Body",
+            rawByteHash: "raw",
+            normalizedTextHash: "text"
+        )
+        _ = try await coordinator.scan(
+            jobID: job.id,
+            adapter: SingleNoteAdapter(note: note),
+            request: .init(sourceID: source.id, sourceURL: root, kind: .markdownFolder, options: job.options)
+        )
+
+        let execution = Task { try await coordinator.execute(jobID: job.id) }
+        var waits = 0
+        while backend.callCount == 0, waits < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waits += 1
+        }
+        #expect(backend.callCount == 1)
+        let cancelStarted = Date()
+        try await coordinator.cancel(jobID: job.id)
+        let cancelled = try await execution.value
+
+        #expect(backend.callCount == 1)
+        #expect(cancelled.status == .cancelled)
+        #expect(Date().timeIntervalSince(cancelStarted) < 1.5)
+        #expect(try ledger.items(jobID: job.id).allSatisfy { $0.status == .cancelled })
     }
 
     @Test("Reuses deterministic session after interruption between session creation and ledger binding")
