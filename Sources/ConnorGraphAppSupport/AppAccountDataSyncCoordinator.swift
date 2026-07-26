@@ -2,6 +2,16 @@ import Foundation
 import CryptoKit
 import ConnorGraphCore
 
+public enum AppAccountSyncSignal {
+    @TaskLocal public static var suppressLocalChange = false
+    public static let localDataDidChange = Notification.Name("ConnorAccountSyncLocalDataDidChange")
+
+    public static func postLocalDataDidChange() {
+        guard !suppressLocalChange else { return }
+        NotificationCenter.default.post(name: localDataDidChange, object: nil)
+    }
+}
+
 public struct ConnorPortableMessage: Codable, Sendable, Equatable {
     public var id: String
     public var role: String
@@ -60,8 +70,25 @@ public struct ConnorPortableProfile: Codable, Sendable, Equatable {
     }
 }
 
-@MainActor
-public final class AppAccountDataSyncCoordinator {
+public struct AppAccountDataSyncResult: Sendable, Equatable {
+    public var appliedSessionChangeCount: Int
+    public var appliedSettingsChangeCount: Int
+    public var pushedChangeCount: Int
+    public var appliedSessionIDs: Set<String>
+
+    public init(appliedSessionChangeCount: Int = 0, appliedSettingsChangeCount: Int = 0, pushedChangeCount: Int = 0, appliedSessionIDs: Set<String> = []) {
+        self.appliedSessionChangeCount = appliedSessionChangeCount
+        self.appliedSettingsChangeCount = appliedSettingsChangeCount
+        self.pushedChangeCount = pushedChangeCount
+        self.appliedSessionIDs = appliedSessionIDs
+    }
+
+    public var sessionsChanged: Bool { appliedSessionChangeCount > 0 || !appliedSessionIDs.isEmpty }
+    public var settingsChanged: Bool { appliedSettingsChangeCount > 0 }
+}
+
+public actor AppAccountDataSyncCoordinator {
+    private enum AppliedChangeKind { case session(String), settings }
     private struct RecordState: Codable { var version: Int64; var hash: String; var deleted: Bool }
     private struct PersistedState: Codable { var cursor: Int64 = 0; var records: [String: RecordState] = [:] }
 
@@ -78,15 +105,19 @@ public final class AppAccountDataSyncCoordinator {
         decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
     }
 
-    public func reconcile() async throws {
-        guard let userID = identity.currentUser?.id else { return }
+    public func reconcile() async throws -> AppAccountDataSyncResult {
+        guard let userID = await identity.currentUser?.id else { return AppAccountDataSyncResult() }
+        let deviceID = await identity.syncDeviceID
+        var syncResult = AppAccountDataSyncResult()
         let stateKey = "ConnorAccountSyncState.\(userID)"
         var state = loadState(key: stateKey)
         var hasMore = false
         repeat {
             let page = try await identity.pullSyncChanges(cursor: state.cursor)
             for change in page.changes {
-                if change.sourceDeviceId != identity.syncDeviceID { try apply(change) }
+                if change.sourceDeviceId != deviceID, let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(change) }) {
+                    record(kind, in: &syncResult)
+                }
                 state.records[recordKey(change.collection, change.recordId)] = RecordState(version: change.version ?? 0, hash: try payloadHash(change.payload), deleted: change.deleted)
             }
             state.cursor = page.nextCursor; hasMore = page.hasMore
@@ -107,16 +138,18 @@ public final class AppAccountDataSyncCoordinator {
 
         for batch in mutations.chunked(into: 200) {
             let results = try await identity.pushSyncChanges(batch)
-            for (result, mutation) in zip(results, batch) {
-                if let conflict = result.conflict {
-                    try apply(conflict)
+            for (pushResult, mutation) in zip(results, batch) {
+                if let conflict = pushResult.conflict {
+                    if let kind = try AppAccountSyncSignal.$suppressLocalChange.withValue(true, operation: { try apply(conflict) }) { record(kind, in: &syncResult) }
                     state.records[recordKey(conflict.collection, conflict.recordId)] = RecordState(version: conflict.version ?? 0, hash: try payloadHash(conflict.payload), deleted: conflict.deleted)
-                } else if result.applied {
+                } else if pushResult.applied {
                     state.records[recordKey(mutation.collection, mutation.recordId)] = RecordState(version: (mutation.baseVersion ?? 0) + 1, hash: try payloadHash(mutation.payload), deleted: mutation.deleted)
+                    syncResult.pushedChangeCount += 1
                 }
             }
         }
         saveState(state, key: stateKey)
+        return syncResult
     }
 
     private func projections() throws -> [String: ConnorJSONValue] {
@@ -130,25 +163,38 @@ public final class AppAccountDataSyncCoordinator {
         return values
     }
 
-    private func apply(_ change: ConnorSyncChange) throws {
+    private func apply(_ change: ConnorSyncChange) throws -> AppliedChangeKind? {
         switch (change.collection, change.recordId) {
         case ("sessions", let id):
             if change.deleted {
-                if try sessions.loadSession(id: id) != nil { try sessions.store.deleteSession(id: id) }
+                guard try sessions.loadSession(id: id) != nil else { return nil }
+                try sessions.store.deleteSession(id: id)
             } else {
                 let portable: ConnorPortableSession = try decode(change.payload)
                 _ = try sessions.saveSession(portable.merging(into: try sessions.loadSession(id: id)))
             }
+            return .session(id)
         case ("settings", "macos_runtime") where !change.deleted:
             var synced: AgentRuntimeSettings = try decode(change.payload)
             synced.preferences = try settings.loadOrCreateDefault().preferences
             try settings.save(synced)
+            return .settings
         case ("settings", "profile"):
             var runtimeSettings = try settings.loadOrCreateDefault()
             let profile = change.deleted ? ConnorPortableProfile(memoryProfile: "") : try decode(change.payload)
             runtimeSettings.preferences.notes = profile.memoryProfile
             try settings.save(runtimeSettings)
-        default: break
+            return .settings
+        default: return nil
+        }
+    }
+
+    private func record(_ kind: AppliedChangeKind, in result: inout AppAccountDataSyncResult) {
+        switch kind {
+        case .session(let id):
+            result.appliedSessionChangeCount += 1
+            result.appliedSessionIDs.insert(id)
+        case .settings: result.appliedSettingsChangeCount += 1
         }
     }
 

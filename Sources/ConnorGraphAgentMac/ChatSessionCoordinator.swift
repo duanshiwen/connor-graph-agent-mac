@@ -20,6 +20,7 @@ final class ChatSessionCoordinator {
     @ObservationIgnored private var pendingImportedSessions: [String: AgentSession] = [:]
     @ObservationIgnored private var importedSessionFlushTask: Task<Void, Never>?
     @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
+    @ObservationIgnored private var remoteRefreshTask: Task<Void, Never>?
 
     @ObservationIgnored var activeSessionIDProvider: () -> String = { "" }
     @ObservationIgnored var onSelectionWillChange: (String?, String) -> Void = { _, _ in }
@@ -97,6 +98,36 @@ final class ChatSessionCoordinator {
         }
     }
 
+    func refreshSelectedSessionIfChanged(sessionIDs: Set<String>) {
+        guard !isShutdown,
+              let repository,
+              let selectedID = model.selectedSessionID,
+              sessionIDs.contains(selectedID) else { return }
+        let generation = selectionGeneration
+        remoteRefreshTask?.cancel()
+        remoteRefreshTask = Task(priority: .utility) { [weak self] in
+            defer { self?.remoteRefreshTask = nil }
+            do {
+                let page = try await Task.detached(priority: .utility) {
+                    try repository.loadSessionMessagePage(id: selectedID)
+                }.value
+                guard let self,
+                      !self.isShutdown,
+                      self.selectionGeneration == generation,
+                      self.model.selectedSessionID == selectedID,
+                      let page else { return }
+                try self.onReloadSelectedSession(
+                    page.session,
+                    false,
+                    page.totalMessageCount,
+                    page.nextBeforePosition
+                )
+            } catch {
+                self?.report(error)
+            }
+        }
+    }
+
     func setFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
         guard !isShutdown, model.filter != filter else { return }
         _ = restoreWorkspaceMode
@@ -137,6 +168,8 @@ final class ChatSessionCoordinator {
            activeSessionIDProvider() == sessionID { return }
         let previous = model.selectedSessionID
         onSelectionWillChange(previous, sessionID)
+        remoteRefreshTask?.cancel()
+        remoteRefreshTask = nil
         selectionTask?.cancel()
         selectionGeneration += 1
         let generation = selectionGeneration
@@ -360,6 +393,8 @@ final class ChatSessionCoordinator {
         pendingImportedSessions.removeAll()
         loadMoreTask?.cancel()
         loadMoreTask = nil
+        remoteRefreshTask?.cancel()
+        remoteRefreshTask = nil
         model.isLoadingNextPage = false
         model.loadingSessionDetailID = nil
         model.presentedSessionDetailID = nil

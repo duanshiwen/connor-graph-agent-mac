@@ -3611,18 +3611,20 @@ extension AppRuntimeLifecycle {
         )
     }
 
-    func syncAccountData(using identityStore: AppUserIdentityStore) async {
+    func syncAccountData(using identityStore: AppUserIdentityStore) async throws {
         guard let chatSessionRepository, let storagePaths else { return }
-        do {
-            try await AppAccountDataSyncCoordinator(
-                sessions: chatSessionRepository,
-                settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
-                identity: identityStore
-            ).reconcile()
-            loadRuntimeSettings()
-            reloadChatSessions(restoreWorkspaceMode: false)
-        } catch {
-            AppPerformanceLog.chatTurnLogger.warning("account.sync.failed error=\(String(describing: error), privacy: .public)")
+        let coordinator = AppAccountDataSyncCoordinator(
+            sessions: chatSessionRepository,
+            settings: AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory),
+            identity: identityStore
+        )
+        let result = try await Task.detached(priority: .utility) {
+            try await coordinator.reconcile()
+        }.value
+        if result.settingsChanged { loadRuntimeSettings() }
+        if result.sessionsChanged {
+            scheduleChatSessionListRefresh(reason: "account-sync")
+            chatSessionCoordinator.refreshSelectedSessionIfChanged(sessionIDs: result.appliedSessionIDs)
         }
     }
 }

@@ -20,4 +20,14 @@ struct DeviceSyncPolicyTests {
         #expect(!L1ExtractionEligibility.shared.canRun(now: now.addingTimeInterval(11)))
         L1ExtractionEligibility.shared.update(granted: false, expiresAt: nil)
     }
+
+    @Test func syncResultOnlyRefreshesChangedSurfaces() {
+        let uploadOnly = AppAccountDataSyncResult(pushedChangeCount: 3)
+        #expect(!uploadOnly.sessionsChanged)
+        #expect(!uploadOnly.settingsChanged)
+
+        let remoteChanges = AppAccountDataSyncResult(appliedSessionChangeCount: 2, appliedSettingsChangeCount: 1)
+        #expect(remoteChanges.sessionsChanged)
+        #expect(remoteChanges.settingsChanged)
+    }
 }
