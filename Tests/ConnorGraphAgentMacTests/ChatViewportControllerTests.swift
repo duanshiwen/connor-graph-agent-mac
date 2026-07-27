@@ -184,6 +184,22 @@ struct ChatViewportControllerTests {
         #expect(!controller.isResolvingInitialAnchor)
     }
 
+    @Test func firstDataSetUsesViewportMetricsPublishedBeforeRegistration() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        let dataSet = ChatViewportDataSetID.agentChatSession(sessionID: "session", revision: 1)
+        controller.updateMetrics(.init(
+            viewportHeight: 600,
+            contentHeight: 1_200,
+            distanceToBottom: 600,
+            distanceToTop: 0
+        ))
+
+        controller.replaceDataSet(id: dataSet, itemCount: 8, initialAnchor: .bottom)
+
+        #expect(controller.pendingScrollCommand?.target == .bottom(animated: false))
+        #expect(controller.isResolvingInitialAnchor)
+    }
+
     @Test func sameDataSetTransitionFromEmptyToNonEmptySchedulesInitialBottomScroll() {
         let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
         let dataSet = ChatViewportDataSetID.agentChatSession(sessionID: "session", revision: 1)
