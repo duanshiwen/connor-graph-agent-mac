@@ -602,6 +602,19 @@ import ConnorGraphAgent
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
+@Test func defaultSystemPromptEncouragesRelevantInlineImages() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Rich Media Responses"))
+    #expect(prompt.contains("When `present_image` is available"))
+    #expect(prompt.contains("relevant local or network image would materially improve"))
+    #expect(prompt.contains("copy the exact Markdown returned by the tool"))
+    #expect(prompt.contains("Place each image immediately after the paragraph"))
+    #expect(prompt.contains("distribute them beside their relevant sections"))
+    #expect(prompt.contains("do not add them merely for decoration"))
+    #expect(prompt.contains("Never invent an image path"))
+}
+
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {
     let summary = AgentSessionSummary(
         id: "summary-1",
