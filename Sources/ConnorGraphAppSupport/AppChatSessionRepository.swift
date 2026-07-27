@@ -6,11 +6,17 @@ import ConnorGraphStore
 public enum AppChatSessionRepositoryError: Error, Equatable, CustomStringConvertible {
     case sessionNotFound(String)
     case sessionHasRunningBackgroundTasks(String)
+    case noteBodyNotEditable(String)
+    case noteBodyConflict(String)
+    case emptyNoteBody
 
     public var description: String {
         switch self {
         case .sessionNotFound(let id): "sessionNotFound: \(id)"
         case .sessionHasRunningBackgroundTasks(let id): "sessionHasRunningBackgroundTasks: \(id)"
+        case .noteBodyNotEditable(let id): "noteBodyNotEditable: \(id)"
+        case .noteBodyConflict(let id): "noteBodyConflict: \(id)"
+        case .emptyNoteBody: "emptyNoteBody"
         }
     }
 }
@@ -223,6 +229,7 @@ public struct AppChatSessionRepository: Sendable {
     public func upsertImportedNoteMessage(
         sessionID: String,
         messageID: String,
+        expectedContent: String,
         content: String,
         attachments: [AgentMessageAttachmentRef],
         createdAt: Date
@@ -245,6 +252,33 @@ public struct AppChatSessionRepository: Sendable {
         session.messages.removeSubrange((index + 1)..<session.messages.endIndex)
         session.updatedAt = Date()
         return try saveSession(session)
+    }
+
+    @discardableResult
+    public func updateNoteBody(
+        sessionID: String,
+        messageID: String,
+        content: String,
+        updatedAt: Date = Date()
+    ) throws -> AgentSession {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppChatSessionRepositoryError.emptyNoteBody
+        }
+        guard var session = try loadSession(id: sessionID) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(sessionID)
+        }
+        guard session.governance.kind == .note,
+              session.messages.first?.id == messageID,
+              session.messages.first?.role == .user else {
+            throw AppChatSessionRepositoryError.noteBodyNotEditable("\(sessionID):\(messageID)")
+        }
+        guard session.messages[0].content == expectedContent else {
+            throw AppChatSessionRepositoryError.noteBodyConflict("\(sessionID):\(messageID)")
+        }
+        guard session.messages[0].content != content else { return session }
+        session.messages[0].content = content
+        session.updatedAt = updatedAt
+        return try saveSession(session, previousMessageCount: session.messages.count)
     }
 
     @discardableResult
