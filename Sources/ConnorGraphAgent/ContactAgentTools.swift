@@ -215,7 +215,6 @@ public struct ContactSearchTool: AgentTool {
     public var description: String { "Search legacy governed contact records." }
     public var permission: AgentPermissionCapability { .readContacts }
     public var inputSchema: AgentToolInputSchema { .closedObject(properties: ["query": .string(description: "Contact query")], required: ["query"]) }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Legacy contact query")], required: ["query"]) }
 
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -315,14 +314,6 @@ public struct ContactsReadTool: AgentTool {
             "query": .string(description: "Person/contact query; use this for plain names that were not already resolved in Referenced People"),
             "personID": .string(description: "Exact personID returned by a Person Registry list/search result or Referenced People; copy the field and value unchanged. Do not infer IDs from displayName."),
             "id": .string(description: "Legacy Person/contact ID accepted for compatibility. Prefer personID for Person Registry operations; do not infer IDs from displayName")
-    public var description: String { "Read governed relationship-aware Person Registry profiles, with legacy contact records available through list_contacts/search_contacts operations." }
-    public var permission: AgentPermissionCapability { .readContacts }
-    public var inputSchema: AgentToolInputSchema {
-        .object(properties: [
-            "operation": .string(description: "list_people | search_people | get_person | resolve_person | list_contacts | search_contacts | get_contact | resolve_contact"),
-            "query": .string(description: "Relationship person or legacy contact query"),
-            "id": .string(description: "Relationship person or legacy contact ID")
-
         ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
@@ -341,26 +332,23 @@ public struct ContactsReadTool: AgentTool {
             let people = try await runtime.searchPeople(query: arguments.string("query") ?? "")
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(people, prefix: "Found \(people.count) people"), contentJSON: try ContactJSON.encodePeople(people))
         case "get_person":
-            guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("personID is required") }
-            let person = try await runtime.getPerson(id: ContactID(rawValue: id))
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePerson(person), contentJSON: try ContactJSON.encodePerson(person))
-            guard let rawID = arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("id is required") }
+            guard let rawID = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") ?? arguments.string("query") else { throw AgentToolError.invalidArguments("personID is required") }
             let id = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
             let person = try await runtime.getPerson(id: ContactID(rawValue: id))
             if let person {
-                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Loaded person", contentJSON: try ContactJSON.encode(person))
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePerson(person), contentJSON: try ContactJSON.encodePerson(person))
             }
             guard !Self.looksLikePersonID(id) else {
-                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Person not found", contentJSON: try ContactJSON.encode(Optional<PersonProfile>.none))
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Person not found", contentJSON: try ContactJSON.encodePerson(nil))
             }
             let matches = try await runtime.searchPeople(query: id)
             if matches.count == 1, let resolved = matches.first {
-                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Resolved person by query \"\(id)\"", contentJSON: try ContactJSON.encode(resolved))
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Resolved person by query \"\(id)\"\n\(summarizePerson(resolved))", contentJSON: try ContactJSON.encodePerson(resolved))
             }
             if matches.count > 1 {
-                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Ambiguous person query \"\(id)\"; use an exact person ID", contentJSON: try ContactJSON.encode(matches))
+                return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: summarizePeople(matches, prefix: "Ambiguous person query \"\(id)\"; use an exact person ID"), contentJSON: try ContactJSON.encodePeople(matches))
             }
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Person not found", contentJSON: try ContactJSON.encode(Optional<PersonProfile>.none))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Person not found", contentJSON: try ContactJSON.encodePerson(nil))
 
         case "list_contacts", "search_contacts", "resolve_contact":
             let records = try await runtime.search(query: arguments.string("query") ?? "")
@@ -379,8 +367,6 @@ public struct ContactsWriteTool: AgentTool {
     public let runtime: any AgentContactRuntime
     public var name: String { "contacts_write" }
     public var description: String { "Write governed Person Registry profiles using operations: create_person, update_person, add_person_images, remove_all_person_images, delete_person, merge_people. To add one or more images from the current user message, call add_person_images with the exact personID and exact image attachmentIDs shown in User Attachments. Images are optional and new images are appended. For update/delete/image/merge operations, never guess IDs from display names." }
-    public var description: String { "Write governed relationship-aware Person Registry profiles using operations: create_person, update_person, delete_person, merge_people. Legacy create_contact remains supported." }
-
     public var permission: AgentPermissionCapability { .mutateContacts }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
@@ -391,6 +377,7 @@ public struct ContactsWriteTool: AgentTool {
             "targetID": .string(description: "For merge_people, copy the target person's exact personID returned by contacts_read into this field"),
             "email": .string(description: "Email"),
             "name": .string(description: "Display name"),
+            "displayName": .string(description: "Legacy display-name field accepted for compatibility"),
             "aliases": .array(items: .string(description: "Person alias"), description: "Aliases for the person"),
             "source": .string(description: "Creation source such as llm-discovery"),
             "organization": .string(description: "Organization"),
@@ -398,10 +385,7 @@ public struct ContactsWriteTool: AgentTool {
             "notes": .string(description: "Notes"),
             "attachmentIDs": .array(items: .string(description: "Exact image attachmentID"), description: "For add_person_images, one or more exact image IDs from User Attachments in the current user message. Copy them unchanged; never pass local file paths or invent IDs."),
             "approved": .boolean(description: "Explicit approval")
-        ], required: ["operation", "approved"])
-            "approved": .boolean(description: "Explicit approval for destructive relationship-person changes or legacy contact operations")
-        ], required: ["operation"]) 
-
+        ], required: ["operation"])
     }
     public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -409,7 +393,7 @@ public struct ContactsWriteTool: AgentTool {
         let approved = arguments.bool("approved") ?? false
         switch operation {
         case "create_person":
-            let name = arguments.string("name")
+            let name = arguments.string("name") ?? arguments.string("displayName")
             guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw AgentToolError.invalidArguments("name is required") }
             let email = arguments.string("email")
             let aliases = (arguments.array("aliases") ?? []).compactMap(\.stringValue)
@@ -423,17 +407,15 @@ public struct ContactsWriteTool: AgentTool {
                 notes: arguments.string("notes"),
                 discoveredBy: source
             )
-            let created = try await runtime.createPerson(profile, approved: approved)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created approved person \(created.id.rawValue)", contentJSON: try ContactJSON.encodePerson(created))
             let created = try await runtime.createPerson(profile, approved: true)
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created person \(created.id.rawValue)", contentJSON: try ContactJSON.encode(created))
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: self.name, contentText: "Created person \(created.id.rawValue)", contentJSON: try ContactJSON.encodePerson(created))
 
         case "update_person":
             guard let id = arguments.string("personID") ?? arguments.string("person_id") ?? arguments.string("id") else { throw AgentToolError.invalidArguments("personID is required") }
             let existing = try await runtime.getPerson(id: ContactID(rawValue: id))
             guard let existing else { throw AgentToolError.invalidArguments("Unknown person") }
             var draft = PersonProfileDraft(profile: existing)
-            if let name = arguments.string("name") { draft.displayName = name }
+            if let name = arguments.string("name") ?? arguments.string("displayName") { draft.displayName = name }
             if let organization = arguments.string("organization") { draft.organizationName = organization }
             if let jobTitle = arguments.string("jobTitle") { draft.jobTitle = jobTitle }
             if let notes = arguments.string("notes") { draft.notes = notes }

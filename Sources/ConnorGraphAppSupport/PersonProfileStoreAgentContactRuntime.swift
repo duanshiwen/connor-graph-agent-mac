@@ -53,6 +53,14 @@ public actor PersonProfileStoreAgentContactRuntime: AgentContactRuntime {
         return try await store.upsert(updated)
     }
 
+    public func addPersonImages(id: ContactID, sessionID: String, attachmentIDs: [String], approved: Bool) async throws -> PersonProfile {
+        throw AgentToolError.invalidArguments("Person image storage is unavailable")
+    }
+
+    public func removeAllPersonImages(id: ContactID, approved: Bool) async throws -> PersonProfile {
+        throw AgentToolError.invalidArguments("Person image storage is unavailable")
+    }
+
     public func deletePerson(id: ContactID, approved: Bool) async throws -> PersonProfile {
         guard approved else { throw AgentToolError.permissionDenied("Person profile delete approval required") }
         guard let existing = try await store.profile(id: id) else { throw AgentToolError.invalidArguments("Unknown person") }

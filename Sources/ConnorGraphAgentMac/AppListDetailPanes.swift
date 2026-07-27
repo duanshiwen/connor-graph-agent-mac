@@ -511,31 +511,15 @@ struct CraftContactsListPane: View {
         VStack(spacing: 0) {
             AppListPaneHeader(title: "人际关系") {
                 Button(action: { model.presentNewProfileEditor() }) {
-            HStack {
-                Spacer(minLength: 24)
-                Text("人际关系")
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Button(action: { viewModel.presentNewPersonProfileEditor() }) {
-
                     Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.appIcon)
                 .help("新建人物")
                 .accessibilityLabel("新建人物")
-                .buttonStyle(.plain)
-                .help("新建人物档案")
-                .accessibilityLabel("新建人物档案")
-
             }
 
             if model.presentation.rows.isEmpty {
                 ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.2", description: Text("添加人物后，康纳同学会把与你相关的人、关系线索和可用联系方式整理在这里，方便之后检索和关联会话。"))
-            if viewModel.contactsBrowserPresentation.rows.isEmpty {
-                ContentUnavailableView("还没有可显示的人际关系", systemImage: "person.crop.circle.badge", description: Text("连接通讯录后，康纳同学会把可用人际关系整理在这里，方便之后检索和关联会话。"))
-
                     .padding(.top, 80)
             } else {
                 ContactsRowsScrollView(
@@ -2358,34 +2342,6 @@ struct ContactsSourceSettingsView: View {
                                     }
                                 }
                             }
-                let profile = selectedPersonProfile
-                let memoryItems = profile.map { viewModel.personMemoryItemsByPersonID[$0.id] ?? [] } ?? []
-                let detail = profile.map { PersonProfileDetailPresentation(profile: $0, memoryItems: memoryItems) }
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                    CalendarContactsDetailHeader(title: "人物档案", subtitle: "人际关系现在是人物列表：人可以先存在，联系方式后补充。")
-                    Divider().opacity(0.6)
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                        Label(selected.displayName, systemImage: "person.crop.circle")
-                            .font(AgentChatTypography.title)
-                        Text(selected.subtitle).font(AgentChatTypography.meta).textSelection(.enabled)
-                        if let organization = selected.organizationName {
-                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
-                        }
-                        if let detail {
-                            PersonDetailInfoRow(title: "别名", value: detail.aliasesText, systemImage: "tag")
-                            PersonDetailInfoRow(title: detail.memoryBindingTitle, value: detail.memoryBindingDetail, systemImage: "brain.head.profile")
-                            PersonDetailInfoRow(title: "人物记忆摘要", value: detail.memorySummary, systemImage: "text.alignleft")
-                            PersonDetailInfoRow(title: "人物记忆", value: detail.activeMemoryCountText, systemImage: "list.bullet.rectangle")
-                            PersonMemoryItemsList(
-                                items: detail.memoryItems,
-                                onArchive: { item in Task { @MainActor in await viewModel.archivePersonMemoryItem(item.id, for: item.personID) } },
-                                onDelete: { item in Task { @MainActor in await viewModel.deletePersonMemoryItem(item.id, for: item.personID) } }
-                            )
-                        }
-                        HStack {
-                            Button("编辑") { viewModel.presentEditPersonProfile(selected.id) }
-                            Button("删除", role: .destructive) { viewModel.pendingPersonProfileDeletionID = selected.id }
-
                         }
                     }
                     .padding(AppShellLayout.spaceXL)
@@ -2394,9 +2350,6 @@ struct ContactsSourceSettingsView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .task(id: selected.id) {
-                    await viewModel.reloadPersonMemoryItems(for: selected.id)
-                }
             } else {
                 Color.clear
             }
@@ -2446,10 +2399,6 @@ struct ContactsSourceSettingsView: View {
         return model.presentation.rows.first { $0.id == id }
     }
 
-    private var selectedPersonProfile: PersonProfile? {
-        guard let id = viewModel.selectedContactID else { return nil }
-        return viewModel.personProfiles.first { $0.id == id }
-    }
 }
 
 private struct PersonMemoryItemsList: View {

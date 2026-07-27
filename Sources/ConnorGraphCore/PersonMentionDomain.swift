@@ -32,7 +32,8 @@ public struct PersonReference: Codable, Sendable, Equatable, Hashable, Identifia
         self.personID = personID
         let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.displayName = normalizedDisplayName
-        self.mentionText = mentionText?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? (normalizedDisplayName.isEmpty ? "@person" : "@\(normalizedDisplayName)")
+        self.mentionText = mentionText?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? (normalizedDisplayName.isEmpty ? "@person" : "@\(normalizedDisplayName)")
         self.status = status
         self.mergedIntoID = mergedIntoID
         self.memoryEntityID = memoryEntityID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -49,6 +50,9 @@ public struct PersonReference: Codable, Sendable, Equatable, Hashable, Identifia
             memoryEntityID: profile.memoryEntityID,
             memoryStableKey: profile.memoryStableKey
         )
+    }
+}
+
 public struct PersonMention: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var id: String
     public var personID: ContactID
@@ -65,7 +69,6 @@ public struct PersonMention: Codable, Sendable, Equatable, Hashable, Identifiabl
         self.personID = personID
         self.displayName = displayName
         self.insertedText = insertedText
-
     }
 }
 
@@ -81,15 +84,22 @@ public struct PersonMentionTrigger: Sendable, Equatable, Hashable {
 
 public struct PersonMentionReplacement: Sendable, Equatable, Hashable {
     public var text: String
-    public var mention: ComposerPersonMention
-    public var selectedRange: NSRange
-
-    public init(text: String, mention: ComposerPersonMention, selectedRange: NSRange) {
     public var mention: PersonMention
     public var selectedRange: NSRange
 
     public init(text: String, mention: PersonMention, selectedRange: NSRange) {
+        self.text = text
+        self.mention = mention
+        self.selectedRange = selectedRange
+    }
+}
 
+public struct ComposerPersonMentionReplacement: Sendable, Equatable, Hashable {
+    public var text: String
+    public var mention: ComposerPersonMention
+    public var selectedRange: NSRange
+
+    public init(text: String, mention: ComposerPersonMention, selectedRange: NSRange) {
         self.text = text
         self.mention = mention
         self.selectedRange = selectedRange
@@ -104,10 +114,9 @@ public struct PersonMentionTriggerDetector: Sendable {
     public init() {}
 
     public func trigger(in text: String, selectedRange: NSRange) -> PersonMentionTrigger? {
-        guard selectedRange.length == 0 else { return nil }
-        guard selectedRange.location >= 0, selectedRange.location <= (text as NSString).length else { return nil }
-        guard selectedRange.location >= 0, selectedRange.location <= text.utf16.count else { return nil }
-
+        guard selectedRange.length == 0,
+              selectedRange.location >= 0,
+              selectedRange.location <= text.utf16.count else { return nil }
         let cursor = String.Index(utf16Offset: selectedRange.location, in: text)
 
         var index = cursor
@@ -125,8 +134,6 @@ public struct PersonMentionTriggerDetector: Sendable {
                 )
             }
             if character.isWhitespace || character.isNewline || Self.terminatingCharacters.contains(character) {
-            if character.isWhitespace || character.isNewline || Self.terminatingScalars.contains(character) {
-
                 return nil
             }
             index = previous
@@ -134,8 +141,10 @@ public struct PersonMentionTriggerDetector: Sendable {
         return nil
     }
 
-    private static let terminatingCharacters: Set<Character> = ["，", "。", "、", ",", ".", "!", "?", "！", "？", ":", "：", ";", "；", "（", "(", ")", "）", "[", "]", "【", "】", "{", "}"]
-    private static let terminatingScalars: Set<Character> = ["，", "。", "、", ",", ".", "!", "?", "！", "？", ":", "：", ";", "；", "（", "(", ")", "）"]
+    private static let terminatingCharacters: Set<Character> = [
+        "，", "。", "、", ",", ".", "!", "?", "！", "？", ":", "：", ";", "；",
+        "（", "(", ")", "）", "[", "]", "【", "】", "{", "}"
+    ]
 
     private func isValidMentionBoundary(before atIndex: String.Index, in text: String) -> Bool {
         guard atIndex > text.startIndex else { return true }
@@ -148,34 +157,43 @@ public struct PersonMentionSearch: Sendable {
     public init() {}
 
     public func search(query: String, profiles: [PersonProfile], limit: Int = 8) -> [PersonProfile] {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
-        let activeProfiles = profiles.filter(\.isActiveForDefaultContext)
-        let filtered: [PersonProfile]
-        if normalizedQuery.isEmpty {
-            filtered = activeProfiles
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        let active = profiles.filter(\.isActiveForDefaultContext)
+        let activeByID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
+        let matches: [PersonProfile]
+        if normalized.isEmpty {
+            matches = active
         } else {
-            filtered = activeProfiles.filter { profile in
-                searchableTokens(for: profile).contains { token in
-                    token.localizedLowercase.contains(normalizedQuery)
-                }
+            var matchedByID: [ContactID: PersonProfile] = [:]
+            for profile in active where profileMatches(profile, normalizedQuery: normalized) {
+                matchedByID[profile.id] = profile
             }
+            for merged in profiles where merged.status == .merged {
+                guard let targetID = merged.mergedIntoID,
+                      let target = activeByID[targetID],
+                      profileMatches(merged, normalizedQuery: normalized) else { continue }
+                matchedByID[target.id] = target
+            }
+            matches = Array(matchedByID.values)
         }
-        return Array(filtered.sorted(by: sortProfiles).prefix(max(0, limit)))
+        return Array(matches.sorted(by: sortProfiles).prefix(max(0, limit)))
     }
 
-    private func searchableTokens(for profile: PersonProfile) -> [String] {
-        var tokens = [
+    private func profileMatches(_ profile: PersonProfile, normalizedQuery: String) -> Bool {
+        let tokens = [
             profile.displayName,
             profile.givenName,
             profile.familyName,
+            profile.gender ?? "",
             profile.organizationName ?? "",
             profile.jobTitle ?? "",
-            profile.notes ?? ""
+            profile.notes ?? "",
+            profile.aliases.joined(separator: " "),
+            profile.emails.map(\.email).joined(separator: " "),
+            profile.phones.map(\.number).joined(separator: " "),
+            profile.addresses.map(\.value).joined(separator: " ")
         ]
-        tokens.append(contentsOf: profile.aliases)
-        tokens.append(contentsOf: profile.emails.map(\.email))
-        tokens.append(contentsOf: profile.phones.map(\.number))
-        return tokens.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return tokens.contains { $0.localizedLowercase.contains(normalizedQuery) }
     }
 
     private func sortProfiles(_ lhs: PersonProfile, _ rhs: PersonProfile) -> Bool {
@@ -185,24 +203,57 @@ public struct PersonMentionSearch: Sendable {
     }
 }
 
-public struct ComposerPersonMentionTextRewriter: Sendable {
 public struct PersonMentionTextRewriter: Sendable {
-
     public init() {}
 
-    public func replace(trigger: PersonMentionTrigger, in text: String, with profile: PersonProfile) throws -> PersonMentionReplacement {
-        guard let range = Range(trigger.range, in: text) else { throw PersonMentionTextRewriteError.invalidRange }
+    public func replace(
+        trigger: PersonMentionTrigger,
+        in text: String,
+        with profile: PersonProfile
+    ) throws -> PersonMentionReplacement {
+        guard let range = Range(trigger.range, in: text) else {
+            throw PersonMentionTextRewriteError.invalidRange
+        }
+        let insertedText = "@\(profile.displayName)"
+        let replacementText = insertedText + " "
+        var updated = text
+        updated.replaceSubrange(range, with: replacementText)
+        let location = trigger.range.location + replacementText.utf16.count
+        let mention = PersonMention(
+            personID: profile.id,
+            displayName: profile.displayName,
+            insertedText: insertedText
+        )
+        return PersonMentionReplacement(
+            text: updated,
+            mention: mention,
+            selectedRange: NSRange(location: location, length: 0)
+        )
+    }
+}
+
+public struct ComposerPersonMentionTextRewriter: Sendable {
+    public init() {}
+
+    public func replace(
+        trigger: PersonMentionTrigger,
+        in text: String,
+        with profile: PersonProfile
+    ) throws -> ComposerPersonMentionReplacement {
+        guard let range = Range(trigger.range, in: text) else {
+            throw PersonMentionTextRewriteError.invalidRange
+        }
         let mentionText = "@\(profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines))"
         let replacementText = mentionText + " "
         var updatedText = text
         updatedText.replaceSubrange(range, with: replacementText)
-        let selectedLocation = trigger.range.location + (replacementText as NSString).length
+        let selectedLocation = trigger.range.location + replacementText.utf16.count
         let mention = ComposerPersonMention(
             profile: profile,
             mentionText: mentionText,
-            range: TextRange(location: trigger.range.location, length: (mentionText as NSString).length)
+            range: TextRange(location: trigger.range.location, length: mentionText.utf16.count)
         )
-        return PersonMentionReplacement(
+        return ComposerPersonMentionReplacement(
             text: updatedText,
             mention: mention,
             selectedRange: NSRange(location: selectedLocation, length: 0)
@@ -236,7 +287,8 @@ public struct ComposerPersonMention: Codable, Sendable, Equatable, Hashable, Ide
         self.personID = personID
         let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         self.displayName = normalizedDisplayName
-        self.mentionText = mentionText?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? (normalizedDisplayName.isEmpty ? "@person" : "@\(normalizedDisplayName)")
+        self.mentionText = mentionText?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? (normalizedDisplayName.isEmpty ? "@person" : "@\(normalizedDisplayName)")
         self.range = range
         self.status = status
         self.mergedIntoID = mergedIntoID
@@ -273,56 +325,5 @@ public struct ComposerPersonMention: Codable, Sendable, Equatable, Hashable, Ide
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
-        let insertedText = "@\(profile.displayName)"
-        let replacementText = insertedText + " "
-        var updated = text
-        updated.replaceSubrange(range, with: replacementText)
-        let location = trigger.range.location + replacementText.utf16.count
-        let mention = PersonMention(personID: profile.id, displayName: profile.displayName, insertedText: insertedText)
-        return PersonMentionReplacement(text: updated, mention: mention, selectedRange: NSRange(location: location, length: 0))
-    }
-}
-
-public struct PersonMentionSearch: Sendable {
-    public init() {}
-
-    public func search(query: String, profiles: [PersonProfile], limit: Int = 8) -> [PersonProfile] {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let active = profiles.filter(\.isActiveForDefaultContext)
-        let activeByID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
-        let matches: [PersonProfile]
-        if normalized.isEmpty {
-            matches = active
-        } else {
-            var matchedByID: [ContactID: PersonProfile] = [:]
-            for profile in active where profileMatches(profile, normalizedQuery: normalized) {
-                matchedByID[profile.id] = profile
-            }
-            for merged in profiles where merged.status == .merged {
-                guard let targetID = merged.mergedIntoID,
-                      let target = activeByID[targetID],
-                      profileMatches(merged, normalizedQuery: normalized) else { continue }
-                matchedByID[target.id] = target
-            }
-            matches = Array(matchedByID.values)
-        }
-        return Array(matches.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }.prefix(limit))
-    }
-
-    private func profileMatches(_ profile: PersonProfile, normalizedQuery: String) -> Bool {
-        [
-            profile.displayName,
-            profile.givenName,
-            profile.familyName,
-            profile.gender ?? "",
-            profile.organizationName ?? "",
-            profile.jobTitle ?? "",
-            profile.notes ?? "",
-            profile.aliases.joined(separator: " "),
-            profile.emails.map(\.email).joined(separator: " "),
-            profile.phones.map(\.number).joined(separator: " "),
-            profile.addresses.map(\.value).joined(separator: " ")
-        ].contains { $0.lowercased().contains(normalizedQuery) }
-
     }
 }
