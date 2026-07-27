@@ -54,8 +54,6 @@ struct AgentChatComposerView: View {
     @State private var personMentionTrigger: PersonMentionTrigger?
     @State private var isPersonMentionPickerPresented: Bool = false
     @State private var personMentionPickerSelectionIndex: Int = 0
-    @State private var selectedPersonMentions: [PersonMention] = []
-
     @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
@@ -401,79 +399,6 @@ struct AgentChatComposerView: View {
         sendComposerAction(.showAttachmentImportError(message))
     }
 
-    @ViewBuilder
-    private var personMentionPickerAnchor: some View {
-        if isPersonMentionPickerPresented, let trigger = personMentionTrigger {
-            VStack {
-                PersonMentionPickerView(
-                    query: trigger.query,
-                    profiles: viewModel.personProfiles,
-                    selectionIndex: personMentionPickerSelectionIndex,
-                    onSelect: selectPersonMention
-                )
-                Spacer(minLength: 0)
-            }
-            .padding(.top, AgentChatLayout.spaceL)
-            .padding(.leading, AgentChatLayout.spaceL)
-            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-        }
-    }
-
-    private var personMentionPickerResults: [PersonProfile] {
-        guard let trigger = personMentionTrigger else { return [] }
-        return PersonMentionSearch().search(query: trigger.query, profiles: viewModel.personProfiles, limit: 8)
-    }
-
-    private func updatePersonMentionTrigger(for text: String) {
-        let selectedRange = composerSelectionTracker.selectedRange ?? NSRange(location: text.utf16.count, length: 0)
-        if let trigger = PersonMentionTriggerDetector().trigger(in: text, selectedRange: selectedRange) {
-            personMentionTrigger = trigger
-            personMentionPickerSelectionIndex = 0
-            isPersonMentionPickerPresented = true
-            closeSkillPicker()
-        } else {
-            closePersonMentionPicker()
-        }
-    }
-
-    private func selectPersonMention(_ profile: PersonProfile) {
-        guard let trigger = personMentionTrigger else { return }
-        do {
-            let replacement = try PersonMentionTextRewriter().replace(trigger: trigger, in: localChatInput, with: profile)
-            localChatInput = replacement.text
-            composerSelectionTracker.selectedRange = replacement.selectedRange
-            selectedPersonMentions.removeAll { $0.personID == replacement.mention.personID }
-            selectedPersonMentions.append(replacement.mention)
-            viewModel.updateSelectedChatInputDraft(localChatInput)
-            closePersonMentionPicker()
-        } catch {
-            closePersonMentionPicker()
-        }
-    }
-
-    private func closePersonMentionPicker() {
-        isPersonMentionPickerPresented = false
-        personMentionTrigger = nil
-        personMentionPickerSelectionIndex = 0
-    }
-
-    private func handlePersonMentionPickerKeyCommand(_ command: SkillPickerKeyCommand) {
-        let results = personMentionPickerResults
-        switch command {
-        case .moveUp:
-            guard !results.isEmpty else { return }
-            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex - 1 + results.count) % results.count
-        case .moveDown:
-            guard !results.isEmpty else { return }
-            personMentionPickerSelectionIndex = (personMentionPickerSelectionIndex + 1) % results.count
-        case .confirm:
-            guard results.indices.contains(personMentionPickerSelectionIndex) else { return }
-            selectPersonMention(results[personMentionPickerSelectionIndex])
-        case .cancel:
-            closePersonMentionPicker()
-        }
-    }
-
     private var noteFormatBar: some View {
         ComposerFormatBar(
             text: localChatInputBinding,
@@ -658,18 +583,6 @@ struct AgentChatComposerView: View {
                 localChatInput = submittedText
                 composerPersonMentions = submittedMentions
                 chatActions.composer.updateSelectedChatInputDraft(submittedText)
-        let submittedMentions = selectedPersonMentions
-        localChatInput = ""
-        selectedPersonMentions = []
-        closePersonMentionPicker()
-        viewModel.updateSelectedChatInputDraft("")
-        Task {
-            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt, personMentions: submittedMentions)
-            if runID == nil, localChatInput.isEmpty {
-                localChatInput = submittedText
-                selectedPersonMentions = submittedMentions
-                viewModel.updateSelectedChatInputDraft(submittedText)
-
             }
         }
     }
@@ -1603,69 +1516,5 @@ private struct ComposerFormatBar: View {
         case "photo": return "插入图片"
         default: return ""
         }
-    }
-}
-
-private struct PersonMentionPickerView: View {
-    var query: String
-    var profiles: [PersonProfile]
-    var selectionIndex: Int
-    var onSelect: (PersonProfile) -> Void
-
-    private var results: [PersonProfile] {
-        PersonMentionSearch().search(query: query, profiles: profiles, limit: 8)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if results.isEmpty {
-                Text(query.isEmpty ? "选择人物" : "没有匹配的人物")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, AgentChatLayout.spaceM)
-                    .padding(.vertical, AgentChatLayout.spaceS)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ForEach(Array(results.enumerated()), id: \.element.id) { index, profile in
-                    Button {
-                        onSelect(profile)
-                    } label: {
-                        HStack(spacing: AgentChatLayout.spaceS) {
-                            Image(systemName: "person.crop.circle")
-                                .foregroundStyle(.secondary)
-                                .accessibilityHidden(true)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(profile.displayName)
-                                    .font(AgentChatTypography.metaEmphasis)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-
-                                Text(profile.contactSubtitle)
-                                    .font(AgentChatTypography.micro)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer(minLength: AgentChatLayout.spaceS)
-                        }
-                        .padding(.horizontal, AgentChatLayout.spaceM)
-                        .padding(.vertical, AgentChatLayout.spaceS)
-                        .background(index == selectionIndex ? Color.accentColor.opacity(0.12) : Color.clear)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("选择人物：\(profile.displayName)")
-                }
-            }
-        }
-        .frame(width: 280, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(query.isEmpty ? "人物选择列表" : "人物选择列表，搜索：\(query)")
     }
 }

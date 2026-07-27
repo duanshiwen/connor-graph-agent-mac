@@ -74,6 +74,7 @@ public actor HeadlessNoteSessionService: HeadlessNoteSessionRunning {
         try repository.upsertImportedNoteMessage(
             sessionID: sessionID,
             messageID: messageID,
+            expectedContent: content,
             content: content,
             attachments: attachments,
             createdAt: createdAt

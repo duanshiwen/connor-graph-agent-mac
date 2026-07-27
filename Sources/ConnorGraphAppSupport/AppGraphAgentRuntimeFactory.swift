@@ -304,11 +304,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
                 effectiveMailRuntime = MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths))
             }
-            registry.registerNativeMailTools(runtime: effectiveMailRuntime, recorder: nativeSourceReferenceRecorder)
-            ), recorder: nativeSourceReferenceRecorder)
-            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             registry.registerNativeMailTools(
-                runtime: MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths)),
+                runtime: effectiveMailRuntime,
                 contactRuntime: contactRuntime,
                 recorder: nativeSourceReferenceRecorder
             )
@@ -319,8 +316,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
         registry.registerNativeContactsAggregateTools(runtime: makePersonRegistryContactRuntime(memoryOSFacade: memoryOSFacade) ?? InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
-        registry.registerNativeContactsAggregateTools(runtime: contactRuntime)
-        registry.register(BrowserFetchTool())
 
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))

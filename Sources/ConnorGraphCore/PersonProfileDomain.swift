@@ -190,7 +190,6 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
         jobTitle: String? = nil,
         notes: String? = nil,
         imageRelativePaths: [String]? = nil,
-        status: PersonProfileStatus = .active
         status: PersonProfileStatus = .active,
         discoveredBy: String? = nil,
         lastMentionedAt: Date? = nil
@@ -229,7 +228,6 @@ public struct PersonProfileDraft: Codable, Sendable, Equatable, Hashable, Identi
             jobTitle: profile.jobTitle,
             notes: profile.notes,
             imageRelativePaths: profile.imageRelativePaths,
-            status: profile.status
             status: profile.status,
             discoveredBy: profile.discoveredBy,
             lastMentionedAt: profile.lastMentionedAt
