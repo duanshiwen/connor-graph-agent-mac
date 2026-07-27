@@ -64,6 +64,24 @@ import ConnorGraphAppSupport
     #expect(blocks == [.code(language: "swift", text: "let value = 42")])
 }
 
+@Test func markdownBlockParserParsesStandaloneImagesBetweenTextBlocks() {
+    let blocks = AgentMarkdownBlockParser().parse("""
+    Before
+
+    ![Architecture diagram](file:///tmp/session/architecture.png)
+
+    After
+    """)
+
+    #expect(blocks == [
+        .paragraph("Before"),
+        .spacer,
+        .image(altText: "Architecture diagram", source: "file:///tmp/session/architecture.png"),
+        .spacer,
+        .paragraph("After")
+    ])
+}
+
 @Test func markdownBlockParserStillSupportsCommonMarkdownBlocks() throws {
     let blocks = AgentMarkdownBlockParser().parse("""
     # Title

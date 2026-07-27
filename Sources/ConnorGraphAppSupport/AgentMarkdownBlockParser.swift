@@ -25,6 +25,7 @@ public enum AgentMarkdownBlock: Codable, Sendable, Equatable, Identifiable {
     case orderedItem(number: String, text: String)
     case taskItem(isCompleted: Bool, text: String)
     case quote(String)
+    case image(altText: String, source: String)
     case code(language: String?, text: String)
     case table(AgentMarkdownTable)
     case horizontalRule
@@ -38,6 +39,7 @@ public enum AgentMarkdownBlock: Codable, Sendable, Equatable, Identifiable {
         case .orderedItem(let number, let text): return "ordered-\(number)-\(text.hashValue)"
         case .taskItem(let isCompleted, let text): return "task-\(isCompleted)-\(text.hashValue)"
         case .quote(let text): return "quote-\(text.hashValue)"
+        case .image(let altText, let source): return "image-\(altText.hashValue)-\(source.hashValue)"
         case .code(let language, let text): return "code-\(language ?? "")-\(text.hashValue)"
         case .table(let table): return "table-\(table.headers.joined(separator: "|").hashValue)-\(table.rows.count)"
         case .horizontalRule: return "horizontal-rule"
@@ -113,7 +115,10 @@ public struct AgentMarkdownBlockParser: Sendable {
                 continue
             }
 
-            if isHorizontalRule(trimmed) {
+            if let image = parseImage(trimmed) {
+                flushParagraph()
+                result.append(.image(altText: image.altText, source: image.source))
+            } else if isHorizontalRule(trimmed) {
                 flushParagraph()
                 result.append(.horizontalRule)
             } else if let heading = parseHeading(trimmed) {
@@ -185,6 +190,19 @@ public struct AgentMarkdownBlockParser: Sendable {
         let hashes = line.prefix { $0 == "#" }.count
         guard hashes > 0, hashes <= 6, line.dropFirst(hashes).first == " " else { return nil }
         return (hashes, String(line.dropFirst(hashes + 1)))
+    }
+
+    private func parseImage(_ line: String) -> (altText: String, source: String)? {
+        guard line.hasPrefix("!["), line.hasSuffix(")"),
+              let separator = line.range(of: "](", options: .backwards) else { return nil }
+        let altStart = line.index(line.startIndex, offsetBy: 2)
+        let altText = String(line[altStart..<separator.lowerBound])
+            .replacingOccurrences(of: "\\]", with: "]")
+        let sourceEnd = line.index(before: line.endIndex)
+        let source = String(line[separator.upperBound..<sourceEnd])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { return nil }
+        return (altText, source)
     }
 
     private func parseTaskItem(_ line: String) -> (isCompleted: Bool, text: String)? {

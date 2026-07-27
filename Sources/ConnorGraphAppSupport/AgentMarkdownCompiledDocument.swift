@@ -8,6 +8,7 @@ public enum AgentMarkdownCompiledBlockKind: String, Sendable, Equatable {
     case orderedItem
     case taskItem
     case quote
+    case image
     case code
     case table
     case horizontalRule
@@ -21,6 +22,7 @@ public enum AgentMarkdownCompiledBlockContent: Sendable, Equatable {
     case orderedItem(number: String, text: String, inline: AttributedString)
     case taskItem(isCompleted: Bool, text: String, inline: AttributedString)
     case quote(text: String, inline: AttributedString)
+    case image(altText: String, source: String)
     case code(language: String?, text: String)
     case table(AgentMarkdownTable)
     case horizontalRule
@@ -34,6 +36,7 @@ public enum AgentMarkdownCompiledBlockContent: Sendable, Equatable {
         case .orderedItem: return .orderedItem
         case .taskItem: return .taskItem
         case .quote: return .quote
+        case .image: return .image
         case .code: return .code
         case .table: return .table
         case .horizontalRule: return .horizontalRule
@@ -69,8 +72,8 @@ public struct AgentMarkdownCompiledDocument: Identifiable, Sendable, Equatable {
 }
 
 public struct AgentMarkdownDocumentCompiler: Sendable {
-    public static let parserVersion = 2
-    public static let rendererVersion = 1
+    public static let parserVersion = 3
+    public static let rendererVersion = 2
 
     private let parser: AgentMarkdownBlockParser
 
@@ -108,6 +111,8 @@ public struct AgentMarkdownDocumentCompiler: Sendable {
             content = .taskItem(isCompleted: isCompleted, text: text, inline: renderInline(text))
         case .quote(let text):
             content = .quote(text: text, inline: renderInline(text))
+        case .image(let altText, let source):
+            content = .image(altText: altText, source: source)
         case .code(let language, let text):
             content = .code(language: language, text: text)
         case .table(let table):
@@ -142,6 +147,7 @@ public struct AgentMarkdownDocumentCompiler: Sendable {
         case .orderedItem(let number, let text): return "ordered|\(number)|\(text)"
         case .taskItem(let isCompleted, let text): return "task|\(isCompleted)|\(text)"
         case .quote(let text): return "quote|\(text)"
+        case .image(let altText, let source): return "image|\(altText)|\(source)"
         case .code(let language, let text): return "code|\(language ?? "")|\(text)"
         case .table(let table): return "table|\(table.headers.joined(separator: "|"))|\(table.rows.flatMap { $0 }.joined(separator: "|"))"
         case .horizontalRule: return "horizontal-rule"

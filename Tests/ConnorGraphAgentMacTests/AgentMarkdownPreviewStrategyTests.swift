@@ -139,4 +139,14 @@ struct AgentMarkdownPreviewStrategyTests {
 
         #expect(linkRanges == 1)
     }
+
+    @Test func markdownImageSourcePolicyAllowsOnlyFilesInsideTheSessionRoot() {
+        let root = URL(fileURLWithPath: "/tmp/connor/sessions/session-1")
+        let inside = root.appendingPathComponent("attachments/image/original/chart.png")
+        let outside = URL(fileURLWithPath: "/tmp/private.png")
+
+        #expect(AgentMarkdownImageSourcePolicy.localFileURL(source: inside.absoluteString, allowedRoot: root) == inside)
+        #expect(AgentMarkdownImageSourcePolicy.localFileURL(source: outside.absoluteString, allowedRoot: root) == nil)
+        #expect(AgentMarkdownImageSourcePolicy.localFileURL(source: "https://example.com/chart.png", allowedRoot: root) == nil)
+    }
 }
