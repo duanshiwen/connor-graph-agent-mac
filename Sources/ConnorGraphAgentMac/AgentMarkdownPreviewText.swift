@@ -142,6 +142,13 @@ struct AgentMarkdownPreviewText: View {
         )
     }
 
+    private var allowedImageRoot: URL? {
+        guard let persistentCacheContext else { return nil }
+        return persistentCacheContext.store.storagePaths
+            .sessionArtifactDirectories(sessionID: persistentCacheContext.sessionID)
+            .root
+    }
+
     @ViewBuilder
     var body: some View {
         Group {
@@ -281,6 +288,12 @@ struct AgentMarkdownPreviewText: View {
                     .fill(Color.secondary.opacity(0.28))
                     .frame(width: 3)
                 }
+        case .image(let altText, let source):
+            AgentMarkdownImageView(
+                altText: altText,
+                source: source,
+                allowedRoot: allowedImageRoot
+            )
         case .taskItem(let isCompleted, let text, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
@@ -478,6 +491,69 @@ struct AgentMarkdownPreviewText: View {
         }
     }
 
+}
+
+enum AgentMarkdownImageSourcePolicy {
+    static func localFileURL(source: String, allowedRoot: URL?) -> URL? {
+        guard let allowedRoot,
+              let sourceURL = URL(string: source),
+              sourceURL.isFileURL else { return nil }
+        let root = allowedRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = root.path
+        let candidatePath = candidate.path
+        guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else { return nil }
+        return candidate
+    }
+}
+
+private struct AgentMarkdownImageView: View {
+    private enum Phase {
+        case loading
+        case loaded(NSImage)
+        case failed
+    }
+
+    var altText: String
+    var source: String
+    var allowedRoot: URL?
+    @State private var phase: Phase = .loading
+
+    var body: some View {
+        Group {
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            case .loaded(let image):
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 480, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            case .failed:
+                Label("图片无法显示", systemImage: "photo.badge.exclamationmark")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 96)
+            }
+        }
+        .accessibilityLabel(altText.isEmpty ? "回复图片" : altText)
+        .task(id: source) {
+            phase = .loading
+            guard let url = AgentMarkdownImageSourcePolicy.localFileURL(source: source, allowedRoot: allowedRoot) else {
+                phase = .failed
+                return
+            }
+            let data = await Task.detached(priority: .utility) {
+                guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= 20_000_000 else { return nil as Data? }
+                return data
+            }.value
+            guard !Task.isCancelled, let data, let image = NSImage(data: data) else { return phase = .failed }
+            phase = .loaded(image)
+        }
+    }
 }
 
 struct AgentMarkdownLinkText: NSViewRepresentable {

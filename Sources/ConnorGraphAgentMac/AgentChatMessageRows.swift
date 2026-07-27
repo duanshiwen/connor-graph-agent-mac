@@ -206,6 +206,11 @@ struct AgentChatMessageRow: View {
             isExpanded: isMessageExpanded
         )
     }
+    private var supplementalAttachments: [AgentMessageAttachmentRef] {
+        row.attachments.filter { attachment in
+            !row.message.content.contains("/attachments/\(attachment.id)/")
+        }
+    }
 
     private var activeSkillLabel: String? {
         guard let contextSnapshot = row.message.contextSnapshot else { return nil }
@@ -237,9 +242,9 @@ struct AgentChatMessageRow: View {
                         messageExpansionControl
                     }
                     messageContent
-                    if !row.attachments.isEmpty {
+                    if !supplementalAttachments.isEmpty {
                         AgentMessageAttachmentRefsView(
-                            attachments: row.attachments,
+                            attachments: supplementalAttachments,
                             localFileURL: localAttachmentFileURL,
                             onPreview: onPreviewAttachment,
                             onSaveImage: onSaveImageAttachment
