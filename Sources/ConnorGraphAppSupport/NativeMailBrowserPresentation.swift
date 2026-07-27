@@ -202,6 +202,10 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
         messages.count
     }
 
+    public var totalMailboxMessageCount: Int {
+        mailboxes.reduce(0) { $0 + $1.status.messageCount }
+    }
+
     public var totalUnreadCount: Int {
         mailboxes.reduce(0) { $0 + $1.status.unreadCount }
     }

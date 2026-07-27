@@ -1569,7 +1569,7 @@ struct CraftMailListPane: View {
                 model.searchQuery = ""
             }
 
-            if let syncMessage = model.syncMessage {
+            if model.showsSyncStatusBanner, let syncMessage = model.syncMessage {
                 HStack(spacing: AppShellLayout.spaceS) {
                     if model.isSyncing {
                         ProgressView()
