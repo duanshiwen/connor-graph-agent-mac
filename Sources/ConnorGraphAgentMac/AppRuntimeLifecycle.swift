@@ -1160,6 +1160,7 @@ final class AppRuntimeLifecycle {
         }
         chatSessionCoordinator.onSelectionStarted = { [weak self] sessionID in
             guard let self else { return }
+            self.restoreChatInputDraft(for: sessionID)
             self.chatRunCoordinator.prepareSelection(sessionID: sessionID)
             self.chatFeatureModel.sessions.selectedArtifactDirectories = nil
         }
