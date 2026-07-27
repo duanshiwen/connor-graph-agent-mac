@@ -296,10 +296,10 @@ private struct MCPToolSelectionMenu: View {
                         systemImage: "server.rack",
                         message: "请先启用并测试 MCP Source。"
                     )
-                    .frame(minHeight: 160)
+                    .frame(maxHeight: .infinity)
                 } else if groups.isEmpty {
                     ContentUnavailableView.search(text: searchText)
-                        .frame(minHeight: 160)
+                        .frame(maxHeight: .infinity)
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
@@ -309,10 +309,10 @@ private struct MCPToolSelectionMenu: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 380)
+                    .frame(maxHeight: .infinity)
                 }
             }
-            .frame(width: 360)
+            .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height)
         }
     }
 
