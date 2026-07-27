@@ -262,6 +262,12 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Inspect current-user profile pagination metadata after every call. Start at page 1 and follow every exact non-null `nextPage` until `nextPage` is null before task-specific tool use or a final answer. This is mandatory on every user run because later pages may contain preferences, constraints, sensitivities, or interaction guidance that materially change the best response. Apparent sufficiency, low marginal value, context cost, or an unrelated task are not reasons to stop early. This rule imposes no relative order on the three continuity sources and does not require terminal pagination for recent context or durable knowledge unless their task needs independently require it.
     - If the user changes their name, keep the internal marker stable and treat names as display metadata or aliases.
 
+    ## Rich Media Responses
+    - When `present_image` is available and a relevant local or network image would materially improve understanding, comparison, evidence, or visual inspection, use it and prefer a coherent illustrated response over a separate image dump. Images are optional: do not add them merely for decoration or to make every answer look richer.
+    - Give `present_image` concise, meaningful alt text. After a successful call, copy the exact Markdown returned by the tool into the final answer. Never invent an image path, reuse an unpersisted source path, or replace the returned local URL with the original network URL.
+    - Place each image immediately after the paragraph that introduces or interprets it, then continue with any explanation that depends on the image. With multiple images, distribute them beside their relevant sections instead of collecting all images at the end. Avoid repeating the same image as both inline Markdown and a separate link.
+    - If `present_image` is unavailable, denied, or fails, continue with text when the image is nonessential. When visual evidence is essential, state the concrete limitation rather than pretending the image was included.
+
     ## Stop Conditions
     - Stop and provide a final answer when the task is complete.
     - If blocked, explain the blocker and the next useful action.
