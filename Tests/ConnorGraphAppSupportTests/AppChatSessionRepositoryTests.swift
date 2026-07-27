@@ -43,6 +43,90 @@ private struct FailingNoteProjection: NoteProjectionSynchronizing {
     #expect(projected.sourceMessageID == "first")
 }
 
+@Test func appChatRepositoryUpdatesNoteBodyWithoutReplacingMessageIdentityOrMetadata() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    let createdAt = Date(timeIntervalSince1970: 1_000)
+    let attachment = AgentMessageAttachmentRef(
+        id: "attachment",
+        displayName: "source.txt",
+        kind: .text,
+        byteCount: 12,
+        lifecycleStatus: .ready,
+        extractionStatus: .extracted,
+        manifestRelativePath: "attachments/attachment/manifest.json"
+    )
+    let firstMessage = AgentMessage(
+        id: "note-body",
+        role: .user,
+        content: "original",
+        createdAt: createdAt,
+        attachments: [attachment]
+    )
+    let previousReply = AgentMessage(id: "reply", role: .assistant, content: "previous reply")
+    try repository.saveSession(AgentSession(
+        id: "editable-note",
+        title: "Editable",
+        messages: [firstMessage, previousReply],
+        governance: governance
+    ))
+
+    let updated = try repository.updateNoteBody(
+        sessionID: "editable-note",
+        messageID: firstMessage.id,
+        expectedContent: "original",
+        content: "revised",
+        updatedAt: Date(timeIntervalSince1970: 2_000)
+    )
+
+    #expect(updated.messages.map(\.id) == ["note-body", "reply"])
+    #expect(updated.messages.first?.createdAt == createdAt)
+    #expect(updated.messages.first?.attachments == [attachment])
+    #expect(updated.messages.first?.content == "revised")
+    #expect(try AppNoteRepository(store: store).note(sessionID: "editable-note")?.body == "revised")
+}
+
+@Test func appChatRepositoryRejectsStaleOrNonNoteBodyEdits() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    try repository.saveSession(AgentSession(
+        id: "conflicted-note",
+        messages: [AgentMessage(id: "body", role: .user, content: "current")],
+        governance: governance
+    ))
+
+    #expect(throws: AppChatSessionRepositoryError.noteBodyConflict("conflicted-note:body")) {
+        try repository.updateNoteBody(
+            sessionID: "conflicted-note",
+            messageID: "body",
+            expectedContent: "stale",
+            content: "replacement"
+        )
+    }
+    #expect(throws: AppChatSessionRepositoryError.noteBodyNotEditable("conflicted-note:other")) {
+        try repository.updateNoteBody(
+            sessionID: "conflicted-note",
+            messageID: "other",
+            expectedContent: "current",
+            content: "replacement"
+        )
+    }
+    #expect(throws: AppChatSessionRepositoryError.emptyNoteBody) {
+        try repository.updateNoteBody(
+            sessionID: "conflicted-note",
+            messageID: "body",
+            expectedContent: "current",
+            content: "  \n"
+        )
+    }
+}
+
 @Test func appChatRepositoryNoteProjectionFailureDoesNotFailSessionPersistence() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
