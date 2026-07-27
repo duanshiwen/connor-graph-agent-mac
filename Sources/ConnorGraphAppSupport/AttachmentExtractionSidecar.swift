@@ -271,6 +271,18 @@ public struct AttachmentExtractionOrchestrator: Sendable {
     }
 
     public func extract(_ request: AttachmentExtractionRequest) async throws -> AttachmentExtractionResult {
+        if IWorkAttachmentTextExtraction.supports(fileExtension: request.manifest.fileExtension) {
+            let iWork = try IWorkAttachmentTextExtraction.extract(
+                fileURL: request.originalFileURL,
+                attachmentID: request.manifest.id,
+                displayName: request.manifest.displayName,
+                maxPDFBytes: maxBuiltinPDFBytes
+            )
+            if iWork.report.status != .unsupported {
+                return iWork
+            }
+        }
+
         if AttachmentTextExtraction.supports(kind: request.manifest.kind) {
             let builtin = try AttachmentTextExtraction.extract(fileURL: request.originalFileURL, kind: request.manifest.kind, maxBytes: maxBuiltinTextBytes)
             let report = AgentAttachmentExtractionReport(

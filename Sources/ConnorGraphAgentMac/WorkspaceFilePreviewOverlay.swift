@@ -118,7 +118,10 @@ struct WorkspaceFilePreviewOverlay: View {
         case .markdown:
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                    AgentMarkdownPreviewText(markdown: model.body)
+                    AgentMarkdownPreviewText(
+                        markdown: model.body,
+                        allowsUserExpansion: true
+                    )
                     continuationControl(model, automaticallyLoadWhenVisible: true)
                 }
                     .padding(AgentChatLayout.spaceM)

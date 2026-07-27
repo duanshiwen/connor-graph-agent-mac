@@ -192,6 +192,11 @@ final class ChatComposerCoordinator {
         }
     }
 
+    func awaitAttachmentExtraction(sessionID: String) async {
+        runExtractionJobs(sessionID: sessionID)
+        await extractionTasksBySessionID[sessionID]?.value
+    }
+
     func showToast(title: String, message: String, systemImage: String = "exclamationmark.triangle") {
         guard !isShutdown else { return }
         let toast = AgentChatToast(title: title, message: message, systemImage: systemImage)

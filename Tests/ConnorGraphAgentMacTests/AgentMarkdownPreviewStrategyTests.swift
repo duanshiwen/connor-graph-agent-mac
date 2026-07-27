@@ -44,6 +44,31 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(!preview.contains("不应进入折叠预览"))
     }
 
+    @Test func fileAndAttachmentPreviewsOfferFullMarkdownExpansion() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let root = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let markdownPreview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift"),
+            encoding: .utf8
+        )
+        let workspacePreview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift"),
+            encoding: .utf8
+        )
+        let attachmentPreview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(markdownPreview.contains("Label(\"展开完整内容\", systemImage: \"chevron.down\")"))
+        #expect(markdownPreview.contains("allowsDeferredPreview && !isUserExpanded"))
+        #expect(workspacePreview.contains("allowsUserExpansion: true"))
+        #expect(attachmentPreview.contains("allowsUserExpansion: true"))
+    }
+
     @Test func messageBodyPointSizeIsDisplayedAndClamped() {
         #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)
@@ -104,7 +129,7 @@ struct AgentMarkdownPreviewStrategyTests {
             encoding: .utf8
         )
 
-        #expect(preview.contains("deferred:\\(allowsDeferredPreview)"))
+        #expect(preview.contains("deferred:\\(effectiveAllowsDeferredPreview)"))
         #expect(preview.contains("deferredPreviewView(statusText: \"正在展开完整内容…\", showsProgress: true)"))
         #expect(messageRows.components(separatedBy: "allowsDeferredPreview: !isMessageExpanded").count == 3)
         #expect(messageRows.contains("transaction.disablesAnimations = true"))
