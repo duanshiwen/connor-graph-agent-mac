@@ -68,14 +68,20 @@ final class ChatViewportController: ObservableObject {
         itemCount: Int,
         initialAnchor: ChatViewportInitialAnchor = .bottom
     ) {
+        // SwiftUI can publish geometry preferences before onAppear registers the
+        // first data set. Those measurements belong to this viewport and are
+        // required to settle its initial anchor. Measurements from a previous
+        // data set are intentionally discarded on later replacements.
+        let initialMetrics = currentDataSetID == nil ? latestMetrics : nil
         currentDataSetID = id
         currentDataSetItemCount = itemCount
         replacementGeneration += 1
-        latestMetrics = nil
+        latestMetrics = initialMetrics
         pendingInitialAnchor = itemCount > 0 ? initialAnchor : nil
         pendingScrollCommand = nil
         Self.logger.info("Chat viewport dataset replaced dataset=\(id.description, privacy: .public) generation=\(self.replacementGeneration, privacy: .public) itemCount=\(itemCount, privacy: .public) initialAnchor=\(String(describing: initialAnchor), privacy: .public)")
         setSnapshot(.initial)
+        completePendingInitialAnchorIfNeeded()
     }
 
     func replaceDataSetIfNeeded(

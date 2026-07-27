@@ -709,6 +709,7 @@ private struct AgentChatConversationView: View {
                 previousFirstItemID: anchorItemID,
                 addedMessageCount: addedCount
             )
+            visibleMessageLimit += addedCount
         }
     }
 
@@ -884,7 +885,13 @@ private struct AgentChatConversationView: View {
             .padding(.horizontal, noteFullscreen ? 0 : AgentChatLayout.chatViewportHorizontalInset)
             .padding(.vertical, noteFullscreen ? 0 : AgentChatLayout.chatViewportVerticalInset)
             .onAppear {
-                resetVisibleMessageWindow()
+                // Startup restoration and returning from another workspace can
+                // present an already-loaded transcript without a count change.
+                // Seed the window from that transcript so it does not stay at
+                // the eight-row eager-layout bootstrap limit.
+                visibleMessageLimit = max(Self.initialVisibleMessageLimit, model.run.transcript.count)
+                pendingPrependCorrection = nil
+                isLoadingOlderMessages = false
                 lastObservedSessionID = model.sessions.selectedSessionID
                 lastObservedTranscriptCount = model.run.transcript.count
             }
