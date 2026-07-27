@@ -370,28 +370,26 @@ struct AgentChatComposerView: View {
         )
     }
 
-    @ViewBuilder
     private var slashSkillPickerAnchor: some View {
-        if let slashSkillPickerAnchorRect {
-            Color.clear
-                .frame(width: 1, height: max(18, slashSkillPickerAnchorRect.height))
-                .offset(x: max(0, slashSkillPickerAnchorRect.minX), y: max(0, slashSkillPickerAnchorRect.maxY))
-                .popover(
-                    isPresented: Binding(
-                        get: { isSkillPickerPresented && self.slashSkillPickerAnchorRect != nil },
-                        set: { isPresented in
-                            isSkillPickerPresented = isPresented
-                            if !isPresented {
-                                self.slashSkillPickerAnchorRect = nil
-                                self.slashSkillPickerTriggerRange = nil
-                            }
+        let anchorRect = slashSkillPickerAnchorRect ?? .zero
+        return Color.clear
+            .frame(width: 1, height: max(18, anchorRect.height))
+            .offset(x: max(0, anchorRect.minX), y: max(0, anchorRect.maxY))
+            .popover(
+                isPresented: Binding(
+                    get: { isSkillPickerPresented && self.slashSkillPickerAnchorRect != nil },
+                    set: { isPresented in
+                        isSkillPickerPresented = isPresented
+                        if !isPresented {
+                            self.slashSkillPickerAnchorRect = nil
+                            self.slashSkillPickerTriggerRange = nil
                         }
-                    ),
-                    arrowEdge: .top
-                ) {
-                    skillPickerPopoverContent
-                }
-        }
+                    }
+                ),
+                arrowEdge: .top
+            ) {
+                skillPickerPopoverContent
+            }
     }
 
     private func importComposerFiles(_ urls: [URL]) {
@@ -1181,7 +1179,7 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
                         systemImage: "books.vertical",
                         message: "订阅知识库，或发布自己的知识库后会显示在这里。"
                     )
-                    .frame(minHeight: 150)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
@@ -1209,7 +1207,11 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
                     .frame(maxHeight: .infinity)
                 }
             }
-            .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height)
+            .frame(
+                width: ComposerPopoverLayout.width,
+                height: ComposerPopoverLayout.height,
+                alignment: .topLeading
+            )
         }
         .task {
             if store.library.availableForConsumption.isEmpty { await store.load() }
