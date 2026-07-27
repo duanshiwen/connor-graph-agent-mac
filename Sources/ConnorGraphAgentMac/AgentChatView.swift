@@ -771,6 +771,7 @@ private struct AgentChatConversationView: View {
                 onExportAssistantMessage: { message in
                     chatActions.run.exportAssistantMessageToFile(message)
                 },
+                onEditNoteBody: noteBodyEditAction(for: message),
                 speechPresentation: speechPresentation,
                 onToggleSpeech: { message in
                     let preferences = chatActions.dependencies.userPreferences
@@ -801,6 +802,19 @@ private struct AgentChatConversationView: View {
             }
         } else if let timestamp = item.timestamp {
             AgentChatTurnTimestampRow(timestamp: timestamp)
+        }
+    }
+
+    private func noteBodyEditAction(
+        for message: AgentChatMessagePresentation
+    ) -> ((String) async -> Bool)? {
+        guard isNoteBodyMessage(message), !model.run.isSubmitting else { return nil }
+        return { content in
+            await chatActions.run.reviseNoteBody(
+                messageID: message.message.id,
+                expectedContent: message.message.content,
+                content: content
+            )
         }
     }
 
