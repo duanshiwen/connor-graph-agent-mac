@@ -258,6 +258,7 @@ public struct AppChatSessionRepository: Sendable {
     public func updateNoteBody(
         sessionID: String,
         messageID: String,
+        expectedContent: String,
         content: String,
         updatedAt: Date = Date()
     ) throws -> AgentSession {
