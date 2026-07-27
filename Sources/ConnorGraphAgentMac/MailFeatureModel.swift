@@ -58,6 +58,10 @@ final class MailFeatureModel {
     private(set) var syncMessage: String?
     private(set) var errorMessage: String?
 
+    var showsSyncStatusBanner: Bool {
+        isSyncing && syncMessage != nil
+    }
+
     @ObservationIgnored private let store: FileBackedMailSourceStore?
     @ObservationIgnored private let preferencesStore: (any MailPreferencesStore)?
     @ObservationIgnored private let credentialStore: AppMailCredentialStore
