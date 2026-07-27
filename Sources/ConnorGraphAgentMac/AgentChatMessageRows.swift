@@ -238,9 +238,6 @@ struct AgentChatMessageRow: View {
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
                     }
-                    if assistantExpansionPresentation.isAvailable, isMessageExpanded {
-                        messageExpansionControl
-                    }
                     messageContent
                     if !supplementalAttachments.isEmpty {
                         AgentMessageAttachmentRefsView(
@@ -250,7 +247,7 @@ struct AgentChatMessageRow: View {
                             onSaveImage: onSaveImageAttachment
                         )
                     }
-                    if assistantExpansionPresentation.isAvailable, !isMessageExpanded {
+                    if isUser, assistantExpansionPresentation.isAvailable {
                         messageExpansionControl
                     }
                 }
@@ -268,6 +265,8 @@ struct AgentChatMessageRow: View {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
                         speechPresentation: speechPresentation,
+                        expansionPresentation: assistantExpansionPresentation,
+                        onToggleExpansion: toggleMessageExpansion,
                         onToggleSpeech: { onToggleSpeech(row) },
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
@@ -480,12 +479,17 @@ private struct AgentNoteBodyEditorSheet: View {
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
     var speechPresentation: ConnorSpeechActionPresentation
+    var expansionPresentation: AgentAssistantMessageExpansionPresentation
+    var onToggleExpansion: () -> Void
     var onToggleSpeech: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceM) {
+            if expansionPresentation.isAvailable {
+                expansionButton
+            }
             if presentation.showsActions, speechPresentation.isVisible {
                 actionButton(
                     title: speechPresentation.title,
@@ -516,6 +520,24 @@ private struct AgentAssistantMessageActionsView: View {
         }
         .padding(.top, 2)
         .accessibilityElement(children: .contain)
+    }
+
+    private var expansionButton: some View {
+        Button(action: onToggleExpansion) {
+            Image(systemName: expansionPresentation.systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.accentColor.opacity(0.08)))
+                .overlay(
+                    Circle()
+                        .stroke(Color.accentColor.opacity(0.72), lineWidth: 1)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(expansionPresentation.accessibilityLabel)
+        .help(expansionPresentation.help)
     }
 
     private func actionButton(
