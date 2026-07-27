@@ -175,6 +175,23 @@ struct MailRuntimeSendPipelineTests {
         #expect(stored.approvedEnvelopeHash == payload.envelopeHash)
     }
 
+    @Test func sendApprovalPayloadKeepsTheCompleteDraftBodyForReview() async throws {
+        let runtime = MailRuntime.fixture()
+        let body = String(repeating: "完整审批正文段落。", count: 80)
+        let draft = try await runtime.createDraft(
+            accountID: MailAccountID(rawValue: "fixture-account"),
+            identityID: MailIdentityID(rawValue: "fixture-identity"),
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Long approval body",
+            body: body
+        )
+
+        let payload = try await runtime.sendApprovalPayload(draftID: draft.id)
+
+        #expect(body.count > 500)
+        #expect(payload.bodyPreview == body)
+    }
+
     @Test func approvedSendRequiresApprovedEnvelopeHashAndDoesNotCallSMTPWhenMissing() async throws {
         let accountID = MailAccountID(rawValue: "account-missing-approved-hash")
         let identityID = MailIdentityID(rawValue: "identity-missing-approved-hash")

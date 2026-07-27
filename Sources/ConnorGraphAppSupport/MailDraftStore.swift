@@ -22,7 +22,7 @@ public struct MailRuntimeSendApproval: Codable, Sendable, Equatable {
         self.cc = draft.cc.map(\.email)
         self.bcc = draft.bcc.map(\.email)
         self.subject = draft.subject
-        self.bodyPreview = String(draft.body.prefix(500))
+        self.bodyPreview = draft.body
         self.attachmentCount = draft.attachmentIDs.count
         self.riskSummary = "Email sending follows the current session permission mode."
         self.envelopeHash = draft.envelopeHash()

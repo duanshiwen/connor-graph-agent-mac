@@ -54,3 +54,24 @@ import ConnorGraphCore
     #expect(presentation.subjectSummary == "主题：草稿中配置")
     #expect(presentation.warning.contains("真实邮件"))
 }
+
+@Test func mailSendApprovalPresentationPreservesCompleteBodyForExpandedReview() throws {
+    let body = String(repeating: "需要完整审阅的正文。", count: 80)
+    let payloadData = try JSONSerialization.data(withJSONObject: [
+        "draftID": "draft-long",
+        "bodyPreview": body
+    ])
+    let approval = AgentPendingApproval(
+        requestID: "request-mail-long",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .sendMail,
+        toolName: "mail_send_draft",
+        payloadJSON: String(decoding: payloadData, as: UTF8.self)
+    )
+
+    let presentation = AppMailSendApprovalPresentation(approval)
+
+    #expect(body.count > 500)
+    #expect(presentation.bodyPreview == body)
+}
