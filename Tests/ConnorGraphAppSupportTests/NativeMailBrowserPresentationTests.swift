@@ -85,6 +85,44 @@ struct NativeMailBrowserPresentationTests {
         #expect(presentation.unqueriedMessages(direction: .sent).map { $0.id.rawValue } == ["sent-message"])
     }
 
+    @Test func mailboxMessageTotalIsIndependentOfLoadedMessagePage() {
+        let accountID = MailAccountID(rawValue: "account")
+        let inboxID = MailMailboxID(rawValue: "inbox")
+        let archiveID = MailMailboxID(rawValue: "archive")
+        let inbox = MailMailbox(
+            id: inboxID,
+            accountID: accountID,
+            name: "Inbox",
+            path: "INBOX",
+            role: .inbox,
+            status: MailMailboxStatus(messageCount: 120)
+        )
+        let archive = MailMailbox(
+            id: archiveID,
+            accountID: accountID,
+            name: "Archive",
+            path: "Archive",
+            role: .archive,
+            status: MailMailboxStatus(messageCount: 30)
+        )
+        let loadedMessage = Self.makeMessage(
+            id: "loaded",
+            accountID: accountID,
+            mailboxID: inboxID,
+            date: Date(),
+            subject: "Loaded page"
+        )
+
+        let presentation = NativeMailBrowserPresentation(
+            accounts: [],
+            mailboxes: [inbox, archive],
+            messages: [loadedMessage]
+        )
+
+        #expect(presentation.totalMessageCount == 1)
+        #expect(presentation.totalMailboxMessageCount == 150)
+    }
+
     private static func makeMessage(id: String, accountID: MailAccountID, mailboxID: MailMailboxID, date: Date, subject: String) -> MailMessageSummary {
         MailMessageSummary(
             id: MailMessageID(rawValue: id),

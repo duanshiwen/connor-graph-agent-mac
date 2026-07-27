@@ -46,4 +46,18 @@ struct NoteSessionPresentationPolicyTests {
             isSubmitting: false
         ))
     }
+
+    @Test("note body row exposes the editor and revision action")
+    func noteBodyRowExposesEditorAndRevisionAction() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(source.contains("Image(systemName: \"square.and.pencil\")"))
+        #expect(source.contains("AgentNoteBodyEditorSheet"))
+        #expect(source.contains("保存并分析变化"))
+    }
 }
