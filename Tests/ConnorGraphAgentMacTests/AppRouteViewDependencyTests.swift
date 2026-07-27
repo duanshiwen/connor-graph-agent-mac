@@ -73,15 +73,27 @@ struct AppRouteViewDependencyTests {
         #expect(!implementation.contains("runningBackgroundTasksForDeletionCheck"))
     }
 
-    @Test func mailSidebarCountUsesTheDisplayedMessageTotal() throws {
+    @Test func mailSidebarCountUsesTheMailboxMessageTotal() throws {
         let source = try String(contentsOf: projectSourceURL(named: "AppPrimarySidebarView.swift"), encoding: .utf8)
         let start = try #require(source.range(of: "private var mailSidebarCount"))
         let tail = source[start.lowerBound...]
         let end = try #require(tail.range(of: "private var rssUnreadCount"))
         let implementation = tail[..<end.lowerBound]
 
-        #expect(implementation.contains("totalMessageCount"))
+        #expect(implementation.contains("totalMailboxMessageCount"))
+        #expect(!implementation.contains("totalMessageCount"))
         #expect(!implementation.contains("totalUnreadCount"))
+    }
+
+    @Test func mailListSyncBannerOnlyUsesActiveSyncVisibility() throws {
+        let source = try String(contentsOf: projectSourceURL(named: "AppListDetailPanes.swift"), encoding: .utf8)
+        let start = try #require(source.range(of: "struct CraftMailListPane: View"))
+        let tail = source[start.lowerBound...]
+        let end = try #require(tail.range(of: "extension MailMessageDirectionFilter"))
+        let implementation = tail[..<end.lowerBound]
+
+        #expect(implementation.contains("if model.showsSyncStatusBanner, let syncMessage = model.syncMessage"))
+        #expect(!implementation.contains("if let syncMessage = model.syncMessage"))
     }
 
     @Test func knowledgeMarketplaceListMatchesNativeListAndPresentsCreatorFromAddButton() throws {

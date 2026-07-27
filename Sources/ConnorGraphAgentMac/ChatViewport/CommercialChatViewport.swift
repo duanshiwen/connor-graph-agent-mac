@@ -113,6 +113,9 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 .onChange(of: isLoadingOlderItems) { wasLoading, isLoading in
                     guard wasLoading, !isLoading else { return }
                     didRequestOlderItemsForCurrentTopReach = false
+                    DispatchQueue.main.async {
+                        requestOlderItemsIfNeeded()
+                    }
                 }
                 .onChange(of: controller.isResolvingInitialAnchor) { wasResolving, isResolving in
                     guard wasResolving,

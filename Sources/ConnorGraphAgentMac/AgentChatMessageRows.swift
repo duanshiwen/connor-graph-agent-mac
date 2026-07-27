@@ -174,6 +174,7 @@ struct AgentChatMessageRow: View {
     var onSaveImageAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
+    var onEditNoteBody: ((String) async -> Bool)? = nil
     var speechPresentation = ConnorSpeechActionPresentation(
         isConfigured: false,
         isAvailable: false,
@@ -182,6 +183,8 @@ struct AgentChatMessageRow: View {
     )
     var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
     @State private var isMessageExpanded = false
+    @State private var isNoteEditorPresented = false
+    @State private var noteEditorDraft = ""
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -269,6 +272,18 @@ struct AgentChatMessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
+        .sheet(isPresented: $isNoteEditorPresented) {
+            AgentNoteBodyEditorSheet(
+                originalContent: row.message.content,
+                draft: $noteEditorDraft,
+                onCancel: { isNoteEditorPresented = false },
+                onSave: { content in
+                    guard let onEditNoteBody else { return false }
+                    return await onEditNoteBody(content)
+                },
+                onSaved: { isNoteEditorPresented = false }
+            )
+        }
     }
 
     private var noteBodyHeader: some View {
@@ -280,6 +295,17 @@ struct AgentChatMessageRow: View {
                 .font(AgentChatTypography.metaEmphasis)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
+            if onEditNoteBody != nil {
+                Button {
+                    noteEditorDraft = row.message.content
+                    isNoteEditorPresented = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("编辑笔记正文")
+                .help("编辑笔记正文")
+            }
         }
         .padding(.bottom, AgentChatLayout.spaceXS)
         .overlay(alignment: .bottom) {
@@ -385,6 +411,64 @@ struct AgentChatMessageRow: View {
     private var messageBorder: Color {
         if isNoteBody { return ConnorCraftPalette.accent.opacity(0.20) }
         return isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity)
+    }
+}
+
+private struct AgentNoteBodyEditorSheet: View {
+    var originalContent: String
+    @Binding var draft: String
+    var onCancel: () -> Void
+    var onSave: (String) async -> Bool
+    var onSaved: () -> Void
+    @State private var isSaving = false
+
+    private var canSave: Bool {
+        !isSaving
+            && draft != originalContent
+            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Text("编辑笔记正文")
+                .font(AgentChatTypography.sectionTitle)
+
+            TextEditor(text: $draft)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.24), lineWidth: 1)
+                )
+                .frame(minHeight: 360, maxHeight: 620)
+
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Spacer()
+                Button("取消", action: onCancel)
+                    .disabled(isSaving)
+                Button {
+                    isSaving = true
+                    Task { @MainActor in
+                        let saved = await onSave(draft)
+                        isSaving = false
+                        if saved { onSaved() }
+                    }
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("保存并分析变化", systemImage: "checkmark")
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
+            }
+        }
+        .padding(AgentChatLayout.spaceL)
+        .frame(minWidth: 620, idealWidth: 760, minHeight: 500)
     }
 }
 

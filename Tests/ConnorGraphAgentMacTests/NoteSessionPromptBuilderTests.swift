@@ -56,3 +56,19 @@ import ConnorGraphCore
     #expect(!suffix.contains("请创建 Markdown 文件"))
     #expect(!suffix.contains("请选择保存路径"))
 }
+
+@Test func noteRevisionPromptRequestsDeltaAnalysisWithoutResavingOrFullReanalysis() {
+    let prompt = NoteSessionPromptBuilder.revisionPrompt(
+        previousContent: "旧内容",
+        updatedContent: "新内容"
+    )
+
+    #expect(prompt.contains("note_phase: revision_review"))
+    #expect(prompt.contains("persistence: already_updated_by_session_os"))
+    #expect(prompt.contains("append_assistant_message_only"))
+    #expect(prompt.contains("Do not restart the original full-note analysis"))
+    #expect(prompt.contains("Do not call Write, Edit, shell"))
+    #expect(prompt.contains("<previous_note>\n旧内容\n</previous_note>"))
+    #expect(prompt.contains("<updated_note>\n新内容\n</updated_note>"))
+    #expect(!prompt.contains(NoteSessionPromptBuilder.noteInstructionSuffix))
+}

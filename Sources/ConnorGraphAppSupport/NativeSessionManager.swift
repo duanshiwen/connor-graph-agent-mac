@@ -9,12 +9,15 @@ public protocol AgentPendingApprovalRepository: Sendable {
 
 public enum NativeSessionManagerError: Error, Sendable, Equatable, LocalizedError {
     case noUserMessageToRetry
+    case existingUserMessageNotFound(String)
     case runCancelled(String)
 
     public var errorDescription: String? {
         switch self {
         case .noUserMessageToRetry:
             "No user message is available to retry."
+        case .existingUserMessageNotFound(let id):
+            "The existing user message is unavailable: \(id)"
         case .runCancelled(let reason):
             reason
         }
@@ -160,6 +163,7 @@ public struct NativeSessionManager: Sendable {
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil,
+        existingUserMessageID: String? = nil,
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
@@ -170,10 +174,25 @@ public struct NativeSessionManager: Sendable {
             guard !displayName.isEmpty || !slug.isEmpty else { return nil }
             return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
         }()
-        let isFirstUserMessage = !session.messages.contains { $0.role == .user }
-        let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, personReferences: personReferences, contextSnapshot: activeSkillContextSnapshot)
-        try persistSession()
-        try await persistMemoryOSAfterUserMessage(userMessage, isFirstUserMessage: isFirstUserMessage)
+        let userMessage: AgentMessage
+        if let existingUserMessageID {
+            guard let existing = session.messages.first(where: {
+                $0.id == existingUserMessageID && $0.role == .user
+            }) else {
+                throw NativeSessionManagerError.existingUserMessageNotFound(existingUserMessageID)
+            }
+            userMessage = existing
+        } else {
+            let isFirstUserMessage = !session.messages.contains { $0.role == .user }
+            userMessage = session.appendUserMessage(
+                displayPrompt ?? prompt,
+                attachments: attachments,
+                personReferences: personReferences,
+                contextSnapshot: activeSkillContextSnapshot
+            )
+            try persistSession()
+            try await persistMemoryOSAfterUserMessage(userMessage, isFirstUserMessage: isFirstUserMessage)
+        }
 
         let request = AgentChatRequest(
             sessionID: session.id,
@@ -193,7 +212,11 @@ public struct NativeSessionManager: Sendable {
             personReferences: personReferences
         )
         let now = Date()
-        var runMetadata = ["user_message_id": userMessage.id, "queue": "single-session"]
+        var runMetadata = [
+            "user_message_id": userMessage.id,
+            "queue": "single-session",
+            "input_mode": existingUserMessageID == nil ? "appended_user_message" : "existing_user_message"
+        ]
         if let activeSkillSlug, !activeSkillSlug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             runMetadata["active_skill_slug"] = activeSkillSlug
         }
@@ -214,8 +237,10 @@ public struct NativeSessionManager: Sendable {
                 runID: run.id,
                 sessionID: session.id,
                 kind: .runStarted,
-                action: "message_persisted",
-                message: "User message persisted before backend execution",
+                action: existingUserMessageID == nil ? "message_persisted" : "existing_message_reused",
+                message: existingUserMessageID == nil
+                    ? "User message persisted before backend execution"
+                    : "Existing user message reused for backend execution",
                 metadata: ["message_id": userMessage.id]
             )
         }

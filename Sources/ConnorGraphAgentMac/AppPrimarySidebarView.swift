@@ -165,7 +165,7 @@ struct CraftPrimarySidebarView: View {
     }
 
     private var mailSidebarCount: Int? {
-        let totalCount = graph.mail.presentation.totalMessageCount
+        let totalCount = graph.mail.presentation.totalMailboxMessageCount
         return totalCount > 0 ? totalCount : nil
     }
 
