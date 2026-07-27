@@ -251,6 +251,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
         registry.register(LocalBashTool(policy: localWorkspacePolicy))
         if let storagePaths {
+            registry.register(PresentImageAgentTool(
+                store: AppSessionAttachmentStore(paths: storagePaths),
+                localWorkspacePolicy: localWorkspacePolicy
+            ))
             let skillMutationService = SkillManagerMutationService(storagePaths: storagePaths)
             registry.register(ConnorSkillCreateTool(service: skillMutationService))
             registry.register(ConnorSkillUpdateTool(service: skillMutationService))
