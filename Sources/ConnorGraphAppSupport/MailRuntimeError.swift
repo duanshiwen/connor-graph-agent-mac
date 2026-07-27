@@ -15,6 +15,13 @@ public enum MailRuntimeError: Error, Sendable, Equatable, CustomStringConvertibl
     case missingApprovedEnvelopeHash(String)
     case envelopeHashMismatch(expected: String, actual: String)
     case invalidDraftState(String)
+    case attachmentSessionRequired
+    case attachmentNotFound(String)
+    case attachmentNotReady(String)
+    case invalidAttachment(String)
+    case attachmentChanged(String)
+    case attachmentTooLarge(id: String, maximumBytes: Int64)
+    case attachmentsTooLarge(maximumBytes: Int64)
     case unsupportedNetworkOperation(String)
 
     public var description: String {
@@ -32,6 +39,13 @@ public enum MailRuntimeError: Error, Sendable, Equatable, CustomStringConvertibl
         case .missingApprovedEnvelopeHash(let id): "Mail draft has no approved envelope hash: \(id)"
         case .envelopeHashMismatch(let expected, let actual): "Mail draft envelope hash mismatch: expected \(expected), actual \(actual)"
         case .invalidDraftState(let state): "Mail draft cannot be sent in state: \(state)"
+        case .attachmentSessionRequired: "Mail attachments require the current chat session"
+        case .attachmentNotFound(let id): "Mail attachment not found in the current session: \(id)"
+        case .attachmentNotReady(let id): "Mail attachment is not ready: \(id)"
+        case .invalidAttachment(let id): "Mail attachment is not a valid regular file: \(id)"
+        case .attachmentChanged(let id): "Mail attachment changed after it was imported: \(id)"
+        case .attachmentTooLarge(let id, let maximumBytes): "Mail attachment exceeds the \(maximumBytes)-byte limit: \(id)"
+        case .attachmentsTooLarge(let maximumBytes): "Mail attachments exceed the \(maximumBytes)-byte total limit"
         case .unsupportedNetworkOperation(let op): "Network operation not implemented in commercial skeleton: \(op)"
         }
     }
