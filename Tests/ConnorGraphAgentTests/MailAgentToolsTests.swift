@@ -355,6 +355,40 @@ struct MailAgentToolsTests {
         #expect(result.contentText.contains("Do not ask the user to provide the draft ID"))
     }
 
+    @Test func createDraftSchemasRequireExactCurrentUserAttachmentIDs() {
+        let mailTool = MailCreateDraftTool(runtime: RecordingMailRuntime())
+        let peopleTool = MailCreateDraftToPeopleTool(mailRuntime: RecordingMailRuntime(), contactRuntime: InMemoryAgentContactRuntime())
+
+        for schema in [mailTool.inputSchema, peopleTool.inputSchema] {
+            let properties: [String: AgentToolInputSchema]
+            switch schema {
+            case .closedObject(let values, _), .object(let values, _):
+                properties = values
+            default:
+                properties = [:]
+            }
+            guard let rawAttachmentSchema = properties["attachmentIDs"] else {
+                Issue.record("Expected attachmentIDs schema")
+                continue
+            }
+            let attachmentSchema: AgentToolInputSchema
+            if case .nullable(let wrapped) = rawAttachmentSchema {
+                attachmentSchema = wrapped
+            } else {
+                attachmentSchema = rawAttachmentSchema
+            }
+            guard case .array(let itemSchema, let description) = attachmentSchema,
+                  case .string(let itemDescription) = itemSchema else {
+                Issue.record("Expected attachmentIDs array schema")
+                continue
+            }
+            #expect(description.contains("current-session"))
+            #expect(description.contains("User Attachments"))
+            #expect(description.contains("never pass local paths"))
+            #expect(itemDescription.lowercased().contains("exact attachment id"))
+        }
+    }
+
     @Test func sendDraftSchemaExplainsDraftIDComesFromCreateDraftAndTriggersComposeApproval() {
         let tool = MailSendDraftTool(runtime: RecordingMailRuntime())
         guard case .closedObject(let properties, let required) = tool.inputSchema,

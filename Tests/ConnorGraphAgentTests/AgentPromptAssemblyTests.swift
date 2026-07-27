@@ -412,6 +412,14 @@ import ConnorGraphAgent
     #expect(prompt.contains("status: deleted"))
 }
 
+@Test func defaultSystemPromptDocumentsOutboundMailAttachments() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("current User Attachments section into `attachmentIDs`"))
+    #expect(prompt.contains("never pass local paths"))
+    #expect(prompt.contains("reuse attachments from another session"))
+}
+
 @Test func defaultSystemPromptAllowsAutomaticActivePersonCreation() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

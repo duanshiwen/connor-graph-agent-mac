@@ -301,12 +301,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
             registry.registerNativeRSSTools(runtime: effectiveRSSRuntime, recorder: nativeSourceReferenceRecorder)
-            let effectiveMailRuntime: MailRuntime
+            var effectiveMailRuntime: MailRuntime
             if let mailRuntime {
                 effectiveMailRuntime = mailRuntime
             } else {
                 let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
                 effectiveMailRuntime = MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths))
+            }
+            if effectiveMailRuntime.outboundAttachmentResolver == nil {
+                effectiveMailRuntime.outboundAttachmentResolver = AppSessionOutboundMailAttachmentResolver(
+                    store: AppSessionAttachmentStore(paths: storagePaths)
+                )
             }
             registry.registerNativeMailTools(
                 runtime: effectiveMailRuntime,
