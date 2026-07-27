@@ -45,8 +45,10 @@ struct AgentMarkdownPreviewText: View {
     var lineLimit: Int? = nil
     var maxRenderedBlocks: Int? = nil
     var allowsDeferredPreview: Bool = true
+    var allowsUserExpansion: Bool = false
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     @State private var loadedDocument: AgentMarkdownCompiledDocument?
+    @State private var isUserExpanded = false
 
     private final class RenderCache: @unchecked Sendable {
         static let shared = RenderCache()
@@ -113,9 +115,17 @@ struct AgentMarkdownPreviewText: View {
 
     private var documentLoadID: String {
         let contentID = AgentMarkdownDocumentCompiler.stableFingerprint(markdown)
-        let expansionID = "deferred:\(allowsDeferredPreview)"
+        let expansionID = "deferred:\(effectiveAllowsDeferredPreview)"
         guard let persistentCacheContext else { return "\(contentID)|\(expansionID)" }
         return "\(persistentCacheContext.sessionID)|\(persistentCacheContext.messageID)|\(contentID)|\(expansionID)"
+    }
+
+    private var markdownContentID: String {
+        AgentMarkdownDocumentCompiler.stableFingerprint(markdown)
+    }
+
+    private var effectiveAllowsDeferredPreview: Bool {
+        allowsDeferredPreview && !isUserExpanded
     }
 
     private func renderWindow(for document: AgentMarkdownCompiledDocument) -> AgentMarkdownCompiledRenderWindow {
@@ -138,7 +148,7 @@ struct AgentMarkdownPreviewText: View {
             lineLimit: lineLimit,
             monospacedFallback: monospacedFallback,
             markdownCharacterCount: markdown.utf8.count,
-            allowsDeferredPreview: allowsDeferredPreview
+            allowsDeferredPreview: effectiveAllowsDeferredPreview
         )
     }
 
@@ -169,7 +179,10 @@ struct AgentMarkdownPreviewText: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             case .deferredPreview:
-                deferredPreviewView(statusText: "内容较长，已先显示轻量预览以保持界面响应。")
+                deferredPreviewView(
+                    statusText: "内容较长，已先显示轻量预览以保持界面响应。",
+                    showsExpansionControl: allowsUserExpansion
+                )
             case .compiledDocument:
                 if let loadedDocument, loadedDocument.source == markdown {
                     compiledDocumentView(loadedDocument)
@@ -197,9 +210,17 @@ struct AgentMarkdownPreviewText: View {
             guard !Task.isCancelled, document.source == markdown else { return }
             loadedDocument = document
         }
+        .onChange(of: markdownContentID) {
+            isUserExpanded = false
+            loadedDocument = nil
+        }
     }
 
-    private func deferredPreviewView(statusText: String, showsProgress: Bool = false) -> some View {
+    private func deferredPreviewView(
+        statusText: String,
+        showsProgress: Bool = false,
+        showsExpansionControl: Bool = false
+    ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             inlineText(deferredPreviewInlineRendered, font: font, nativeFont: bodyNSFont)
                 .lineLimit(12)
@@ -213,11 +234,29 @@ struct AgentMarkdownPreviewText: View {
                 Text(statusText)
                     .font(secondaryFont)
                     .foregroundStyle(.secondary)
+                if showsExpansionControl {
+                    Spacer(minLength: 4)
+                    Button(action: expandFullContent) {
+                        Label("展开完整内容", systemImage: "chevron.down")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(secondaryFont.weight(.medium))
+                    .help("加载并显示完整 Markdown 内容")
+                    .accessibilityLabel("展开并显示完整文件内容")
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
+    }
+
+    private func expandFullContent() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isUserExpanded = true
+        }
     }
 
     private func compiledDocumentView(_ document: AgentMarkdownCompiledDocument) -> some View {

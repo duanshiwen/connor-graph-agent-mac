@@ -3214,6 +3214,9 @@ final class AppRuntimeLifecycle {
             } else {
                 sessionSummary = nil
             }
+            if !attachmentsForSubmission.isEmpty {
+                await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
+            }
             let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission

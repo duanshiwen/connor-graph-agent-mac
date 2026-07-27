@@ -91,7 +91,10 @@ struct AgentAttachmentPreviewSheetView: View {
                     Group {
                         switch model.bodyMode {
                         case .markdown:
-                            AgentMarkdownPreviewText(markdown: model.body)
+                            AgentMarkdownPreviewText(
+                                markdown: model.body,
+                                allowsUserExpansion: true
+                            )
                         case .monospaced:
                             Text(model.body)
                                 .font(AgentChatTypography.monoMeta)

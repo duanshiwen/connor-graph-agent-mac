@@ -59,6 +59,51 @@ struct AttachmentPDFTextExtractionTests {
         #expect(result.extractedMarkdown?.contains("Built in PDF text") == true)
     }
 
+    @Test func extractsPagesPackageTextFromEmbeddedPreviewPDF() async throws {
+        let preview = try makePDF(textByPage: ["Pages package body text"])
+        let package = preview.deletingLastPathComponent().appendingPathComponent("Report.pages", isDirectory: true)
+        let quickLook = package.appendingPathComponent("QuickLook", isDirectory: true)
+        try FileManager.default.createDirectory(at: quickLook, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: preview, to: quickLook.appendingPathComponent("Preview.pdf"))
+        let request = AttachmentExtractionRequest(
+            sessionID: "session",
+            manifest: manifest(kind: .document, filename: "Report.pages", fileExtension: "pages"),
+            originalFileURL: package,
+            derivativesDirectoryURL: package.deletingLastPathComponent()
+        )
+        let orchestrator = AttachmentExtractionOrchestrator(sidecars: [FakeAttachmentExtractionSidecar(markdown: "sidecar")])
+
+        let result = try await orchestrator.extract(request)
+
+        #expect(result.report.engine == .builtinIWorkText)
+        #expect(result.report.status == .extracted)
+        #expect(result.report.capabilitiesUsed.contains("iwork-embedded-preview"))
+        #expect(result.extractedMarkdown?.contains("Pages package body text") == true)
+        #expect(result.extractedMarkdown?.contains("Report.pages") == true)
+    }
+
+    @Test func extractsLegacyNumbersAndKeynotePackageXML() throws {
+        for filename in ["Budget.numbers", "Deck.keynote"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let package = root.appendingPathComponent(filename, isDirectory: true)
+            try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+            try "<document><text>Quarterly plan</text><text>Revenue 120</text></document>"
+                .write(to: package.appendingPathComponent("index.xml"), atomically: true, encoding: .utf8)
+
+            let result = try IWorkAttachmentTextExtraction.extract(
+                fileURL: package,
+                attachmentID: filename,
+                displayName: filename
+            )
+
+            #expect(IWorkAttachmentTextExtraction.supports(fileExtension: package.pathExtension))
+            #expect(result.report.engine == .builtinIWorkText)
+            #expect(result.report.status == .extracted)
+            #expect(result.report.capabilitiesUsed == ["iwork-legacy-xml"])
+            #expect(result.extractedMarkdown?.contains("Quarterly plan Revenue 120") == true)
+        }
+    }
+
     private func makePDF(textByPage: [String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -86,13 +131,18 @@ struct AttachmentPDFTextExtractionTests {
         return url
     }
 
-    private func manifest(kind: AgentAttachmentKind) -> AgentAttachmentManifest {
+    private func manifest(
+        kind: AgentAttachmentKind,
+        filename: String = "file.pdf",
+        fileExtension: String? = nil
+    ) -> AgentAttachmentManifest {
         AgentAttachmentManifest(
             id: "attachment",
-            displayName: "file.pdf",
-            originalFilename: "file.pdf",
-            normalizedFilename: "file.pdf",
+            displayName: filename,
+            originalFilename: filename,
+            normalizedFilename: filename,
             kind: kind,
+            fileExtension: fileExtension,
             byteCount: 3,
             sha256: "sha",
             lifecycleStatus: .ready,
