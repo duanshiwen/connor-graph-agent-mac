@@ -45,6 +45,8 @@ struct MailAgentToolsTests {
             return
         }
         #expect(replyMessageDescription.contains("copy the field without renaming it"))
+    }
+
     @Test func registryRegistersPersonAwareMailDraftToolWhenContactRuntimeProvided() {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(

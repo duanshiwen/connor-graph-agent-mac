@@ -1,21 +1,25 @@
 import SwiftUI
 import ConnorGraphCore
 
-struct PersonProfileEditorPresentation: Equatable {
-    var isEditing: Bool
-    var title: String
-    var subtitle: String
-    var canSave: Bool
-    var footerHint: String
-    var closeAccessibilityLabel: String
-    var cancelAccessibilityLabel: String
-    var saveAccessibilityLabel: String
-    var saveHelp: String
+public struct PersonProfileEditorPresentation: Equatable, Sendable {
+    public var isEditing: Bool
+    public var title: String
+    public var subtitle: String
+    public var saveButtonTitle: String
+    public var displayNameHint: String
+    public var canSave: Bool
+    public var footerHint: String
+    public var closeAccessibilityLabel: String
+    public var cancelAccessibilityLabel: String
+    public var saveAccessibilityLabel: String
+    public var saveHelp: String
 
-    init(draft: PersonProfileDraft) {
+    public init(draft: PersonProfileDraft) {
         isEditing = draft.id != nil
-        title = isEditing ? "编辑人物" : "新建人物"
-        subtitle = "人物可以没有邮箱或电话；这里记录的是 Person Registry 中的稳定人物档案。"
+        title = isEditing ? "编辑人物档案" : "新建人物档案"
+        subtitle = "用于人际关系检索、@人物提及和人物相关记忆归因。人物可以先存在，联系方式后补充。"
+        saveButtonTitle = "保存人物档案"
+        displayNameHint = "显示名是必填项，用于列表和 @人物提及。"
         canSave = !draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         footerHint = canSave ? "按 ⏎ 保存，按 Esc 取消。" : "请输入显示名后保存。"
         closeAccessibilityLabel = isEditing ? "关闭编辑人物表单" : "关闭新建人物表单"
@@ -142,7 +146,7 @@ struct PersonProfileEditorView: View {
                 TextField("可选", text: optionalText($draft.gender))
                     .textFieldStyle(.roundedBorder)
             }
-            PersonProfileDialogHint("显示名是 Person Registry 的主要识别名称；名和姓可留空。")
+            PersonProfileDialogHint(presentation.displayNameHint + "名和姓可留空。")
         }
     }
 
@@ -200,7 +204,7 @@ struct PersonProfileEditorView: View {
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel(presentation.cancelAccessibilityLabel)
                 .help("放弃更改并关闭")
-            Button("保存") { onSave(draft) }
+            Button(presentation.saveButtonTitle) { onSave(draft) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!presentation.canSave)

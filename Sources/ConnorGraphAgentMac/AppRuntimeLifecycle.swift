@@ -31,6 +31,16 @@ private enum NewSessionPreparationResult: Sendable {
 
 @MainActor
 final class AppRuntimeLifecycle {
+    static func agentTurnMutatedPersonRegistry(_ events: [AgentEventPresentation]) -> Bool {
+        AgentToolInvocationAssembler()
+            .invocations(from: events)
+            .contains { invocation in
+                invocation.toolName == "contacts_write" &&
+                    invocation.phase == .finished &&
+                    invocation.severity == .success
+            }
+    }
+
     static let projectWebsiteURL = URL(string: "https://duanshiwen.github.io/connor-graph-agent-mac/")!
 
     let maintenanceCoordinator = AppMaintenanceCoordinator()
@@ -3251,6 +3261,9 @@ final class AppRuntimeLifecycle {
             AppPerformanceLog.chatTurnLogger.info("nativeSubmit.completed session=\(submittingSessionID, privacy: .public) events=\(manager.eventPresentations.count, privacy: .public) duration=\(submitMilliseconds, privacy: .public)ms")
             chatRunCoordinator.setTimeline(manager.eventPresentations, sessionID: submittingSessionID)
             await flushActivityTimelineCache(sessionID: submittingSessionID)
+            if Self.agentTurnMutatedPersonRegistry(manager.eventPresentations) {
+                await contactsFeatureModel.reload()
+            }
             if chatFeatureModel.sessions.selectedSessionID == submittingSessionID {
                 let restoredSubmittedManager = chatRunCoordinator.applyCompletedRun(
                     manager: manager,
