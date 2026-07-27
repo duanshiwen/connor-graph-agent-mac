@@ -243,6 +243,40 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(renderedMessages.contains("memoryEntityID: memory-person-duan"))
 }
 
+@Test func nativeSessionManagerCanAppendRevisionReplyWithoutAppendingAnotherUserMessage() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    var governance = AgentSessionGovernanceMetadata.default
+    governance.kind = .note
+    let body = AgentMessage(id: "note-body", role: .user, content: "updated note")
+    let previousReply = AgentMessage(id: "previous-reply", role: .assistant, content: "previous analysis")
+    let session = AgentSession(
+        id: "note-revision-session",
+        title: "Revision",
+        messages: [body, previousReply],
+        governance: governance
+    )
+    try repository.saveSession(session)
+    let provider = NativeSessionPromptRecordingProvider()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+
+    let response = try await manager.submit(
+        "note_phase: revision_review",
+        sessionSummary: nil,
+        existingUserMessageID: body.id
+    )
+
+    #expect(response.session.messages.map(\.role) == [.user, .assistant, .assistant])
+    #expect(response.session.messages.first == body)
+    #expect(response.session.messages.last?.content == "Recorded response")
+    let loaded = try #require(try repository.loadSession(id: session.id))
+    #expect(loaded.messages.map(\.id).filter { $0 == body.id }.count == 1)
+    #expect(loaded.messages.filter { $0.role == .user }.count == 1)
+    let run = try #require(try repository.loadRuns(sessionID: session.id).first)
+    #expect(run.metadata["input_mode"] == "existing_user_message")
+}
+
 @Test func nativeSessionManagerPersistsAskToWritePendingApprovalAndContinuesAfterApproval() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)
