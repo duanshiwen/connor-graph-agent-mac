@@ -38,6 +38,11 @@ enum ComposerPlaceholderPresentation {
     }
 }
 
+enum ComposerPopoverLayout {
+    static let width: CGFloat = 360
+    static let height: CGFloat = 360
+}
+
 struct AgentChatComposerView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
@@ -385,8 +390,6 @@ struct AgentChatComposerView: View {
                     arrowEdge: .top
                 ) {
                     skillPickerPopoverContent
-                        .padding(10)
-                        .frame(width: 320)
                 }
         }
     }
@@ -441,22 +444,27 @@ struct AgentChatComposerView: View {
         closePersonMentionPicker()
     }
 
-    @ViewBuilder
     private var personMentionPickerAnchor: some View {
-        if isPersonMentionPickerPresented, let trigger = personMentionTrigger {
-            VStack {
-                PersonMentionPickerView(
-                    query: trigger.query,
-                    profiles: contactsFeatureModel.profiles,
-                    selectionIndex: personMentionPickerSelectionIndex,
-                    onSelect: selectPersonMention
-                )
-                Spacer(minLength: 0)
+        Color.clear
+            .frame(width: 1, height: 1)
+            .popover(
+                isPresented: Binding(
+                    get: { isPersonMentionPickerPresented && personMentionTrigger != nil },
+                    set: { isPresented in
+                        if !isPresented { closePersonMentionPicker() }
+                    }
+                ),
+                arrowEdge: .bottom
+            ) {
+                if let trigger = personMentionTrigger {
+                    PersonMentionPickerView(
+                        query: trigger.query,
+                        profiles: contactsFeatureModel.profiles,
+                        selectionIndex: personMentionPickerSelectionIndex,
+                        onSelect: selectPersonMention
+                    )
+                }
             }
-            .padding(.top, AgentChatLayout.spaceL)
-            .padding(.leading, AgentChatLayout.spaceL)
-            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-        }
     }
 
     private var personMentionPickerResults: [PersonProfile] {
@@ -603,61 +611,70 @@ struct AgentChatComposerView: View {
         .buttonStyle(.plain)
         .popover(isPresented: $isWorkspacePopoverPresented, arrowEdge: .bottom) {
             workingDirectoryPopoverContent
-                .padding(10)
-                .frame(width: 390)
         }
         .help(workingDirectoryHelpText)
     }
 
     private var workingDirectoryPopoverContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if chatActions.dependencies.workspaceSettings.roots.isEmpty {
-                Text("尚未设置工作目录")
-                    .font(AgentChatTypography.body)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-            } else {
-                VStack(spacing: 2) {
-                    ForEach(chatActions.dependencies.workspaceSettings.roots) { root in
-                        workspaceRootPopoverRow(root)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            Text("工作目录")
+                .font(AgentChatTypography.sectionTitle)
+                .padding(12)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 2) {
-                Label("历史打开列表", systemImage: "clock.arrow.circlepath")
-                    .font(AgentChatTypography.calloutEmphasis)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 2)
-
-                if chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
-                    Text("暂无历史记录")
-                        .font(AgentChatTypography.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                } else {
-                    ForEach(chatActions.dependencies.workspaceSettings.recentPaths, id: \.self) { path in
-                        Button {
-                            chatActions.dependencies.workspaceSettings.selectWorkingDirectory(path: path)
-                            isWorkspacePopoverPresented = false
-                        } label: {
-                            workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
-                                .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if chatActions.dependencies.workspaceSettings.roots.isEmpty {
+                        Text("尚未设置工作目录")
+                            .font(AgentChatTypography.body)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                    } else {
+                        VStack(spacing: 2) {
+                            ForEach(chatActions.dependencies.workspaceSettings.roots) { root in
+                                workspaceRootPopoverRow(root)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .font(AgentChatTypography.callout)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .contentShape(Rectangle())
-                        .help(path)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("历史打开列表", systemImage: "clock.arrow.circlepath")
+                            .font(AgentChatTypography.calloutEmphasis)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 2)
+
+                        if chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
+                            Text("暂无历史记录")
+                                .font(AgentChatTypography.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                        } else {
+                            ForEach(chatActions.dependencies.workspaceSettings.recentPaths, id: \.self) { path in
+                                Button {
+                                    chatActions.dependencies.workspaceSettings.selectWorkingDirectory(path: path)
+                                    isWorkspacePopoverPresented = false
+                                } label: {
+                                    workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                .font(AgentChatTypography.callout)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .contentShape(Rectangle())
+                                .help(path)
+                            }
+                        }
                     }
                 }
+                .padding(10)
             }
 
             Divider()
@@ -689,8 +706,9 @@ struct AgentChatComposerView: View {
                 .disabled(chatActions.dependencies.workspaceSettings.recentPaths.isEmpty)
             }
             .font(AgentChatTypography.callout)
-            .padding(.horizontal, 4)
+            .padding(10)
         }
+        .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height)
     }
 
     private func workspaceRootPopoverRow(_ root: WorkspaceRootDraft) -> some View {
@@ -964,18 +982,15 @@ struct AgentChatComposerView: View {
             arrowEdge: .bottom
         ) {
             skillPickerPopoverContent
-                .padding(10)
-                .frame(width: 320)
         }
         .help(composerState.activeSkillSlug != nil ? "当前技能：\(composerState.activeSkillDisplayName ?? "") — 点击 × 清除" : "输入 / 或点击选择技能")
     }
 
     private var skillPickerPopoverContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("选择技能")
-                .font(AgentChatTypography.micro.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
+                .font(AgentChatTypography.sectionTitle)
+                .padding(12)
 
             Divider()
 
@@ -985,46 +1000,60 @@ struct AgentChatComposerView: View {
                     .font(AgentChatTypography.micro)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(12)
+                Spacer(minLength: 0)
             } else {
-                ForEach(Array(allSkills.enumerated()), id: \.element.id) { index, card in
-                    let isKeyboardSelected = index == skillPickerSelectionIndex
-                    Button {
-                        skillPickerSelectionIndex = index
-                        selectSkill(card)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "bolt.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
-                                .frame(width: 16)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(card.title)
-                                    .font(AgentChatTypography.meta.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Text(card.subtitle)
-                                    .font(AgentChatTypography.micro)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            Spacer()
-                            if card.id == composerState.activeSkillSlug {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Color.accentColor)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(allSkills.enumerated()), id: \.element.id) { index, card in
+                                let isKeyboardSelected = index == skillPickerSelectionIndex
+                                Button {
+                                    skillPickerSelectionIndex = index
+                                    selectSkill(card)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "bolt.fill")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(Color.accentColor)
+                                            .frame(width: 16)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(card.title)
+                                                .font(AgentChatTypography.meta.weight(.medium))
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+                                            Text(card.subtitle)
+                                                .font(AgentChatTypography.micro)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                        Spacer()
+                                        if card.id == composerState.activeSkillSlug {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundStyle(Color.accentColor)
+                                        }
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                    .background(
+                                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                                            .fill(isKeyboardSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .id(card.id)
                             }
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                        .background(
-                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                                .fill(isKeyboardSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-                        )
+                        .padding(10)
                     }
-                    .buttonStyle(.plain)
+                    .onChange(of: skillPickerSelectionIndex) { _, index in
+                        guard allSkills.indices.contains(index) else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(allSkills[index].id, anchor: .center)
+                        }
+                    }
                 }
             }
 
@@ -1040,7 +1069,8 @@ struct AgentChatComposerView: View {
                         .font(AgentChatTypography.micro)
                 }
                 .buttonStyle(.borderless)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
 
             Divider()
@@ -1052,8 +1082,9 @@ struct AgentChatComposerView: View {
                     .font(AgentChatTypography.micro)
             }
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 8)
+            .padding(12)
         }
+        .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height)
     }
 
     private var attachmentButton: some View {
@@ -1175,10 +1206,10 @@ struct RemoteKnowledgeBaseSelectionMenu: View {
                         }
                         .padding(.vertical, 6)
                     }
-                    .frame(maxHeight: 320)
+                    .frame(maxHeight: .infinity)
                 }
             }
-            .frame(width: 320)
+            .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height)
         }
         .task {
             if store.library.availableForConsumption.isEmpty { await store.load() }

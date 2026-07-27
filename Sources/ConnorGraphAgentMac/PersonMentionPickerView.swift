@@ -78,13 +78,25 @@ struct PersonMentionPickerView: View {
 
             if presentation.rows.isEmpty {
                 emptyState
+                    .frame(maxHeight: .infinity)
             } else {
-                VStack(spacing: 1) {
-                    ForEach(Array(presentation.rows.enumerated()), id: \.element.id) { index, row in
-                        rowButton(row, isSelected: index == presentation.clampedSelectionIndex)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 1) {
+                            ForEach(Array(presentation.rows.enumerated()), id: \.element.id) { index, row in
+                                rowButton(row, isSelected: index == presentation.clampedSelectionIndex)
+                                    .id(row.id)
+                            }
+                        }
+                        .padding(.vertical, AgentChatLayout.spaceXS)
+                    }
+                    .onChange(of: presentation.clampedSelectionIndex) { _, index in
+                        guard presentation.rows.indices.contains(index) else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(presentation.rows[index].id, anchor: .center)
+                        }
                     }
                 }
-                .padding(.vertical, AgentChatLayout.spaceXS)
             }
 
             Divider()
@@ -92,13 +104,7 @@ struct PersonMentionPickerView: View {
 
             footer
         }
-        .frame(width: 320, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
+        .frame(width: ComposerPopoverLayout.width, height: ComposerPopoverLayout.height, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("人物选择器")
     }
