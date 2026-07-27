@@ -4,29 +4,29 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @MainActor
-struct AppViewModelPersonRegistryRefreshTests {
+struct AppRuntimeLifecyclePersonRegistryRefreshTests {
     @Test func agentTurnMutatedPersonRegistryReturnsTrueForSuccessfulContactsWrite() {
         let events = [toolEvent(toolName: "contacts_write", phase: .finished, severity: .success)]
 
-        #expect(AppViewModel.agentTurnMutatedPersonRegistry(events))
+        #expect(AppRuntimeLifecycle.agentTurnMutatedPersonRegistry(events))
     }
 
     @Test func agentTurnMutatedPersonRegistryIgnoresContactsRead() {
         let events = [toolEvent(toolName: "contacts_read", phase: .finished, severity: .success)]
 
-        #expect(!AppViewModel.agentTurnMutatedPersonRegistry(events))
+        #expect(!AppRuntimeLifecycle.agentTurnMutatedPersonRegistry(events))
     }
 
     @Test func agentTurnMutatedPersonRegistryIgnoresFailedContactsWrite() {
         let events = [toolEvent(toolName: "contacts_write", phase: .failed, severity: .error)]
 
-        #expect(!AppViewModel.agentTurnMutatedPersonRegistry(events))
+        #expect(!AppRuntimeLifecycle.agentTurnMutatedPersonRegistry(events))
     }
 
     @Test func agentTurnMutatedPersonRegistryIgnoresRunningContactsWrite() {
         let events = [toolEvent(toolName: "contacts_write", phase: .running, severity: .info)]
 
-        #expect(!AppViewModel.agentTurnMutatedPersonRegistry(events))
+        #expect(!AppRuntimeLifecycle.agentTurnMutatedPersonRegistry(events))
     }
 
     private func toolEvent(

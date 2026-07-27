@@ -75,6 +75,8 @@ import ConnorGraphCore
     #expect(replacement.mention.mentionText == "@段磊强")
     #expect(replacement.mention.range == TextRange(location: 3, length: ("@段磊强" as NSString).length))
     #expect(replacement.mention.memoryEntityID == "memory-person-duan")
+}
+
 @Suite("Person Mention Trigger Detector Tests")
 struct PersonMentionTriggerDetectorTests {
     @Test func detectsAtMentionAtStartOfInput() {

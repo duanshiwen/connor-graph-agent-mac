@@ -32,29 +32,6 @@ struct PersonContactAgentToolsTests {
                 displayName: "张霞",
                 aliases: ["妈妈"],
                 notes: "段诗闻和段福强的妈妈。"
-    @Test func contactsWriteCreatePersonAcceptsLLMDiscoveryWithoutApprovedFlagAndParsesAliases() async throws {
-        let runtime = InMemoryAgentContactRuntime()
-        let writeTool = ContactsWriteTool(runtime: runtime)
-
-        let created = try await writeTool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"name\":\"张三\",\"aliases\":[\"小张\",\"Zhang San\"],\"source\":\"llm-discovery\"}"),
-            context: Self.context(toolCallID: "call-create-auto-person")
-        )
-
-        #expect(created.contentText.contains("Created person"))
-        #expect(created.contentJSON?.contains("张三") == true)
-        #expect(created.contentJSON?.contains("小张") == true)
-        #expect(created.contentJSON?.contains("Zhang San") == true)
-        #expect(created.contentJSON?.contains("active") == true)
-    }
-
-    @Test func contactsReadGetPersonFallsBackToUniqueDisplayNameMatch() async throws {
-        let runtime = InMemoryAgentContactRuntime(people: [
-            PersonProfile(
-                id: ContactID(rawValue: "person-duan-fuqiang"),
-                displayName: "段福强",
-                emails: [ContactEmailAddress(email: "oisin.duan@apecho.com")]
-
             )
         ])
         let readTool = ContactsReadTool(runtime: runtime)
@@ -94,6 +71,34 @@ struct PersonContactAgentToolsTests {
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["imageRelativePaths"] as? [String] == paths)
         #expect(object["photos"] as? [String] == paths)
+    }
+
+    @Test func contactsWriteCreatePersonAcceptsLLMDiscoveryWithoutApprovedFlagAndParsesAliases() async throws {
+        let runtime = InMemoryAgentContactRuntime()
+        let writeTool = ContactsWriteTool(runtime: runtime)
+
+        let created = try await writeTool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"create_person\",\"name\":\"张三\",\"aliases\":[\"小张\",\"Zhang San\"],\"source\":\"llm-discovery\"}"),
+            context: Self.context(toolCallID: "call-create-auto-person")
+        )
+
+        #expect(created.contentText.contains("Created person"))
+        #expect(created.contentJSON?.contains("张三") == true)
+        #expect(created.contentJSON?.contains("小张") == true)
+        #expect(created.contentJSON?.contains("Zhang San") == true)
+        #expect(created.contentJSON?.contains("active") == true)
+    }
+
+    @Test func contactsReadGetPersonFallsBackToUniqueDisplayNameMatch() async throws {
+        let runtime = InMemoryAgentContactRuntime(people: [
+            PersonProfile(
+                id: ContactID(rawValue: "person-duan-fuqiang"),
+                displayName: "段福强",
+                emails: [ContactEmailAddress(email: "oisin.duan@apecho.com")]
+            )
+        ])
+        let readTool = ContactsReadTool(runtime: runtime)
+
         let result = try await readTool.execute(
             arguments: try AgentToolArguments(json: "{\"operation\":\"get_person\",\"id\":\"段福强\"}"),
             context: Self.context(toolCallID: "call-get-person-by-name")
@@ -119,7 +124,6 @@ struct PersonContactAgentToolsTests {
         #expect(result.contentText.contains("Ambiguous person query"))
         #expect(result.contentJSON?.contains("person-a") == true)
         #expect(result.contentJSON?.contains("person-b") == true)
-
     }
 
     @Test func contactsWriteCanUpdateDeleteAndMergePeople() async throws {
