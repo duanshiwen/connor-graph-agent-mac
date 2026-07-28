@@ -108,6 +108,8 @@ import ConnorGraphAgent
     #expect(request.messages[0].content.contains("康纳同学 (Connor)"))
     #expect(request.messages[1].role == .system)
     #expect(request.messages[1].content.contains("## Conversation Continuity Summary"))
+    #expect(request.messages[1].content.contains("not automatically fresh evidence"))
+    #expect(request.messages[1].content.contains("Re-check mutable filesystem, database, external-service, and runtime state"))
     #expect(request.messages[1].content.contains("Continue the migration"))
     #expect(!projectedContent.contains("obsolete user detail"))
     #expect(!projectedContent.contains("obsolete assistant reply"))

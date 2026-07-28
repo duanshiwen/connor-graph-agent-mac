@@ -27,11 +27,15 @@ private struct RollingSummaryProvider: LLMProvider {
 @Test func rollingSummaryAdvancesAcrossMultipleCompressionGenerations() async throws {
     let firstPayload = ConversationSummaryPayload(
         currentGoal: "Build summaries",
-        decisions: [.init(id: "decision-1", text: "Use one rolling summary", sourceMessageIDs: ["m1"])]
+        decisions: [.init(id: "decision-1", text: "Use one rolling summary", sourceMessageIDs: ["m1"])],
+        completedWork: [.init(id: "verified-1", text: "Targeted tests passed: 8/8", sourceMessageIDs: ["m2"])],
+        filesAndArtifacts: [.init(id: "artifact-1", text: "Changed /workspace/TimerManager.swift", sourceMessageIDs: ["m2"])]
     )
     let secondPayload = ConversationSummaryPayload(
         currentGoal: "Build summaries",
         decisions: [.init(id: "decision-1", text: "Use one rolling summary", sourceMessageIDs: ["m1"])],
+        completedWork: [.init(id: "verified-1", text: "Targeted tests passed: 8/8", sourceMessageIDs: ["m2"])],
+        filesAndArtifacts: [.init(id: "artifact-1", text: "Changed /workspace/TimerManager.swift", sourceMessageIDs: ["m2"])],
         pendingWork: [.init(id: "pending-1", text: "Wire runtime", sourceMessageIDs: ["m5"])]
     )
     let encoder = JSONEncoder()
@@ -71,8 +75,15 @@ private struct RollingSummaryProvider: LLMProvider {
     #expect(secondDraft.record.previousCutoffMessageID == firstDraft.state.coveredThroughMessageID)
     #expect(secondDraft.record.deltaMessageIDs.allSatisfy { !firstDraft.record.deltaMessageIDs.contains($0) })
     #expect(secondDraft.state.payload.decisions.map(\.id).contains("decision-1"))
+    #expect(secondDraft.state.payload.completedWork.map(\.id).contains("verified-1"))
+    #expect(secondDraft.state.payload.filesAndArtifacts.map(\.id).contains("artifact-1"))
     #expect(await responses.prompts.count == 2)
+    #expect(await responses.prompts[0].contains("final assistant messages as durable handoff records"))
+    #expect(await responses.prompts[0].contains("verification performed with its exact scope and result"))
+    #expect(await responses.prompts[0].contains("Do not preserve raw tool transcripts"))
     #expect(await responses.prompts[1].contains("decision-1"))
+    #expect(await responses.prompts[1].contains("verified-1"))
+    #expect(await responses.prompts[1].contains("artifact-1"))
 }
 
 @Test func rollingSummaryRejectsDroppedActiveItems() async throws {
