@@ -159,8 +159,8 @@ public struct CalendarSearchEventsTool: AgentTool {
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
             "query": .string(description: "Search query; leave empty to search by time range only"),
-            "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp"),
-            "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp"),
+            "startDate": .string(description: "Optional inclusive RFC 3339/ISO-8601 timestamp with timezone; fractional seconds are accepted. Prefer an exact timestamp derived from get_current_time.iso8601"),
+            "endDate": .string(description: "Optional exclusive RFC 3339/ISO-8601 timestamp with timezone; fractional seconds are accepted. Derive it from the same get_current_time result as startDate"),
             "timePreset": .stringEnumeration(values: NativeSearchTimePreset.allCases.map(\.rawValue), description: "Optional relative time range."),
             "timeFilterMode": .stringEnumeration(values: NativeSearchTemporalFilterMode.allCases.map(\.rawValue), description: "Optional temporal matching mode."),
             "timeSort": .stringEnumeration(values: NativeSearchTemporalSort.allCases.map(\.rawValue), description: "Optional temporal result ordering."),

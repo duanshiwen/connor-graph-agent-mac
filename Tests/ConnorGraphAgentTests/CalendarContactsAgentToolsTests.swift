@@ -231,6 +231,24 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
     }
 
+    @Test func calendarSearchEventsAcceptsFractionalSecondTimestampsFromCurrentTimeTool() async throws {
+        let event = CalendarEvent(
+            id: CalendarEventID(rawValue: "event-fractional-time"),
+            calendarID: CalendarID(rawValue: "calendar-work"),
+            title: "Upcoming review",
+            start: CalendarEventDateTime(date: try #require(ISO8601DateFormatter().date(from: "2026-07-30T01:00:00Z"))),
+            end: CalendarEventDateTime(date: try #require(ISO8601DateFormatter().date(from: "2026-07-30T02:00:00Z")))
+        )
+        let tool = CalendarSearchEventsTool(runtime: InMemoryAgentCalendarRuntime(events: [event]))
+
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: #"{"startDate":"2026-07-29T01:54:49.228+08:00","endDate":"2026-07-31T01:54:49.228+08:00","query":"","limit":50,"timeFilterMode":"intervalOverlapsRange","timeSort":"timeAscThenRelevance"}"#),
+            context: Self.context(toolCallID: "call-calendar-fractional-time")
+        )
+
+        #expect(result.contentText.contains("event-fractional-time"))
+    }
+
     @Test func calendarWritePreflightRequiresMatchingTrustedDetailRead() async throws {
         let evidence = CalendarDetailReadEvidenceRegistry()
         let runtime = InMemoryAgentCalendarRuntime(events: [Self.versionedEvent])
