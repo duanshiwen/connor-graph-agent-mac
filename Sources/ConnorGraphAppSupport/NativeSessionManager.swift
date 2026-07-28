@@ -72,10 +72,8 @@ public struct NativeSessionManager: Sendable {
     public var permissionMode: AgentPermissionMode
     public var recentMessageLimit: Int
 
-    // MARK: - Context Compression
+    // MARK: - Conversation Summary
 
-    /// Persisted anchor state for context compression (loaded from Session Capsule).
-    public private(set) var anchorState: SessionAnchorState?
     /// Model's context window size in tokens (for percentage-based budget).
     public var contextWindowSize: Int
     public private(set) var conversationSummaryState: ConversationSummaryState?
@@ -100,7 +98,6 @@ public struct NativeSessionManager: Sendable {
         eventRecorder: AgentEventRecorder? = nil,
         pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
         contextWindowSize: Int = 200_000,
-        anchorState: SessionAnchorState? = nil,
         conversationSummaryState: ConversationSummaryState? = nil,
         rollingSummaryProvider: AnyLLMProvider? = nil,
         rollingSummaryModelID: String? = nil
@@ -120,7 +117,6 @@ public struct NativeSessionManager: Sendable {
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.contextWindowSize = contextWindowSize
-        self.anchorState = anchorState
         self.conversationSummaryState = conversationSummaryState
         self.rollingSummaryProvider = rollingSummaryProvider
         self.rollingSummaryModelID = rollingSummaryModelID
@@ -167,11 +163,15 @@ public struct NativeSessionManager: Sendable {
         activeSkillSlug: String? = nil,
         activeSkillDisplayName: String? = nil,
         existingUserMessageID: String? = nil,
+        rehydratedHistoricalAttachmentIDs: Set<String> = [],
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
         let persistedSession = try? sessionRepository.loadSession(id: session.id)
         let persistedMessages = (persistedSession ?? session).messages
+        let summaryRevisionBeforePreflight = conversationSummaryState?.revision
+        await maybeUpdateRollingSummary(messages: persistedMessages)
+        let didCompactBeforeRun = conversationSummaryState?.revision != summaryRevisionBeforePreflight
         let storedSummaryState = try? sessionRepository.loadConversationSummaryState(sessionID: session.id)
         let historySelection = ConversationSummaryHistorySelector().select(
             messages: persistedMessages,
@@ -179,6 +179,9 @@ public struct NativeSessionManager: Sendable {
         )
         conversationSummaryState = historySelection.summaryState
         let recentMessages = Array(historySelection.messages.suffix(max(0, recentMessageLimit)))
+        let allowedAttachmentIDs = Set(recentMessages.flatMap(\.attachments).map(\.id) + attachments.map(\.id))
+            .union(rehydratedHistoricalAttachmentIDs)
+        let routedAttachmentContextPlan = attachmentContextPlan.filtered(allowedAttachmentIDs: allowedAttachmentIDs)
         let activeSkillContextSnapshot: String? = {
             let displayName = activeSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let slug = activeSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -210,12 +213,12 @@ public struct NativeSessionManager: Sendable {
             groupID: groupID,
             userMessage: prompt,
             currentUserMessageID: userMessage.id,
-            sessionSummary: conversationSummaryState == nil ? sessionSummary : nil,
+            sessionSummary: nil,
             recentMessages: recentMessages,
             permissionMode: permissionMode,
             attachmentRefs: attachments,
-            attachmentContextPlan: attachmentContextPlan,
-            anchorState: anchorState,
+            attachmentContextPlan: routedAttachmentContextPlan,
+            anchorState: nil,
             conversationSummaryState: conversationSummaryState,
             explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
@@ -407,7 +410,9 @@ public struct NativeSessionManager: Sendable {
                     message: runFailure == nil ? "Session run completed" : (runFailure?.message ?? "Session run failed")
                 )
         }
-            if runFailure == nil { await maybeUpdateRollingSummary() }
+            if runFailure == nil, !didCompactBeforeRun {
+                await maybeUpdateRollingSummary(messages: session.messages)
+            }
             return AgentLoopChatResponse(
                 session: session,
                 events: collectedEvents,
@@ -538,30 +543,45 @@ public struct NativeSessionManager: Sendable {
         try sessionRepository.saveSession(sessionToPersist)
     }
 
-    // MARK: - Context Compression
+    // MARK: - Conversation Summary
 
-    private mutating func maybeUpdateRollingSummary() async {
+    private mutating func maybeUpdateRollingSummary(messages: [AgentMessage]) async {
         guard let provider = rollingSummaryProvider, let modelID = rollingSummaryModelID else { return }
-        let conversation = session.messages.filter { $0.role == .user || $0.role == .assistant }
-        let totalTokens = SessionTokenCounter().estimate(messages: conversation).totalTokenCount
-        let budget = SessionContextBudget(contextWindowSize: contextWindowSize)
-        guard budget.status(tokenCount: totalTokens) >= .shouldCompress else { return }
+        let conversation = messages.filter { $0.role == .user || $0.role == .assistant }
 
         do {
             let latestState = try sessionRepository.loadConversationSummaryState(sessionID: session.id) ?? conversationSummaryState
             let selection = ConversationSummaryHistorySelector().select(messages: conversation, state: latestState)
             let validState = selection.summaryState
+            let liveTokenCount = SessionTokenCounter().estimate(messages: selection.messages).totalTokenCount
+                + (validState?.summaryTokenEstimate ?? 0)
+            let budget = SessionContextBudget(contextWindowSize: contextWindowSize)
+            guard budget.status(tokenCount: liveTokenCount) >= .shouldCompress else { return }
             let plan = try ConversationCompactionPlanner().plan(
                 messages: conversation,
                 existingState: validState,
                 contextWindowTokens: contextWindowSize
             )
             let maximumSummaryTokens = min(8_000, max(512, Int(Double(contextWindowSize) * 0.05)))
+            var summarizedAttachmentIDs = Set<String>()
+            let attachmentDescriptions: [ConversationSummaryAttachment] = plan.deltaMessages.flatMap(\.attachments).compactMap { attachment in
+                guard summarizedAttachmentIDs.insert(attachment.id).inserted else { return nil }
+                return ConversationSummaryAttachment(
+                    id: attachment.id,
+                    displayName: attachment.displayName,
+                    kind: attachment.kind,
+                    description: attachment.previewText ?? "\(attachment.kind.rawValue) attachment, \(attachment.byteCount) bytes"
+                )
+            }
             let draft = try await RollingConversationSummarizer(
                 provider: provider,
                 modelID: modelID,
                 maximumSummaryTokens: maximumSummaryTokens
-            ).summarize(sessionID: session.id, plan: plan)
+            ).summarize(
+                sessionID: session.id,
+                plan: plan,
+                attachmentDescriptions: attachmentDescriptions
+            )
             guard try sessionRepository.commitConversationCompaction(
                 state: draft.state,
                 record: draft.record,
@@ -579,19 +599,6 @@ public struct NativeSessionManager: Sendable {
                 message: String(describing: error)
             )
         }
-    }
-
-    /// Update anchor state externally (e.g., when loading from Session Capsule).
-    public mutating func setAnchorState(_ anchor: SessionAnchorState?) {
-        self.anchorState = anchor
-    }
-
-    private func persistAnchorState() throws {
-        var snapshot = (try? sessionRepository.loadSessionState(sessionID: session.id))
-            ?? AppSessionStateSnapshot(sessionID: session.id)
-        snapshot.anchorState = anchorState
-        snapshot.updatedAt = Date()
-        try sessionRepository.saveSessionState(snapshot, sessionID: session.id)
     }
 
     @discardableResult

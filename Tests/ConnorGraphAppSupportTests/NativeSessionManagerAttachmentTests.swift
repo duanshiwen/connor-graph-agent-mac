@@ -34,6 +34,50 @@ import ConnorGraphStore
     #expect(backend.requests.first?.attachmentRefs == [ref])
 }
 
+@Test func nativeSessionManagerDoesNotRouteSummaryCoveredAttachmentContent() async throws {
+    let backend = RecordingAttachmentBackend()
+    let store = try SQLiteGraphKernelStore(path: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite").path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let coveredRef = AgentMessageAttachmentRef(id: "covered", displayName: "covered.txt", kind: .text, byteCount: 10, lifecycleStatus: .ready, extractionStatus: .extracted, manifestRelativePath: "covered/manifest.json")
+    let tailRef = AgentMessageAttachmentRef(id: "tail", displayName: "tail.txt", kind: .text, byteCount: 10, lifecycleStatus: .ready, extractionStatus: .extracted, manifestRelativePath: "tail/manifest.json")
+    let coveredMessages = [AgentMessage(id: "covered-message", role: .user, content: "old", attachments: [coveredRef])]
+    let session = AgentSession(
+        id: "attachment-summary-session",
+        title: "Summary Attachments",
+        messages: coveredMessages + [AgentMessage(id: "tail-message", role: .assistant, content: "recent", attachments: [tailRef])]
+    )
+    try repository.saveSession(session)
+    let summary = ConversationSummaryState(
+        sessionID: session.id,
+        revision: 1,
+        compressionGeneration: 1,
+        payload: ConversationSummaryPayload(currentGoal: "Continue"),
+        coveredThroughMessageID: "covered-message",
+        coveredMessageCount: 1,
+        coveredPrefixHash: try ConversationSummaryIntegrity.coveredPrefixHash(messages: coveredMessages),
+        currentSummaryHash: "summary-hash",
+        sourceTokenEstimate: 5,
+        summaryTokenEstimate: 2,
+        generationModelID: "summary-model"
+    )
+    let plan = AttachmentContextPlan(inlineBlocks: [
+        AttachmentInlineBlock(attachmentID: coveredRef.id, displayName: coveredRef.displayName, kind: .text, content: "covered bytes"),
+        AttachmentInlineBlock(attachmentID: tailRef.id, displayName: tailRef.displayName, kind: .text, content: "tail bytes")
+    ])
+    var manager = NativeSessionManager(
+        backend: backend,
+        sessionRepository: repository,
+        session: session,
+        conversationSummaryState: summary
+    )
+
+    _ = try await manager.submit("Continue", sessionSummary: nil, attachmentContextPlan: plan)
+
+    let routedPlan = try #require(backend.requests.first?.attachmentContextPlan)
+    #expect(routedPlan.inlineBlocks.map(\.attachmentID) == [tailRef.id])
+}
+
 @Test func nativeSessionManagerBindsGeneratedImageToolResultsToAssistantMessage() async throws {
     let generatedRef = AgentMessageAttachmentRef(
         id: "generated-image-1",

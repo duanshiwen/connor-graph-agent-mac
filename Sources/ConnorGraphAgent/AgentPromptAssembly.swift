@@ -483,6 +483,15 @@ public struct AgentPromptDiagnosticsTransformer: AgentContextTransformer, Sendab
         if let memory = assembly.memory {
             append(id: "memory", title: "Graph memory", role: "system", text: memory.renderedText, notes: ["background evidence"])
         }
+        if let summary = assembly.conversation.rollingSummaryState {
+            append(
+                id: "conversation_summary",
+                title: "Rolling conversation summary",
+                role: "system",
+                text: ConversationSummaryPromptRenderer.render(summary.payload),
+                notes: ["generation=\(summary.compressionGeneration)", "revision=\(summary.revision)", "not trimmed"]
+            )
+        }
         let conversationText = assembly.conversation.renderedContextOnly
         if !conversationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             append(id: "conversation", title: "Conversation context", role: "user", text: conversationText, notes: ["context only"])
