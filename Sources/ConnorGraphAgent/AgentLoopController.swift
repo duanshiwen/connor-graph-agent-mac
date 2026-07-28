@@ -554,6 +554,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
                         logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
 
+                        if let assistantText = modelResponse.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !assistantText.isEmpty {
+                            var assistantMessage = AgentMessage(role: .assistant, content: assistantText)
+                            assistantMessage.runID = run.id
+                            assistantMessage.sessionID = run.sessionID
+                            yield(.assistantMessageCreated(assistantMessage), to: continuation, recorder: eventRecorder)
+                        }
+
                         messages.append(AgentModelMessage(
                             role: .assistant,
                             content: modelResponse.text ?? "",

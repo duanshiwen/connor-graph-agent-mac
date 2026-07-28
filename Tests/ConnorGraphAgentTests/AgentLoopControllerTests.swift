@@ -180,6 +180,56 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(await provider.requests.count == 2)
 }
 
+@Test func agentLoopPublishesAssistantTextBeforeExecutingMixedToolResponse() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: "日历范围已经确认，我接着核对邮件。",
+            toolCalls: [AgentToolCall(
+                id: "mixed-1",
+                name: "echo_args",
+                argumentsJSON: #"{"value":"mail"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "日历和邮件都核对完成。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-mixed-response",
+        sessionID: "session-mixed-response",
+        userMessage: "分阶段检查日历和邮件"
+    )) {
+        events.append(event)
+    }
+
+    let progressMessage = try #require(events.compactMap { event -> AgentMessage? in
+        if case .assistantMessageCreated(let message) = event { return message }
+        return nil
+    }.first)
+    #expect(progressMessage.role == .assistant)
+    #expect(progressMessage.content == "日历范围已经确认，我接着核对邮件。")
+    #expect(progressMessage.runID == "run-mixed-response")
+    #expect(progressMessage.sessionID == "session-mixed-response")
+    #expect(events.map(\.kind).firstIndex(of: .assistantMessageCreated)! < events.map(\.kind).firstIndex(of: .toolStarted)!)
+
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    let mixedAssistantMessage = try #require(requests[1].messages.first { message in
+        message.role == .assistant && message.toolCalls?.first?.id == "mixed-1"
+    })
+    #expect(mixedAssistantMessage.content == "日历范围已经确认，我接着核对邮件。")
+    #expect(events.contains { event in
+        if case .textComplete(let payload) = event {
+            return payload.text == "日历和邮件都核对完成。"
+        }
+        return false
+    })
+}
+
 @Test func agentLoopEmitsPromptAssembledDiagnosticsBeforeModelCall() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(text: "Done", usage: AgentModelUsage(promptTokens: 12, completionTokens: 2))
