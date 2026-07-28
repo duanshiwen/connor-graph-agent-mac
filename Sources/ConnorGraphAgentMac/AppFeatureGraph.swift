@@ -31,11 +31,18 @@ final class SettingsRuntimeActions {
     let load: () -> Void
     let openProjectHelp: () -> Void
     let openURL: (URL) -> Void
+    let clearAllMemoryAndSessions: () async throws -> Void
 
-    init(load: @escaping () -> Void, openProjectHelp: @escaping () -> Void, openURL: @escaping (URL) -> Void) {
+    init(
+        load: @escaping () -> Void,
+        openProjectHelp: @escaping () -> Void,
+        openURL: @escaping (URL) -> Void,
+        clearAllMemoryAndSessions: @escaping () async throws -> Void
+    ) {
         self.load = load
         self.openProjectHelp = openProjectHelp
         self.openURL = openURL
+        self.clearAllMemoryAndSessions = clearAllMemoryAndSessions
     }
 }
 

@@ -521,7 +521,7 @@ public struct AgentPromptDiagnosticsTransformer: AgentContextTransformer, Sendab
 public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
     public var maxEstimatedTokens: Int
 
-    public init(maxEstimatedTokens: Int = 160_000) {
+    public init(maxEstimatedTokens: Int = 1_000_000) {
         self.maxEstimatedTokens = maxEstimatedTokens
     }
 

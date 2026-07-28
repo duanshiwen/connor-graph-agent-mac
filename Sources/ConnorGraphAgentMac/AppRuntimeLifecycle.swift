@@ -2452,6 +2452,54 @@ final class AppRuntimeLifecycle {
         }
     }
 
+    func clearAllMemoryAndSessions() async throws {
+        guard let chatSessionRepository, let memoryOSStore, let storagePaths else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [
+                NSLocalizedDescriptionKey: "本地记忆存储尚未就绪，无法执行清除。"
+            ])
+        }
+
+        await maintenanceCoordinator.pauseForMemoryReset()
+        do {
+            let activeSessionIDs = Set(chatFeatureModel.sessions.allSessions.map(\.id))
+            for sessionID in activeSessionIDs {
+                _ = stopSpeechTranscriptionIfRunningForDeletedSession(sessionID)
+                chatBackgroundTaskCoordinator.removeSession(sessionID)
+                chatComposerCoordinator.removeSession(sessionID)
+                chatRunCoordinator.removeSession(sessionID)
+                chatWorkspaceCoordinator.removeSession(sessionID)
+                browserFeatureModel.removeWorkspaceSnapshot(for: sessionID)
+            }
+
+            memoryOSFacade = nil
+            let purgedSessionIDs = try chatSessionRepository.purgeAllSessions()
+            try memoryOSStore.clearAllMemoryData()
+            try AppMemoryOSSearchKernelFactory.removeLiveIndex(paths: storagePaths)
+
+            for sessionID in purgedSessionIDs {
+                globalSearchFeatureModel.removeSessionIndex(sessionID: sessionID)
+            }
+            await globalSearchFeatureModel.waitForSessionIndexOperations()
+
+            let rebuiltDocumentCount = try AppMemoryOSSearchKernelFactory.rebuildLiveIndex(paths: storagePaths)
+            let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
+            memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: searchKernel)
+            memoryOSSearchHealthSummary = "Memory OS 已清空，搜索索引已重建（\(rebuiltDocumentCount) 条文档）。"
+
+            chatSessionCoordinator.clearSelection()
+            reloadChatSessions(restoreWorkspaceMode: false)
+            rebuildNativeSessionManagerForActiveSession()
+            chatApprovalCoordinator.reload()
+            errorMessage = nil
+            maintenanceCoordinator.resumeAfterMemoryReset()
+        } catch {
+            memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: nil)
+            rebuildNativeSessionManagerForActiveSession()
+            maintenanceCoordinator.resumeAfterMemoryReset()
+            throw error
+        }
+    }
+
     private func installEmptySessionCapsuleState(
         sessionID: String,
         synchronizeWorkspaceDrafts: Bool = true
@@ -3673,7 +3721,11 @@ extension AppRuntimeLifecycle {
             settingsActions: SettingsRuntimeActions(
                 load: { [weak model] in model?.loadRuntimeSettings() },
                 openProjectHelp: { [weak model] in model?.openProjectWebsiteHelp() },
-                openURL: { [weak model] in model?.openURLInSystemDefaultBrowser($0) }
+                openURL: { [weak model] in model?.openURLInSystemDefaultBrowser($0) },
+                clearAllMemoryAndSessions: { [weak model] in
+                    guard let model else { return }
+                    try await model.clearAllMemoryAndSessions()
+                }
             ),
             commercialReadinessDashboard: { [weak model] in model?.commercialReadinessDashboard ?? CommercialReadinessDashboard(cards: []) }
         )

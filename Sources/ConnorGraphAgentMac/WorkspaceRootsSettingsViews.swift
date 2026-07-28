@@ -249,7 +249,13 @@ struct SettingsShortcutsSection: View {
 
 struct SettingsPreferencesSection: View {
     @Bindable var model: UserPreferencesFeatureModel
+    let clearAllMemoryAndSessions: () async throws -> Void
     @State private var showsPersonalityResetConfirmation = false
+    @State private var showsMemoryClearConfirmation = false
+    @State private var memoryClearConfirmationText = ""
+    @State private var isClearingMemory = false
+    @State private var memoryClearErrorMessage: String?
+    @State private var memoryClearStatusMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -416,8 +422,153 @@ struct SettingsPreferencesSection: View {
                     .frame(minHeight: 150)
                     .appFormTextEditor()
             }
+            SettingsGroup(title: "危险操作") {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("清除全部记忆和会话")
+                            .font(SettingsListTypography.rowTitleSelected)
+                            .foregroundStyle(.red)
+                        Text("永久删除全部会话，以及 Memory OS 的 L0、L1、L2、L3、L4 记忆、处理队列和搜索索引。此操作不可撤销。")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 16)
+                    Button(role: .destructive) {
+                        memoryClearConfirmationText = ""
+                        memoryClearErrorMessage = nil
+                        showsMemoryClearConfirmation = true
+                    } label: {
+                        Label("清除记忆", systemImage: "trash.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(isClearingMemory)
+                }
+                .padding(.vertical, 4)
+
+                if let memoryClearStatusMessage {
+                    Divider()
+                    Label(memoryClearStatusMessage, systemImage: "checkmark.circle.fill")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.green)
+                }
+            }
         }
         .onAppear { model.refreshEnvironmentPermissionStatus() }
+        .sheet(isPresented: $showsMemoryClearConfirmation) {
+            ClearMemoryConfirmationSheet(
+                confirmationText: $memoryClearConfirmationText,
+                isClearing: isClearingMemory,
+                errorMessage: memoryClearErrorMessage,
+                onCancel: {
+                    guard !isClearingMemory else { return }
+                    showsMemoryClearConfirmation = false
+                },
+                onConfirm: clearMemoryAfterConfirmation
+            )
+        }
+    }
+
+    private func clearMemoryAfterConfirmation() {
+        guard MemoryClearConfirmationPolicy.accepts(memoryClearConfirmationText), !isClearingMemory else { return }
+        isClearingMemory = true
+        memoryClearErrorMessage = nil
+        Task { @MainActor in
+            do {
+                try await clearAllMemoryAndSessions()
+                isClearingMemory = false
+                showsMemoryClearConfirmation = false
+                memoryClearConfirmationText = ""
+                memoryClearStatusMessage = "全部记忆和会话已清除。"
+            } catch {
+                isClearingMemory = false
+                memoryClearErrorMessage = "清除失败：\(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+enum MemoryClearConfirmationPolicy {
+    static let requiredText = "清除全部记忆"
+
+    static func accepts(_ input: String) -> Bool {
+        input.trimmingCharacters(in: .whitespacesAndNewlines) == requiredText
+    }
+}
+
+private struct ClearMemoryConfirmationSheet: View {
+    @Binding var confirmationText: String
+    let isClearing: Bool
+    let errorMessage: String?
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    @FocusState private var isConfirmationFieldFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("永久清除全部记忆和会话？")
+                        .font(AppTypography.sectionTitle)
+                    Text("将删除所有会话，以及 L0、L1、L2、L3、L4 的全部记忆和索引。删除后无法恢复。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("请输入“\(MemoryClearConfirmationPolicy.requiredText)”以继续")
+                    .font(SettingsListTypography.rowTitleSelected)
+                TextField(MemoryClearConfirmationPolicy.requiredText, text: $confirmationText)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isConfirmationFieldFocused)
+                    .disabled(isClearing)
+                    .onSubmit {
+                        if MemoryClearConfirmationPolicy.accepts(confirmationText) {
+                            onConfirm()
+                        }
+                    }
+            }
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "xmark.octagon.fill")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+
+            HStack(spacing: 10) {
+                Spacer()
+                Button("取消", action: onCancel)
+                    .disabled(isClearing)
+                Button(role: .destructive, action: onConfirm) {
+                    if isClearing {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("正在清除…")
+                        }
+                    } else {
+                        Label("永久清除", systemImage: "trash.fill")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(!MemoryClearConfirmationPolicy.accepts(confirmationText) || isClearing)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .interactiveDismissDisabled(isClearing)
+        .onAppear { isConfirmationFieldFocused = true }
     }
 }
 

@@ -95,7 +95,7 @@ public struct NativeSessionManager: Sendable {
         session: AgentSession = AgentSession(),
         groupID: String = "default",
         permissionMode: AgentPermissionMode = .askToWrite,
-        recentMessageLimit: Int = 6,
+        recentMessageLimit: Int = .max,
         memoryOSFacade: AppMemoryOSFacade? = nil,
         memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
         eventRecorder: AgentEventRecorder? = nil,
@@ -167,7 +167,11 @@ public struct NativeSessionManager: Sendable {
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
-        let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
+        let persistedSession = try? sessionRepository.loadSession(id: session.id)
+        let conversationMessages = (persistedSession ?? session).messages.filter {
+            $0.role == .user || $0.role == .assistant
+        }
+        let recentMessages = Array(conversationMessages.suffix(max(0, recentMessageLimit)))
         let activeSkillContextSnapshot: String? = {
             let displayName = activeSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let slug = activeSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

@@ -7,6 +7,14 @@ import ConnorGraphAppSupport
 @MainActor
 @Suite("Settings Feature Models Tests")
 struct SettingsFeatureModelsTests {
+    @Test func memoryClearConfirmationRequiresExactWarningText() {
+        #expect(MemoryClearConfirmationPolicy.accepts("清除全部记忆"))
+        #expect(MemoryClearConfirmationPolicy.accepts("  清除全部记忆\n"))
+        #expect(!MemoryClearConfirmationPolicy.accepts("确认"))
+        #expect(!MemoryClearConfirmationPolicy.accepts("清除全部会话"))
+        #expect(!MemoryClearConfirmationPolicy.accepts(""))
+    }
+
     @Test func appSettingsRoundTripOnlyOwnedFields() {
         var settings = AgentRuntimeSettings.default
         settings.loop.maxConsecutiveToolResultErrors = 0

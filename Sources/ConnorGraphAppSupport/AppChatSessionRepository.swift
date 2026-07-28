@@ -349,6 +349,23 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
+    public func purgeAllSessions(fileManager: FileManager = .default) throws -> [String] {
+        let sessionIDs = try store.purgeAllSessionData()
+        if let sessionsDirectory = storagePaths?.sessionsDirectory,
+           fileManager.fileExists(atPath: sessionsDirectory.path) {
+            for item in try fileManager.contentsOfDirectory(
+                at: sessionsDirectory,
+                includingPropertiesForKeys: nil,
+                options: []
+            ) {
+                try fileManager.removeItem(at: item)
+            }
+        }
+        AppAccountSyncSignal.postLocalDataDidChange()
+        return sessionIDs
+    }
+
+    @discardableResult
     public func restoreDeletedSession(sessionID: String, now: Date = Date()) throws -> AgentSession {
         guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
         try store.restoreSession(id: sessionID, restoredAt: now)
