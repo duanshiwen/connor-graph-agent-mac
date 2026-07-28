@@ -68,6 +68,54 @@ import ConnorGraphAgent
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
+@Test func rollingSummaryIsSecondSystemMessageAndReplacesCoveredHistory() throws {
+    let coveredMessages = [
+        AgentMessage(id: "covered-user", role: .user, content: "obsolete user detail"),
+        AgentMessage(id: "covered-assistant", role: .assistant, content: "obsolete assistant reply")
+    ]
+    let summary = ConversationSummaryState(
+        sessionID: "session-summary-prompt",
+        revision: 1,
+        compressionGeneration: 1,
+        payload: ConversationSummaryPayload(currentGoal: "Continue the migration"),
+        coveredThroughMessageID: "covered-assistant",
+        coveredMessageCount: coveredMessages.count,
+        coveredPrefixHash: try ConversationSummaryIntegrity.coveredPrefixHash(messages: coveredMessages),
+        currentSummaryHash: "summary-hash",
+        sourceTokenEstimate: 20,
+        summaryTokenEstimate: 5,
+        generationModelID: "summary-model"
+    )
+    let tail = [
+        AgentMessage(id: "tail-user", role: .user, content: "live tail request"),
+        AgentMessage(id: "tail-assistant", role: .assistant, content: "live tail response")
+    ]
+    let selection = ConversationSummaryHistorySelector().select(messages: coveredMessages + tail, state: summary)
+    let assembly = AgentPromptAssembler().assemble(
+        request: AgentChatRequest(
+            sessionID: summary.sessionID,
+            userMessage: "current request",
+            recentMessages: selection.messages,
+            conversationSummaryState: selection.summaryState
+        ),
+        memoryContract: nil
+    )
+
+    let request = AgentTranscriptProjector().project(assembly, tools: [])
+    let projectedContent = request.messages.map(\.content).joined(separator: "\n")
+
+    #expect(request.messages[0].role == .system)
+    #expect(request.messages[0].content.contains("康纳同学 (Connor)"))
+    #expect(request.messages[1].role == .system)
+    #expect(request.messages[1].content.contains("## Conversation Continuity Summary"))
+    #expect(request.messages[1].content.contains("Continue the migration"))
+    #expect(!projectedContent.contains("obsolete user detail"))
+    #expect(!projectedContent.contains("obsolete assistant reply"))
+    #expect(projectedContent.contains("live tail request"))
+    #expect(projectedContent.contains("live tail response"))
+    #expect(request.messages.last?.content.contains("Current user request:\ncurrent request") == true)
+}
+
 @Test func defaultSystemPromptDefinesConnorAsPersonalizedGeneralPurposeAgent() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 

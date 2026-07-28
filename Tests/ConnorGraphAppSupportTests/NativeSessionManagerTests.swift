@@ -90,13 +90,7 @@ private actor NativeSessionRecordingLLMProvider: LLMProvider {
 
     func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
         promptCount += 1
-        return LLMResponse(text: """
-        INTENT: Preserve prior session context.
-        DECISIONS: NONE
-        CHANGES: NONE
-        PENDING: NONE
-        DETAILS: compressed
-        """, citations: [])
+        return LLMResponse(text: #"{"currentGoal":"Handle the current request","userConstraints":[],"decisions":[],"completedWork":[],"importantFacts":[],"filesAndArtifacts":[],"pendingWork":[],"attachments":[]}"#, citations: [])
     }
 
     func count() -> Int { promptCount }
@@ -112,7 +106,7 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     return store
 }
 
-@Test func nativeSessionManagerRunsMainAgentPromptAssemblyBeforeMaintenanceCompression() async throws {
+@Test func nativeSessionManagerRunsMainAgentPromptAssemblyBeforeRollingSummaryMaintenance() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)
     let longMessage = String(repeating: "historical context requiring compression ", count: 120)
@@ -137,8 +131,9 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
         backend: AgentLoopBackend(loopController: loop),
         sessionRepository: repository,
         session: session,
-        compressionProvider: AnyLLMProvider(compressionProvider),
-        contextWindowSize: 100
+        contextWindowSize: 100,
+        rollingSummaryProvider: AnyLLMProvider(compressionProvider),
+        rollingSummaryModelID: "summary-test-model"
     )
 
     let response = try await manager.submit("Handle the current request")
@@ -149,6 +144,10 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(promptAssembledIndex < textCompleteIndex)
     #expect(response.assistantMessage?.content == "Connor-owned assistant response")
     #expect(await compressionProvider.count() == 1)
+    let loadedSummaryState = try repository.loadConversationSummaryState(sessionID: session.id)
+    let summaryState = try #require(loadedSummaryState)
+    #expect(summaryState.compressionGeneration == 1)
+    #expect(summaryState.payload.currentGoal == "Handle the current request")
     #expect(manager.session.messages.last?.role == .assistant)
     #expect(manager.session.messages.last?.content == "Connor-owned assistant response")
 }
