@@ -2682,8 +2682,12 @@ final class AppRuntimeLifecycle {
                 return []
             }
         }.value
-        chatRunCoordinator.cacheProcessTimeline(restored, key: cacheKey)
-        return restored
+        let sliced = AgentAssistantMessageEventSlicer().events(
+            forAssistantMessageID: process.assistantMessageID,
+            from: restored
+        )
+        chatRunCoordinator.cacheProcessTimeline(sliced, key: cacheKey)
+        return sliced
     }
 
     private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {

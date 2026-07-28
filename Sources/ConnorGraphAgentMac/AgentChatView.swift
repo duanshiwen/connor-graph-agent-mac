@@ -727,8 +727,14 @@ private struct AgentChatConversationView: View {
     }
 
     private func initialActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation]? {
-        if process.id == latestProcessID, !model.run.eventTimeline.isEmpty {
-            return model.run.eventTimeline
+        let hasLiveBoundary = process.assistantMessageID.map { messageID in
+            model.run.eventTimeline.contains { $0.assistantMessageID == messageID }
+        } ?? false
+        if !model.run.eventTimeline.isEmpty, process.id == latestProcessID || hasLiveBoundary {
+            return AgentAssistantMessageEventSlicer().events(
+                forAssistantMessageID: process.assistantMessageID,
+                from: model.run.eventTimeline
+            )
         }
         return nil
     }

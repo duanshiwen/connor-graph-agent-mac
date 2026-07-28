@@ -81,6 +81,7 @@ public struct AgentToolActivityClassifier: Sendable {
         let result = parseJSONObject(resultJSON)
         let rawToolName = rawToolName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rawToolName.isEmpty else { return nil }
+        guard rawToolName != "share_progress_update" else { return nil }
 
         let descriptor = descriptor(for: rawToolName, arguments: arguments, result: result)
         let icon = severity == .error ? errorIcon(for: descriptor.semanticKind, defaultIcon: descriptor.icon) : descriptor.icon
