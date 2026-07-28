@@ -651,7 +651,7 @@ public struct NativeSessionManager: Sendable {
         }
         let attachment: AgentMessageAttachmentRef?
         switch result.toolName {
-        case "generate_image":
+        case "generate_image", "edit_image":
             attachment = (try? JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: data))?.attachment
         case "present_image":
             attachment = (try? JSONDecoder().decode(PresentImageToolResultPayload.self, from: data))?.attachment
