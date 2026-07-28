@@ -84,6 +84,40 @@ final class AppMaintenanceCoordinator {
         schedulerTask = nil
     }
 
+    func pauseForMemoryReset() async {
+        generation += 1
+        let scheduledTask = schedulerTask
+        let backgroundTask = backgroundJobsTask
+        let sweepTask = dailySweepTask
+        let indexRepairTask = repairTask
+        let sourceReconcileTasks = Array(reconcileTasks.values)
+
+        stopScheduler()
+        backgroundTask?.cancel()
+        dailySweepTask?.cancel()
+        indexRepairTask?.cancel()
+        for task in sourceReconcileTasks { task.cancel() }
+
+        await scheduledTask?.value
+        await backgroundTask?.value
+        await sweepTask?.value
+        await indexRepairTask?.value
+        for task in sourceReconcileTasks { _ = try? await task.value }
+
+        backgroundJobsTask = nil
+        dailySweepTask = nil
+        repairTask = nil
+        reconcileTasks.removeAll()
+        needsBackgroundJobsRerun = false
+        isRunningBackgroundJobs = false
+        hasScheduledRepair = false
+        lastDailySweep = nil
+    }
+
+    func resumeAfterMemoryReset() {
+        startScheduler()
+    }
+
     func runScheduledTasksOnce() {
         guard !isShutdown, isSchedulerRunning, schedulerTask == nil else { return }
         let currentGeneration = generation

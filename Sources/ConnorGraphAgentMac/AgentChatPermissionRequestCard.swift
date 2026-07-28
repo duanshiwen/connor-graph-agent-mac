@@ -220,12 +220,15 @@ struct AgentPermissionExpandedReviewOverlay: View {
                     .padding(.trailing, AgentChatLayout.spaceS)
                 }
                 .scrollIndicators(.visible)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
 
                 Divider()
 
                 actionBar
             }
             .padding(AgentChatLayout.spaceXL)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
@@ -234,6 +237,7 @@ struct AgentPermissionExpandedReviewOverlay: View {
             .shadow(color: .black.opacity(0.18), radius: 28, x: 0, y: 14)
             .padding(AgentChatLayout.spaceL)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .focusable()
         .onExitCommand(perform: onCollapse)
     }
@@ -307,12 +311,21 @@ private struct MailApprovalExpandedContent: View {
             approvalInfoGrid
 
             SectionBlock(title: "邮件内容预览", systemImage: "doc.text") {
-                Text(mail.bodyPreview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? mail.bodyPreview! : "无正文预览。")
-                    .font(AgentChatTypography.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AgentChatLayout.spaceM)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+                ScrollView(.vertical) {
+                    Text(bodyText)
+                        .font(AgentChatTypography.body)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(AgentChatLayout.spaceM)
+                }
+                .scrollIndicators(.visible)
+                .frame(minHeight: 180, maxHeight: 420)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+                )
             }
 
             SectionBlock(title: "安全与审计", systemImage: "lock.shield") {
@@ -333,6 +346,13 @@ private struct MailApprovalExpandedContent: View {
                 }
             }
         }
+    }
+
+    private var bodyText: String {
+        guard let body = mail.bodyPreview?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty else {
+            return "无正文预览。"
+        }
+        return body
     }
 
     private var approvalInfoGrid: some View {

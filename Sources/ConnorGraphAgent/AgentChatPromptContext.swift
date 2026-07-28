@@ -177,13 +177,22 @@ public struct AgentChatPromptContext: Sendable, Equatable {
     }
 
     private static func render(message: AgentMessage) -> String {
+        let attachmentContext: String
+        if message.attachments.isEmpty {
+            attachmentContext = ""
+        } else {
+            let attachments = message.attachments.map {
+                "\($0.displayName) [id=\($0.id), kind=\($0.kind.rawValue)]"
+            }.joined(separator: ", ")
+            attachmentContext = "\nAttachments: \(attachments)"
+        }
         switch message.role {
         case .user:
-            return "User: \(message.content)"
+            return "User: \(message.content)\(attachmentContext)"
         case .assistant:
-            return "Assistant: \(message.content)"
+            return "Assistant: \(message.content)\(attachmentContext)"
         case .system:
-            return "System: \(message.content)"
+            return "System: \(message.content)\(attachmentContext)"
         }
     }
 }

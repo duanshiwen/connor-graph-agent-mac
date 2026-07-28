@@ -56,14 +56,17 @@ public struct ContextCompressionPipeline<Provider: LLMProvider>: @unchecked Send
         messages: [AgentMessage],
         existingAnchor: SessionAnchorState?
     ) async throws -> CompressedContext {
-        let (evictable, recent) = splitMessages(messages)
+        let (evictableCandidates, recent) = splitMessages(messages)
+        let alreadyCompressedIDs = Set(existingAnchor?.compressedMessageIDs ?? [])
+        let evictable = evictableCandidates.filter { !alreadyCompressedIDs.contains($0.id) }
 
         guard !evictable.isEmpty else {
-            // Nothing to compress — everything fits in the recent tail.
             return CompressedContext(
                 anchor: existingAnchor ?? .empty,
                 recentMessages: recent,
-                compressionSummary: "No messages to compress (all fit in recent tail)",
+                compressionSummary: evictableCandidates.isEmpty
+                    ? "No messages to compress (all fit in recent tail)"
+                    : "No new messages to compress",
                 evictedMessageCount: 0
             )
         }
@@ -267,7 +270,10 @@ public struct ContextCompressionPipeline<Provider: LLMProvider>: @unchecked Send
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
-        let mergedIDs = (existing?.compressedMessageIDs ?? []) + evictedMessageIDs
+        var seenMessageIDs = Set<String>()
+        let mergedIDs = ((existing?.compressedMessageIDs ?? []) + evictedMessageIDs).filter {
+            seenMessageIDs.insert($0).inserted
+        }
 
         return SessionAnchorState(
             intent: intent.isEmpty ? (existing?.intent ?? "Unknown") : intent,

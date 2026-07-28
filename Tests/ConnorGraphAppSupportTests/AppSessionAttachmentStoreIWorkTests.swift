@@ -19,6 +19,7 @@ struct AppSessionAttachmentStoreIWorkTests {
 
         #expect(manifest.kind == .document)
         #expect(manifest.fileExtension == "pages")
+        #expect(manifest.mimeType == "application/vnd.apple.pages")
         #expect(manifest.extractionStatus == .pending)
         #expect(manifest.storedRelativePath.hasSuffix("/original/Report.pages"))
         let storedURL = paths.sessionArtifactDirectories(sessionID: "s").root.appendingPathComponent(manifest.storedRelativePath)
@@ -32,5 +33,22 @@ struct AppSessionAttachmentStoreIWorkTests {
         #expect(jobs.count == 1)
         #expect(jobs.first?.attachmentID == manifest.id)
         #expect(jobs.first?.requestedCapabilities == ["document-to-markdown"])
+    }
+
+    @Test func assignsNativeMIMETypesToNumbersAndKeynote() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root.appendingPathComponent("app-support"))
+        try paths.ensureDirectoryHierarchy()
+        let numbers = root.appendingPathComponent("Budget.numbers")
+        let keynote = root.appendingPathComponent("Deck.keynote")
+        try Data("numbers".utf8).write(to: numbers)
+        try Data("keynote".utf8).write(to: keynote)
+        let store = AppSessionAttachmentStore(paths: paths)
+
+        let numbersManifest = try store.importFile(at: numbers, sessionID: "numbers")
+        let keynoteManifest = try store.importFile(at: keynote, sessionID: "keynote")
+
+        #expect(numbersManifest.mimeType == "application/vnd.apple.numbers")
+        #expect(keynoteManifest.mimeType == "application/vnd.apple.keynote")
     }
 }

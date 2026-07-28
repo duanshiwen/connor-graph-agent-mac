@@ -249,9 +249,13 @@ struct SettingsShortcutsSection: View {
 
 struct SettingsPreferencesSection: View {
     @Bindable var model: UserPreferencesFeatureModel
-    @Bindable var aiConnections: AIConnectionsFeatureModel
+    let clearAllMemoryAndSessions: () async throws -> Void
     @State private var showsPersonalityResetConfirmation = false
-    @State private var showsAdvancedVoiceSettings = false
+    @State private var showsMemoryClearConfirmation = false
+    @State private var memoryClearConfirmationText = ""
+    @State private var isClearingMemory = false
+    @State private var memoryClearErrorMessage: String?
+    @State private var memoryClearStatusMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -412,185 +416,159 @@ struct SettingsPreferencesSection: View {
                     Text("已保存的自定义性格会被清除，康纳同学将恢复默认对话风格。")
                 }
             }
-            SettingsGroup(title: "康纳同学的声音") {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .center, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("音色性别")
-                                .font(SettingsListTypography.rowTitleSelected)
-                            Text("默认跟随主人格；也可手动覆盖性别或展开高级配置。")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Picker(
-                            "音色性别",
-                            selection: Binding(
-                                get: { model.connorVoiceGenderSelection },
-                                set: { model.setConnorVoiceGenderSelection($0) }
-                            )
-                        ) {
-                            ForEach(ConnorVoiceGenderSelection.allCases) { selection in
-                                Text(selection.displayName).tag(selection)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(width: 260)
-                    }
-
-                    Divider()
-
-                    DisclosureGroup(isExpanded: $showsAdvancedVoiceSettings) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text(model.connorVoiceProfile == nil
-                                 ? "默认根据主人格生成音色。填写独立描述并应用后，音色将不再受人格表达风格影响。"
-                                 : "当前已应用独立音色；主人格变化不会覆盖这份音色方案。")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("描述你希望的音色")
-                                    .font(SettingsListTypography.rowTitleSelected)
-                                TextEditor(text: $model.voiceRequest)
-                                    .font(SettingsListTypography.rowTitle)
-                                    .frame(minHeight: 100)
-                                    .appFormTextEditor()
-                                    .disabled(model.isGeneratingVoice)
-                                HStack {
-                                    if model.isGeneratingVoice {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                        Text("正在分析并补充…")
-                                            .font(SettingsListTypography.rowCaption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Button {
-                                        Task { await model.generateVoiceDraft() }
-                                    } label: {
-                                        Label(model.voiceDraft == nil ? "AI 分析" : "重新生成", systemImage: "sparkles")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(model.isGeneratingVoice || model.voiceRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                }
-                            }
-
-                            if let error = model.voiceErrorMessage {
-                                Label(error, systemImage: "exclamationmark.triangle.fill")
-                                    .font(SettingsListTypography.rowCaption)
-                                    .foregroundStyle(.red)
-                            }
-
-                            if let draft = model.voiceDraft {
-                                Divider()
-                                ConnorVoiceProfilePreview(title: "待应用的 AI 分析结果", profile: draft)
-                                HStack {
-                                    Spacer()
-                                    Button("取消") { model.cancelVoiceDraft() }
-                                        .buttonStyle(.bordered)
-                                    Button {
-                                        model.confirmVoiceDraft()
-                                    } label: {
-                                        Label("应用音色", systemImage: "checkmark")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                }
-                            }
-
-                            if let profile = model.connorVoiceProfile {
-                                Divider()
-                                ConnorVoiceProfilePreview(title: "当前已生效的独立音色", profile: profile)
-                                HStack {
-                                    Spacer()
-                                    Button {
-                                        model.resetVoiceToFollowPersonality()
-                                    } label: {
-                                        Label("恢复跟随人格", systemImage: "arrow.counterclockwise")
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                            }
-                        }
-                        .padding(.top, 12)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "slider.horizontal.3")
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("高级音色配置")
-                                    .font(SettingsListTypography.rowTitleSelected)
-                                Text(model.connorVoiceProfile == nil ? "当前跟随人格" : "已启用独立音色")
-                                    .font(SettingsListTypography.rowCaption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Toggle(isOn: $model.automaticallyReadsReplies) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("回复后自动朗读")
-                                .font(SettingsListTypography.rowTitleSelected)
-                            Text(aiConnections.isXiaomiMiMOSpeechAvailable
-                                 ? "康纳同学完成回复后自动播放语音。"
-                                 : aiConnections.hasXiaomiMiMOConnection
-                                    ? "已检测到 MiMo；请检查此连接是否已保存有效的 API Key。"
-                                    : "需要先添加带有效 API Key 的 Xiaomi MiMo 连接，按量付费与 Token Plan 均可。")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                    .disabled(!aiConnections.isXiaomiMiMOSpeechAvailable)
-                }
-            }
             SettingsGroup(title: "备注") {
                 TextEditor(text: $model.notes)
                     .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
                     .appFormTextEditor()
             }
+            SettingsGroup(title: "危险操作") {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("清除全部记忆和会话")
+                            .font(SettingsListTypography.rowTitleSelected)
+                            .foregroundStyle(.red)
+                        Text("永久删除全部会话，以及 Memory OS 的 L0、L1、L2、L3、L4 记忆、处理队列和搜索索引。此操作不可撤销。")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 16)
+                    Button(role: .destructive) {
+                        memoryClearConfirmationText = ""
+                        memoryClearErrorMessage = nil
+                        showsMemoryClearConfirmation = true
+                    } label: {
+                        Label("清除记忆", systemImage: "trash.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(isClearingMemory)
+                }
+                .padding(.vertical, 4)
+
+                if let memoryClearStatusMessage {
+                    Divider()
+                    Label(memoryClearStatusMessage, systemImage: "checkmark.circle.fill")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.green)
+                }
+            }
         }
         .onAppear { model.refreshEnvironmentPermissionStatus() }
+        .sheet(isPresented: $showsMemoryClearConfirmation) {
+            ClearMemoryConfirmationSheet(
+                confirmationText: $memoryClearConfirmationText,
+                isClearing: isClearingMemory,
+                errorMessage: memoryClearErrorMessage,
+                onCancel: {
+                    guard !isClearingMemory else { return }
+                    showsMemoryClearConfirmation = false
+                },
+                onConfirm: clearMemoryAfterConfirmation
+            )
+        }
+    }
+
+    private func clearMemoryAfterConfirmation() {
+        guard MemoryClearConfirmationPolicy.accepts(memoryClearConfirmationText), !isClearingMemory else { return }
+        isClearingMemory = true
+        memoryClearErrorMessage = nil
+        Task { @MainActor in
+            do {
+                try await clearAllMemoryAndSessions()
+                isClearingMemory = false
+                showsMemoryClearConfirmation = false
+                memoryClearConfirmationText = ""
+                memoryClearStatusMessage = "全部记忆和会话已清除。"
+            } catch {
+                isClearingMemory = false
+                memoryClearErrorMessage = "清除失败：\(error.localizedDescription)"
+            }
+        }
     }
 }
 
-private struct ConnorVoiceProfilePreview: View {
-    let title: String
-    let profile: ConnorVoiceProfile
+enum MemoryClearConfirmationPolicy {
+    static let requiredText = "清除全部记忆"
+
+    static func accepts(_ input: String) -> Bool {
+        input.trimmingCharacters(in: .whitespacesAndNewlines) == requiredText
+    }
+}
+
+private struct ClearMemoryConfirmationSheet: View {
+    @Binding var confirmationText: String
+    let isClearing: Bool
+    let errorMessage: String?
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    @FocusState private var isConfirmationFieldFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(SettingsListTypography.rowTitleSelected)
-            voiceRow("总体音色", profile.summary)
-            voiceRow("听感年龄", profile.ageRange)
-            voiceRow("音质共鸣", profile.timbre)
-            voiceRow("表达方式", profile.speakingStyle)
-            voiceRow("语速节奏", profile.pace)
-            voiceRow("发音要求", profile.accent)
-            voiceRow("情绪底色", profile.emotionalTone)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("永久清除全部记忆和会话？")
+                        .font(AppTypography.sectionTitle)
+                    Text("将删除所有会话，以及 L0、L1、L2、L3、L4 的全部记忆和索引。删除后无法恢复。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
-    @ViewBuilder
-    private func voiceRow(_ label: String, _ value: String) -> some View {
-        if !value.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(label)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("请输入“\(MemoryClearConfirmationPolicy.requiredText)”以继续")
+                    .font(SettingsListTypography.rowTitleSelected)
+                TextField(MemoryClearConfirmationPolicy.requiredText, text: $confirmationText)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isConfirmationFieldFocused)
+                    .disabled(isClearing)
+                    .onSubmit {
+                        if MemoryClearConfirmationPolicy.accepts(confirmationText) {
+                            onConfirm()
+                        }
+                    }
+            }
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "xmark.octagon.fill")
                     .font(SettingsListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 64, alignment: .leading)
-                Text(value)
-                    .font(SettingsListTypography.rowTitle)
+                    .foregroundStyle(.red)
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 10) {
+                Spacer()
+                Button("取消", action: onCancel)
+                    .disabled(isClearing)
+                Button(role: .destructive, action: onConfirm) {
+                    if isClearing {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("正在清除…")
+                        }
+                    } else {
+                        Label("永久清除", systemImage: "trash.fill")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(!MemoryClearConfirmationPolicy.accepts(confirmationText) || isClearing)
             }
         }
+        .padding(24)
+        .frame(width: 520)
+        .interactiveDismissDisabled(isClearing)
+        .onAppear { isConfirmationFieldFocused = true }
     }
 }
 

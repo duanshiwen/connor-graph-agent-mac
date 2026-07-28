@@ -109,7 +109,6 @@ struct ChatFeatureDependencies {
     let contacts: ContactsFeatureModel
     let governance: GovernanceFeatureModel
     let aiConnections: AIConnectionsFeatureModel
-    let speechPlayback: ConnorSpeechPlaybackCoordinator
     let knowledgeMarketplace: CloudKnowledgeMarketplaceStore
     let sources: SourceRuntimeFeatureModel
     let permissionMode: () -> AgentPermissionMode

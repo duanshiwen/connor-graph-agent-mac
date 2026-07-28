@@ -202,10 +202,11 @@ struct ChatSessionRuntimeIntegrationTests {
         fixture.runtime.selectChatSession(session.id)
         #expect(fixture.runtime.chatFeatureModel.sessions.loadingSessionDetailID == session.id)
 
+        let publishedBeforeEdit = fixture.runtime.chatFeatureModel.composer.input
         fixture.runtime.chatComposerCoordinator.updateSelectedDraft("a")
         try await waitForLoadingToFinish(fixture.runtime)
 
-        #expect(fixture.runtime.chatFeatureModel.composer.input == "a")
+        #expect(fixture.runtime.chatFeatureModel.composer.input == publishedBeforeEdit)
         #expect(fixture.runtime.chatComposerCoordinator.currentSelectedDraft() == "a")
     }
 
@@ -216,12 +217,13 @@ struct ChatSessionRuntimeIntegrationTests {
 
         let sessionID = try #require(fixture.runtime.chatFeatureModel.sessions.selectedSessionID)
         fixture.runtime.inputSettingsModel.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        let publishedBeforeEdit = fixture.runtime.chatFeatureModel.composer.input
         fixture.runtime.chatComposerCoordinator.updateSelectedDraft("draft in progress")
 
         fixture.runtime.reloadChatSessions()
 
         #expect(fixture.runtime.chatFeatureModel.sessions.selectedSessionID == sessionID)
-        #expect(fixture.runtime.chatFeatureModel.composer.input == "draft in progress")
+        #expect(fixture.runtime.chatFeatureModel.composer.input == publishedBeforeEdit)
         #expect(fixture.runtime.chatComposerCoordinator.currentSelectedDraft() == "draft in progress")
     }
 

@@ -53,6 +53,7 @@ public struct MailRuntime: Sendable {
     public var smtpClient: any MailSMTPClient
     public var sentMessageRemoteAppender: any MailSentMessageRemoteAppender
     public var messageComposer: MailMessageComposer
+    public var outboundAttachmentResolver: (any OutboundMailAttachmentResolving)?
     public var memoryOSFacade: AppMemoryOSFacade?
 
     public init(
@@ -65,6 +66,7 @@ public struct MailRuntime: Sendable {
         smtpClient: any MailSMTPClient = NetworkMailSMTPClient(),
         sentMessageRemoteAppender: any MailSentMessageRemoteAppender = NetworkMailSentMessageRemoteAppender(),
         messageComposer: MailMessageComposer = MailMessageComposer(),
+        outboundAttachmentResolver: (any OutboundMailAttachmentResolving)? = nil,
         memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
         self.repository = repository
@@ -76,6 +78,7 @@ public struct MailRuntime: Sendable {
         self.smtpClient = smtpClient
         self.sentMessageRemoteAppender = sentMessageRemoteAppender
         self.messageComposer = messageComposer
+        self.outboundAttachmentResolver = outboundAttachmentResolver
         self.memoryOSFacade = memoryOSFacade
     }
 
@@ -301,7 +304,15 @@ public struct MailRuntime: Sendable {
         guard let endpoint = account.outgoing else {
             throw MailRuntimeError.missingOutgoingEndpoint(account.id.rawValue)
         }
-        let composed = try messageComposer.compose(draft: draft, identity: identity)
+        let attachments: [OutboundMailAttachment]
+        if draft.attachmentIDs.isEmpty {
+            attachments = []
+        } else if let outboundAttachmentResolver {
+            attachments = try await outboundAttachmentResolver.resolve(ids: draft.attachmentIDs, sessionID: sessionID)
+        } else {
+            throw MailRuntimeError.attachmentSessionRequired
+        }
+        let composed = try messageComposer.compose(draft: draft, identity: identity, attachments: attachments)
         guard let approvedEnvelopeHash = draft.approvedEnvelopeHash, !approvedEnvelopeHash.isEmpty else {
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Approved send blocked because draft has no approved envelope hash", payloadHash: composed.envelopeHash))
             throw MailRuntimeError.missingApprovedEnvelopeHash(draftID.rawValue)
@@ -331,7 +342,7 @@ public struct MailRuntime: Sendable {
             let receipt = MailSendReceipt(draftID: draftID, providerMessageID: response.providerMessageID, sentAt: response.sentAt, envelopeHash: composed.envelopeHash)
             try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: response.providerMessageID, envelopeHash: composed.envelopeHash))
             _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
-            let sentMailbox = try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
+            let sentMailbox = try await saveSentMessage(draft: draft, identity: identity, attachments: attachments, receipt: receipt, messageIDHeader: composed.messageID)
             await appendRemoteSentMessageIfPossible(account: account, password: password, draft: draft, receipt: receipt, rawMessage: composed.rawMessage, sentMailbox: sentMailbox, runID: runID, sessionID: sessionID)
             try captureOutboundMemoryEvidence(draft: draft, identity: identity, receipt: receipt, runID: runID, sessionID: sessionID)
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent authorized draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
@@ -360,7 +371,7 @@ public struct MailRuntime: Sendable {
         return MailSendHistory(draft: draft, attempts: attempts, auditRecords: auditRecords)
     }
 
-    private func saveSentMessage(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, messageIDHeader: String) async throws -> MailMailbox {
+    private func saveSentMessage(draft: MailDraft, identity: MailIdentity, attachments: [OutboundMailAttachment], receipt: MailSendReceipt, messageIDHeader: String) async throws -> MailMailbox {
         let mailboxID = MailMailboxID(rawValue: "\(draft.accountID.rawValue)-sent")
         let existingMailboxes = try await cache.listMailboxes(accountID: draft.accountID)
         let sentMailbox: MailMailbox
@@ -398,21 +409,21 @@ public struct MailRuntime: Sendable {
             redactedPreview: String(draft.body.prefix(500)),
             bodyHash: receipt.envelopeHash
         )
-        let attachments = draft.attachmentIDs.map { attachmentID in
+        let attachmentDescriptors = attachments.map { attachment in
             MailAttachmentDescriptor(
-                id: attachmentID,
+                id: attachment.id,
                 messageID: messageID,
-                filename: attachmentID.rawValue,
-                mimeType: "application/octet-stream",
-                byteCount: 0,
-                contentHash: nil
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                byteCount: attachment.data.count,
+                contentHash: attachment.contentHash
             )
         }
         try await cache.saveMessage(MailMessageDetail(
             summary: summary,
             headers: MailMessageHeaders(messageIDHeader: messageIDHeader, inReplyTo: draft.inReplyToHeader, references: draft.referencesHeaders, rawHeaderHash: receipt.envelopeHash),
             body: body,
-            attachments: attachments
+            attachments: attachmentDescriptors
         ))
         NotificationCenter.default.post(
             name: .connorMailCacheDidChange,

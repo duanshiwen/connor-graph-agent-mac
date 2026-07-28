@@ -36,7 +36,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         loopController: AgentLoopController<Provider>,
         session: AgentSession = AgentSession(),
         groupID: String = "default",
-        recentMessageLimit: Int = 6,
+        recentMessageLimit: Int = .max,
         memoryOSRepository: AppMemoryOSRepository? = nil,
         memoryOSIngestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
         memoryOSFacade: AppMemoryOSFacade? = nil
@@ -66,7 +66,10 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
 
     @discardableResult
     public mutating func submit(_ prompt: String, personReferences: [PersonReference] = []) async throws -> AgentLoopChatResponse {
-        let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
+        let conversationMessages = session.messages.filter {
+            $0.role == .user || $0.role == .assistant
+        }
+        let recentMessages = Array(conversationMessages.suffix(max(0, recentMessageLimit)))
         let isFirstUserMessage = !session.messages.contains { $0.role == .user }
         let userMessage = session.appendUserMessage(prompt, personReferences: personReferences)
         transcript = session.messages

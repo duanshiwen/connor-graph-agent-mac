@@ -45,8 +45,10 @@ struct AgentMarkdownPreviewText: View {
     var lineLimit: Int? = nil
     var maxRenderedBlocks: Int? = nil
     var allowsDeferredPreview: Bool = true
+    var allowsUserExpansion: Bool = false
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     @State private var loadedDocument: AgentMarkdownCompiledDocument?
+    @State private var isUserExpanded = false
 
     private final class RenderCache: @unchecked Sendable {
         static let shared = RenderCache()
@@ -113,9 +115,17 @@ struct AgentMarkdownPreviewText: View {
 
     private var documentLoadID: String {
         let contentID = AgentMarkdownDocumentCompiler.stableFingerprint(markdown)
-        let expansionID = "deferred:\(allowsDeferredPreview)"
+        let expansionID = "deferred:\(effectiveAllowsDeferredPreview)"
         guard let persistentCacheContext else { return "\(contentID)|\(expansionID)" }
         return "\(persistentCacheContext.sessionID)|\(persistentCacheContext.messageID)|\(contentID)|\(expansionID)"
+    }
+
+    private var markdownContentID: String {
+        AgentMarkdownDocumentCompiler.stableFingerprint(markdown)
+    }
+
+    private var effectiveAllowsDeferredPreview: Bool {
+        allowsDeferredPreview && !isUserExpanded
     }
 
     private func renderWindow(for document: AgentMarkdownCompiledDocument) -> AgentMarkdownCompiledRenderWindow {
@@ -138,8 +148,15 @@ struct AgentMarkdownPreviewText: View {
             lineLimit: lineLimit,
             monospacedFallback: monospacedFallback,
             markdownCharacterCount: markdown.utf8.count,
-            allowsDeferredPreview: allowsDeferredPreview
+            allowsDeferredPreview: effectiveAllowsDeferredPreview
         )
+    }
+
+    private var allowedImageRoot: URL? {
+        guard let persistentCacheContext else { return nil }
+        return persistentCacheContext.store.storagePaths
+            .sessionArtifactDirectories(sessionID: persistentCacheContext.sessionID)
+            .root
     }
 
     @ViewBuilder
@@ -162,7 +179,10 @@ struct AgentMarkdownPreviewText: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             case .deferredPreview:
-                deferredPreviewView(statusText: "内容较长，已先显示轻量预览以保持界面响应。")
+                deferredPreviewView(
+                    statusText: "内容较长，已先显示轻量预览以保持界面响应。",
+                    showsExpansionControl: allowsUserExpansion
+                )
             case .compiledDocument:
                 if let loadedDocument, loadedDocument.source == markdown {
                     compiledDocumentView(loadedDocument)
@@ -190,9 +210,17 @@ struct AgentMarkdownPreviewText: View {
             guard !Task.isCancelled, document.source == markdown else { return }
             loadedDocument = document
         }
+        .onChange(of: markdownContentID) {
+            isUserExpanded = false
+            loadedDocument = nil
+        }
     }
 
-    private func deferredPreviewView(statusText: String, showsProgress: Bool = false) -> some View {
+    private func deferredPreviewView(
+        statusText: String,
+        showsProgress: Bool = false,
+        showsExpansionControl: Bool = false
+    ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             inlineText(deferredPreviewInlineRendered, font: font, nativeFont: bodyNSFont)
                 .lineLimit(12)
@@ -206,11 +234,29 @@ struct AgentMarkdownPreviewText: View {
                 Text(statusText)
                     .font(secondaryFont)
                     .foregroundStyle(.secondary)
+                if showsExpansionControl {
+                    Spacer(minLength: 4)
+                    Button(action: expandFullContent) {
+                        Label("展开完整内容", systemImage: "chevron.down")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(secondaryFont.weight(.medium))
+                    .help("加载并显示完整 Markdown 内容")
+                    .accessibilityLabel("展开并显示完整文件内容")
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
+    }
+
+    private func expandFullContent() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isUserExpanded = true
+        }
     }
 
     private func compiledDocumentView(_ document: AgentMarkdownCompiledDocument) -> some View {
@@ -281,6 +327,12 @@ struct AgentMarkdownPreviewText: View {
                     .fill(Color.secondary.opacity(0.28))
                     .frame(width: 3)
                 }
+        case .image(let altText, let source):
+            AgentMarkdownImageView(
+                altText: altText,
+                source: source,
+                allowedRoot: allowedImageRoot
+            )
         case .taskItem(let isCompleted, let text, let inline):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
@@ -478,6 +530,69 @@ struct AgentMarkdownPreviewText: View {
         }
     }
 
+}
+
+enum AgentMarkdownImageSourcePolicy {
+    static func localFileURL(source: String, allowedRoot: URL?) -> URL? {
+        guard let allowedRoot,
+              let sourceURL = URL(string: source),
+              sourceURL.isFileURL else { return nil }
+        let root = allowedRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = root.path
+        let candidatePath = candidate.path
+        guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else { return nil }
+        return candidate
+    }
+}
+
+private struct AgentMarkdownImageView: View {
+    private enum Phase {
+        case loading
+        case loaded(NSImage)
+        case failed
+    }
+
+    var altText: String
+    var source: String
+    var allowedRoot: URL?
+    @State private var phase: Phase = .loading
+
+    var body: some View {
+        Group {
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            case .loaded(let image):
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 480, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            case .failed:
+                Label("图片无法显示", systemImage: "photo.badge.exclamationmark")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 96)
+            }
+        }
+        .accessibilityLabel(altText.isEmpty ? "回复图片" : altText)
+        .task(id: source) {
+            phase = .loading
+            guard let url = AgentMarkdownImageSourcePolicy.localFileURL(source: source, allowedRoot: allowedRoot) else {
+                phase = .failed
+                return
+            }
+            let data = await Task.detached(priority: .utility) {
+                guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= 20_000_000 else { return nil as Data? }
+                return data
+            }.value
+            guard !Task.isCancelled, let data, let image = NSImage(data: data) else { return phase = .failed }
+            phase = .loaded(image)
+        }
+    }
 }
 
 struct AgentMarkdownLinkText: NSViewRepresentable {

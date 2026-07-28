@@ -80,9 +80,21 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 @Test func agentLoopConfigurationDefaultsAllowDeeperSingleRunWork() {
     let configuration = AgentLoopConfiguration()
 
-    #expect(configuration.maxToolIterations == 256)
+    #expect(configuration.maxToolIterations == 2_048)
     #expect(configuration.maxToolCallsPerIteration == 4)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
+    #expect(configuration.promptMaxEstimatedTokens == 1_000_000)
+    #expect(configuration.maxToolResultBytes == 1_000_000)
+    #expect(configuration.budget.maxTotalTokens == 10_000_000)
+}
+
+@Test func agentLoopConfigurationDecodesMissingToolIterationLimitWithCurrentDefault() throws {
+    let configuration = try JSONDecoder().decode(
+        AgentLoopConfiguration.self,
+        from: Data(#"{}"#.utf8)
+    )
+
+    #expect(configuration.maxToolIterations == 2_048)
 }
 
 @Test func agentLoopConfigurationDecodesLegacyJSONWithPromptDefaults() throws {
@@ -102,7 +114,9 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     #expect(configuration.maxToolIterations == 32)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 160_000)
+    #expect(configuration.promptMaxEstimatedTokens == 1_000_000)
+    #expect(configuration.maxToolResultBytes == 4096)
+    #expect(configuration.budget.maxTotalTokens == 10_000)
     #expect(configuration.maxConsecutiveToolResultErrors == 0)
 }
 

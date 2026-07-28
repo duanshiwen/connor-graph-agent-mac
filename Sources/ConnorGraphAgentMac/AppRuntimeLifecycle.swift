@@ -129,7 +129,6 @@ final class AppRuntimeLifecycle {
     let appSettingsModel: AppSettingsFeatureModel
     let inputSettingsModel: InputSettingsFeatureModel
     let userPreferencesModel: UserPreferencesFeatureModel
-    let connorSpeechPlaybackCoordinator: ConnorSpeechPlaybackCoordinator
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
     private lazy var environmentLocationService = MacCurrentLocationService()
@@ -551,11 +550,6 @@ final class AppRuntimeLifecycle {
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
         self.userPreferencesModel = UserPreferencesFeatureModel()
-        self.connorSpeechPlaybackCoordinator = ConnorSpeechPlaybackCoordinator(
-            settingsRepository: llmSettingsRepository,
-            cacheDirectory: storagePaths?.applicationSupportDirectory
-                .appendingPathComponent("speech-cache", isDirectory: true)
-        )
         self.workspaceSettingsModel = WorkspaceSettingsFeatureModel()
         self.permissionSettingsModel = PermissionSettingsFeatureModel()
         self.runtimeSettingsCoordinator = RuntimeSettingsPersistenceCoordinator(
@@ -739,7 +733,6 @@ final class AppRuntimeLifecycle {
         self.fallbackChatSessionStorage = initialSession
         aiConnectionsModel.onRuntimeSettingsChanged = { [weak self] rebuildRuntime in
             guard let self else { return }
-            self.connorSpeechPlaybackCoordinator.stopIfUnavailable()
             if rebuildRuntime {
                 self.aiConnectionsRuntimeCoordinator.syncCurrentSessionDisplay()
                 self.rebuildNativeSessionManagerForActiveSession()
@@ -752,19 +745,6 @@ final class AppRuntimeLifecycle {
         }
         aiConnectionsModel.onConnectionSetup = { [weak self] connection in
             self?.aiConnectionsRuntimeCoordinator.syncActiveSession(to: connection)
-        }
-        connorSpeechPlaybackCoordinator.isAvailable = { [weak self] in
-            self?.aiConnectionsModel.isXiaomiMiMOSpeechAvailable ?? false
-        }
-        connorSpeechPlaybackCoordinator.isConfigured = { [weak self] in
-            self?.aiConnectionsModel.hasXiaomiMiMOConnection ?? false
-        }
-        connorSpeechPlaybackCoordinator.reportError = { [weak self] message in
-            self?.chatComposerCoordinator.showToast(
-                title: "朗读失败",
-                message: message,
-                systemImage: "speaker.slash"
-            )
         }
         governanceModel.sessionsProvider = { [weak self] in
             guard let self else { return [] }
@@ -933,15 +913,6 @@ final class AppRuntimeLifecycle {
             guard let self else { throw ConnorPersonalityError.unavailable }
             let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
             return try await ConnorPersonalityGenerator().generate(from: request, provider: provider)
-        }
-        userPreferencesModel.voiceGenerator = { [weak self] request, voiceGender in
-            guard let self else { throw ConnorVoiceProfileError.unavailable }
-            let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
-            return try await ConnorVoiceProfileGenerator().generate(
-                from: request,
-                voiceGender: voiceGender,
-                provider: provider
-            )
         }
         workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
@@ -1160,6 +1131,7 @@ final class AppRuntimeLifecycle {
         }
         chatSessionCoordinator.onSelectionStarted = { [weak self] sessionID in
             guard let self else { return }
+            self.restoreChatInputDraft(for: sessionID)
             self.chatRunCoordinator.prepareSelection(sessionID: sessionID)
             self.chatFeatureModel.sessions.selectedArtifactDirectories = nil
         }
@@ -1502,7 +1474,6 @@ final class AppRuntimeLifecycle {
         contactsFeatureModel.shutdown()
         mailFeatureModel.shutdown()
         browserFeatureModel.shutdown()
-        connorSpeechPlaybackCoordinator.shutdown()
     }
 
     private func applyPromotedGraphSnapshot(_ snapshot: GraphStoreSnapshot) {
@@ -2481,6 +2452,54 @@ final class AppRuntimeLifecycle {
         }
     }
 
+    func clearAllMemoryAndSessions() async throws {
+        guard let chatSessionRepository, let memoryOSStore, let storagePaths else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [
+                NSLocalizedDescriptionKey: "本地记忆存储尚未就绪，无法执行清除。"
+            ])
+        }
+
+        await maintenanceCoordinator.pauseForMemoryReset()
+        do {
+            let activeSessionIDs = Set(chatFeatureModel.sessions.allSessions.map(\.id))
+            for sessionID in activeSessionIDs {
+                _ = stopSpeechTranscriptionIfRunningForDeletedSession(sessionID)
+                chatBackgroundTaskCoordinator.removeSession(sessionID)
+                chatComposerCoordinator.removeSession(sessionID)
+                chatRunCoordinator.removeSession(sessionID)
+                chatWorkspaceCoordinator.removeSession(sessionID)
+                browserFeatureModel.removeWorkspaceSnapshot(for: sessionID)
+            }
+
+            memoryOSFacade = nil
+            let purgedSessionIDs = try chatSessionRepository.purgeAllSessions()
+            try memoryOSStore.clearAllMemoryData()
+            try AppMemoryOSSearchKernelFactory.removeLiveIndex(paths: storagePaths)
+
+            for sessionID in purgedSessionIDs {
+                globalSearchFeatureModel.removeSessionIndex(sessionID: sessionID)
+            }
+            await globalSearchFeatureModel.waitForSessionIndexOperations()
+
+            let rebuiltDocumentCount = try AppMemoryOSSearchKernelFactory.rebuildLiveIndex(paths: storagePaths)
+            let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
+            memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: searchKernel)
+            memoryOSSearchHealthSummary = "Memory OS 已清空，搜索索引已重建（\(rebuiltDocumentCount) 条文档）。"
+
+            chatSessionCoordinator.clearSelection()
+            reloadChatSessions(restoreWorkspaceMode: false)
+            rebuildNativeSessionManagerForActiveSession()
+            chatApprovalCoordinator.reload()
+            errorMessage = nil
+            maintenanceCoordinator.resumeAfterMemoryReset()
+        } catch {
+            memoryOSFacade = AppMemoryOSFacade(store: memoryOSStore, searchKernel: nil)
+            rebuildNativeSessionManagerForActiveSession()
+            maintenanceCoordinator.resumeAfterMemoryReset()
+            throw error
+        }
+    }
+
     private func installEmptySessionCapsuleState(
         sessionID: String,
         synchronizeWorkspaceDrafts: Bool = true
@@ -3213,9 +3232,21 @@ final class AppRuntimeLifecycle {
             } else {
                 sessionSummary = nil
             }
+            if !attachmentsForSubmission.isEmpty {
+                await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
+            }
+            var attachmentHistoryMessages = manager.session.messages
+            if let chatSessionRepository,
+               let persistedSession = try? chatSessionRepository.loadSession(id: submittingSessionID) {
+                attachmentHistoryMessages = persistedSession.messages
+            }
+            let conversationAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+                messages: attachmentHistoryMessages,
+                currentAttachments: attachmentsForSubmission
+            )
             let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
                 sessionID: submittingSessionID,
-                attachments: attachmentsForSubmission
+                attachments: conversationAttachments
             )
             let noteAugmentedPrompt = NoteSessionPromptBuilder.augmentedPrompt(
                 prompt,
@@ -3287,18 +3318,6 @@ final class AppRuntimeLifecycle {
             let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
                 .last(where: { $0.role == AgentRole.assistant })
-            if let latestAssistantMessage {
-                connorSpeechPlaybackCoordinator.automaticallyRead(
-                    messageID: latestAssistantMessage.id,
-                    markdown: latestAssistantMessage.content,
-                    personality: userPreferencesModel.connorPersonality,
-                    personalityRevision: userPreferencesModel.connorPersonalityRevision,
-                    voiceGender: userPreferencesModel.resolvedConnorVoiceGender,
-                    voiceProfile: userPreferencesModel.connorVoiceProfile,
-                    voiceRevision: userPreferencesModel.connorVoiceRevision,
-                    enabled: userPreferencesModel.automaticallyReadsReplies
-                )
-            }
             noteSessionUpdate(
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,
@@ -3664,7 +3683,6 @@ extension AppRuntimeLifecycle {
                 contacts: model.contactsFeatureModel,
                 governance: model.governanceModel,
                 aiConnections: aiConnections,
-                speechPlayback: model.connorSpeechPlaybackCoordinator,
                 knowledgeMarketplace: model.knowledgeMarketplaceStore,
                 sources: model.sourceRuntimeModel,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },
@@ -3712,7 +3730,11 @@ extension AppRuntimeLifecycle {
             settingsActions: SettingsRuntimeActions(
                 load: { [weak model] in model?.loadRuntimeSettings() },
                 openProjectHelp: { [weak model] in model?.openProjectWebsiteHelp() },
-                openURL: { [weak model] in model?.openURLInSystemDefaultBrowser($0) }
+                openURL: { [weak model] in model?.openURLInSystemDefaultBrowser($0) },
+                clearAllMemoryAndSessions: { [weak model] in
+                    guard let model else { return }
+                    try await model.clearAllMemoryAndSessions()
+                }
             ),
             commercialReadinessDashboard: { [weak model] in model?.commercialReadinessDashboard ?? CommercialReadinessDashboard(cards: []) }
         )

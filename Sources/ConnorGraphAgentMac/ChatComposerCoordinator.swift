@@ -10,6 +10,7 @@ import ConnorGraphCore
 final class ChatComposerCoordinator {
     let model: ChatComposerModel
     private let storagePaths: AppStoragePaths?
+    private let draftPersistence: ChatComposerDraftPersistence?
     private let speech = SessionSpeechTranscriptionCoordinator(transcriber: SessionSpeechTranscriptionController())
     private var draftsBySessionID: [String: String] = [:]
     private var liveDraftSessionID: String?
@@ -21,6 +22,7 @@ final class ChatComposerCoordinator {
     private var generation = 0
     private var isShutdown = false
     private var isRestoring = false
+    private var restoredPublishedDraftSessionID: String?
 
     @ObservationIgnored var selectedSessionID: () -> String? = { nil }
     @ObservationIgnored var autoSaveDraftsEnabled: () -> Bool = { true }
@@ -29,9 +31,15 @@ final class ChatComposerCoordinator {
     @ObservationIgnored var skillDisplayName: (String) -> String = { $0 }
     @ObservationIgnored var onBackgroundTask: (AppSessionBackgroundTask) -> Void = { _ in }
 
-    init(model: ChatComposerModel, storagePaths: AppStoragePaths?) {
+    init(model: ChatComposerModel, storagePaths: AppStoragePaths?, draftSaveDelay: TimeInterval = 0.3) {
         self.model = model
         self.storagePaths = storagePaths
+        self.draftPersistence = storagePaths.map {
+            ChatComposerDraftPersistence(
+                repository: ChatComposerDraftRepository(storagePaths: $0),
+                saveDelay: draftSaveDelay
+            )
+        }
     }
 
     var canSubmit: Bool {
@@ -43,7 +51,10 @@ final class ChatComposerCoordinator {
     func updateSelectedDraft(_ draft: String) {
         guard !isShutdown, !isRestoring, let sessionID = selectedSessionID() else { return }
         updateLiveDraft(draft, sessionID: sessionID)
-        if autoSaveDraftsEnabled() { draftsBySessionID[sessionID] = draft }
+        if autoSaveDraftsEnabled() {
+            draftsBySessionID[sessionID] = draft
+            draftPersistence?.scheduleSave(draft, sessionID: sessionID)
+        }
         speech.noteUserEditedDraft(sessionID: sessionID, draft: draft)
     }
 
@@ -63,9 +74,14 @@ final class ChatComposerCoordinator {
 
     func restore(sessionID: String?) {
         guard !isShutdown else { return }
+        guard restoredPublishedDraftSessionID != sessionID else { return }
         let draft: String
         if let sessionID, liveDraftSessionID == sessionID { draft = liveDraft }
-        else if let sessionID, autoSaveDraftsEnabled() { draft = draftsBySessionID[sessionID] ?? "" }
+        else if let sessionID, autoSaveDraftsEnabled() {
+            let restored = draftsBySessionID[sessionID] ?? draftPersistence?.load(sessionID: sessionID) ?? ""
+            draftsBySessionID[sessionID] = restored
+            draft = restored
+        }
         else { draft = "" }
         setPublishedDraft(draft, sessionID: sessionID)
         model.pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentsBySessionID[$0] } ?? []
@@ -73,6 +89,7 @@ final class ChatComposerCoordinator {
 
     func consumeForSubmission(sessionID: String) {
         draftsBySessionID[sessionID] = ""
+        draftPersistence?.remove(sessionID: sessionID)
         pendingAttachmentsBySessionID[sessionID] = []
         if selectedSessionID() == sessionID {
             setPublishedDraft("", sessionID: sessionID)
@@ -83,6 +100,7 @@ final class ChatComposerCoordinator {
     func removeSession(_ sessionID: String) {
         extractionTasksBySessionID.removeValue(forKey: sessionID)?.cancel()
         draftsBySessionID.removeValue(forKey: sessionID)
+        draftPersistence?.remove(sessionID: sessionID)
         pendingAttachmentsBySessionID.removeValue(forKey: sessionID)
         if liveDraftSessionID == sessionID { liveDraftSessionID = nil; liveDraft = "" }
     }
@@ -174,6 +192,11 @@ final class ChatComposerCoordinator {
         }
     }
 
+    func awaitAttachmentExtraction(sessionID: String) async {
+        runExtractionJobs(sessionID: sessionID)
+        await extractionTasksBySessionID[sessionID]?.value
+    }
+
     func showToast(title: String, message: String, systemImage: String = "exclamationmark.triangle") {
         guard !isShutdown else { return }
         let toast = AgentChatToast(title: title, message: message, systemImage: systemImage)
@@ -232,10 +255,14 @@ final class ChatComposerCoordinator {
     private func setPublishedDraft(_ draft: String, sessionID: String?) {
         if let sessionID { updateLiveDraft(draft, sessionID: sessionID) }
         else { liveDraftSessionID = nil; liveDraft = draft }
+        restoredPublishedDraftSessionID = sessionID
         isRestoring = true; model.input = draft; isRestoring = false
     }
     private func setSpeechDraft(_ draft: String, sessionID: String) {
-        draftsBySessionID[sessionID] = draft
+        if autoSaveDraftsEnabled() {
+            draftsBySessionID[sessionID] = draft
+            draftPersistence?.scheduleSave(draft, sessionID: sessionID)
+        }
         if selectedSessionID() == sessionID { setPublishedDraft(draft, sessionID: sessionID) }
     }
     private func setProvisionalTranscript(_ transcript: String?, sessionID: String) {
@@ -285,6 +312,7 @@ final class ChatComposerCoordinator {
 
     func shutdown() {
         guard !isShutdown else { return }
+        draftPersistence?.flush(draftsBySessionID)
         isShutdown = true; generation += 1
         toastTask?.cancel(); toastTask = nil
         for task in importTasks.values { task.cancel() }

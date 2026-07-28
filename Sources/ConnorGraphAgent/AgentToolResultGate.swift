@@ -6,7 +6,7 @@ public struct AgentToolResultGateConfiguration: Codable, Sendable, Equatable {
     public var includeTruncationMetadata: Bool
 
     public init(
-        maxResultCharacters: Int = 32 * 1024,
+        maxResultCharacters: Int = 1_000_000,
         perToolCharacterLimits: [String: Int] = [:],
         includeTruncationMetadata: Bool = true
     ) {

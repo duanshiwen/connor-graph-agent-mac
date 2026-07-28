@@ -338,3 +338,33 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(try store.sessionBackgroundTasks(sessionID: "session-1").map(\.id) == ["task-1"])
     #expect(try store.sessionBackgroundTasks(sessionID: "session-2").map(\.id) == ["task-2"])
 }
+
+@Test func graphKernelStorePermanentlyPurgesAllSessionOwnedData() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    let session = AgentSession(
+        id: "session-1",
+        title: "One",
+        messages: [AgentMessage(id: "message-1", role: .user, content: "Remember this")]
+    )
+    try store.upsertSession(session)
+    try store.upsertSessionBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: session.id,
+        kind: "title_generation",
+        title: "Title",
+        detail: "Queued",
+        status: .queued,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_000),
+        errorMessage: nil,
+        payloadJSON: "{}"
+    ))
+
+    let purgedIDs = try store.purgeAllSessionData()
+
+    #expect(purgedIDs == [session.id])
+    #expect(try store.recentSessions(limit: 10, includeDeleted: true).isEmpty)
+    #expect(try store.sessionBackgroundTasks(sessionID: session.id).isEmpty)
+    #expect(try store.schemaHealthReport().isHealthy)
+}
