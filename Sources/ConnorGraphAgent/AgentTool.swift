@@ -272,7 +272,9 @@ public struct AgentToolArguments: Sendable, Equatable {
 
     public func iso8601Date(_ key: String) throws -> Date? {
         guard let value = string(key) else { return nil }
-        guard let date = ISO8601DateFormatter().date(from: value) else {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) else {
             throw AgentToolError.invalidArguments("\(key) must be a valid ISO-8601 timestamp")
         }
         return date
