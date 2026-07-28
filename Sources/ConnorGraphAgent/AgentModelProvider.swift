@@ -100,7 +100,6 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
 
 public enum AgentGeneratedMediaKind: String, Codable, Sendable, Equatable {
     case image
-    case speech
 }
 
 public enum AgentGeneratedMediaCapability: String, Codable, Sendable, Equatable, CaseIterable {
@@ -108,8 +107,6 @@ public enum AgentGeneratedMediaCapability: String, Codable, Sendable, Equatable,
     case imageGeneration
     case imageEditing
     case audioInput
-    case speechGeneration
-    case streamingAudioOutput
 }
 
 public enum AgentGeneratedImageAction: String, Codable, Sendable, Equatable {
@@ -153,26 +150,10 @@ public struct AgentGeneratedMediaArtifact: Sendable, Equatable {
     }
 }
 
-public struct AgentGeneratedAudioFormat: Codable, Sendable, Equatable {
-    public var encoding: String
-    public var sampleRate: Double
-    public var channelCount: Int
-    public var bitsPerChannel: Int
-
-    public init(encoding: String, sampleRate: Double, channelCount: Int, bitsPerChannel: Int) {
-        self.encoding = encoding
-        self.sampleRate = sampleRate
-        self.channelCount = channelCount
-        self.bitsPerChannel = bitsPerChannel
-    }
-}
-
 public enum AgentGeneratedMediaEvent: Sendable, Equatable {
     case started
     case progress(Double)
     case preview(Data, mimeType: String)
-    case audioStreamStarted(AgentGeneratedAudioFormat)
-    case audioChunk(sequence: Int, data: Data, presentationTime: TimeInterval?)
     case completed(AgentGeneratedMediaArtifact)
 }
 
@@ -231,16 +212,9 @@ public enum CurrentModelMediaCapabilityGate {
     public static func decision(
         modelID: String,
         capabilities: AgentModelCapabilities,
-        requestKind: AgentGeneratedMediaKind,
-        requiresStreaming: Bool = false
+        requestKind: AgentGeneratedMediaKind
     ) -> CurrentModelMediaCapabilityDecision {
-        let required: Set<AgentGeneratedMediaCapability>
-        switch requestKind {
-        case .image:
-            required = [.imageGeneration]
-        case .speech:
-            required = requiresStreaming ? [.speechGeneration, .streamingAudioOutput] : [.speechGeneration]
-        }
+        let required: Set<AgentGeneratedMediaCapability> = [.imageGeneration]
         guard required.isSubset(of: capabilities.generatedMediaCapabilities) else {
             let missing = required.subtracting(capabilities.generatedMediaCapabilities).map(\.rawValue).sorted().joined(separator: ", ")
             return .unsupportedByCurrentModel(reason: "当前模型 \(modelID) 不支持所需媒体能力：\(missing)。请切换到支持该能力的模型。")

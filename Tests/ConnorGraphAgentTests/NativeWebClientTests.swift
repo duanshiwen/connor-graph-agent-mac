@@ -91,7 +91,82 @@ struct NativeWebClientTests {
             _ = try await client.search(query: "connor", engine: "google", maxResults: 3)
         }
     }
+
+    @Test func openverseImageSearchReturnsSourceAndLicenseMetadata() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON)))
+
+        let result = try await client.search(query: "Golden Gate Bridge", maxResults: 5, licenseFilter: .commercial)
+
+        #expect(result.provider == "openverse")
+        #expect(result.licenseFilter == .commercial)
+        #expect(result.results.count == 1)
+        #expect(result.results[0].imageURL == "https://images.example.com/golden-gate.jpg")
+        #expect(result.results[0].sourcePageURL == "https://source.example.com/golden-gate")
+        #expect(result.results[0].license == "by 4.0")
+        #expect(result.results[0].width == 2400)
+        #expect(result.markdown.contains("Source page: https://source.example.com/golden-gate"))
+        #expect(result.markdown.contains("Attribution: Golden Gate Bridge by Example Photographer, CC BY 4.0"))
+    }
+
+    @Test func imageSearchToolReturnsStructuredCandidatesAndSourceCitations() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON)))
+        let tool = NativeImageSearchTool(client: client)
+        let context = AgentToolExecutionContext(
+            runID: "run-image-search",
+            sessionID: "session-image-search",
+            groupID: "default",
+            userPrompt: "Find a Golden Gate Bridge image",
+            toolCallID: "call-image-search",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "query": .string("Golden Gate Bridge"),
+                "maxResults": .int(3),
+                "licenseFilter": .string("commercial")
+            ]),
+            context: context
+        )
+
+        #expect(result.toolName == "image_search")
+        #expect(result.citations == ["https://source.example.com/golden-gate"])
+        let data = try #require(result.contentJSON?.data(using: String.Encoding.utf8))
+        let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(payload["provider"] as? String == "openverse")
+        #expect(payload["licenseFilter"] as? String == "commercial")
+        let candidates = try #require(payload["results"] as? [[String: Any]])
+        #expect(candidates.count == 1)
+        #expect(candidates[0]["imageURL"] as? String == "https://images.example.com/golden-gate.jpg")
+        #expect(candidates[0]["sourcePageURL"] as? String == "https://source.example.com/golden-gate")
+    }
 }
+
+private let openverseImageResponseJSON = """
+{
+  "results": [
+    {
+      "title": "Golden Gate Bridge",
+      "url": "https://images.example.com/golden-gate.jpg",
+      "thumbnail": "https://images.example.com/golden-gate-small.jpg",
+      "foreign_landing_url": "https://source.example.com/golden-gate",
+      "creator": "Example Photographer",
+      "creator_url": "https://source.example.com/creator",
+      "license": "by",
+      "license_version": "4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "Golden Gate Bridge by Example Photographer, CC BY 4.0",
+      "width": 2400,
+      "height": 1600
+    },
+    {
+      "title": "Invalid candidate",
+      "url": "javascript:alert(1)",
+      "foreign_landing_url": "https://source.example.com/invalid"
+    }
+  ]
+}
+"""
 
 private struct FakeNativeWebHTTPClient: NativeWebHTTPClient {
     var response: NativeWebHTTPResponse
@@ -108,6 +183,16 @@ private extension NativeWebHTTPResponse {
             statusCode: 200,
             mimeType: "text/html",
             finalURL: URL(string: url),
+            textEncodingName: "utf-8"
+        )
+    }
+
+    static func json(_ json: String) -> NativeWebHTTPResponse {
+        NativeWebHTTPResponse(
+            data: Data(json.utf8),
+            statusCode: 200,
+            mimeType: "application/json",
+            finalURL: URL(string: "https://api.openverse.org/v1/images/"),
             textEncodingName: "utf-8"
         )
     }

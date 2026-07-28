@@ -734,7 +734,6 @@ private struct AgentChatConversationView: View {
     @ViewBuilder
     private func chatTimelineRow(_ item: AgentChatTurnTimelineItem, latestProcessID: String?) -> some View {
         if let message = item.message {
-            let speechPresentation = chatActions.dependencies.speechPlayback.presentation(messageID: message.id)
             AgentChatMessageRow(
                 row: message,
                 isNoteBody: isNoteBodyMessage(message),
@@ -771,20 +770,7 @@ private struct AgentChatConversationView: View {
                 onExportAssistantMessage: { message in
                     chatActions.run.exportAssistantMessageToFile(message)
                 },
-                onEditNoteBody: noteBodyEditAction(for: message),
-                speechPresentation: speechPresentation,
-                onToggleSpeech: { message in
-                    let preferences = chatActions.dependencies.userPreferences
-                    chatActions.dependencies.speechPlayback.toggle(
-                        messageID: message.id,
-                        markdown: message.message.content,
-                        personality: preferences.connorPersonality,
-                        personalityRevision: preferences.connorPersonalityRevision,
-                        voiceGender: preferences.resolvedConnorVoiceGender,
-                        voiceProfile: preferences.connorVoiceProfile,
-                        voiceRevision: preferences.connorVoiceRevision
-                    )
-                }
+                onEditNoteBody: noteBodyEditAction(for: message)
             )
         } else if let process = item.process {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {

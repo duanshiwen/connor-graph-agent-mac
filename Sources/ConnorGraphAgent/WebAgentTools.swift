@@ -505,6 +505,63 @@ public struct NativeWebSearchTool: AgentTool {
     }
 }
 
+public struct NativeImageSearchTool: AgentTool {
+    public let name = "image_search"
+    public let description = "Search the public internet for existing, source-attributed images through Openverse. Returns direct image URLs plus original source pages, creators, and license details. Use this to discover relevant real-world images before calling present_image; it is optional and must not block an otherwise complete answer."
+    public let permission: AgentPermissionCapability = .externalNetwork
+    public let inputSchema = AgentToolInputSchema.closedObject(properties: [
+        "query": .string(description: "Focused image search keywords describing the real subject or visual evidence needed."),
+        "maxResults": .integer(description: "Maximum number of candidates, 1-10. Defaults to 5."),
+        "licenseFilter": .stringEnumeration(values: ["all", "commercial", "modification"], description: "Optional reuse filter. Defaults to all.")
+    ], required: ["query"])
+
+    private let client: NativeImageSearchClient
+
+    public init(client: NativeImageSearchClient = NativeImageSearchClient()) {
+        self.client = client
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let query = arguments.string("query"), !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("image_search requires query")
+        }
+        let maxResults = min(max(arguments.int("maxResults") ?? arguments.int("max_results") ?? 5, 1), 10)
+        let rawFilter = arguments.string("licenseFilter") ?? arguments.string("license_filter") ?? NativeImageSearchLicenseFilter.all.rawValue
+        guard let licenseFilter = NativeImageSearchLicenseFilter(rawValue: rawFilter.lowercased()) else {
+            throw AgentToolError.invalidArguments("image_search licenseFilter must be all, commercial, or modification")
+        }
+
+        let result = try await client.search(query: query, maxResults: maxResults, licenseFilter: licenseFilter)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: result.markdown.isEmpty ? "No suitable image candidates were found." : result.markdown,
+            contentJSON: BrowserFetchTool.encodeJSONObject([
+                "query": result.query,
+                "provider": result.provider,
+                "licenseFilter": result.licenseFilter.rawValue,
+                "results": result.results.map { item in
+                    [
+                        "title": item.title,
+                        "imageURL": item.imageURL,
+                        "thumbnailURL": item.thumbnailURL,
+                        "sourcePageURL": item.sourcePageURL,
+                        "creator": item.creator,
+                        "creatorURL": item.creatorURL,
+                        "license": item.license,
+                        "licenseURL": item.licenseURL,
+                        "attribution": item.attribution,
+                        "width": item.width.map { $0 as Any } ?? NSNull(),
+                        "height": item.height.map { $0 as Any } ?? NSNull()
+                    ] as [String: Any]
+                },
+                "text": result.markdown
+            ]),
+            citations: result.results.map(\.sourcePageURL)
+        )
+    }
+}
+
 public struct BrowserAssistedWebFetchRequest: Equatable, Sendable {
     public var urlString: String
     public var extractMode: String

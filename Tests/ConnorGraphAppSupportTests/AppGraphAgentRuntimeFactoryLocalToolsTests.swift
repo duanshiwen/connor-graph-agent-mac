@@ -132,6 +132,8 @@ import ConnorGraphStore
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     #expect(controller.toolRegistry.definitions.map(\.name).contains("present_image"))
     #expect(controller.toolRegistry.permission(named: "present_image") == .externalNetwork)
+    #expect(controller.toolRegistry.definitions.map(\.name).contains("image_search"))
+    #expect(controller.toolRegistry.permission(named: "image_search") == .externalNetwork)
     let result = try await controller.toolRegistry.execute(
         AgentToolCall(name: "Read", argumentsJSON: #"{"filePath":"README.md"}"#),
         context: AgentToolExecutionContext(
