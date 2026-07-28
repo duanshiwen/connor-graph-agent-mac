@@ -13,6 +13,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var stopAfterTurnWhenBudgetExceeded: Bool
     public var promptProjectionMode: AgentPromptProjectionMode
     public var promptMaxEstimatedTokens: Int
+    public var modelContextWindowTokens: Int?
+    public var reservedOutputTokens: Int
     public var permissionMode: AgentPermissionMode
     public var instructionAppendix: String
     public var budget: AgentBudgetConfiguration
@@ -27,6 +29,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         stopAfterTurnWhenBudgetExceeded: Bool = false,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
         promptMaxEstimatedTokens: Int = 1_000_000,
+        modelContextWindowTokens: Int? = nil,
+        reservedOutputTokens: Int = 8_192,
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
@@ -40,6 +44,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.stopAfterTurnWhenBudgetExceeded = stopAfterTurnWhenBudgetExceeded
         self.promptProjectionMode = promptProjectionMode
         self.promptMaxEstimatedTokens = promptMaxEstimatedTokens
+        self.modelContextWindowTokens = modelContextWindowTokens
+        self.reservedOutputTokens = max(1, reservedOutputTokens)
         self.permissionMode = permissionMode
         self.instructionAppendix = instructionAppendix
         self.budget = budget
@@ -55,6 +61,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case stopAfterTurnWhenBudgetExceeded
         case promptProjectionMode
         case promptMaxEstimatedTokens
+        case modelContextWindowTokens
+        case reservedOutputTokens
         case permissionMode
         case instructionAppendix
         case budget
@@ -71,6 +79,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
         self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 1_000_000
+        self.modelContextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .modelContextWindowTokens)
+        self.reservedOutputTokens = max(1, try container.decodeIfPresent(Int.self, forKey: .reservedOutputTokens) ?? 8_192)
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
         self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()
@@ -87,6 +97,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(stopAfterTurnWhenBudgetExceeded, forKey: .stopAfterTurnWhenBudgetExceeded)
         try container.encode(promptProjectionMode, forKey: .promptProjectionMode)
         try container.encode(promptMaxEstimatedTokens, forKey: .promptMaxEstimatedTokens)
+        try container.encodeIfPresent(modelContextWindowTokens, forKey: .modelContextWindowTokens)
+        try container.encode(reservedOutputTokens, forKey: .reservedOutputTokens)
         try container.encode(permissionMode, forKey: .permissionMode)
         try container.encode(instructionAppendix, forKey: .instructionAppendix)
         try container.encode(budget, forKey: .budget)
@@ -264,6 +276,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             return true
                         }
+                        try AgentModelContextGuard().validate(
+                            modelRequest,
+                            currentUserInput: request.userMessage,
+                            currentAttachmentEstimatedTokens: request.attachmentContextPlan.estimatedTokens,
+                            contextWindowTokens: configuration.modelContextWindowTokens
+                                ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID),
+                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            reservedOutputTokens: configuration.reservedOutputTokens,
+                            isAfterToolExecution: iterationCount > 1
+                        )
                         var modelResponse = try await completeModelRequest(
                             modelRequest,
                             run: run,
@@ -979,11 +1001,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         }
-        let transformers: [any AgentContextTransformer] = [
-            AgentPromptBudgetTransformer(maxEstimatedTokens: configuration.promptMaxEstimatedTokens),
-            AgentPromptDedupeTransformer(),
-            AgentPromptDiagnosticsTransformer()
-        ]
+        let transformers: [any AgentContextTransformer] = [AgentPromptDiagnosticsTransformer()]
         for transformer in transformers {
             do {
                 assembly = try await transformer.transform(assembly, projectionMode: configuration.promptProjectionMode)

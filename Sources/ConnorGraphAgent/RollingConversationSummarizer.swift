@@ -188,7 +188,11 @@ public struct RollingConversationSummarizer<Provider: LLMProvider>: Sendable {
         let prompt = try Self.prompt(plan: plan, attachmentDescriptions: attachmentDescriptions, maximumSummaryTokens: maximumSummaryTokens)
         let response = try await provider.complete(prompt: prompt, context: AgentContext(query: "Update rolling conversation summary", items: []))
         let payload = try Self.decodePayload(response.text)
-        try Self.validate(payload: payload, previous: plan.baseState?.payload)
+        try Self.validate(
+            payload: payload,
+            previous: plan.baseState?.payload,
+            requiredNewAttachments: attachmentDescriptions
+        )
         let encodedPayload = try Self.canonicalData(payload)
         let summaryTokens = estimator.estimate(String(decoding: encodedPayload, as: UTF8.self)).estimatedTokenCount
         guard summaryTokens <= maximumSummaryTokens else {
@@ -293,13 +297,17 @@ public struct RollingConversationSummarizer<Provider: LLMProvider>: Sendable {
         return payload
     }
 
-    private static func validate(payload: ConversationSummaryPayload, previous: ConversationSummaryPayload?) throws {
-        guard let previous else { return }
+    private static func validate(
+        payload: ConversationSummaryPayload,
+        previous: ConversationSummaryPayload?,
+        requiredNewAttachments: [ConversationSummaryAttachment]
+    ) throws {
         let returnedIDs = Set(payload.allItems.map(\.id))
-        let missingItems = previous.allItems.filter { $0.status == .active && !returnedIDs.contains($0.id) }.map(\.id)
+        let missingItems = (previous?.allItems ?? []).filter { $0.status == .active && !returnedIDs.contains($0.id) }.map(\.id)
         if !missingItems.isEmpty { throw RollingConversationSummaryError.requiredItemsMissing(missingItems.sorted()) }
         let returnedAttachments = Set(payload.attachments.map(\.id))
-        let missingAttachments = previous.attachments.filter { !returnedAttachments.contains($0.id) }.map(\.id)
+        let requiredAttachments = (previous?.attachments ?? []) + requiredNewAttachments
+        let missingAttachments = requiredAttachments.filter { !returnedAttachments.contains($0.id) }.map(\.id)
         if !missingAttachments.isEmpty { throw RollingConversationSummaryError.requiredAttachmentsMissing(missingAttachments.sorted()) }
     }
 

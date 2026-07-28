@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
 @testable import ConnorGraphAgentMac
@@ -51,5 +52,39 @@ struct AgentAttachmentContextPlanBuilderTests {
         #expect(attachments == [manifest.messageRef])
         #expect(plan.imageBlocks.count == 1)
         #expect(rebuiltBytes == originalBytes)
+    }
+
+    @Test func conversationAttachmentsExcludeCoveredPrefixUnlessExplicitlyRehydrated() throws {
+        let covered = AgentMessageAttachmentRef(id: "covered", displayName: "covered.png", kind: .image, byteCount: 10, lifecycleStatus: .ready, extractionStatus: .pending, manifestRelativePath: "covered/manifest.json")
+        let tail = AgentMessageAttachmentRef(id: "tail", displayName: "tail.png", kind: .image, byteCount: 10, lifecycleStatus: .ready, extractionStatus: .pending, manifestRelativePath: "tail/manifest.json")
+        let coveredMessages = [AgentMessage(id: "covered-message", role: .user, content: "old", attachments: [covered])]
+        let allMessages = coveredMessages + [AgentMessage(id: "tail-message", role: .assistant, content: "recent", attachments: [tail])]
+        let state = ConversationSummaryState(
+            sessionID: "session",
+            revision: 1,
+            compressionGeneration: 1,
+            payload: ConversationSummaryPayload(),
+            coveredThroughMessageID: "covered-message",
+            coveredMessageCount: 1,
+            coveredPrefixHash: try ConversationSummaryIntegrity.coveredPrefixHash(messages: coveredMessages),
+            currentSummaryHash: "hash",
+            sourceTokenEstimate: 1,
+            summaryTokenEstimate: 1,
+            generationModelID: "model"
+        )
+        let selection = ConversationSummaryHistorySelector().select(messages: allMessages, state: state)
+
+        let defaultAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+            messages: selection.messages,
+            currentAttachments: []
+        )
+        let rehydratedAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+            messages: selection.messages,
+            currentAttachments: [],
+            explicitlyRehydratedAttachments: [covered]
+        )
+
+        #expect(defaultAttachments == [tail])
+        #expect(rehydratedAttachments == [tail, covered])
     }
 }

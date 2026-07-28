@@ -3181,8 +3181,7 @@ final class AppRuntimeLifecycle {
         personReferences: [PersonReference] = [],
         onCancellation: (() -> Void)? = nil,
         existingUserMessageID: String? = nil,
-        usesActiveSkill: Bool = true,
-        usesSessionSummary: Bool = true
+        usesActiveSkill: Bool = true
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3225,13 +3224,6 @@ final class AppRuntimeLifecycle {
         )
         defer { chatRunCoordinator.finish(sessionID: submittingSessionID) }
         do {
-            let sessionSummary: AgentSessionSummary?
-            if usesSessionSummary, let chatSessionRepository {
-                let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: submittingSessionID)
-                sessionSummary = AgentSessionSummaryPolicy().summaryForContext(candidateSummary, session: manager.session)
-            } else {
-                sessionSummary = nil
-            }
             if !attachmentsForSubmission.isEmpty {
                 await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
             }
@@ -3240,8 +3232,13 @@ final class AppRuntimeLifecycle {
                let persistedSession = try? chatSessionRepository.loadSession(id: submittingSessionID) {
                 attachmentHistoryMessages = persistedSession.messages
             }
-            let conversationAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+            let persistedSummaryState = try? chatSessionRepository?.loadConversationSummaryState(sessionID: submittingSessionID)
+            let attachmentHistorySelection = ConversationSummaryHistorySelector().select(
                 messages: attachmentHistoryMessages,
+                state: persistedSummaryState ?? manager.conversationSummaryState
+            )
+            let conversationAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+                messages: attachmentHistorySelection.messages,
                 currentAttachments: attachmentsForSubmission
             )
             let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
@@ -3263,7 +3260,7 @@ final class AppRuntimeLifecycle {
             let submitStartedAt = ContinuousClock.now
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
-                sessionSummary: sessionSummary,
+                sessionSummary: nil,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
@@ -3409,8 +3406,7 @@ final class AppRuntimeLifecycle {
                 attachments: [],
                 personReferences: [],
                 existingUserMessageID: messageID,
-                usesActiveSkill: false,
-                usesSessionSummary: false
+                usesActiveSkill: false
             )
             return true
         } catch {

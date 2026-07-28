@@ -106,7 +106,7 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     return store
 }
 
-@Test func nativeSessionManagerRunsMainAgentPromptAssemblyBeforeRollingSummaryMaintenance() async throws {
+@Test func nativeSessionManagerCompactsAtMostOncePerSubmission() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)
     let longMessage = String(repeating: "historical context requiring compression ", count: 120)

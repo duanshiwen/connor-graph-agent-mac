@@ -9,10 +9,11 @@ struct AgentAttachmentContextPlanBuilder: Sendable {
 
     static func conversationAttachments(
         messages: [AgentMessage],
-        currentAttachments: [AgentMessageAttachmentRef]
+        currentAttachments: [AgentMessageAttachmentRef],
+        explicitlyRehydratedAttachments: [AgentMessageAttachmentRef] = []
     ) -> [AgentMessageAttachmentRef] {
         var seenIDs = Set<String>()
-        return (messages.flatMap(\.attachments) + currentAttachments).filter {
+        return (messages.flatMap(\.attachments) + currentAttachments + explicitlyRehydratedAttachments).filter {
             seenIDs.insert($0.id).inserted
         }
     }
@@ -79,7 +80,10 @@ struct AgentAttachmentContextPlanBuilder: Sendable {
                 omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Failed to read extracted text: \(error)"))
             }
         }
-        let estimatedTokens = max(1, inlineBlocks.reduce(0) { $0 + $1.content.count } / 4 + imageBlocks.count * 85)
+        let estimatedTokens = max(1,
+            inlineBlocks.reduce(0) { $0 + $1.content.count } / 4
+                + imageBlocks.reduce(0) { $0 + $1.dataURL.count } / 4
+        )
         return AttachmentContextPlan(inlineBlocks: inlineBlocks, omittedAttachments: omissions, imageBlocks: imageBlocks, estimatedTokens: estimatedTokens)
     }
 

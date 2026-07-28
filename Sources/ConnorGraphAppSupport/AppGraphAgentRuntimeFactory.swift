@@ -378,6 +378,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
+        if effectiveConfiguration.modelContextWindowTokens == nil {
+            effectiveConfiguration.modelContextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+        }
         let generatedImageInstruction = generatedImageToolIsAvailable
             ? "When the user asks to create or generate an image, use `generate_image`. Do not claim that image generation is unavailable before attempting the available tool; if the tool fails, report the actual failure briefly."
             : ""

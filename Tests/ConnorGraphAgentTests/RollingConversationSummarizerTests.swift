@@ -108,3 +108,26 @@ private struct RollingSummaryProvider: LLMProvider {
         _ = try await summarizer.summarize(sessionID: "session", plan: plan)
     }
 }
+
+@Test func rollingSummaryRejectsDroppedNewAttachmentDescriptions() async throws {
+    let encoder = JSONEncoder()
+    let responses = RollingSummaryResponses([
+        String(decoding: try encoder.encode(ConversationSummaryPayload(currentGoal: "Goal")), as: UTF8.self)
+    ])
+    let messages = (1...4).map { AgentMessage(id: "m\($0)", role: $0.isMultiple(of: 2) ? .assistant : .user, content: "message \($0)") }
+    let plan = try ConversationCompactionPlanner(minimumRecentMessageCount: 2).plan(
+        messages: messages,
+        existingState: nil,
+        contextWindowTokens: 20
+    )
+    let attachment = ConversationSummaryAttachment(id: "attachment-1", displayName: "diagram.png", kind: .image, description: "Architecture diagram")
+    let summarizer = RollingConversationSummarizer(provider: RollingSummaryProvider(responses: responses), modelID: "model")
+
+    await #expect(throws: RollingConversationSummaryError.requiredAttachmentsMissing(["attachment-1"])) {
+        _ = try await summarizer.summarize(
+            sessionID: "session",
+            plan: plan,
+            attachmentDescriptions: [attachment]
+        )
+    }
+}
