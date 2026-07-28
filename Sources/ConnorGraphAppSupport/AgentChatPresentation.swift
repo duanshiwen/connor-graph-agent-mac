@@ -295,6 +295,7 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
     public var message: AgentChatMessagePresentation?
     public var process: AgentChatTurnProcessPresentation?
     public var timestamp: AgentChatTurnTimestampPresentation?
+    public var showsAssistantHeader: Bool
 
     public var kindLabel: String {
         if message != nil { return "message" }
@@ -303,11 +304,26 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
     }
 
     public static func message(_ message: AgentChatMessagePresentation) -> AgentChatTurnTimelineItem {
-        AgentChatTurnTimelineItem(id: message.id, message: message, process: nil, timestamp: nil)
+        AgentChatTurnTimelineItem(
+            id: message.id,
+            message: message,
+            process: nil,
+            timestamp: nil,
+            showsAssistantHeader: false
+        )
     }
 
-    public static func process(_ process: AgentChatTurnProcessPresentation) -> AgentChatTurnTimelineItem {
-        AgentChatTurnTimelineItem(id: process.id, message: nil, process: process, timestamp: nil)
+    public static func process(
+        _ process: AgentChatTurnProcessPresentation,
+        showsAssistantHeader: Bool = true
+    ) -> AgentChatTurnTimelineItem {
+        AgentChatTurnTimelineItem(
+            id: process.id,
+            message: nil,
+            process: process,
+            timestamp: nil,
+            showsAssistantHeader: showsAssistantHeader
+        )
     }
 
     public static func timestamp(turnNumber: Int, date: Date, now: Date = Date(), calendar: Calendar = .current) -> AgentChatTurnTimelineItem {
@@ -315,7 +331,8 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
             id: "timestamp-turn-\(turnNumber)",
             message: nil,
             process: nil,
-            timestamp: AgentChatTurnTimestampPresentation(date: date, now: now, calendar: calendar)
+            timestamp: AgentChatTurnTimestampPresentation(date: date, now: now, calendar: calendar),
+            showsAssistantHeader: false
         )
     }
 
@@ -340,25 +357,37 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                 lastTimestampDate = row.message.createdAt
             }
             if row.message.role == .assistant {
-                items.append(.process(AgentChatTurnProcessPresentation(
-                    completedAssistant: row,
-                    conversationHistoryStorage: conversationHistoryStorage,
-                    conversationHistoryCount: index
-                )))
+                let previousRow = index > 0 ? rows[index - 1] : nil
+                let continuesAssistantGroup = previousRow?.message.role == .assistant
+                    && previousRow?.turnNumber == row.turnNumber
+                items.append(.process(
+                    AgentChatTurnProcessPresentation(
+                        completedAssistant: row,
+                        conversationHistoryStorage: conversationHistoryStorage,
+                        conversationHistoryCount: index
+                    ),
+                    showsAssistantHeader: !continuesAssistantGroup
+                ))
             }
             items.append(.message(row))
         }
         if isSubmitting || preservesOpenProcess {
             let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
-            items.append(.process(AgentChatTurnProcessPresentation(
-                pending: AgentChatPendingAssistantPresentation(
-                    messages: messages,
-                    startingTurnCursor: startingTurnCursor
+            let pending = AgentChatPendingAssistantPresentation(
+                messages: messages,
+                startingTurnCursor: startingTurnCursor
+            )
+            let continuesAssistantGroup = rows.last?.message.role == .assistant
+                && rows.last?.turnNumber == pending.turnNumber
+            items.append(.process(
+                AgentChatTurnProcessPresentation(
+                    pending: pending,
+                    conversationHistoryStorage: conversationHistoryStorage,
+                    conversationHistoryCount: rows.count,
+                    state: state
                 ),
-                conversationHistoryStorage: conversationHistoryStorage,
-                conversationHistoryCount: rows.count,
-                state: state
-            )))
+                showsAssistantHeader: !continuesAssistantGroup
+            ))
         }
         return items
     }

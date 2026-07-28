@@ -44,9 +44,36 @@ import ConnorGraphAppSupport
 
     let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: nil)
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
+    let assistantProcesses = items.filter { $0.process != nil }
 
     #expect(rows.map(\.turnNumber) == [1, 1, 1, 1])
-    #expect(items.compactMap(\.process).map(\.turnNumber) == [1, 1, 1])
+    #expect(assistantProcesses.compactMap(\.process).map(\.turnNumber) == [1, 1, 1])
+    #expect(assistantProcesses.map(\.showsAssistantHeader) == [true, false, false])
+}
+
+@Test func agentChatPresentationRestartsAssistantHeaderAfterUserMessage() {
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "Start"),
+        AgentMessage(id: "assistant-progress", role: .assistant, content: "Working"),
+        AgentMessage(id: "assistant-final", role: .assistant, content: "Done"),
+        AgentMessage(id: "user-2", role: .user, content: "Continue"),
+        AgentMessage(id: "assistant-2", role: .assistant, content: "Continuing")
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
+
+    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false, true])
+}
+
+@Test func agentChatPresentationKeepsPendingProcessInExistingAssistantGroup() {
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "Start"),
+        AgentMessage(id: "assistant-progress", role: .assistant, content: "First stage complete")
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: true)
+
+    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false])
 }
 
 @Test func agentChatTurnTimelinePlacesTimestampAndProcessBetweenUserAndAssistant() {
