@@ -188,11 +188,6 @@ struct AgentChatComposerView: View {
                     .help(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
                     .accessibilityLabel(chatActions.dependencies.browser.isVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
-                    if let inspection = model.run.lastPromptInspection {
-                        promptBudgetLabel(inspection)
-                            .layoutPriority(-1)
-                    }
-
                     Spacer(minLength: AgentChatLayout.spaceXS)
 
                     modelSelectionMenu
@@ -1125,25 +1120,6 @@ struct AgentChatComposerView: View {
     private var composerControlForeground: Color { .secondary }
 
     private var composerControlActiveForeground: Color { .accentColor }
-
-    @ViewBuilder
-    private func promptBudgetLabel(_ inspection: AgentChatPromptInspection) -> some View {
-        Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
-            .font(AgentChatTypography.micro)
-            .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: 128, alignment: .leading)
-            .accessibilityLabel("预计提示词约 \(inspection.estimatedPromptTokenCount) tokens")
-    }
-
-    private func promptBudgetStatusColor(_ status: AgentPromptBudgetStatus) -> Color {
-        switch status {
-        case .safe: return .secondary
-        case .warning: return .orange
-        case .over: return .red
-        }
-    }
 
 }
 
