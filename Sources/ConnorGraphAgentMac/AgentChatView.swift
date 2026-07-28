@@ -27,7 +27,7 @@ struct AgentChatView: View {
         }
         .onChange(of: model.sessions.selectedSessionID) { _, _ in
             model.workspaceExplorer.dismissTree()
-            model.workspaceExplorer.closePreview()
+            model.dismissPreviewsForSessionChange()
         }
     }
 
