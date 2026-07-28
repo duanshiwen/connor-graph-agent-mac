@@ -123,7 +123,10 @@ public struct AgentAttachmentContextSection: Sendable, Equatable {
 
     public var renderedText: String {
         guard !plan.isEmpty else { return "" }
-        var parts: [String] = ["## User Attachments"]
+        var parts: [String] = [
+            "## Conversation Attachments",
+            "These attachments are linked to current or historical conversation messages. Use the attachment IDs in the conversation transcript to preserve authorship and turn association."
+        ]
         for block in plan.inlineBlocks {
             var header = "Attachment: \(block.displayName)\nID: \(block.attachmentID)\nKind: \(block.kind.rawValue)"
             if let source = block.sourceRelativePath {

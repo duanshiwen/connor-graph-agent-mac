@@ -27,7 +27,7 @@ import ConnorGraphCore
     let projected = AgentTranscriptProjector(projectionMode: .structuredContextMessages).project(assembly, tools: [])
 
     #expect(projected.messages.contains { message in
-        message.content.contains("## User Attachments") &&
+        message.content.contains("## Conversation Attachments") &&
         message.content.contains("notes.md") &&
         message.content.contains("Important context.")
     })
@@ -65,7 +65,7 @@ import ConnorGraphCore
     )
 
     let attachmentSection = diagnostics.sections.first { $0.id == "attachments" }
-    #expect(attachmentSection?.title == "User attachments")
+    #expect(attachmentSection?.title == "Conversation attachments")
     #expect(attachmentSection?.notes.contains("inline=1") == true)
     #expect(attachmentSection?.notes.contains("omitted=1") == true)
 }
