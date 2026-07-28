@@ -6,6 +6,7 @@ import ConnorGraphCore
 struct AgentAttachmentPreviewSheetView: View {
     var model: AttachmentPreviewModel
     var onDownloadImage: (() -> Void)? = nil
+    var onShare: (() -> Void)? = nil
     var onRetryExtraction: (() -> Void)? = nil
 
     var body: some View {
@@ -38,6 +39,14 @@ struct AgentAttachmentPreviewSheetView: View {
                 }
             }
             Spacer()
+            if model.sourceFileURL != nil, let onShare {
+                Button(action: onShare) {
+                    Label("分享", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("分享这个附件")
+                .help("使用 macOS 系统分享这个附件")
+            }
             if canDownloadImage, let onDownloadImage {
                 Button(action: onDownloadImage) {
                     Label("下载", systemImage: "square.and.arrow.down")

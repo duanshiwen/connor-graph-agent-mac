@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import ConnorGraphAgentMac
 
@@ -16,5 +17,16 @@ struct AgentInlineAttachmentViewTests {
         #expect(layout.maxWidth == 240)
         #expect(layout.maxHeight == 180)
         #expect(layout.minimumPlaceholderHeight == 96)
+    }
+
+    @MainActor
+    @Test func attachmentSharingRequiresAnExistingLocalFile() throws {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("share".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        #expect(AgentAttachmentSharingService.canShare(fileURL: fileURL))
+        #expect(!AgentAttachmentSharingService.canShare(fileURL: URL(string: "https://example.com/file")!))
+        #expect(!AgentAttachmentSharingService.canShare(fileURL: fileURL.appendingPathExtension("missing")))
     }
 }
