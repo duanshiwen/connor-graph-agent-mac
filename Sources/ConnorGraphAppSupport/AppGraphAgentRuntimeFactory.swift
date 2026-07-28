@@ -362,6 +362,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let snapshot = scanner.scan(storagePaths: storagePaths)
             registry.register(SkillActivateTool(packages: snapshot.packages))
             registry.register(SkillListTool(packages: snapshot.packages))
+            registry.register(LoadAttachmentContextAgentTool(store: AppSessionAttachmentStore(paths: storagePaths)))
         }
         let generatedMediaProvider = generatedMediaProviderResolver?(modelProvider)
             ?? makeConfiguredGeneratedMediaProvider(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
@@ -370,19 +371,33 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let generatedImageToolIsAvailable = storagePaths != nil
             && generatedMediaProvider?.supportsGeneratedMediaExecution == true
             && generatedMediaProvider?.capabilities.generatedMediaCapabilities.contains(.imageGeneration) == true
+        let editImageToolIsAvailable = storagePaths != nil
+            && generatedMediaProvider?.supportsGeneratedMediaExecution == true
+            && generatedMediaProvider?.capabilities.generatedMediaCapabilities.contains(.imageEditing) == true
         if generatedImageToolIsAvailable, let storagePaths, let generatedMediaProvider {
             registry.register(GeneratedImageAgentTool(
                 provider: generatedMediaProvider,
                 ingestionService: GeneratedMediaIngestionService(store: AppSessionAttachmentStore(paths: storagePaths))
             ))
         }
+        if editImageToolIsAvailable, let storagePaths, let generatedMediaProvider {
+            let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
+            registry.register(EditImageAgentTool(
+                provider: generatedMediaProvider,
+                ingestionService: GeneratedMediaIngestionService(store: attachmentStore),
+                attachmentStore: attachmentStore
+            ))
+        }
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
         if effectiveConfiguration.modelContextWindowTokens == nil {
-            effectiveConfiguration.modelContextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+            effectiveConfiguration.modelContextWindowTokens = settings
+                .connection(id: sessionLLMOverride?.connectionID)?
+                .contextWindowTokens
+                ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
         }
         let generatedImageInstruction = generatedImageToolIsAvailable
-            ? "When the user asks to create or generate an image, use `generate_image`. Do not claim that image generation is unavailable before attempting the available tool; if the tool fails, report the actual failure briefly."
+            ? "When the user asks to create or generate an image, use `generate_image`. When the user asks to modify a session image and `edit_image` is available, use `edit_image` with the exact latest source attachment ID instead of generating a replacement from scratch. Do not claim that image generation or editing is unavailable before attempting the corresponding available tool; if the tool fails, report the actual failure briefly."
             : ""
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),

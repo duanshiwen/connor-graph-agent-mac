@@ -51,6 +51,7 @@ struct AgentAttachmentContextPlanBuilderTests {
 
         #expect(attachments == [manifest.messageRef])
         #expect(plan.imageBlocks.count == 1)
+        #expect(plan.estimatedTokens == 8_192)
         #expect(rebuiltBytes == originalBytes)
     }
 
@@ -86,5 +87,109 @@ struct AgentAttachmentContextPlanBuilderTests {
 
         #expect(defaultAttachments == [tail])
         #expect(rehydratedAttachments == [tail, covered])
+    }
+
+    @Test func sendsOnlyLatestImageEditLeafUnlessOlderVersionIsExplicitlyPreserved() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-image-chain-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let store = AppSessionAttachmentStore(paths: paths)
+        let sessionID = "session"
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        func importImage(name: String, marker: UInt8, sourceID: String? = nil) throws -> AgentAttachmentManifest {
+            let url = root.appendingPathComponent(name)
+            try Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, marker]).write(to: url)
+            let metadata = sourceID.map {
+                AgentAttachmentGenerationMetadata(
+                    providerID: "test",
+                    modelID: "image-model",
+                    parameters: [AgentAttachmentGenerationMetadata.sourceAttachmentIDParameterKey: $0]
+                )
+            }
+            return try store.importFile(at: url, sessionID: sessionID, origin: .modelGenerated, generationMetadata: metadata)
+        }
+
+        let original = try importImage(name: "original.png", marker: 1)
+        let firstEdit = try importImage(name: "first.png", marker: 2, sourceID: original.id)
+        let latestEdit = try importImage(name: "latest.png", marker: 3, sourceID: firstEdit.id)
+        let builder = AgentAttachmentContextPlanBuilder(storagePaths: paths)
+        let attachments = [original.messageRef, firstEdit.messageRef, latestEdit.messageRef]
+
+        let defaultPlan = builder.build(sessionID: sessionID, attachments: attachments)
+        let restoredPlan = builder.build(
+            sessionID: sessionID,
+            attachments: attachments,
+            preservingAttachmentIDs: [original.id]
+        )
+
+        #expect(defaultPlan.imageBlocks.map(\.attachmentID) == [latestEdit.id])
+        #expect(defaultPlan.estimatedTokens == 8_192)
+        #expect(restoredPlan.imageBlocks.map(\.attachmentID) == [original.id, latestEdit.id])
+        #expect(restoredPlan.estimatedTokens == 16_384)
+    }
+
+    @Test func appliesLatestLeafSelectionToAudioAndReportsNativeInputRequirement() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-audio-chain-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let store = AppSessionAttachmentStore(paths: paths)
+        let sessionID = "session"
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let originalURL = root.appendingPathComponent("original.mp3")
+        let latestURL = root.appendingPathComponent("latest.mp3")
+        try Data([0x49, 0x44, 0x33, 1]).write(to: originalURL)
+        try Data([0x49, 0x44, 0x33, 2]).write(to: latestURL)
+        let original = try store.importFile(at: originalURL, sessionID: sessionID, origin: .userImported)
+        let latest = try store.importFile(
+            at: latestURL,
+            sessionID: sessionID,
+            origin: .modelGenerated,
+            generationMetadata: AgentAttachmentGenerationMetadata(
+                providerID: "test",
+                modelID: "audio-model",
+                parameters: [AgentAttachmentGenerationMetadata.sourceAttachmentIDParameterKey: original.id]
+            )
+        )
+
+        let plan = AgentAttachmentContextPlanBuilder(storagePaths: paths).build(
+            sessionID: sessionID,
+            attachments: [original.messageRef, latest.messageRef]
+        )
+
+        #expect(plan.omittedAttachments.map(\.attachmentID) == [latest.id])
+        #expect(plan.omittedAttachments.first?.reason.contains("native audio input") == true)
+    }
+
+    @Test func historicalAssistantMediaIsCatalogedInsteadOfRetransmitted() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-media-catalog-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let sessionID = "session"
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("generated.png")
+        try Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]).write(to: source)
+        let manifest = try AppSessionAttachmentStore(paths: paths).importFile(at: source, sessionID: sessionID, origin: .modelGenerated)
+        let image = AgentMessageAttachmentRef(
+            id: manifest.id,
+            displayName: manifest.displayName,
+            kind: .image,
+            byteCount: manifest.byteCount,
+            lifecycleStatus: .ready,
+            extractionStatus: .pending,
+            manifestRelativePath: manifest.manifestRelativePath
+        )
+        let messages = [AgentMessage(role: .assistant, content: "Done", attachments: [image])]
+        let attachments = AgentAttachmentContextPlanBuilder.conversationAttachments(messages: messages, currentAttachments: [])
+        let plan = AgentAttachmentContextPlanBuilder(storagePaths: paths).build(
+            sessionID: sessionID,
+            attachments: attachments,
+            deferredMediaAttachmentIDs: AgentAttachmentContextPlanBuilder.historicalAssistantMediaAttachmentIDs(messages: messages)
+        )
+
+        #expect(plan.imageBlocks.isEmpty)
+        #expect(plan.inlineBlocks.count == 1)
+        #expect(plan.inlineBlocks.first?.content.contains(manifest.id) == true)
+        #expect(plan.inlineBlocks.first?.content.contains("load_attachment_context") == true)
     }
 }

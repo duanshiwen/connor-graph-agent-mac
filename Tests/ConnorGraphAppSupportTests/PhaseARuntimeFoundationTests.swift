@@ -140,6 +140,52 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.ui.textDeltaFlushCharacterThreshold == 120)
 }
 
+@Test func runtimeSettingsRepositoryMigratesLegacyCapacityDefaultsWithoutOverwritingCustomValues() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+
+    var legacy = AgentRuntimeSettings(schemaVersion: 4)
+    legacy.loop.maxToolIterations = 256
+    legacy.loop.maxToolResultBytes = 32_768
+    legacy.loop.promptMaxEstimatedTokens = 160_000
+    legacy.loop.budget.maxTotalTokens = 120_000
+    legacy.loop.maxToolCallsPerIteration = 17
+    try repository.save(legacy)
+
+    let migrated = try repository.loadOrCreateDefault()
+
+    #expect(migrated.schemaVersion == 5)
+    #expect(migrated.loop.maxToolIterations == 2_048)
+    #expect(migrated.loop.maxToolResultBytes == 1_000_000)
+    #expect(migrated.loop.promptMaxEstimatedTokens == 1_000_000)
+    #expect(migrated.loop.budget.maxTotalTokens == 10_000_000)
+    #expect(migrated.loop.maxToolCallsPerIteration == 17)
+}
+
+@Test func runtimeSettingsRepositoryPreservesCustomLegacyCapacityValues() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+
+    var legacy = AgentRuntimeSettings(schemaVersion: 4)
+    legacy.loop.maxToolIterations = 512
+    legacy.loop.maxToolResultBytes = 456_789
+    legacy.loop.promptMaxEstimatedTokens = 345_678
+    legacy.loop.budget.maxTotalTokens = 2_345_678
+    try repository.save(legacy)
+
+    let migrated = try repository.loadOrCreateDefault()
+
+    #expect(migrated.schemaVersion == 5)
+    #expect(migrated.loop.maxToolIterations == 512)
+    #expect(migrated.loop.maxToolResultBytes == 456_789)
+    #expect(migrated.loop.promptMaxEstimatedTokens == 345_678)
+    #expect(migrated.loop.budget.maxTotalTokens == 2_345_678)
+}
+
 @Test func runtimeSettingsRepositoryCommitsPersonalityWithOptimisticRevision() throws {
     let root = phaseATemporaryRoot()
     let paths = AppStoragePaths(applicationSupportDirectory: root)

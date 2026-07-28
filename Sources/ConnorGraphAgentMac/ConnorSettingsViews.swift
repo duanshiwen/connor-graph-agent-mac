@@ -1028,6 +1028,7 @@ struct AIConnectionSetupView: View {
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
     @State private var shouldFetchModelsList = true
+    @State private var contextWindowTokens = 1_000_000
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var providerUsageMode: AIConnectionUsageMode = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
@@ -1388,6 +1389,13 @@ struct AIConnectionSetupView: View {
                 aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
                     aiConnectionTextField("claude-sonnet-4-5", text: $selectedModel)
                 }
+                aiConnectionSettingsRow(title: "上下文窗口", help: "填写服务商为该模型提供的真实上下文 token 上限。运行时还会预留输出空间。") {
+                    aiConnectionInputContainer {
+                        TextField("1000000", value: $contextWindowTokens, format: .number.grouping(.never))
+                            .textFieldStyle(.plain)
+                            .font(SettingsListTypography.rowTitle)
+                    }
+                }
                 aiConnectionSettingsRow(title: "视觉输入", help: "默认自动检测模型是否支持图片。如果自动检测不准（如新模型），可手动覆盖。") {
                     aiConnectionInputContainer {
                         Picker("视觉输入", selection: $visionSupportOverride) {
@@ -1708,6 +1716,14 @@ struct AIConnectionSetupView: View {
                         }
                     }
 
+                    aiConnectionSettingsRow(title: "上下文窗口", help: "填写服务商为当前模型提供的真实上下文 token 上限。默认按 100 万配置，可按模型说明调整。") {
+                        aiConnectionInputContainer {
+                            TextField("1000000", value: $contextWindowTokens, format: .number.grouping(.never))
+                                .textFieldStyle(.plain)
+                                .font(SettingsListTypography.rowTitle)
+                        }
+                    }
+
                     if selectedProviderPresetID == "custom" && customProtocol == .openAICompatible {
                         aiConnectionSettingsRow(title: "模型目录", help: "开启后会自动请求兼容接口的 /models 获取远程模型目录；关闭后只使用手动填写的模型列表。") {
                             HStack(spacing: SettingsListLayout.spaceM) {
@@ -2000,7 +2016,8 @@ struct AIConnectionSetupView: View {
                     model: model,
                     selectedModel: selectedModel,
                     apiKey: result.apiKey,
-                    oauthTokens: result.tokens
+                    oauthTokens: result.tokens,
+                    contextWindowTokens: contextWindowTokens
                 )
                 _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
@@ -2041,7 +2058,8 @@ struct AIConnectionSetupView: View {
                     model: model,
                     selectedModel: selectedModel,
                     apiKey: tokens.accessToken,
-                    oauthTokens: tokens
+                    oauthTokens: tokens,
+                    contextWindowTokens: contextWindowTokens
                 )
                 _ = try await aiModel.setupConnection(input)
                 await MainActor.run {
@@ -2081,6 +2099,7 @@ struct AIConnectionSetupView: View {
                     anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
                     openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft(),
                     explicitVisionSupport: visionSupportOverride,
+                    contextWindowTokens: contextWindowTokens,
                     shouldFetchModelsList: selectedProviderPresetID == "custom" && customProtocol == .openAICompatible ? shouldFetchModelsList : true
                 )
                 _ = try await aiModel.setupConnection(input)

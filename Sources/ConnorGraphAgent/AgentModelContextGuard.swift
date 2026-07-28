@@ -29,11 +29,28 @@ public struct AgentModelContextLimitError: Error, Sendable, Equatable, CustomStr
     }
 }
 
+public struct AgentVisionTokenEstimator: Sendable, Equatable {
+    public var conservativeTokensPerImage: Int
+
+    public init(conservativeTokensPerImage: Int = 8_192) {
+        self.conservativeTokensPerImage = max(1, conservativeTokensPerImage)
+    }
+
+    public func estimateImageTokenCount(dataURL: String) -> Int {
+        dataURL.isEmpty ? 0 : conservativeTokensPerImage
+    }
+}
+
 public struct AgentModelContextGuard: Sendable {
     public var estimator: AgentPromptBudgetEstimator
+    public var visionEstimator: AgentVisionTokenEstimator
 
-    public init(estimator: AgentPromptBudgetEstimator = .init()) {
+    public init(
+        estimator: AgentPromptBudgetEstimator = .init(),
+        visionEstimator: AgentVisionTokenEstimator = .init()
+    ) {
         self.estimator = estimator
+        self.visionEstimator = visionEstimator
     }
 
     public func maximumInputTokens(
@@ -48,7 +65,7 @@ public struct AgentModelContextGuard: Sendable {
         let messageTokens = request.messages.reduce(0) { partial, message in
             var total = partial + estimator.estimate(message.content).estimatedTokenCount
             for part in message.contentParts ?? [] where part.kind == .imageDataURL {
-                total += estimator.estimate(part.dataURL ?? "").estimatedTokenCount
+                total += visionEstimator.estimateImageTokenCount(dataURL: part.dataURL ?? "")
             }
             if let toolCalls = message.toolCalls {
                 total += toolCalls.reduce(0) {

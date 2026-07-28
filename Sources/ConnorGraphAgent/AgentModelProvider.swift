@@ -114,10 +114,27 @@ public enum AgentGeneratedImageAction: String, Codable, Sendable, Equatable {
     case edit
 }
 
+public struct AgentGeneratedMediaInputImage: Sendable, Equatable {
+    public var attachmentID: String
+    public var mimeType: String
+    public var data: Data
+
+    public init(attachmentID: String, mimeType: String, data: Data) {
+        self.attachmentID = attachmentID
+        self.mimeType = mimeType
+        self.data = data
+    }
+
+    public var dataURL: String {
+        "data:\(mimeType);base64,\(data.base64EncodedString())"
+    }
+}
+
 public struct AgentGeneratedMediaRequest: Sendable, Equatable {
     public var kind: AgentGeneratedMediaKind
     public var prompt: String
     public var inputAttachments: [AgentMessageAttachmentRef]
+    public var inputImages: [AgentGeneratedMediaInputImage]
     public var options: [String: String]
     public var imageAction: AgentGeneratedImageAction
 
@@ -125,12 +142,14 @@ public struct AgentGeneratedMediaRequest: Sendable, Equatable {
         kind: AgentGeneratedMediaKind,
         prompt: String,
         inputAttachments: [AgentMessageAttachmentRef] = [],
+        inputImages: [AgentGeneratedMediaInputImage] = [],
         options: [String: String] = [:],
         imageAction: AgentGeneratedImageAction = .generate
     ) {
         self.kind = kind
         self.prompt = prompt
         self.inputAttachments = inputAttachments
+        self.inputImages = inputImages
         self.options = options
         self.imageAction = imageAction
     }

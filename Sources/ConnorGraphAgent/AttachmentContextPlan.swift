@@ -122,7 +122,9 @@ public struct AttachmentContextPlan: Sendable, Equatable {
             providerNativeBlocks: providerNativeBlocks.filter { allowedAttachmentIDs.contains($0.attachmentID) },
             imageBlocks: filteredImageBlocks,
             estimatedTokens: filteredInlineBlocks.reduce(0) { $0 + max(1, $1.content.count / 4) }
-                + filteredImageBlocks.reduce(0) { $0 + max(1, $1.dataURL.count / 4) }
+                + filteredImageBlocks.reduce(0) {
+                    $0 + AgentVisionTokenEstimator().estimateImageTokenCount(dataURL: $1.dataURL)
+                }
         )
     }
 }

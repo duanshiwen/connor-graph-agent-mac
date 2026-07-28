@@ -26,6 +26,8 @@ public enum AgentAttachmentOrigin: String, Codable, Sendable, Equatable {
 }
 
 public struct AgentAttachmentGenerationMetadata: Codable, Sendable, Equatable {
+    public static let sourceAttachmentIDParameterKey = "source_attachment_id"
+
     public var providerID: String
     public var modelID: String
     public var responseID: String?

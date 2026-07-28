@@ -341,6 +341,8 @@ final class AppRuntimeLifecycle {
     private func buildAttachmentContextPlanOffMain(
         sessionID: String,
         attachments: [AgentMessageAttachmentRef],
+        preservingAttachmentIDs: Set<String> = [],
+        deferredMediaAttachmentIDs: Set<String> = [],
         perAttachmentCharacterLimit: Int = 20_000,
         totalCharacterLimit: Int = 60_000
     ) async -> AttachmentContextPlan {
@@ -350,7 +352,12 @@ final class AppRuntimeLifecycle {
             totalCharacterLimit: totalCharacterLimit
         )
         return await Task.detached(priority: .utility) {
-            builder.build(sessionID: sessionID, attachments: attachments)
+            builder.build(
+                sessionID: sessionID,
+                attachments: attachments,
+                preservingAttachmentIDs: preservingAttachmentIDs,
+                deferredMediaAttachmentIDs: deferredMediaAttachmentIDs
+            )
         }.value
     }
 
@@ -3241,9 +3248,14 @@ final class AppRuntimeLifecycle {
                 messages: attachmentHistorySelection.messages,
                 currentAttachments: attachmentsForSubmission
             )
+            let historicalAssistantMediaAttachmentIDs = AgentAttachmentContextPlanBuilder.historicalAssistantMediaAttachmentIDs(
+                messages: attachmentHistorySelection.messages
+            )
             let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
                 sessionID: submittingSessionID,
-                attachments: conversationAttachments
+                attachments: conversationAttachments,
+                preservingAttachmentIDs: Set(attachmentsForSubmission.map(\.id)),
+                deferredMediaAttachmentIDs: historicalAssistantMediaAttachmentIDs
             )
             let noteAugmentedPrompt = NoteSessionPromptBuilder.augmentedPrompt(
                 prompt,

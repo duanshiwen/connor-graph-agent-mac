@@ -222,12 +222,25 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
     private func makeImageGenerationRequest(_ request: AgentGeneratedMediaRequest) throws -> AgentHTTPRequest {
         let endpoint = config.baseURL.appendingPathComponent("responses")
         var tool: [String: Any] = ["type": "image_generation"]
+        if request.imageAction == .edit {
+            tool["action"] = "edit"
+        }
         for key in ["size", "quality", "format", "background"] {
             if let value = request.options[key], !value.isEmpty { tool[key] = value }
         }
+        let input: Any
+        if request.imageAction == .edit, !request.inputImages.isEmpty {
+            var content: [[String: Any]] = [["type": "input_text", "text": request.prompt]]
+            content.append(contentsOf: request.inputImages.map {
+                ["type": "input_image", "image_url": $0.dataURL]
+            })
+            input = [["role": "user", "content": content]]
+        } else {
+            input = request.prompt
+        }
         let body: [String: Any] = [
             "model": config.requestModel,
-            "input": request.prompt,
+            "input": input,
             "tools": [tool],
             "tool_choice": ["type": "image_generation"],
             "store": false
