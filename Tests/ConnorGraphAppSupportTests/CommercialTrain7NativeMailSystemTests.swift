@@ -35,9 +35,19 @@ struct CommercialTrain7NativeMailSystemTests {
     @Test func explicitReadStateMutationChangesFlags() async throws {
         let runtime = MailRuntime.fixture()
         let message = try #require(try await runtime.searchMessages(MailRuntimeSearchRequest(query: "native")).first)
+        let notifications = MailStateChangeNotificationRecorder()
+        let observer = NotificationCenter.default.addObserver(forName: .connorMailCacheDidChange, object: nil, queue: nil) {
+            notifications.record($0)
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
         try await runtime.setReadState(messageIDs: [message.id], isRead: true)
+
         let updated = try await runtime.getMessage(id: message.id)
         #expect(updated.summary.flags.isRead)
+        let notification = try #require(notifications.notifications.first)
+        #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.messageIDs] as? [String] == [message.id.rawValue])
+        #expect(notification.userInfo?[MailCacheChangeNotificationUserInfoKey.reason] as? String == MailCacheChangeReason.readStateUpdated.rawValue)
     }
 
     @Test func runtimeListsRecentMessagesWithCachedBodyPreviewsWithoutMutatingReadState() async throws {
@@ -735,6 +745,17 @@ struct CommercialTrain7NativeMailSystemTests {
         ]
 
         return NativeMailBrowserPresentation(accounts: accounts, mailboxes: mailboxes, messages: messages)
+    }
+}
+
+private final class MailStateChangeNotificationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var notifications: [Notification] = []
+
+    func record(_ notification: Notification) {
+        lock.lock()
+        defer { lock.unlock() }
+        notifications.append(notification)
     }
 }
 

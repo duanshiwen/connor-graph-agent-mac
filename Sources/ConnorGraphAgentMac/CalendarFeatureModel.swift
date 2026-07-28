@@ -36,6 +36,8 @@ final class CalendarFeatureModel {
     @ObservationIgnored private let credentialStore: AppCalendarCredentialStore
     @ObservationIgnored private let systemSnapshotLoader: SystemSnapshotLoader
     @ObservationIgnored private let remoteAccountSynchronizer: RemoteAccountSynchronizer
+    @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored private var cacheObserver: NSObjectProtocol?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
     @ObservationIgnored private var ownedTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var isShutdown = false
@@ -64,13 +66,26 @@ final class CalendarFeatureModel {
             return try await engine.sync(
                 request: CalendarSourceSyncRequest(account: account, credential: credential, runID: runID)
             )
-        }
+        },
+        notificationCenter: NotificationCenter = .default
     ) {
         self.legacyStore = legacyStore
         self.runtimeStore = runtimeStore
         self.credentialStore = credentialStore
         self.systemSnapshotLoader = systemSnapshotLoader
         self.remoteAccountSynchronizer = remoteAccountSynchronizer
+        self.notificationCenter = notificationCenter
+        cacheObserver = notificationCenter.addObserver(
+            forName: .connorCalendarCacheDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.startOwnedTask { [weak self] in
+                    await self?.reload()
+                }
+            }
+        }
     }
 
     var agentRuntimeStore: FileBackedCalendarSourceRuntimeStore? { runtimeStore }
@@ -89,7 +104,13 @@ final class CalendarFeatureModel {
             guard !Task.isCancelled, !isShutdown, generation == reloadGeneration else { return }
             accounts = mergeAccounts(legacySnapshot?.accounts ?? [], runtimeSnapshot?.accounts ?? [])
             collections = mergeCollections(legacySnapshot?.collections ?? [], runtimeSnapshot?.collections ?? [])
-            events = mergeEvents(legacySnapshot?.events ?? [], runtimeSnapshot?.events ?? [])
+            let deletedEventIDs = Set(
+                runtimeSnapshot?.mutationAudits.compactMap { audit in
+                    audit.status == .confirmed && audit.operation == .delete ? audit.eventID : nil
+                } ?? []
+            )
+            let retainedLegacyEvents = (legacySnapshot?.events ?? []).filter { !deletedEventIDs.contains($0.id) }
+            events = mergeEvents(retainedLegacyEvents, runtimeSnapshot?.events ?? [])
             rebuildPresentation()
             reportSuccess()
         } catch is CancellationError {
@@ -263,6 +284,7 @@ final class CalendarFeatureModel {
     }
 
     func waitForPendingOperations() async {
+        await Task.yield()
         while !ownedTasks.isEmpty {
             for task in Array(ownedTasks.values) { await task.value }
         }
@@ -272,6 +294,10 @@ final class CalendarFeatureModel {
         guard !isShutdown else { return }
         isShutdown = true
         reloadGeneration &+= 1
+        if let cacheObserver {
+            notificationCenter.removeObserver(cacheObserver)
+            self.cacheObserver = nil
+        }
         for task in ownedTasks.values { task.cancel() }
         ownedTasks.removeAll()
     }
