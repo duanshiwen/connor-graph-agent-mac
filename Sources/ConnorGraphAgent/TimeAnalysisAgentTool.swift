@@ -29,7 +29,6 @@ public struct TimeAnalyzeRangesTool: AgentTool {
     }
 
     private func parseRanges(arguments: AgentToolArguments) throws -> [TimeAnalysisRange] {
-        let formatter = ISO8601DateFormatter()
         guard let rawRanges = arguments.array("ranges") else {
             throw AgentToolError.invalidArguments("ranges is required")
         }
@@ -38,8 +37,8 @@ public struct TimeAnalyzeRangesTool: AgentTool {
                   let id = object["id"]?.stringValue,
                   let startString = object["start"]?.stringValue,
                   let endString = object["end"]?.stringValue,
-                  let start = formatter.date(from: startString),
-                  let end = formatter.date(from: endString)
+                  let start = AgentToolTimestampParser.parse(startString),
+                  let end = AgentToolTimestampParser.parse(endString)
             else {
                 throw AgentToolError.invalidArguments("Each range requires id, start, and end ISO-8601 timestamps")
             }
