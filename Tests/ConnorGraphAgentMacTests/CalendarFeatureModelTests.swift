@@ -185,6 +185,91 @@ struct CalendarFeatureModelTests {
         #expect(model.events.isEmpty)
     }
 
+    @Test func mutationNotificationReloadsCreatedUpdatedAndDeletedEvents() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let notificationCenter = NotificationCenter()
+        let account = makeAccount(id: "account", name: "Account")
+        let collection = makeCollection(id: "calendar", accountID: account.id, name: "Calendar")
+        try await fixture.runtime.saveSnapshot(.init(accounts: [account], collections: [collection]))
+        let model = fixture.model(notificationCenter: notificationCenter)
+        await model.reload()
+
+        let created = makeEvent(id: "event", calendarID: collection.id.rawValue, title: "Created")
+        try await applyMutation(created, operation: .create, account: account, collection: collection, store: fixture.runtime)
+        notificationCenter.post(name: .connorCalendarCacheDidChange, object: nil)
+        await model.waitForPendingOperations()
+        #expect(model.events.map(\.title) == ["Created"])
+
+        var updated = created
+        updated.title = "Updated"
+        try await applyMutation(updated, operation: .update, account: account, collection: collection, store: fixture.runtime)
+        notificationCenter.post(name: .connorCalendarCacheDidChange, object: nil)
+        await model.waitForPendingOperations()
+        #expect(model.events.map(\.title) == ["Updated"])
+
+        try await applyMutation(nil, eventID: updated.id, operation: .delete, account: account, collection: collection, store: fixture.runtime)
+        notificationCenter.post(name: .connorCalendarCacheDidChange, object: nil)
+        await model.waitForPendingOperations()
+        #expect(model.events.isEmpty)
+    }
+
+    @Test func confirmedDeleteAuditPreventsLegacySnapshotFromRestoringDeletedEvent() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let account = makeAccount(id: "account", name: "Account")
+        let collection = makeCollection(id: "calendar", accountID: account.id, name: "Calendar")
+        let deleted = makeEvent(id: "deleted", calendarID: collection.id.rawValue, title: "Deleted")
+        try await fixture.legacy.saveSnapshot(.init(accounts: [account], collections: [collection], events: [deleted]))
+        let audit = CalendarMutationAuditRecord(
+            runID: "run",
+            sessionID: "session",
+            accountID: account.id,
+            calendarID: collection.id,
+            eventID: deleted.id,
+            sourceKind: account.sourceKind,
+            operation: .delete,
+            status: .confirmed
+        )
+        try await fixture.runtime.saveSnapshot(.init(accounts: [account], collections: [collection], mutationAudits: [audit]))
+        let model = fixture.model()
+
+        await model.reload()
+
+        #expect(model.events.isEmpty)
+    }
+
+    private func applyMutation(
+        _ event: CalendarEvent?,
+        eventID: CalendarEventID? = nil,
+        operation: CalendarMutationOperation,
+        account: CalendarAccount,
+        collection: CalendarCollection,
+        store: FileBackedCalendarSourceRuntimeStore
+    ) async throws {
+        let id = event?.id ?? eventID
+        let kind: CalendarMutationKind = switch operation {
+        case .create: .createEvent
+        case .update: .updateEvent
+        case .delete: .deleteEvent
+        }
+        let result = CalendarMutationResult(
+            receipt: .init(mutationKind: kind, eventID: id, approved: true, summary: operation.rawValue),
+            confirmedEvent: event
+        )
+        let audit = CalendarMutationAuditRecord(
+            runID: "run",
+            sessionID: "session",
+            accountID: account.id,
+            calendarID: collection.id,
+            eventID: id,
+            sourceKind: account.sourceKind,
+            operation: operation,
+            status: .confirmed
+        )
+        try await store.applyMutationResult(result, audit: audit)
+    }
+
     private func makeFixture() throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("connor-calendar-feature-model-\(UUID().uuidString)", isDirectory: true)
@@ -241,13 +326,15 @@ struct CalendarFeatureModelTests {
             },
             remoteAccountSynchronizer: @escaping CalendarFeatureModel.RemoteAccountSynchronizer = { account, _, _, _ in
                 CalendarSourceSyncResult(accountID: account.id, sourceKind: account.sourceKind)
-            }
+            },
+            notificationCenter: NotificationCenter = .default
         ) -> CalendarFeatureModel {
             CalendarFeatureModel(
                 legacyStore: legacy,
                 runtimeStore: runtime,
                 systemSnapshotLoader: systemSnapshotLoader,
-                remoteAccountSynchronizer: remoteAccountSynchronizer
+                remoteAccountSynchronizer: remoteAccountSynchronizer,
+                notificationCenter: notificationCenter
             )
         }
 
