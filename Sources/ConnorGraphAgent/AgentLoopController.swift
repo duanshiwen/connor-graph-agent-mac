@@ -631,7 +631,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             if let assistantMessage = batchResult.result.assistantMessage,
                                batchResult.result.error == nil {
                                 yield(.assistantMessageCreated(assistantMessage), to: continuation, recorder: eventRecorder)
-                                messages.append(AgentModelMessage(role: .assistant, content: assistantMessage.content))
                             }
                             if let parts = batchResult.result.modelContentParts, !parts.isEmpty {
                                 messages.append(AgentModelMessage(
