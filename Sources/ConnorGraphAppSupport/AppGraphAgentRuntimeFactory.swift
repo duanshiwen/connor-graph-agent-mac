@@ -127,6 +127,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         allowedMCPToolNames: [String]? = nil
     ) -> NativeSessionManager {
         let intentProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
+        let summaryProvider = AnyLLMProvider { prompt, _ in
+            let response = try await intentProvider.complete(AgentModelRequest(
+                messages: [AgentModelMessage(role: .user, content: prompt)],
+                tools: [],
+                temperature: 0
+            ))
+            return LLMResponse(text: response.text ?? "", citations: [])
+        }
         return NativeSessionManager(
             backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs, allowedMCPToolNames: allowedMCPToolNames)),
             sessionRepository: AppChatSessionRepository(store: store),
@@ -134,7 +142,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             groupID: groupID,
             permissionMode: permissionMode,
             memoryOSFacade: makeMemoryOSFacade(),
-            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider))
+            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider)),
+            contextWindowSize: SessionContextBudget.inferContextWindowSize(modelID: intentProvider.modelID),
+            rollingSummaryProvider: summaryProvider,
+            rollingSummaryModelID: intentProvider.modelID
         )
     }
 
@@ -351,6 +362,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let snapshot = scanner.scan(storagePaths: storagePaths)
             registry.register(SkillActivateTool(packages: snapshot.packages))
             registry.register(SkillListTool(packages: snapshot.packages))
+            registry.register(LoadAttachmentContextAgentTool(store: AppSessionAttachmentStore(paths: storagePaths)))
         }
         let generatedMediaProvider = generatedMediaProviderResolver?(modelProvider)
             ?? makeConfiguredGeneratedMediaProvider(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
@@ -359,16 +371,33 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let generatedImageToolIsAvailable = storagePaths != nil
             && generatedMediaProvider?.supportsGeneratedMediaExecution == true
             && generatedMediaProvider?.capabilities.generatedMediaCapabilities.contains(.imageGeneration) == true
+        let editImageToolIsAvailable = storagePaths != nil
+            && generatedMediaProvider?.supportsGeneratedMediaExecution == true
+            && generatedMediaProvider?.capabilities.generatedMediaCapabilities.contains(.imageEditing) == true
         if generatedImageToolIsAvailable, let storagePaths, let generatedMediaProvider {
             registry.register(GeneratedImageAgentTool(
                 provider: generatedMediaProvider,
                 ingestionService: GeneratedMediaIngestionService(store: AppSessionAttachmentStore(paths: storagePaths))
             ))
         }
+        if editImageToolIsAvailable, let storagePaths, let generatedMediaProvider {
+            let attachmentStore = AppSessionAttachmentStore(paths: storagePaths)
+            registry.register(EditImageAgentTool(
+                provider: generatedMediaProvider,
+                ingestionService: GeneratedMediaIngestionService(store: attachmentStore),
+                attachmentStore: attachmentStore
+            ))
+        }
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
+        if effectiveConfiguration.modelContextWindowTokens == nil {
+            effectiveConfiguration.modelContextWindowTokens = settings
+                .connection(id: sessionLLMOverride?.connectionID)?
+                .contextWindowTokens
+                ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+        }
         let generatedImageInstruction = generatedImageToolIsAvailable
-            ? "When the user asks to create or generate an image, use `generate_image`. Do not claim that image generation is unavailable before attempting the available tool; if the tool fails, report the actual failure briefly."
+            ? "When the user asks to create or generate an image, use `generate_image`. When the user asks to modify a session image and `edit_image` is available, use `edit_image` with the exact latest source attachment ID instead of generating a replacement from scratch. Do not claim that image generation or editing is unavailable before attempting the corresponding available tool; if the tool fails, report the actual failure briefly."
             : ""
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -469,7 +498,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AnyAgentModelProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.connections.first else {
+            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) else {
                 let requestedMode = sessionLLMOverride.flatMap { AppLLMProviderMode(rawValue: $0.providerMode) } ?? settings.defaultConnection?.providerMode ?? .openAICompatible
                 let requestedKind = settings.connection(id: sessionLLMOverride?.connectionID)?.connectionKind
                     ?? settings.defaultConnection?.connectionKind

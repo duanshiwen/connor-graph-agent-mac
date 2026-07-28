@@ -46,6 +46,53 @@ private actor NativeSessionPromptRecordingProvider: AgentModelProvider {
     func lastRequest() -> AgentModelRequest? { requests.last }
 }
 
+private actor NativeSessionTwoTurnToolProvider: AgentModelProvider {
+    let modelID = "native-session-two-turn-tool"
+    let capabilities = AgentModelCapabilities(
+        supportsStreaming: false,
+        supportsToolCalling: true,
+        supportsParallelToolCalls: false,
+        supportsStructuredOutput: false,
+        supportsVision: false
+    )
+    private var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        let content = request.messages.map(\.content).joined(separator: "\n")
+        if content.contains("SECOND_USER_TURN") {
+            return AgentModelResponse(text: "SECOND_ASSISTANT_FINAL")
+        }
+        if request.messages.contains(where: { $0.role == .tool }) {
+            return AgentModelResponse(text: "FIRST_ASSISTANT_FINAL")
+        }
+        return AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "first-turn-tool-call", name: "continuity_probe", argumentsJSON: #"{}"#)],
+            finishReason: .toolCalls
+        )
+    }
+
+    func recordedRequests() -> [AgentModelRequest] { requests }
+}
+
+private struct NativeSessionContinuityProbeTool: AgentTool {
+    let name = "continuity_probe"
+    let description = "Return a marker that must remain scoped to the current run"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "FIRST_TURN_TOOL_RESULT_MUST_NOT_CROSS_ROUNDS"
+        )
+    }
+}
+
 private enum NativeSessionFailingProviderError: Error, Sendable, Equatable {
     case backendUnavailable
 }
@@ -90,13 +137,7 @@ private actor NativeSessionRecordingLLMProvider: LLMProvider {
 
     func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
         promptCount += 1
-        return LLMResponse(text: """
-        INTENT: Preserve prior session context.
-        DECISIONS: NONE
-        CHANGES: NONE
-        PENDING: NONE
-        DETAILS: compressed
-        """, citations: [])
+        return LLMResponse(text: #"{"currentGoal":"Handle the current request","userConstraints":[],"decisions":[],"completedWork":[],"importantFacts":[],"filesAndArtifacts":[],"pendingWork":[],"attachments":[]}"#, citations: [])
     }
 
     func count() -> Int { promptCount }
@@ -112,7 +153,7 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     return store
 }
 
-@Test func nativeSessionManagerRunsMainAgentPromptAssemblyBeforeMaintenanceCompression() async throws {
+@Test func nativeSessionManagerCompactsAtMostOncePerSubmission() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)
     let longMessage = String(repeating: "historical context requiring compression ", count: 120)
@@ -137,8 +178,9 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
         backend: AgentLoopBackend(loopController: loop),
         sessionRepository: repository,
         session: session,
-        compressionProvider: AnyLLMProvider(compressionProvider),
-        contextWindowSize: 100
+        contextWindowSize: 100,
+        rollingSummaryProvider: AnyLLMProvider(compressionProvider),
+        rollingSummaryModelID: "summary-test-model"
     )
 
     let response = try await manager.submit("Handle the current request")
@@ -149,6 +191,10 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(promptAssembledIndex < textCompleteIndex)
     #expect(response.assistantMessage?.content == "Connor-owned assistant response")
     #expect(await compressionProvider.count() == 1)
+    let loadedSummaryState = try repository.loadConversationSummaryState(sessionID: session.id)
+    let summaryState = try #require(loadedSummaryState)
+    #expect(summaryState.compressionGeneration == 1)
+    #expect(summaryState.payload.currentGoal == "Handle the current request")
     #expect(manager.session.messages.last?.role == .assistant)
     #expect(manager.session.messages.last?.content == "Connor-owned assistant response")
 }
@@ -282,6 +328,51 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(!renderedMessages.contains("LEGACY_SYSTEM_MARKER"))
 }
 
+@Test func nativeSessionManagerCarriesOnlyUserAndFinalAssistantMessagesAcrossRealTurns() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(
+        id: "native-session-real-two-turn-continuity",
+        title: "Real Two Turn Continuity",
+        messages: [AgentMessage(id: "legacy-system", role: .system, content: "LEGACY_SYSTEM_MUST_NOT_CROSS_ROUNDS")]
+    )
+    try repository.saveSession(session)
+    let provider = NativeSessionTwoTurnToolProvider()
+    var registry = AgentToolRegistry()
+    registry.register(NativeSessionContinuityProbeTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .allowAll)
+    )
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+
+    let first = try await manager.submit("FIRST_USER_TURN")
+    let second = try await manager.submit("SECOND_USER_TURN")
+
+    #expect(first.assistantMessage?.content == "FIRST_ASSISTANT_FINAL")
+    #expect(second.assistantMessage?.content == "SECOND_ASSISTANT_FINAL")
+    let requests = await provider.recordedRequests()
+    #expect(requests.count == 3)
+    let secondTurnRequest = try #require(requests.last)
+    let secondTurnContent = secondTurnRequest.messages.map(\.content).joined(separator: "\n")
+    #expect(secondTurnContent.contains("FIRST_USER_TURN"))
+    #expect(secondTurnContent.contains("FIRST_ASSISTANT_FINAL"))
+    #expect(secondTurnContent.contains("SECOND_USER_TURN"))
+    #expect(secondTurnRequest.messages.first?.content.contains("## Cross-Run Continuity") == true)
+    #expect(secondTurnRequest.messages.first?.content.contains("final response as the durable handoff record") == true)
+    #expect(!secondTurnContent.contains("FIRST_TURN_TOOL_RESULT_MUST_NOT_CROSS_ROUNDS"))
+    #expect(!secondTurnContent.contains("first-turn-tool-call"))
+    #expect(!secondTurnContent.contains("LEGACY_SYSTEM_MUST_NOT_CROSS_ROUNDS"))
+    #expect(!secondTurnRequest.messages.contains { $0.role == .tool })
+    #expect(!secondTurnRequest.messages.contains { !($0.toolCalls ?? []).isEmpty })
+
+    let persisted = try #require(try repository.loadSession(id: session.id))
+    #expect(persisted.messages.filter { $0.role == .user }.map(\.content) == ["FIRST_USER_TURN", "SECOND_USER_TURN"])
+    #expect(persisted.messages.filter { $0.role == .assistant }.map(\.content) == ["FIRST_ASSISTANT_FINAL", "SECOND_ASSISTANT_FINAL"])
+    #expect(try repository.loadConversationSummaryState(sessionID: session.id) == nil)
+}
+
 @Test func nativeSessionManagerCanAppendRevisionReplyWithoutAppendingAnotherUserMessage() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)
@@ -397,7 +488,26 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.messages.last?.role == .assistant)
     #expect(loaded.messages.last?.content.contains("操作已终止：") == true)
     #expect(loaded.messages.last?.content.contains("backendUnavailable") == true)
+    #expect(loaded.messages.last?.content.contains("已完成边界：本轮用户消息已保存") == true)
+    #expect(loaded.messages.last?.content.contains("继续前请重新检查相关持久状态") == true)
     #expect(manager.session.messages.map(\.id) == loaded.messages.map(\.id))
     #expect(manager.session.messages.map(\.role) == loaded.messages.map(\.role))
     #expect(manager.session.messages.map(\.content) == loaded.messages.map(\.content))
+
+    let recoveryProvider = NativeSessionPromptRecordingProvider()
+    let recoveryLoop = AgentLoopController(modelProvider: recoveryProvider, toolRegistry: AgentToolRegistry())
+    var recoveryManager = NativeSessionManager(
+        loopController: recoveryLoop,
+        sessionRepository: repository,
+        session: loaded
+    )
+    _ = try await recoveryManager.submit("Continue from the saved boundary")
+    let recoveryRequest = try #require(await recoveryProvider.lastRequest())
+    let recoveryContent = recoveryRequest.messages.map(\.content).joined(separator: "\n")
+
+    #expect(recoveryContent.contains("This must be durable even if the backend fails"))
+    #expect(recoveryContent.contains("已完成边界：本轮用户消息已保存"))
+    #expect(recoveryContent.contains("Continue from the saved boundary"))
+    #expect(!recoveryRequest.messages.contains { $0.role == .tool })
+    #expect(!recoveryRequest.messages.contains { !(($0.toolCalls ?? []).isEmpty) })
 }

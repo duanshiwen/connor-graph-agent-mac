@@ -14,6 +14,7 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var attachmentContextPlan: AttachmentContextPlan
     /// Compression anchor state from prior rounds.
     public var anchorState: SessionAnchorState?
+    public var conversationSummaryState: ConversationSummaryState?
     /// Relationship-aware Person Registry entries explicitly mentioned in the current user turn.
     public var explicitPersonContexts: [PersonContextSnapshot]
     /// Skill instructions to inject into the system prompt for this turn.
@@ -36,6 +37,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
         anchorState: SessionAnchorState? = nil,
+        conversationSummaryState: ConversationSummaryState? = nil,
         explicitPersonContexts: [PersonContextSnapshot] = [],
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
@@ -53,6 +55,7 @@ public struct AgentChatRequest: Sendable, Equatable {
             attachmentRefs: attachmentRefs,
             attachmentContextPlan: attachmentContextPlan,
             anchorState: anchorState,
+            conversationSummaryState: conversationSummaryState,
             explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
             activeSkillSlug: activeSkillSlug,
@@ -73,6 +76,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
         anchorState: SessionAnchorState? = nil,
+        conversationSummaryState: ConversationSummaryState? = nil,
         explicitPersonContexts: [PersonContextSnapshot] = [],
         skillInstructions: String? = nil,
         activeSkillSlug: String? = nil,
@@ -90,6 +94,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.attachmentRefs = attachmentRefs
         self.attachmentContextPlan = attachmentContextPlan
         self.anchorState = anchorState
+        self.conversationSummaryState = conversationSummaryState
         self.explicitPersonContexts = explicitPersonContexts
         self.skillInstructions = skillInstructions
         self.activeSkillSlug = activeSkillSlug

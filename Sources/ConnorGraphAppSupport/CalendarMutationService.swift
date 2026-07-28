@@ -8,8 +8,17 @@ public protocol CalendarMutationAdapter: Sendable {
 public struct CalendarMutationService: Sendable {
     private let store: FileBackedCalendarSourceRuntimeStore
     private let adapters: [CalendarSourceKind: any CalendarMutationAdapter]
+    private let notificationCenter: NotificationCenter
 
-    public init(store: FileBackedCalendarSourceRuntimeStore, adapters: [CalendarSourceKind: any CalendarMutationAdapter]) { self.store = store; self.adapters = adapters }
+    public init(
+        store: FileBackedCalendarSourceRuntimeStore,
+        adapters: [CalendarSourceKind: any CalendarMutationAdapter],
+        notificationCenter: NotificationCenter = .default
+    ) {
+        self.store = store
+        self.adapters = adapters
+        self.notificationCenter = notificationCenter
+    }
 
     public func mutate(_ input: CalendarMutationRequest) async throws -> CalendarMutationResult {
         let request = try input.validated()
@@ -32,6 +41,20 @@ public struct CalendarMutationService: Sendable {
         let result = try await adapter.mutate(request, account: account, collection: collection, currentEvent: current)
         let audit = CalendarMutationAuditRecord(runID: request.runID, sessionID: request.sessionID, accountID: account.id, calendarID: calendarID, eventID: result.receipt.eventID, sourceKind: account.sourceKind, operation: request.operation, status: .confirmed)
         try await store.applyMutationResult(result, audit: audit)
+        var userInfo: [String: Any] = [
+            CalendarCacheChangeNotificationUserInfoKey.accountID: account.id.rawValue,
+            CalendarCacheChangeNotificationUserInfoKey.calendarID: calendarID.rawValue,
+            CalendarCacheChangeNotificationUserInfoKey.operation: request.operation.rawValue,
+            CalendarCacheChangeNotificationUserInfoKey.reason: CalendarCacheChangeReason.eventMutationCommitted.rawValue
+        ]
+        if let eventID = result.receipt.eventID?.rawValue {
+            userInfo[CalendarCacheChangeNotificationUserInfoKey.eventID] = eventID
+        }
+        notificationCenter.post(
+            name: .connorCalendarCacheDidChange,
+            object: nil,
+            userInfo: userInfo
+        )
         return result
     }
 }

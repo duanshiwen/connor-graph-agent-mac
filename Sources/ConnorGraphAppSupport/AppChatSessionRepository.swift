@@ -525,6 +525,22 @@ public struct AppChatSessionRepository: Sendable {
         try sessionCapsuleRepository()?.saveState(state, sessionID: sessionID)
     }
 
+    public func loadConversationSummaryState(sessionID: String) throws -> ConversationSummaryState? {
+        try store.conversationSummaryState(sessionID: sessionID)
+    }
+
+    public func loadConversationCompactionRecords(sessionID: String, limit: Int = 100) throws -> [ConversationCompactionRecord] {
+        try store.conversationCompactionRecords(sessionID: sessionID, limit: limit)
+    }
+
+    public func commitConversationCompaction(
+        state: ConversationSummaryState,
+        record: ConversationCompactionRecord,
+        expectedRevision: Int?
+    ) throws -> Bool {
+        try store.commitConversationCompaction(state: state, record: record, expectedRevision: expectedRevision)
+    }
+
     public func appendSessionRecord(_ record: AppSessionRecord, sessionID: String) throws {
         try sessionCapsuleRepository()?.appendRecord(record, sessionID: sessionID)
     }

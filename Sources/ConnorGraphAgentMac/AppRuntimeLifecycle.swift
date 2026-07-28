@@ -341,6 +341,8 @@ final class AppRuntimeLifecycle {
     private func buildAttachmentContextPlanOffMain(
         sessionID: String,
         attachments: [AgentMessageAttachmentRef],
+        preservingAttachmentIDs: Set<String> = [],
+        deferredMediaAttachmentIDs: Set<String> = [],
         perAttachmentCharacterLimit: Int = 20_000,
         totalCharacterLimit: Int = 60_000
     ) async -> AttachmentContextPlan {
@@ -350,7 +352,12 @@ final class AppRuntimeLifecycle {
             totalCharacterLimit: totalCharacterLimit
         )
         return await Task.detached(priority: .utility) {
-            builder.build(sessionID: sessionID, attachments: attachments)
+            builder.build(
+                sessionID: sessionID,
+                attachments: attachments,
+                preservingAttachmentIDs: preservingAttachmentIDs,
+                deferredMediaAttachmentIDs: deferredMediaAttachmentIDs
+            )
         }.value
     }
 
@@ -516,6 +523,7 @@ final class AppRuntimeLifecycle {
         mailCredentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         injectedNativeSourceSearchBackend: (any NativeSourceSearchBackend)? = nil,
         injectedSessionSearchIndexService: SessionSearchIndexService? = nil,
+        injectedSpotlightSessionIndexService: ConnorSpotlightSessionIndexService? = nil,
         injectedMemoryOSStore: SQLiteMemoryOSStore? = nil,
         injectedMemoryOSFacade: AppMemoryOSFacade? = nil,
         injectedMemoryOSSearchHealthSummary: String? = nil,
@@ -667,10 +675,16 @@ final class AppRuntimeLifecycle {
             publicationAPI: cloudKnowledgeAPI
         )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
+        let resolvedSpotlightSessionIndexService = injectedSpotlightSessionIndexService ?? (
+            startupMode == .immediate && Bundle.main.bundleURL.pathExtension == "app"
+                ? ConnorSpotlightSessionIndexService()
+                : nil
+        )
         let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
         self.globalSearchFeatureModel = GlobalSearchFeatureModel(
             nativeSourceSearchBackend: nativeSourceSearchBackend,
             sessionSearchIndexService: resolvedSessionSearchIndexService,
+            spotlightSessionIndexService: resolvedSpotlightSessionIndexService,
             historyRepository: resolvedGlobalSearchHistoryRepository
         )
         let resolvedRSSRuntime = rssRuntime ?? storagePaths.map { paths in
@@ -1359,6 +1373,9 @@ final class AppRuntimeLifecycle {
             summary: snapshot.summary
         )
         globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
+        if let chatSessionRepository {
+            globalSearchFeatureModel.synchronizeSpotlightIndex(repository: chatSessionRepository)
+        }
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {
             clearSelectedChatSessionDetail()
@@ -3181,8 +3198,7 @@ final class AppRuntimeLifecycle {
         personReferences: [PersonReference] = [],
         onCancellation: (() -> Void)? = nil,
         existingUserMessageID: String? = nil,
-        usesActiveSkill: Bool = true,
-        usesSessionSummary: Bool = true
+        usesActiveSkill: Bool = true
     ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3225,13 +3241,6 @@ final class AppRuntimeLifecycle {
         )
         defer { chatRunCoordinator.finish(sessionID: submittingSessionID) }
         do {
-            let sessionSummary: AgentSessionSummary?
-            if usesSessionSummary, let chatSessionRepository {
-                let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: submittingSessionID)
-                sessionSummary = AgentSessionSummaryPolicy().summaryForContext(candidateSummary, session: manager.session)
-            } else {
-                sessionSummary = nil
-            }
             if !attachmentsForSubmission.isEmpty {
                 await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
             }
@@ -3240,13 +3249,23 @@ final class AppRuntimeLifecycle {
                let persistedSession = try? chatSessionRepository.loadSession(id: submittingSessionID) {
                 attachmentHistoryMessages = persistedSession.messages
             }
-            let conversationAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+            let persistedSummaryState = try? chatSessionRepository?.loadConversationSummaryState(sessionID: submittingSessionID)
+            let attachmentHistorySelection = ConversationSummaryHistorySelector().select(
                 messages: attachmentHistoryMessages,
+                state: persistedSummaryState ?? manager.conversationSummaryState
+            )
+            let conversationAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+                messages: attachmentHistorySelection.messages,
                 currentAttachments: attachmentsForSubmission
+            )
+            let historicalAssistantMediaAttachmentIDs = AgentAttachmentContextPlanBuilder.historicalAssistantMediaAttachmentIDs(
+                messages: attachmentHistorySelection.messages
             )
             let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
                 sessionID: submittingSessionID,
-                attachments: conversationAttachments
+                attachments: conversationAttachments,
+                preservingAttachmentIDs: Set(attachmentsForSubmission.map(\.id)),
+                deferredMediaAttachmentIDs: historicalAssistantMediaAttachmentIDs
             )
             let noteAugmentedPrompt = NoteSessionPromptBuilder.augmentedPrompt(
                 prompt,
@@ -3263,7 +3282,7 @@ final class AppRuntimeLifecycle {
             let submitStartedAt = ContinuousClock.now
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
-                sessionSummary: sessionSummary,
+                sessionSummary: nil,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
@@ -3409,8 +3428,7 @@ final class AppRuntimeLifecycle {
                 attachments: [],
                 personReferences: [],
                 existingUserMessageID: messageID,
-                usesActiveSkill: false,
-                usesSessionSummary: false
+                usesActiveSkill: false
             )
             return true
         } catch {

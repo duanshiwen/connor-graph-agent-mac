@@ -1,4 +1,6 @@
 import Foundation
+@preconcurrency import CoreSpotlight
+import UniformTypeIdentifiers
 import SQLite3
 import ConnorGraphCore
 
@@ -264,6 +266,165 @@ public actor SessionSearchIndexService {
 
     private func lastError() -> SessionSearchIndexError {
         SessionSearchIndexError.sqlite(String(cString: sqlite3_errmsg(db)))
+    }
+}
+
+public struct ConnorSpotlightSearchDocument: Sendable, Equatable {
+    public var uniqueIdentifier: String
+    public var domainIdentifier: String
+    public var title: String
+    public var contentDescription: String
+    public var textContent: String
+    public var keywords: [String]
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        uniqueIdentifier: String,
+        domainIdentifier: String,
+        title: String,
+        contentDescription: String,
+        textContent: String,
+        keywords: [String],
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.uniqueIdentifier = uniqueIdentifier
+        self.domainIdentifier = domainIdentifier
+        self.title = title
+        self.contentDescription = contentDescription
+        self.textContent = textContent
+        self.keywords = keywords
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public enum ConnorSpotlightSessionIdentifier {
+    public static let domain = "com.shiwen.connor.sessions"
+    private static let prefix = "connor.session."
+
+    public static func searchableItemID(sessionID: String) -> String {
+        prefix + sessionID
+    }
+
+    public static func sessionID(searchableItemID: String) -> String? {
+        guard searchableItemID.hasPrefix(prefix) else { return nil }
+        let value = String(searchableItemID.dropFirst(prefix.count))
+        return value.isEmpty ? nil : value
+    }
+}
+
+public protocol ConnorSpotlightIndexClient: Sendable {
+    func index(documents: [ConnorSpotlightSearchDocument]) async throws
+    func deleteSearchableItems(identifiers: [String]) async throws
+    func deleteSearchableItems(domainIdentifiers: [String]) async throws
+}
+
+public actor SystemConnorSpotlightIndexClient: ConnorSpotlightIndexClient {
+    private let index: CSSearchableIndex
+
+    public init(index: CSSearchableIndex = .default()) {
+        self.index = index
+    }
+
+    public func index(documents: [ConnorSpotlightSearchDocument]) async throws {
+        let items = documents.map { document in
+            let attributes = CSSearchableItemAttributeSet(contentType: .text)
+            attributes.title = document.title
+            attributes.displayName = document.title
+            attributes.contentDescription = document.contentDescription
+            attributes.textContent = document.textContent
+            attributes.keywords = document.keywords
+            attributes.contentCreationDate = document.createdAt
+            attributes.contentModificationDate = document.updatedAt
+            return CSSearchableItem(
+                uniqueIdentifier: document.uniqueIdentifier,
+                domainIdentifier: document.domainIdentifier,
+                attributeSet: attributes
+            )
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            index.indexSearchableItems(items) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: ()) }
+            }
+        }
+    }
+
+    public func deleteSearchableItems(identifiers: [String]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            index.deleteSearchableItems(withIdentifiers: identifiers) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: ()) }
+            }
+        }
+    }
+
+    public func deleteSearchableItems(domainIdentifiers: [String]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            index.deleteSearchableItems(withDomainIdentifiers: domainIdentifiers) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: ()) }
+            }
+        }
+    }
+}
+
+public actor ConnorSpotlightSessionIndexService {
+    private let client: any ConnorSpotlightIndexClient
+    private let batchSize: Int
+
+    public init(
+        client: any ConnorSpotlightIndexClient = SystemConnorSpotlightIndexClient(),
+        batchSize: Int = 100
+    ) {
+        self.client = client
+        self.batchSize = max(1, batchSize)
+    }
+
+    public func synchronize(sessions: [AgentSession]) async throws {
+        try await client.deleteSearchableItems(domainIdentifiers: [ConnorSpotlightSessionIdentifier.domain])
+        let documents = sessions.map(Self.document)
+        var start = 0
+        while start < documents.count {
+            let end = min(start + batchSize, documents.count)
+            try await client.index(documents: Array(documents[start..<end]))
+            start = end
+        }
+    }
+
+    public func upsert(session: AgentSession) async throws {
+        try await client.index(documents: [Self.document(session)])
+    }
+
+    public func remove(sessionID: String) async throws {
+        try await client.deleteSearchableItems(
+            identifiers: [ConnorSpotlightSessionIdentifier.searchableItemID(sessionID: sessionID)]
+        )
+    }
+
+    public nonisolated static func document(_ session: AgentSession) -> ConnorSpotlightSearchDocument {
+        let title = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kind = session.governance.kind == .note ? "笔记" : "对话"
+        let recentText = session.messages
+            .filter { $0.role == .user || $0.role == .assistant }
+            .suffix(12)
+            .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let boundedText = String(recentText.prefix(6_000))
+        let resolvedTitle = title.isEmpty ? (kind == "笔记" ? "未命名笔记" : "新对话") : title
+        return ConnorSpotlightSearchDocument(
+            uniqueIdentifier: ConnorSpotlightSessionIdentifier.searchableItemID(sessionID: session.id),
+            domainIdentifier: ConnorSpotlightSessionIdentifier.domain,
+            title: resolvedTitle,
+            contentDescription: String(boundedText.prefix(500)),
+            textContent: boundedText,
+            keywords: ["康纳同学", kind],
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt
+        )
     }
 }
 

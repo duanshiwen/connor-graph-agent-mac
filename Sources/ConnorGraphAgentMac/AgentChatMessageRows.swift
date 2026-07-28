@@ -172,6 +172,7 @@ struct AgentChatMessageRow: View {
     var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onSaveImageAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
+    var onShareAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onEditNoteBody: ((String) async -> Bool)? = nil
@@ -237,7 +238,8 @@ struct AgentChatMessageRow: View {
                             attachments: supplementalAttachments,
                             localFileURL: localAttachmentFileURL,
                             onPreview: onPreviewAttachment,
-                            onSaveImage: onSaveImageAttachment
+                            onSaveImage: onSaveImageAttachment,
+                            onShare: onShareAttachment
                         )
                     }
                     if isUser, assistantExpansionPresentation.isAvailable {
@@ -559,6 +561,7 @@ struct AgentMessageAttachmentRefsView: View {
     var localFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreview: (AgentMessageAttachmentRef) -> Void
     var onSaveImage: (AgentMessageAttachmentRef) -> Void = { _ in }
+    var onShare: (AgentMessageAttachmentRef) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
@@ -567,7 +570,8 @@ struct AgentMessageAttachmentRefsView: View {
                     attachment: attachment,
                     localFileURL: localFileURL(attachment),
                     onPreview: { onPreview(attachment) },
-                    onSaveImage: { onSaveImage(attachment) }
+                    onSaveImage: { onSaveImage(attachment) },
+                    onShare: { onShare(attachment) }
                 )
             }
         }

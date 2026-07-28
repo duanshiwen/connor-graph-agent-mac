@@ -112,6 +112,21 @@ public struct AttachmentContextPlan: Sendable, Equatable {
     public var isEmpty: Bool {
         inlineBlocks.isEmpty && omittedAttachments.isEmpty && providerNativeBlocks.isEmpty && imageBlocks.isEmpty
     }
+
+    public func filtered(allowedAttachmentIDs: Set<String>) -> AttachmentContextPlan {
+        let filteredInlineBlocks = inlineBlocks.filter { allowedAttachmentIDs.contains($0.attachmentID) }
+        let filteredImageBlocks = imageBlocks.filter { allowedAttachmentIDs.contains($0.attachmentID) }
+        return AttachmentContextPlan(
+            inlineBlocks: filteredInlineBlocks,
+            omittedAttachments: omittedAttachments.filter { allowedAttachmentIDs.contains($0.attachmentID) },
+            providerNativeBlocks: providerNativeBlocks.filter { allowedAttachmentIDs.contains($0.attachmentID) },
+            imageBlocks: filteredImageBlocks,
+            estimatedTokens: filteredInlineBlocks.reduce(0) { $0 + max(1, $1.content.count / 4) }
+                + filteredImageBlocks.reduce(0) {
+                    $0 + AgentVisionTokenEstimator().estimateImageTokenCount(dataURL: $1.dataURL)
+                }
+        )
+    }
 }
 
 public struct AgentAttachmentContextSection: Sendable, Equatable {

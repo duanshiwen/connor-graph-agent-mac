@@ -272,7 +272,9 @@ public struct AgentToolArguments: Sendable, Equatable {
 
     public func iso8601Date(_ key: String) throws -> Date? {
         guard let value = string(key) else { return nil }
-        guard let date = ISO8601DateFormatter().date(from: value) else {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) else {
             throw AgentToolError.invalidArguments("\(key) must be a valid ISO-8601 timestamp")
         }
         return date
@@ -387,9 +389,16 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
     public var citations: [String]
     public var createdAt: Date
     public var error: String?
+    /// Optional model-only multimodal content emitted by a trusted built-in tool.
+    /// The loop injects it into the current run but it is never persisted as conversation history.
+    public var modelContentParts: [AgentModelMessageContentPart]?
     /// Internal instruction payload. The agent loop accepts this only from a
     /// successful built-in activation tool and never exposes it as ordinary tool text.
     public var instructionPromotion: AgentToolInstructionPromotion?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, runID, sessionID, toolCallID, toolName, contentText, contentJSON, citations, createdAt, error, instructionPromotion
+    }
 
     public init(
         id: String = UUID().uuidString,
@@ -402,6 +411,7 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         citations: [String] = [],
         createdAt: Date = Date(),
         error: String? = nil,
+        modelContentParts: [AgentModelMessageContentPart]? = nil,
         instructionPromotion: AgentToolInstructionPromotion? = nil
     ) {
         self.id = id
@@ -414,7 +424,39 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         self.citations = citations
         self.createdAt = createdAt
         self.error = error
+        self.modelContentParts = modelContentParts
         self.instructionPromotion = instructionPromotion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        runID = try container.decodeIfPresent(String.self, forKey: .runID)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        toolCallID = try container.decode(String.self, forKey: .toolCallID)
+        toolName = try container.decode(String.self, forKey: .toolName)
+        contentText = try container.decode(String.self, forKey: .contentText)
+        contentJSON = try container.decodeIfPresent(String.self, forKey: .contentJSON)
+        citations = try container.decodeIfPresent([String].self, forKey: .citations) ?? []
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        modelContentParts = nil
+        instructionPromotion = try container.decodeIfPresent(AgentToolInstructionPromotion.self, forKey: .instructionPromotion)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(runID, forKey: .runID)
+        try container.encodeIfPresent(sessionID, forKey: .sessionID)
+        try container.encode(toolCallID, forKey: .toolCallID)
+        try container.encode(toolName, forKey: .toolName)
+        try container.encode(contentText, forKey: .contentText)
+        try container.encodeIfPresent(contentJSON, forKey: .contentJSON)
+        try container.encode(citations, forKey: .citations)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(error, forKey: .error)
+        try container.encodeIfPresent(instructionPromotion, forKey: .instructionPromotion)
     }
 }
 

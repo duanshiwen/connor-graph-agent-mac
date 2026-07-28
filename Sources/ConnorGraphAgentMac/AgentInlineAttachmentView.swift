@@ -3,6 +3,28 @@ import ImageIO
 import SwiftUI
 import ConnorGraphCore
 
+@MainActor
+enum AgentAttachmentSharingService {
+    static func canShare(fileURL: URL, fileManager: FileManager = .default) -> Bool {
+        fileURL.isFileURL && fileManager.fileExists(atPath: fileURL.path)
+    }
+
+    @discardableResult
+    static func share(fileURL: URL) -> Bool {
+        guard canShare(fileURL: fileURL),
+              let anchorView = NSApp.keyWindow?.contentView ?? NSApp.mainWindow?.contentView else {
+            return false
+        }
+        let anchorRect = NSRect(x: anchorView.bounds.midX, y: anchorView.bounds.midY, width: 1, height: 1)
+        NSSharingServicePicker(items: [fileURL]).show(
+            relativeTo: anchorRect,
+            of: anchorView,
+            preferredEdge: .minY
+        )
+        return true
+    }
+}
+
 struct AgentInlineAttachmentLayout: Equatable {
     var maxWidth: CGFloat = 420
     var maxHeight: CGFloat = 320
@@ -53,25 +75,39 @@ struct AgentInlineAttachmentView: View {
     var layout = AgentInlineAttachmentLayout()
     var onPreview: () -> Void
     var onSaveImage: () -> Void = {}
+    var onShare: () -> Void = {}
 
     var body: some View {
-        switch attachment.kind {
-        case .image:
-            AgentInlineImageAttachmentView(
-                attachment: attachment,
-                localFileURL: localFileURL,
-                layout: layout,
-                onPreview: onPreview,
-                onSaveImage: onSaveImage
-            )
-        case .audio:
-            AgentInlineAudioAttachmentView(
-                attachment: attachment,
-                localFileURL: localFileURL,
-                onPreview: onPreview
-            )
-        default:
-            AgentAttachmentChip(attachment: attachment, onPreview: onPreview)
+        Group {
+            switch attachment.kind {
+            case .image:
+                AgentInlineImageAttachmentView(
+                    attachment: attachment,
+                    localFileURL: localFileURL,
+                    layout: layout,
+                    onPreview: onPreview
+                )
+            case .audio:
+                AgentInlineAudioAttachmentView(
+                    attachment: attachment,
+                    localFileURL: localFileURL,
+                    onPreview: onPreview
+                )
+            default:
+                AgentAttachmentChip(attachment: attachment, onPreview: onPreview)
+            }
+        }
+        .contextMenu {
+            if attachment.kind == .image {
+                Button(action: onSaveImage) {
+                    Label("图片另存为…", systemImage: "square.and.arrow.down")
+                }
+                .disabled(localFileURL == nil)
+            }
+            Button(action: onShare) {
+                Label("分享…", systemImage: "square.and.arrow.up")
+            }
+            .disabled(localFileURL == nil)
         }
     }
 }
@@ -81,7 +117,6 @@ private struct AgentInlineImageAttachmentView: View {
     var localFileURL: URL?
     var layout: AgentInlineAttachmentLayout
     var onPreview: () -> Void
-    var onSaveImage: () -> Void
     @State private var loader = AgentImageThumbnailLoader()
 
     var body: some View {
@@ -106,12 +141,6 @@ private struct AgentInlineImageAttachmentView: View {
             .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button(action: onSaveImage) {
-                Label("图片另存为…", systemImage: "square.and.arrow.down")
-            }
-            .disabled(localFileURL == nil)
-        }
         .accessibilityLabel("预览图片附件 \(attachment.displayName)")
         .task(id: localFileURL) {
             guard let localFileURL else { return }

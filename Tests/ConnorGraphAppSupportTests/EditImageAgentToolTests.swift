@@ -17,8 +17,8 @@ private func editImageContext(sessionID: String = "session-edit") -> AgentToolEx
     let tool = EditImageAgentTool(provider: provider, ingestionService: GeneratedMediaIngestionService(store: store), attachmentStore: store)
     let result = try await tool.execute(arguments: AgentToolArguments(values: ["prompt": .string("Make it warmer"), "attachmentID": .string(source.id)]), context: editImageContext())
 
-    let request = await recorder.request; #expect(request?.imageAction == .edit); #expect(request?.inputAttachments == [source.messageRef]); #expect(request?.prompt == "Make it warmer")
-    let payload = try JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: Data(try #require(result.contentJSON).utf8)); #expect(payload.attachment.id != source.id); #expect(payload.attachment.kind == AgentAttachmentKind.image)
+    let request = await recorder.request; #expect(request?.imageAction == .edit); #expect(request?.inputAttachments == [source.messageRef]); #expect(request?.inputImages.first?.data == Data([1, 2, 3])); #expect(request?.prompt == "Make it warmer")
+    let payload = try JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: Data(try #require(result.contentJSON).utf8)); #expect(payload.attachment.id != source.id); #expect(payload.attachment.kind == AgentAttachmentKind.image); #expect(payload.generationMetadata.parameters[AgentAttachmentGenerationMetadata.sourceAttachmentIDParameterKey] == source.id)
 }
 
 @Test func editImageToolRejectsProviderWithoutEditingCapabilityBeforeLoadingPath() async throws {
