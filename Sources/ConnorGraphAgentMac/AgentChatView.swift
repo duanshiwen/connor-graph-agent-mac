@@ -107,6 +107,7 @@ struct AgentChatView: View {
                 AgentAttachmentPreviewOverlay(
                     model: previewModel,
                     onDownloadImage: { chatActions.run.downloadPreviewImage(previewModel) },
+                    onShare: { shareAttachment(fileURL: previewModel.sourceFileURL) },
                     onRetryExtraction: { chatActions.composer.retryAttachmentExtraction(attachmentID: previewModel.attachment.id) },
                     onClose: { model.composer.attachmentPreviewModel = nil }
                 )
@@ -138,6 +139,17 @@ struct AgentChatView: View {
             chatActions.workspace.openURLInCurrentChatBrowser(url)
             return .handled
         })
+    }
+
+    private func shareAttachment(fileURL: URL?) {
+        guard let fileURL, AgentAttachmentSharingService.share(fileURL: fileURL) else {
+            chatActions.composer.showAttachmentToast(
+                title: "分享失败",
+                message: "附件原件不存在或当前无法打开系统分享面板。",
+                systemImage: "xmark.circle"
+            )
+            return
+        }
     }
 }
 
@@ -185,6 +197,7 @@ private struct AgentChatToastView: View {
 private struct AgentAttachmentPreviewOverlay: View {
     var model: AttachmentPreviewModel
     var onDownloadImage: (() -> Void)? = nil
+    var onShare: (() -> Void)? = nil
     var onRetryExtraction: (() -> Void)? = nil
     var onClose: () -> Void
 
@@ -226,6 +239,7 @@ private struct AgentAttachmentPreviewOverlay: View {
                 AgentAttachmentPreviewSheetView(
                     model: model,
                     onDownloadImage: onDownloadImage,
+                    onShare: onShare,
                     onRetryExtraction: onRetryExtraction
                 )
                     .frame(maxWidth: 900, maxHeight: .infinity, alignment: .topLeading)
@@ -764,6 +778,9 @@ private struct AgentChatConversationView: View {
                         )
                     )
                 },
+                onShareAttachment: { attachment in
+                    shareAttachment(fileURL: chatActions.composer.localAttachmentFileURL(attachment))
+                },
                 onCopyAssistantMessage: { message in
                     chatActions.run.copyAssistantMessageToPasteboard(message)
                 },
@@ -788,6 +805,17 @@ private struct AgentChatConversationView: View {
             }
         } else if let timestamp = item.timestamp {
             AgentChatTurnTimestampRow(timestamp: timestamp)
+        }
+    }
+
+    private func shareAttachment(fileURL: URL?) {
+        guard let fileURL, AgentAttachmentSharingService.share(fileURL: fileURL) else {
+            chatActions.composer.showAttachmentToast(
+                title: "分享失败",
+                message: "附件原件不存在或当前无法打开系统分享面板。",
+                systemImage: "xmark.circle"
+            )
+            return
         }
     }
 
