@@ -265,6 +265,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("All three continuity tools are paginated"))
     #expect(prompt.contains("Their input Schemas accept `page` and `pageSize`"))
     #expect(prompt.contains("`pageSize` defaults to 100 and may be chosen from 1 through 500"))
+    #expect(prompt.contains("explicitly request the largest `pageSize` allowed by its input Schema (currently 500)"))
     #expect(prompt.contains("Keep the same `pageSize` throughout one pagination chain"))
     #expect(prompt.contains("For recent context and durable knowledge, choose how many consecutive pages to read"))
     #expect(prompt.contains("always begin at page 1 and read every consecutive page through terminal `nextPage: null`"))
