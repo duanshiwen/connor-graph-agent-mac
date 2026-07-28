@@ -160,6 +160,163 @@ public struct NativeWebSearchClient: Sendable {
     }
 }
 
+public enum NativeImageSearchLicenseFilter: String, Sendable, Equatable {
+    case all
+    case commercial
+    case modification
+}
+
+public struct NativeImageSearchResultItem: Sendable, Equatable {
+    public var title: String
+    public var imageURL: String
+    public var thumbnailURL: String
+    public var sourcePageURL: String
+    public var creator: String
+    public var creatorURL: String
+    public var license: String
+    public var licenseURL: String
+    public var attribution: String
+    public var width: Int?
+    public var height: Int?
+}
+
+public struct NativeImageSearchResult: Sendable, Equatable {
+    public var query: String
+    public var provider: String
+    public var licenseFilter: NativeImageSearchLicenseFilter
+    public var results: [NativeImageSearchResultItem]
+    public var markdown: String
+}
+
+public struct NativeImageSearchClient: Sendable {
+    private let httpClient: any NativeWebHTTPClient
+
+    public init(httpClient: any NativeWebHTTPClient = URLSessionNativeWebHTTPClient()) {
+        self.httpClient = httpClient
+    }
+
+    public func search(
+        query: String,
+        maxResults: Int,
+        licenseFilter: NativeImageSearchLicenseFilter
+    ) async throws -> NativeImageSearchResult {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else {
+            throw AgentToolError.invalidArguments("image_search requires query")
+        }
+
+        let resultLimit = min(max(maxResults, 1), 10)
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.openverse.org"
+        components.path = "/v1/images/"
+        components.queryItems = [
+            URLQueryItem(name: "q", value: normalizedQuery),
+            URLQueryItem(name: "page_size", value: String(resultLimit)),
+            URLQueryItem(name: "mature", value: "false")
+        ]
+        if licenseFilter != .all {
+            components.queryItems?.append(URLQueryItem(name: "license_type", value: licenseFilter.rawValue))
+        }
+        guard let url = components.url else {
+            throw AgentToolError.invalidArguments("Unable to construct image search URL")
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "GET"
+        request.setValue("ConnorGraphAgent/1.0 (+https://local-agent)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let response = try await httpClient.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw AgentToolError.invalidArguments("image_search failed with HTTP status \(response.statusCode)")
+        }
+        let decoded: OpenverseImageSearchResponse
+        do {
+            decoded = try JSONDecoder().decode(OpenverseImageSearchResponse.self, from: response.data)
+        } catch {
+            throw AgentToolError.invalidArguments("image_search returned an invalid Openverse response")
+        }
+
+        let results = Array(decoded.results.compactMap(\.resultItem).prefix(resultLimit))
+        let markdown = results.enumerated().map { index, item in
+            var lines = [
+                "\(index + 1). \(item.title)",
+                "   Image URL: \(item.imageURL)",
+                "   Source page: \(item.sourcePageURL)"
+            ]
+            if !item.creator.isEmpty { lines.append("   Creator: \(item.creator)") }
+            if !item.license.isEmpty { lines.append("   License: \(item.license)") }
+            if !item.attribution.isEmpty { lines.append("   Attribution: \(item.attribution)") }
+            return lines.joined(separator: "\n")
+        }.joined(separator: "\n\n")
+
+        return NativeImageSearchResult(
+            query: normalizedQuery,
+            provider: "openverse",
+            licenseFilter: licenseFilter,
+            results: results,
+            markdown: markdown
+        )
+    }
+}
+
+private struct OpenverseImageSearchResponse: Decodable {
+    var results: [OpenverseImageSearchItem]
+}
+
+private struct OpenverseImageSearchItem: Decodable {
+    var title: String?
+    var url: String?
+    var thumbnail: String?
+    var foreignLandingURL: String?
+    var creator: String?
+    var creatorURL: String?
+    var license: String?
+    var licenseVersion: String?
+    var licenseURL: String?
+    var attribution: String?
+    var width: Int?
+    var height: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case title, url, thumbnail, creator, license, attribution, width, height
+        case foreignLandingURL = "foreign_landing_url"
+        case creatorURL = "creator_url"
+        case licenseVersion = "license_version"
+        case licenseURL = "license_url"
+    }
+
+    var resultItem: NativeImageSearchResultItem? {
+        let imageURL = url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sourcePageURL = foreignLandingURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard isHTTPURL(imageURL), isHTTPURL(sourcePageURL) else { return nil }
+        let normalizedLicense = [license, licenseVersion]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let normalizedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return NativeImageSearchResultItem(
+            title: normalizedTitle.isEmpty ? "Untitled image" : normalizedTitle,
+            imageURL: imageURL,
+            thumbnailURL: thumbnail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            sourcePageURL: sourcePageURL,
+            creator: creator?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            creatorURL: creatorURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            license: normalizedLicense,
+            licenseURL: licenseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            attribution: attribution?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            width: width,
+            height: height
+        )
+    }
+
+    private func isHTTPURL(_ value: String) -> Bool {
+        guard let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+}
+
 enum NativeWebTextExtractor {
     static func title(from html: String) -> String {
         guard let raw = firstMatch(in: html, pattern: #"(?is)<title[^>]*>(.*?)</title>"#) else { return "" }

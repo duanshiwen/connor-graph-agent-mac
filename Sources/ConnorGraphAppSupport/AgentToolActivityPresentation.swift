@@ -38,7 +38,7 @@ public enum AgentToolDisplayNameResolver {
         "graph_search": "搜索知识图谱", "browser_fetch": "读取浏览器页面", "web_search": "搜索网页", "web_fetch": "读取网页内容",
         "note_search": "搜索笔记", "note_get": "读取笔记详情",
         "browser_history_search": "搜索浏览历史", "browser_history_get": "读取浏览记录",
-        "generate_image": "生成图片", "edit_image": "编辑图片", "present_image": "载入图片",
+        "generate_image": "生成图片", "edit_image": "编辑图片", "image_search": "搜索图片", "present_image": "载入图片",
         "connor_skill_activate": "启用技能", "connor_skill_list": "查看可用技能", "skill_list": "查看可用技能",
         "connor_skill_create": "创建技能", "connor_skill_update": "更新技能", "connor_skill_delete": "删除技能",
         "session_get_status": "查看会话状态", "session_set_status": "更新会话状态", "session_list_statuses": "查看可用会话状态",

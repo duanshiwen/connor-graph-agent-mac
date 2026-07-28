@@ -98,11 +98,6 @@ func currentGLMVisionModelsAdvertiseVision(modelID: String) throws {
     #expect(profile.supportsVision == false)
 }
 
-@Test func mimoV25TTSDoesNotAdvertiseVision() throws {
-    let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2.5-tts")
-    #expect(profile.supportsVision == false)
-}
-
 @Test func mimoV2OmniAdvertisesVision() throws {
     let profile = AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: "mimo-v2-omni")
     #expect(profile.supportsVision)
@@ -170,23 +165,6 @@ func openAIResponsesImageCatalogAdvertisesOfficialModelFamilies(modelID: String)
         #expect(reason.contains("请切换"))
     } else {
         Issue.record("Expected current model capability rejection")
-    }
-}
-
-@Test func currentModelMediaGateRequiresBothSpeechAndStreamingCapabilities() throws {
-    let nonStreaming = AgentModelCapabilities(
-        supportsStreaming: true,
-        supportsToolCalling: false,
-        supportsParallelToolCalls: false,
-        supportsStructuredOutput: false,
-        supportsVision: false,
-        generatedMediaCapabilities: [.speechGeneration]
-    )
-    #expect(CurrentModelMediaCapabilityGate.decision(modelID: "speech-file-only", capabilities: nonStreaming, requestKind: .speech, requiresStreaming: false) == .supported)
-    if case .unsupportedByCurrentModel(let reason) = CurrentModelMediaCapabilityGate.decision(modelID: "speech-file-only", capabilities: nonStreaming, requestKind: .speech, requiresStreaming: true) {
-        #expect(reason.contains("streamingAudioOutput"))
-    } else {
-        Issue.record("Expected streaming audio capability rejection")
     }
 }
 

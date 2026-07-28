@@ -58,7 +58,7 @@ struct AgentAssistantMessageExpansionPresentation: Equatable {
             && message.content.utf8.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
         self.isExpanded = isExpanded
         let contentName = message.role == .user ? "消息" : "回复"
-        self.title = isExpanded ? "收起\(contentName)" : "展开完整\(contentName)"
+        self.title = isExpanded ? "收起" : "展开"
         self.systemImage = isExpanded ? "chevron.up" : "chevron.down"
         let accessibilityContentName = message.role == .user ? "用户消息" : "助理回复"
         self.accessibilityLabel = isExpanded ? "收起这条\(accessibilityContentName)" : "展开这条\(accessibilityContentName)"
@@ -175,13 +175,6 @@ struct AgentChatMessageRow: View {
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onEditNoteBody: ((String) async -> Bool)? = nil
-    var speechPresentation = ConnorSpeechActionPresentation(
-        isConfigured: false,
-        isAvailable: false,
-        phase: .idle,
-        messageID: ""
-    )
-    var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
@@ -264,10 +257,8 @@ struct AgentChatMessageRow: View {
                 if assistantActionsPresentation.showsActions {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
-                        speechPresentation: speechPresentation,
                         expansionPresentation: assistantExpansionPresentation,
                         onToggleExpansion: toggleMessageExpansion,
-                        onToggleSpeech: { onToggleSpeech(row) },
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
                     )
@@ -478,10 +469,8 @@ private struct AgentNoteBodyEditorSheet: View {
 
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
-    var speechPresentation: ConnorSpeechActionPresentation
     var expansionPresentation: AgentAssistantMessageExpansionPresentation
     var onToggleExpansion: () -> Void
-    var onToggleSpeech: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
 
@@ -489,17 +478,6 @@ private struct AgentAssistantMessageActionsView: View {
         HStack(spacing: AgentChatLayout.spaceM) {
             if expansionPresentation.isAvailable {
                 expansionButton
-            }
-            if presentation.showsActions, speechPresentation.isVisible {
-                actionButton(
-                    title: speechPresentation.title,
-                    systemImage: speechPresentation.systemImage,
-                    accessibilityLabel: speechPresentation.accessibilityLabel,
-                    help: speechPresentation.help,
-                    showsProgress: speechPresentation.isLoading,
-                    isEnabled: speechPresentation.isEnabled,
-                    action: onToggleSpeech
-                )
             }
             if presentation.showsActions {
                 actionButton(
@@ -524,18 +502,19 @@ private struct AgentAssistantMessageActionsView: View {
 
     private var expansionButton: some View {
         Button(action: onToggleExpansion) {
-            Image(systemName: expansionPresentation.systemImage)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(Color.accentColor.opacity(0.08)))
-                .overlay(
-                    Circle()
-                        .stroke(Color.accentColor.opacity(0.72), lineWidth: 1)
-                )
-                .contentShape(Circle())
+            HStack(spacing: 4) {
+                Image(systemName: expansionPresentation.systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .imageScale(.small)
+                Text(expansionPresentation.title)
+                    .font(AgentChatTypography.microEmphasis)
+            }
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
         .accessibilityLabel(expansionPresentation.accessibilityLabel)
         .help(expansionPresentation.help)
     }

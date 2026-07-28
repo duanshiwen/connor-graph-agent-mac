@@ -129,7 +129,6 @@ final class AppRuntimeLifecycle {
     let appSettingsModel: AppSettingsFeatureModel
     let inputSettingsModel: InputSettingsFeatureModel
     let userPreferencesModel: UserPreferencesFeatureModel
-    let connorSpeechPlaybackCoordinator: ConnorSpeechPlaybackCoordinator
     let workspaceSettingsModel: WorkspaceSettingsFeatureModel
     let permissionSettingsModel: PermissionSettingsFeatureModel
     private lazy var environmentLocationService = MacCurrentLocationService()
@@ -551,11 +550,6 @@ final class AppRuntimeLifecycle {
         self.appSettingsModel = AppSettingsFeatureModel()
         self.inputSettingsModel = InputSettingsFeatureModel()
         self.userPreferencesModel = UserPreferencesFeatureModel()
-        self.connorSpeechPlaybackCoordinator = ConnorSpeechPlaybackCoordinator(
-            settingsRepository: llmSettingsRepository,
-            cacheDirectory: storagePaths?.applicationSupportDirectory
-                .appendingPathComponent("speech-cache", isDirectory: true)
-        )
         self.workspaceSettingsModel = WorkspaceSettingsFeatureModel()
         self.permissionSettingsModel = PermissionSettingsFeatureModel()
         self.runtimeSettingsCoordinator = RuntimeSettingsPersistenceCoordinator(
@@ -739,7 +733,6 @@ final class AppRuntimeLifecycle {
         self.fallbackChatSessionStorage = initialSession
         aiConnectionsModel.onRuntimeSettingsChanged = { [weak self] rebuildRuntime in
             guard let self else { return }
-            self.connorSpeechPlaybackCoordinator.stopIfUnavailable()
             if rebuildRuntime {
                 self.aiConnectionsRuntimeCoordinator.syncCurrentSessionDisplay()
                 self.rebuildNativeSessionManagerForActiveSession()
@@ -752,19 +745,6 @@ final class AppRuntimeLifecycle {
         }
         aiConnectionsModel.onConnectionSetup = { [weak self] connection in
             self?.aiConnectionsRuntimeCoordinator.syncActiveSession(to: connection)
-        }
-        connorSpeechPlaybackCoordinator.isAvailable = { [weak self] in
-            self?.aiConnectionsModel.isXiaomiMiMOSpeechAvailable ?? false
-        }
-        connorSpeechPlaybackCoordinator.isConfigured = { [weak self] in
-            self?.aiConnectionsModel.hasXiaomiMiMOConnection ?? false
-        }
-        connorSpeechPlaybackCoordinator.reportError = { [weak self] message in
-            self?.chatComposerCoordinator.showToast(
-                title: "朗读失败",
-                message: message,
-                systemImage: "speaker.slash"
-            )
         }
         governanceModel.sessionsProvider = { [weak self] in
             guard let self else { return [] }
@@ -933,15 +913,6 @@ final class AppRuntimeLifecycle {
             guard let self else { throw ConnorPersonalityError.unavailable }
             let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
             return try await ConnorPersonalityGenerator().generate(from: request, provider: provider)
-        }
-        userPreferencesModel.voiceGenerator = { [weak self] request, voiceGender in
-            guard let self else { throw ConnorVoiceProfileError.unavailable }
-            let provider = try self.sessionAgentModelProvider(sessionID: self.activeChatSession.id)
-            return try await ConnorVoiceProfileGenerator().generate(
-                from: request,
-                voiceGender: voiceGender,
-                provider: provider
-            )
         }
         workspaceSettingsModel.onSaveSessionWorkspace = { [weak self] roots, defaultPath in
             self?.saveWorkspaceDraftsToCurrentSession(roots: roots, defaultWorkingDirectoryPath: defaultPath)
@@ -1503,7 +1474,6 @@ final class AppRuntimeLifecycle {
         contactsFeatureModel.shutdown()
         mailFeatureModel.shutdown()
         browserFeatureModel.shutdown()
-        connorSpeechPlaybackCoordinator.shutdown()
     }
 
     private func applyPromotedGraphSnapshot(_ snapshot: GraphStoreSnapshot) {
@@ -3291,18 +3261,6 @@ final class AppRuntimeLifecycle {
             let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
                 .last(where: { $0.role == AgentRole.assistant })
-            if let latestAssistantMessage {
-                connorSpeechPlaybackCoordinator.automaticallyRead(
-                    messageID: latestAssistantMessage.id,
-                    markdown: latestAssistantMessage.content,
-                    personality: userPreferencesModel.connorPersonality,
-                    personalityRevision: userPreferencesModel.connorPersonalityRevision,
-                    voiceGender: userPreferencesModel.resolvedConnorVoiceGender,
-                    voiceProfile: userPreferencesModel.connorVoiceProfile,
-                    voiceRevision: userPreferencesModel.connorVoiceRevision,
-                    enabled: userPreferencesModel.automaticallyReadsReplies
-                )
-            }
             noteSessionUpdate(
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,
@@ -3668,7 +3626,6 @@ extension AppRuntimeLifecycle {
                 contacts: model.contactsFeatureModel,
                 governance: model.governanceModel,
                 aiConnections: aiConnections,
-                speechPlayback: model.connorSpeechPlaybackCoordinator,
                 knowledgeMarketplace: model.knowledgeMarketplaceStore,
                 sources: model.sourceRuntimeModel,
                 permissionMode: { [weak model] in model?.agentPermissionMode ?? .askToWrite },

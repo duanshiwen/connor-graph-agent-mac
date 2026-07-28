@@ -29,14 +29,6 @@ final class AIConnectionsFeatureModel {
     var showsWelcome = true
     var errorMessage: String?
 
-    var isXiaomiMiMOSpeechAvailable: Bool {
-        connectionConfigs.contains(where: \.supportsXiaomiMiMOSpeech)
-    }
-
-    var hasXiaomiMiMOConnection: Bool {
-        connectionConfigs.contains(where: \.isXiaomiMiMOConnection)
-    }
-
     @ObservationIgnored let settingsRepository: AppLLMSettingsRepository
     @ObservationIgnored private let healthChecker: AppLLMProviderHealthChecker
     @ObservationIgnored private let capabilityEvidenceRepository: AppProviderCapabilityEvidenceRepository
