@@ -687,13 +687,34 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         return MemoryOSQueueOperationalSnapshot(pending: try count(status: .pending), leased: try count(status: .leased), processing: try count(status: .processing), retryScheduled: try count(status: .retryScheduled), succeeded: try count(status: .succeeded), failed: try count(status: .failed), deadLetter: try count(status: .deadLetter), expiredLeases: expired, checkedAt: now)
     }
 
+    /// Permanently removes all Memory OS records, including L0-L4 data,
+    /// processing queues, diagnostics, and full-text search documents.
+    /// The migrated schema itself is retained so the store remains usable.
+    public func clearAllMemoryData() throws {
+        let dataTables = Self.requiredSchemaTables
+            .subtracting(["memory_schema_migrations"])
+            .sorted()
+        let deletionSQL = dataTables.map { "DELETE FROM \($0);" }.joined(separator: "\n")
+
+        try withDatabaseLock {
+            try executeUnlocked("PRAGMA foreign_keys = OFF;")
+            do {
+                try executeUnlocked("BEGIN IMMEDIATE;\n\(deletionSQL)\nCOMMIT;")
+                try executeUnlocked("PRAGMA foreign_keys = ON;")
+                try executeUnlocked("PRAGMA wal_checkpoint(TRUNCATE);")
+            } catch {
+                try? executeUnlocked("ROLLBACK;")
+                try? executeUnlocked("PRAGMA foreign_keys = ON;")
+                throw error
+            }
+        }
+    }
+
     // MARK: - Helpers exposed for repositories/tests
 
     public func execute(_ sql: String) throws {
         try withDatabaseLock {
-            if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-                throw SQLiteMemoryOSStoreError.executeFailed(Self.message(db))
-            }
+            try executeUnlocked(sql)
         }
     }
 
@@ -842,6 +863,12 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         databaseLock.lock()
         defer { databaseLock.unlock() }
         return try operation()
+    }
+
+    private func executeUnlocked(_ sql: String) throws {
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            throw SQLiteMemoryOSStoreError.executeFailed(Self.message(db))
+        }
     }
 
     private static func message(_ db: OpaquePointer?) -> String {

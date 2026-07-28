@@ -74,9 +74,55 @@ struct MailMessageComposerTests {
 
         #expect(message.rawMessage.contains("Content-Type: multipart/mixed"))
         #expect(message.rawMessage.contains("Content-Type: multipart/alternative"))
-        #expect(message.rawMessage.contains("Content-Disposition: attachment; filename=\"brief.txt\""))
+        #expect(message.rawMessage.contains("Content-Disposition: attachment; filename=\"brief.txt\"; filename*=UTF-8''brief.txt"))
         #expect(message.rawMessage.contains("Content-Transfer-Encoding: base64"))
         #expect(message.rawMessage.contains(Data("hello attachment".utf8).base64EncodedString()))
+    }
+
+    @Test func composerEncodesUnicodeAttachmentFilename() throws {
+        let draft = attachmentDraft()
+        let attachment = OutboundMailAttachment(
+            id: MailAttachmentID(rawValue: "attachment-1"),
+            filename: "季度报告.pdf",
+            mimeType: "application/pdf",
+            data: Data("report".utf8)
+        )
+
+        let message = try MailMessageComposer().compose(
+            draft: draft,
+            from: MailAddress(email: "connor@example.com"),
+            attachments: [attachment]
+        )
+        let compatibleFilename = "=?UTF-8?B?\(Data("季度报告.pdf".utf8).base64EncodedString())?="
+
+        #expect(message.rawMessage.contains("name=\"\(compatibleFilename)\"; name*=UTF-8''%E5%AD%A3%E5%BA%A6%E6%8A%A5%E5%91%8A.pdf"))
+        #expect(message.rawMessage.contains("filename=\"\(compatibleFilename)\"; filename*=UTF-8''%E5%AD%A3%E5%BA%A6%E6%8A%A5%E5%91%8A.pdf"))
+        #expect(!message.rawMessage.contains("name=\"季度报告.pdf\""))
+    }
+
+    @Test func composerWrapsAttachmentBase64AndPreservesData() throws {
+        let draft = attachmentDraft()
+        let data = Data((0..<512).map { UInt8($0 % 251) })
+        let attachment = OutboundMailAttachment(
+            id: MailAttachmentID(rawValue: "attachment-1"),
+            filename: "payload.bin",
+            mimeType: "application/octet-stream",
+            data: data
+        )
+
+        let message = try MailMessageComposer().compose(
+            draft: draft,
+            from: MailAddress(email: "connor@example.com"),
+            attachments: [attachment]
+        )
+        let lines = message.rawMessage.components(separatedBy: "\r\n")
+        let transferEncodingIndex = try #require(lines.firstIndex(of: "Content-Transfer-Encoding: base64"))
+        let headerEndIndex = try #require(lines[(transferEncodingIndex + 1)...].firstIndex(of: ""))
+        let payloadLines = lines[(headerEndIndex + 1)...].prefix { !$0.hasPrefix("--connor-mixed-") }
+
+        #expect(!payloadLines.isEmpty)
+        #expect(payloadLines.allSatisfy { !$0.isEmpty && $0.count <= 76 })
+        #expect(Data(base64Encoded: payloadLines.joined()) == data)
     }
 
     @Test func composerRejectsAttachmentFilenameHeaderInjection() {
@@ -104,5 +150,17 @@ struct MailMessageComposerTests {
     @Test func dotStuffingEscapesLinesStartingWithDot() {
         let input = "Hello\r\n.World\r\n..Already\r\nBye"
         #expect(MailMessageComposer.dotStuff(input) == "Hello\r\n..World\r\n...Already\r\nBye")
+    }
+
+    private func attachmentDraft() -> MailDraft {
+        MailDraft(
+            id: MailDraftID(rawValue: "draft-attachment"),
+            accountID: MailAccountID(rawValue: "account-1"),
+            identityID: MailIdentityID(rawValue: "identity-1"),
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Attachment",
+            body: "Plain body",
+            attachmentIDs: [MailAttachmentID(rawValue: "attachment-1")]
+        )
     }
 }

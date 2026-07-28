@@ -60,6 +60,12 @@ public enum AppMemoryOSSearchKernelFactory {
         return count
     }
 
+    public static func removeLiveIndex(paths: AppStoragePaths, fileManager: FileManager = .default) throws {
+        let indexDirectory = MemoryOSSearchKernelPaths.defaultIndexDirectory(graphDirectory: paths.graphDirectory)
+        guard fileManager.fileExists(atPath: indexDirectory.path) else { return }
+        try fileManager.removeItem(at: indexDirectory)
+    }
+
     public static func healthReport(paths: AppStoragePaths, fileManager: FileManager = .default) -> AppMemoryOSSearchIndexHealthReport {
         let indexDirectory = MemoryOSSearchKernelPaths.defaultIndexDirectory(graphDirectory: paths.graphDirectory)
         var checks: [String: Bool] = [:]

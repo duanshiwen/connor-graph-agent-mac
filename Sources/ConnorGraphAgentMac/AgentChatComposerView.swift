@@ -51,7 +51,6 @@ struct AgentChatComposerView: View {
     var onExpandApprovalReview: ((AgentPendingApproval) -> Void)? = nil
     @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
-    @State private var isFileImporterPresented: Bool = false
     @State private var isImageImporterPresented: Bool = false
     @State private var isSkillPickerPresented: Bool = false
     @State private var slashSkillPickerAnchorRect: CGRect?
@@ -268,14 +267,6 @@ struct AgentChatComposerView: View {
             } else {
                 speechKeyboardMonitor?.stop()
                 speechKeyboardMonitor = nil
-            }
-        }
-        .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
-            switch result {
-            case .success(let urls):
-                Task { await chatActions.composer.importAttachments(urls: urls) }
-            case .failure(let error):
-                chatActions.composer.showAttachmentToast(title: "附件选择失败", message: String(describing: error), systemImage: "xmark.circle")
             }
         }
         .fileImporter(isPresented: $isImageImporterPresented, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
@@ -621,59 +612,75 @@ struct AgentChatComposerView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    if chatActions.dependencies.workspaceSettings.roots.isEmpty {
-                        Text("尚未设置工作目录")
-                            .font(AgentChatTypography.body)
+            VStack(alignment: .leading, spacing: 8) {
+                if chatActions.dependencies.workspaceSettings.roots.isEmpty {
+                    Text("尚未设置工作目录")
+                        .font(AgentChatTypography.body)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                } else {
+                    VStack(spacing: 2) {
+                        ForEach(chatActions.dependencies.workspaceSettings.roots) { root in
+                            workspaceRootPopoverRow(root)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                Text("历史打开列表")
+                    .font(AgentChatTypography.metaEmphasis)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if !chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
+                    Text("\(chatActions.dependencies.workspaceSettings.recentPaths.count) 项")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
+                        Text("暂无历史记录")
+                            .font(AgentChatTypography.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 7)
                     } else {
-                        VStack(spacing: 2) {
-                            ForEach(chatActions.dependencies.workspaceSettings.roots) { root in
-                                workspaceRootPopoverRow(root)
+                        ForEach(chatActions.dependencies.workspaceSettings.recentPaths, id: \.self) { path in
+                            Button {
+                                chatActions.dependencies.workspaceSettings.selectWorkingDirectory(path: path)
+                                isWorkspacePopoverPresented = false
+                            } label: {
+                                workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("历史打开列表", systemImage: "clock.arrow.circlepath")
-                            .font(AgentChatTypography.calloutEmphasis)
-                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                            .font(AgentChatTypography.callout)
                             .padding(.horizontal, 8)
-                            .padding(.top, 2)
-
-                        if chatActions.dependencies.workspaceSettings.recentPaths.isEmpty {
-                            Text("暂无历史记录")
-                                .font(AgentChatTypography.callout)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                        } else {
-                            ForEach(chatActions.dependencies.workspaceSettings.recentPaths, id: \.self) { path in
-                                Button {
-                                    chatActions.dependencies.workspaceSettings.selectWorkingDirectory(path: path)
-                                    isWorkspacePopoverPresented = false
-                                } label: {
-                                    workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(.plain)
-                                .font(AgentChatTypography.callout)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .contentShape(Rectangle())
-                                .help(path)
-                            }
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                            .help(path)
                         }
                     }
                 }
                 .padding(10)
             }
+            .frame(maxHeight: .infinity)
 
             Divider()
 
@@ -1087,7 +1094,7 @@ struct AgentChatComposerView: View {
 
     private var attachmentButton: some View {
         let isNoteMode = composerState.displayMode == .note
-        return Button(action: { isFileImporterPresented = true }) {
+        return Button(action: chooseAttachments) {
             Image(systemName: "paperclip")
                 .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
                 .symbolRenderingMode(.hierarchical)
@@ -1101,6 +1108,18 @@ struct AgentChatComposerView: View {
         .opacity(isNoteMode ? 0.4 : 1.0)
         .help(isNoteMode ? "笔记模式下不可用，请用格式工具栏插入图片" : "添加附件")
         .accessibilityLabel("添加附件")
+    }
+
+    private func chooseAttachments() {
+        let panel = NSOpenPanel()
+        panel.title = "选择附件"
+        panel.prompt = "添加"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = supportedAttachmentContentTypes
+        guard panel.runModal() == .OK else { return }
+        Task { await chatActions.composer.importAttachments(urls: panel.urls) }
     }
 
     private var composerControlForeground: Color { .secondary }

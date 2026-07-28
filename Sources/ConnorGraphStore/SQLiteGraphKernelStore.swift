@@ -1020,6 +1020,39 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    /// Permanently removes every conversation and its session-owned records.
+    /// Graph entities and other non-session product data are left unchanged.
+    @discardableResult
+    public func purgeAllSessionData() throws -> [String] {
+        try withDatabaseLock {
+            let sessionIDs = try query(sql: "SELECT id FROM agent_sessions;").compactMap(\.first)
+            do {
+                try execute("""
+                BEGIN IMMEDIATE;
+                DELETE FROM note_search_fts;
+                DELETE FROM note_search_docs;
+                DELETE FROM note_projection_claims;
+                DELETE FROM note_projection_tombstones;
+                DELETE FROM notes;
+                DELETE FROM session_background_tasks;
+                DELETE FROM agent_events;
+                DELETE FROM agent_audit_events;
+                DELETE FROM agent_pending_approvals;
+                DELETE FROM agent_runs;
+                DELETE FROM session_pending_plans;
+                DELETE FROM session_branch_records;
+                DELETE FROM agent_session_messages;
+                DELETE FROM agent_sessions;
+                COMMIT;
+                """)
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+            return sessionIDs
+        }
+    }
+
     public func restoreSession(id: String, restoredAt: Date = Date()) throws {
         try execute("""
         UPDATE agent_sessions SET deleted_at = NULL, updated_at = \(quote(iso(restoredAt)))
