@@ -504,7 +504,6 @@ private struct AgentChatConversationView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
     @Binding var isSessionInfoPresented: Bool
-    @State private var selectedToolInvocation: AgentToolInvocationPresentation?
     @State private var expandedApprovalID: String?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
@@ -799,7 +798,7 @@ private struct AgentChatConversationView: View {
                         await loadActivityEvents(for: process, latestProcessID: latestProcessID)
                     },
                     onOpenToolInvocation: { invocation in
-                        selectedToolInvocation = invocation
+                        model.run.selectedToolInvocation = invocation
                     }
                 )
             }
@@ -974,9 +973,9 @@ private struct AgentChatConversationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .overlay {
-            if let invocation = selectedToolInvocation {
+            if let invocation = model.run.selectedToolInvocation {
                 AgentToolInvocationDetailOverlay(invocation: invocation) {
-                    selectedToolInvocation = nil
+                    model.run.selectedToolInvocation = nil
                 }
                 .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
             }
