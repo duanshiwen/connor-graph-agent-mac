@@ -418,7 +418,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             eventRecorder: AgentEventRecorder(repository: store),
             contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID),
             environmentProvider: environmentProvider,
-            environmentStore: environmentStore
+            environmentStore: environmentStore,
+            automaticallySynthesizesProgressUpdates: true
         )
     }
 
