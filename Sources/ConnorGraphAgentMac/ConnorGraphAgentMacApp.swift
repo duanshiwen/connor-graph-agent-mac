@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreSpotlight
 import CoreLocation
 import CoreServices
 import IOKit.pwr_mgt
@@ -236,6 +237,26 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         orderExistingMainWindowToFront()
         return false
+    }
+
+    func application(
+        _ application: NSApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void
+    ) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType,
+              let searchableItemID = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+              let sessionID = ConnorSpotlightSessionIdentifier.sessionID(searchableItemID: searchableItemID)
+        else { return false }
+
+        NSApp.activate(ignoringOtherApps: true)
+        orderExistingMainWindowToFront()
+        NotificationCenter.default.post(
+            name: .connorSessionNotificationActivated,
+            object: nil,
+            userInfo: ["sessionID": sessionID]
+        )
+        return true
     }
 
     private func registerCurrentApplicationBundleWithLaunchServices() {

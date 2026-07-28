@@ -523,6 +523,7 @@ final class AppRuntimeLifecycle {
         mailCredentialStore: AppMailCredentialStore = AppMailCredentialStore(),
         injectedNativeSourceSearchBackend: (any NativeSourceSearchBackend)? = nil,
         injectedSessionSearchIndexService: SessionSearchIndexService? = nil,
+        injectedSpotlightSessionIndexService: ConnorSpotlightSessionIndexService? = nil,
         injectedMemoryOSStore: SQLiteMemoryOSStore? = nil,
         injectedMemoryOSFacade: AppMemoryOSFacade? = nil,
         injectedMemoryOSSearchHealthSummary: String? = nil,
@@ -674,10 +675,16 @@ final class AppRuntimeLifecycle {
             publicationAPI: cloudKnowledgeAPI
         )
         let resolvedSessionSearchIndexService = injectedSessionSearchIndexService ?? (startupMode == .immediate ? storagePaths.flatMap { try? SessionSearchIndexService(databaseURL: $0.sessionSearchDatabaseURL) } : nil)
+        let resolvedSpotlightSessionIndexService = injectedSpotlightSessionIndexService ?? (
+            startupMode == .immediate && Bundle.main.bundleURL.pathExtension == "app"
+                ? ConnorSpotlightSessionIndexService()
+                : nil
+        )
         let resolvedGlobalSearchHistoryRepository = storagePaths.map { AppGlobalSearchHistoryRepository(historyURL: $0.globalSearchHistoryURL) }
         self.globalSearchFeatureModel = GlobalSearchFeatureModel(
             nativeSourceSearchBackend: nativeSourceSearchBackend,
             sessionSearchIndexService: resolvedSessionSearchIndexService,
+            spotlightSessionIndexService: resolvedSpotlightSessionIndexService,
             historyRepository: resolvedGlobalSearchHistoryRepository
         )
         let resolvedRSSRuntime = rssRuntime ?? storagePaths.map { paths in
@@ -1366,6 +1373,9 @@ final class AppRuntimeLifecycle {
             summary: snapshot.summary
         )
         globalSearchFeatureModel.bootstrapSessionIndexIfNeeded(sessions: snapshot.allSessions)
+        if let chatSessionRepository {
+            globalSearchFeatureModel.synchronizeSpotlightIndex(repository: chatSessionRepository)
+        }
         synchronizeSessionReadStates(from: snapshot.allSessions)
         guard let session = snapshot.selectedSession else {
             clearSelectedChatSessionDetail()

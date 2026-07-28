@@ -43,6 +43,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),
+                .linkedFramework("CoreSpotlight"),
                 .linkedLibrary("sqlite3")
             ]
         ),

@@ -26,9 +26,11 @@ final class GlobalSearchFeatureModel {
 
     @ObservationIgnored private let nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
     @ObservationIgnored private let sessionSearchIndexService: SessionSearchIndexService?
+    @ObservationIgnored private let spotlightSessionIndexService: ConnorSpotlightSessionIndexService?
     @ObservationIgnored private let historyRepository: AppGlobalSearchHistoryRepository?
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var sessionIndexBootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var spotlightIndexBootstrapTask: Task<Void, Never>?
     @ObservationIgnored private var sessionIndexMutationTask: Task<Void, Never>?
     @ObservationIgnored private var sessionIndexGeneration: UInt64 = 0
     @ObservationIgnored private var refreshGeneration: UInt64 = 0
@@ -44,10 +46,12 @@ final class GlobalSearchFeatureModel {
     init(
         nativeSourceSearchBackend: (any NativeSourceSearchBackend)?,
         sessionSearchIndexService: SessionSearchIndexService?,
+        spotlightSessionIndexService: ConnorSpotlightSessionIndexService? = nil,
         historyRepository: AppGlobalSearchHistoryRepository?
     ) {
         self.nativeSourceSearchBackend = nativeSourceSearchBackend
         self.sessionSearchIndexService = sessionSearchIndexService
+        self.spotlightSessionIndexService = spotlightSessionIndexService
         self.historyRepository = historyRepository
         self.historyEntries = (try? historyRepository?.load()) ?? []
     }
@@ -254,28 +258,60 @@ final class GlobalSearchFeatureModel {
         }
     }
 
-    func upsertSessionIndex(_ session: AgentSession) {
-        guard let sessionSearchIndexService else { return }
-        let precedingMutation = sessionIndexMutationTask
-        sessionIndexMutationTask = Task(priority: .utility) {
-            await precedingMutation?.value
+    func synchronizeSpotlightIndex(repository: AppChatSessionRepository) {
+        guard let spotlightSessionIndexService else { return }
+        spotlightIndexBootstrapTask?.cancel()
+        spotlightIndexBootstrapTask = Task.detached(priority: .utility) {
             guard !Task.isCancelled else { return }
-            try? await sessionSearchIndexService.upsert(session: session)
+            do {
+                let sessions = try repository.loadSessions(filter: .all)
+                guard !Task.isCancelled else { return }
+                try await spotlightSessionIndexService.synchronize(sessions: sessions)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
+    }
+
+    func upsertSessionIndex(_ session: AgentSession) {
+        guard sessionSearchIndexService != nil || spotlightSessionIndexService != nil else { return }
+        let precedingMutation = sessionIndexMutationTask
+        let precedingSpotlightBootstrap = spotlightIndexBootstrapTask
+        sessionIndexMutationTask = Task(priority: .utility) { [sessionSearchIndexService, spotlightSessionIndexService] in
+            await precedingMutation?.value
+            await precedingSpotlightBootstrap?.value
+            guard !Task.isCancelled else { return }
+            if let sessionSearchIndexService {
+                try? await sessionSearchIndexService.upsert(session: session)
+            }
+            if let spotlightSessionIndexService {
+                try? await spotlightSessionIndexService.upsert(session: session)
+            }
         }
     }
 
     func removeSessionIndex(sessionID: String) {
-        guard let sessionSearchIndexService else { return }
+        guard sessionSearchIndexService != nil || spotlightSessionIndexService != nil else { return }
         let precedingMutation = sessionIndexMutationTask
-        sessionIndexMutationTask = Task(priority: .utility) {
+        let precedingSpotlightBootstrap = spotlightIndexBootstrapTask
+        sessionIndexMutationTask = Task(priority: .utility) { [sessionSearchIndexService, spotlightSessionIndexService] in
             await precedingMutation?.value
+            await precedingSpotlightBootstrap?.value
             guard !Task.isCancelled else { return }
-            try? await sessionSearchIndexService.remove(sessionID: sessionID)
+            if let sessionSearchIndexService {
+                try? await sessionSearchIndexService.remove(sessionID: sessionID)
+            }
+            if let spotlightSessionIndexService {
+                try? await spotlightSessionIndexService.remove(sessionID: sessionID)
+            }
         }
     }
 
     func waitForSessionIndexOperations() async {
         await sessionIndexBootstrapTask?.value
+        await spotlightIndexBootstrapTask?.value
         await sessionIndexMutationTask?.value
     }
 
@@ -288,6 +324,8 @@ final class GlobalSearchFeatureModel {
         sessionIndexGeneration &+= 1
         sessionIndexBootstrapTask?.cancel()
         sessionIndexBootstrapTask = nil
+        spotlightIndexBootstrapTask?.cancel()
+        spotlightIndexBootstrapTask = nil
         sessionIndexMutationTask?.cancel()
         sessionIndexMutationTask = nil
     }
