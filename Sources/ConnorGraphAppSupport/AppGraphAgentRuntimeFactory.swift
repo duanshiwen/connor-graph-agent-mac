@@ -216,6 +216,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
         var registry = AgentToolRegistry()
+        registry.registerShareProgressUpdateTool()
         let environmentStore = environmentProvider.map { _ in AgentEnvironmentSnapshotStore() }
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)

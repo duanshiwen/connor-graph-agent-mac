@@ -620,6 +620,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
+                            if let assistantMessage = batchResult.result.assistantMessage,
+                               batchResult.result.error == nil {
+                                yield(.assistantMessageCreated(assistantMessage), to: continuation, recorder: eventRecorder)
+                                messages.append(AgentModelMessage(role: .assistant, content: assistantMessage.content))
+                            }
                             if let parts = batchResult.result.modelContentParts, !parts.isEmpty {
                                 messages.append(AgentModelMessage(
                                     role: .user,
@@ -950,6 +955,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func canExecuteInParallel(_ calls: [AgentToolCall]) -> Bool {
         guard calls.count > 1 else { return false }
+        guard !calls.contains(where: { $0.name == ShareProgressUpdateTool.toolName }) else { return false }
         return calls.allSatisfy { call in
             guard let permission = toolRegistry.permission(named: call.name) else { return false }
             return permission.isSafeForParallelNativeToolExecution

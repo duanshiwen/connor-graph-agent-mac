@@ -72,7 +72,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .promptAssembled(let event): return event.runID
         case .textDelta(let event): return event.runID
         case .textComplete(let event): return event.runID
-        case .assistantMessageCreated: return nil
+        case .assistantMessageCreated(let message): return message.runID
         case .toolRequested(let call), .toolApproved(let call), .toolStarted(let call): return call.runID
         case .toolFinished(let result): return result.runID
         case .toolFailed(let failure): return failure.runID
@@ -97,7 +97,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .promptAssembled(let event): return event.sessionID
         case .textDelta(let event): return event.sessionID
         case .textComplete(let event): return event.sessionID
-        case .assistantMessageCreated: return nil
+        case .assistantMessageCreated(let message): return message.sessionID
         case .toolRequested(let call), .toolApproved(let call), .toolStarted(let call): return call.sessionID
         case .toolFinished(let result): return result.sessionID
         case .toolFailed(let failure): return failure.sessionID

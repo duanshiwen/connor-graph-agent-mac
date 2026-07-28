@@ -142,6 +142,44 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(completeText == "Hello")
 }
 
+@Test func progressUpdateToolEmitsAssistantMessageAndContinuesRun() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "progress-1",
+                name: ShareProgressUpdateTool.toolName,
+                argumentsJSON: #"{"message":"关键结构已经确认，我接着处理界面衔接。"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "全部完成。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.registerShareProgressUpdateTool()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-progress",
+        sessionID: "session-progress",
+        userMessage: "完成一项多阶段任务"
+    )) {
+        events.append(event)
+    }
+
+    let progressMessage = try #require(events.compactMap { event -> AgentMessage? in
+        if case .assistantMessageCreated(let message) = event { return message }
+        return nil
+    }.first)
+    #expect(progressMessage.role == .assistant)
+    #expect(progressMessage.content == "关键结构已经确认，我接着处理界面衔接。")
+    #expect(progressMessage.runID == "run-progress")
+    #expect(progressMessage.sessionID == "session-progress")
+    #expect(events.map(\.kind).firstIndex(of: .assistantMessageCreated)! < events.map(\.kind).firstIndex(of: .textComplete)!)
+    #expect(await provider.requests.count == 2)
+}
+
 @Test func agentLoopEmitsPromptAssembledDiagnosticsBeforeModelCall() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(text: "Done", usage: AgentModelUsage(promptTokens: 12, completionTokens: 2))
