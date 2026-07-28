@@ -950,6 +950,7 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(policy.missingToolNames(availableTools: registry.definitions, invokedToolNames: Set(names)) == [])
     #expect(policy.correctionInstruction(for: []) == nil)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("follow every exact non-null `nextPage`") == true)
+    #expect(policy.correctionInstruction(for: [names[0]])?.contains("largest `pageSize` allowed by its input Schema (currently 500)") == true)
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
     #expect(policy.call(AgentToolCall(id: "profile-default-page", name: names[2], argumentsJSON: "{}"), matchesRequiredCurrentUserProfilePage: 1))
     #expect(policy.call(AgentToolCall(id: "profile-exact-page", name: names[2], argumentsJSON: #"{"page":2}"#), matchesRequiredCurrentUserProfilePage: 2))
