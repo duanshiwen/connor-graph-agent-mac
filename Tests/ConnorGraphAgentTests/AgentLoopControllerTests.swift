@@ -177,7 +177,11 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(progressMessage.runID == "run-progress")
     #expect(progressMessage.sessionID == "session-progress")
     #expect(events.map(\.kind).firstIndex(of: .assistantMessageCreated)! < events.map(\.kind).firstIndex(of: .textComplete)!)
-    #expect(await provider.requests.count == 2)
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    #expect(requests[1].messages.contains { message in
+        message.role == .assistant && message.content == "关键结构已经确认，我接着处理界面衔接。"
+    } == false)
 }
 
 @Test func agentLoopPublishesAssistantTextBeforeExecutingMixedToolResponse() async throws {
