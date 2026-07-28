@@ -131,6 +131,21 @@ import ConnorGraphAgent
     #expect(prompt.contains("do not claim a human relationship, consciousness, feelings, or unsupported memories"))
 }
 
+@Test func defaultSystemPromptDefinesDurableCrossRunHandoffs() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Cross-Run Continuity"))
+    #expect(prompt.contains("working context for the current user run only"))
+    #expect(prompt.contains("They will not be available as conversation history in a later user run"))
+    #expect(prompt.contains("user messages, your final assistant messages"))
+    #expect(prompt.contains("final response as the durable handoff record"))
+    #expect(prompt.contains("verification actually performed and its result"))
+    #expect(prompt.contains("Do not copy raw tool transcripts"))
+    #expect(prompt.contains("not automatically fresh evidence"))
+    #expect(prompt.contains("inspect the durable source of truth again"))
+    #expect(prompt.contains("explicit user output-format requirements"))
+}
+
 @Test func defaultSystemPromptDistinguishesNoteSessionsFromFileArtifacts() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
