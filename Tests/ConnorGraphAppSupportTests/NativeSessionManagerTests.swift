@@ -359,6 +359,8 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(secondTurnContent.contains("FIRST_USER_TURN"))
     #expect(secondTurnContent.contains("FIRST_ASSISTANT_FINAL"))
     #expect(secondTurnContent.contains("SECOND_USER_TURN"))
+    #expect(secondTurnRequest.messages.first?.content.contains("## Cross-Run Continuity") == true)
+    #expect(secondTurnRequest.messages.first?.content.contains("final response as the durable handoff record") == true)
     #expect(!secondTurnContent.contains("FIRST_TURN_TOOL_RESULT_MUST_NOT_CROSS_ROUNDS"))
     #expect(!secondTurnContent.contains("first-turn-tool-call"))
     #expect(!secondTurnContent.contains("LEGACY_SYSTEM_MUST_NOT_CROSS_ROUNDS"))
@@ -486,7 +488,26 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.messages.last?.role == .assistant)
     #expect(loaded.messages.last?.content.contains("操作已终止：") == true)
     #expect(loaded.messages.last?.content.contains("backendUnavailable") == true)
+    #expect(loaded.messages.last?.content.contains("已完成边界：本轮用户消息已保存") == true)
+    #expect(loaded.messages.last?.content.contains("继续前请重新检查相关持久状态") == true)
     #expect(manager.session.messages.map(\.id) == loaded.messages.map(\.id))
     #expect(manager.session.messages.map(\.role) == loaded.messages.map(\.role))
     #expect(manager.session.messages.map(\.content) == loaded.messages.map(\.content))
+
+    let recoveryProvider = NativeSessionPromptRecordingProvider()
+    let recoveryLoop = AgentLoopController(modelProvider: recoveryProvider, toolRegistry: AgentToolRegistry())
+    var recoveryManager = NativeSessionManager(
+        loopController: recoveryLoop,
+        sessionRepository: repository,
+        session: loaded
+    )
+    _ = try await recoveryManager.submit("Continue from the saved boundary")
+    let recoveryRequest = try #require(await recoveryProvider.lastRequest())
+    let recoveryContent = recoveryRequest.messages.map(\.content).joined(separator: "\n")
+
+    #expect(recoveryContent.contains("This must be durable even if the backend fails"))
+    #expect(recoveryContent.contains("已完成边界：本轮用户消息已保存"))
+    #expect(recoveryContent.contains("Continue from the saved boundary"))
+    #expect(!recoveryRequest.messages.contains { $0.role == .tool })
+    #expect(!recoveryRequest.messages.contains { !(($0.toolCalls ?? []).isEmpty) })
 }
