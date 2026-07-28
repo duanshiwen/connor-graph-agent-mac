@@ -121,12 +121,15 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var extraHTTPHeaders: [String: String]
     /// Explicit override for vision support. When nil, capability is inferred from model name heuristics.
     public var explicitVisionSupport: Bool?
+    /// Provider/model-specific context window. When nil, the runtime uses its model catalog fallback.
+    public var contextWindowTokens: Int?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
         case shouldFetchModelsList
         case extraHTTPHeaders
         case explicitVisionSupport
+        case contextWindowTokens
     }
 
     public init(
@@ -140,7 +143,8 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         hasAPIKey: Bool = false,
         shouldFetchModelsList: Bool = true,
         extraHTTPHeaders: [String: String] = [:],
-        explicitVisionSupport: Bool? = nil
+        explicitVisionSupport: Bool? = nil,
+        contextWindowTokens: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -154,6 +158,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         self.shouldFetchModelsList = shouldFetchModelsList
         self.extraHTTPHeaders = extraHTTPHeaders
         self.explicitVisionSupport = explicitVisionSupport
+        self.contextWindowTokens = contextWindowTokens.map { max(1, $0) }
     }
 
     public init(from decoder: Decoder) throws {
@@ -170,7 +175,8 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
             shouldFetchModelsList: try container.decodeIfPresent(Bool.self, forKey: .shouldFetchModelsList) ?? true,
             extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:],
-            explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport)
+            explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport),
+            contextWindowTokens: try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens)
         )
     }
 

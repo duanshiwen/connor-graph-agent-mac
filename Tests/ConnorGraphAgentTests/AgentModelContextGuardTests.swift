@@ -1,13 +1,14 @@
 import Testing
 import ConnorGraphAgent
 
-@Test func contextGuardCountsToolSchemasAndImagePayloads() {
-    let request = AgentModelRequest(
+@Test func contextGuardCountsToolSchemasAndUsesBoundedVisionBudget() {
+    func request(base64CharacterCount: Int) -> AgentModelRequest {
+        AgentModelRequest(
         messages: [
             AgentModelMessage(
                 role: .user,
                 content: "inspect",
-                contentParts: [.imageDataURL("data:image/png;base64," + String(repeating: "A", count: 400), mimeType: "image/png")]
+                    contentParts: [.imageDataURL("data:image/png;base64," + String(repeating: "A", count: base64CharacterCount), mimeType: "image/png")]
             )
         ],
         tools: [
@@ -17,9 +18,15 @@ import ConnorGraphAgent
                 inputSchema: .object(properties: ["query": .string(description: "search query")], required: ["query"])
             )
         ]
-    )
+        )
+    }
 
-    #expect(AgentModelContextGuard().estimatedInputTokens(request) > 100)
+    let smallImageEstimate = AgentModelContextGuard().estimatedInputTokens(request(base64CharacterCount: 400))
+    let largeImageEstimate = AgentModelContextGuard().estimatedInputTokens(request(base64CharacterCount: 2_400_000))
+
+    #expect(smallImageEstimate > 8_192)
+    #expect(largeImageEstimate == smallImageEstimate)
+    #expect(largeImageEstimate < 10_000)
 }
 
 @Test func contextGuardClassifiesNewOversizedRequestAsCurrentInput() {

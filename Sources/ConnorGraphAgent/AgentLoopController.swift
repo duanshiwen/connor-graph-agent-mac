@@ -620,6 +620,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
+                            if let parts = batchResult.result.modelContentParts, !parts.isEmpty {
+                                messages.append(AgentModelMessage(
+                                    role: .user,
+                                    content: "Requested attachment context loaded for this run.",
+                                    contentParts: [.text("Requested attachment context loaded for this run.")] + parts
+                                ))
+                            }
                         }
 
                         let stillMissingContinuityTools = continuityPreflightPolicy.missingToolNames(
