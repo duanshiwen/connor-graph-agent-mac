@@ -194,6 +194,7 @@ public enum AgentModelCapabilityKernel {
         var signals: [AgentModelCapabilitySignal] = []
         if providerKind == .openAIResponses, supportsOpenAIHostedImageTool(normalized) {
             result.insert(.imageGeneration)
+            result.insert(.imageEditing)
             confidence = .high
             signals.append(.providerPreset)
         }

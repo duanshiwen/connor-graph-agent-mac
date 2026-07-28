@@ -250,6 +250,14 @@ public struct MailRuntime: Sendable {
             return copy
         }
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, kind: .stateMutated, riskClass: .mutation, redactedSummary: "Set read state for \(messageIDs.count) messages to \(isRead)"))
+        NotificationCenter.default.post(
+            name: .connorMailCacheDidChange,
+            object: nil,
+            userInfo: [
+                MailCacheChangeNotificationUserInfoKey.messageIDs: messageIDs.map(\.rawValue),
+                MailCacheChangeNotificationUserInfoKey.reason: MailCacheChangeReason.readStateUpdated.rawValue
+            ]
+        )
     }
 
     public func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress] = [], bcc: [MailAddress] = [], replyTo: [MailAddress] = [], subject: String, body: String, htmlBody: String? = nil, inReplyToMessageID: MailMessageID? = nil, attachmentIDs: [MailAttachmentID] = [], intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {

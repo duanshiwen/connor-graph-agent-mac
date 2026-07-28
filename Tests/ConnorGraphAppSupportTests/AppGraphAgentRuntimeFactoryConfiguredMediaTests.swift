@@ -43,6 +43,7 @@ private final class ConfiguredMediaCredentials: CredentialStore, @unchecked Send
     #expect(controller.modelProvider.modelID == "gpt-5.6")
     #expect(!controller.modelProvider.capabilities.generatedMediaCapabilities.contains(.imageGeneration))
     #expect(controller.toolRegistry.definitions.contains { $0.name == "generate_image" })
+    #expect(controller.toolRegistry.definitions.contains { $0.name == "edit_image" })
 }
 
 @Test func runtimeFactoryDerivesResponsesMediaProviderFromVerifiedConversationConnection() throws {

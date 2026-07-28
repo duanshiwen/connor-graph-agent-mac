@@ -99,6 +99,7 @@ extension SessionContextBudget {
         // OpenAI GPT
         "gpt-4o": 128_000,
         "gpt-4-turbo": 128_000,
+        "gpt-5.6": 1_000_000,
         "o3": 200_000,
         "o4-mini": 200_000,
         // Google Gemini

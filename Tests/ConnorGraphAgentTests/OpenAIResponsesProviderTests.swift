@@ -326,6 +326,29 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(client.captured == nil)
 }
 
+@Test func openAIResponsesProviderEditsImageUsingBinarySourceInput() async throws {
+    let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    let body = """
+    {"id":"resp_edit","output":[{"id":"ig_edit","type":"image_generation_call","status":"completed","output_format":"png","result":"\(png.base64EncodedString())"}]}
+    """.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-5"),
+        httpClient: client
+    )
+    let input = AgentGeneratedMediaInputImage(attachmentID: "source", mimeType: "image/png", data: png)
+
+    for try await _ in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: "Make it warmer", inputImages: [input], imageAction: .edit)) {}
+
+    let request = try #require(client.captured)
+    let object = try #require(try JSONSerialization.jsonObject(with: request.body) as? [String: Any])
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    let inputItems = try #require(object["input"] as? [[String: Any]])
+    let content = try #require(inputItems.first?["content"] as? [[String: Any]])
+    #expect(tools.first?["action"] as? String == "edit")
+    #expect(content.contains { $0["type"] as? String == "input_image" && ($0["image_url"] as? String)?.contains(png.base64EncodedString()) == true })
+}
+
 @Test func openAIResponsesProviderStreamsTypedTextEvents() async throws {
     let sseClient = ResponsesCapturingSSEClient(frames: [
         "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n",

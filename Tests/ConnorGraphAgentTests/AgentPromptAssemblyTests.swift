@@ -68,6 +68,56 @@ import ConnorGraphAgent
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
+@Test func rollingSummaryIsSecondSystemMessageAndReplacesCoveredHistory() throws {
+    let coveredMessages = [
+        AgentMessage(id: "covered-user", role: .user, content: "obsolete user detail"),
+        AgentMessage(id: "covered-assistant", role: .assistant, content: "obsolete assistant reply")
+    ]
+    let summary = ConversationSummaryState(
+        sessionID: "session-summary-prompt",
+        revision: 1,
+        compressionGeneration: 1,
+        payload: ConversationSummaryPayload(currentGoal: "Continue the migration"),
+        coveredThroughMessageID: "covered-assistant",
+        coveredMessageCount: coveredMessages.count,
+        coveredPrefixHash: try ConversationSummaryIntegrity.coveredPrefixHash(messages: coveredMessages),
+        currentSummaryHash: "summary-hash",
+        sourceTokenEstimate: 20,
+        summaryTokenEstimate: 5,
+        generationModelID: "summary-model"
+    )
+    let tail = [
+        AgentMessage(id: "tail-user", role: .user, content: "live tail request"),
+        AgentMessage(id: "tail-assistant", role: .assistant, content: "live tail response")
+    ]
+    let selection = ConversationSummaryHistorySelector().select(messages: coveredMessages + tail, state: summary)
+    let assembly = AgentPromptAssembler().assemble(
+        request: AgentChatRequest(
+            sessionID: summary.sessionID,
+            userMessage: "current request",
+            recentMessages: selection.messages,
+            conversationSummaryState: selection.summaryState
+        ),
+        memoryContract: nil
+    )
+
+    let request = AgentTranscriptProjector().project(assembly, tools: [])
+    let projectedContent = request.messages.map(\.content).joined(separator: "\n")
+
+    #expect(request.messages[0].role == .system)
+    #expect(request.messages[0].content.contains("康纳同学 (Connor)"))
+    #expect(request.messages[1].role == .system)
+    #expect(request.messages[1].content.contains("## Conversation Continuity Summary"))
+    #expect(request.messages[1].content.contains("not automatically fresh evidence"))
+    #expect(request.messages[1].content.contains("Re-check mutable filesystem, database, external-service, and runtime state"))
+    #expect(request.messages[1].content.contains("Continue the migration"))
+    #expect(!projectedContent.contains("obsolete user detail"))
+    #expect(!projectedContent.contains("obsolete assistant reply"))
+    #expect(projectedContent.contains("live tail request"))
+    #expect(projectedContent.contains("live tail response"))
+    #expect(request.messages.last?.content.contains("Current user request:\ncurrent request") == true)
+}
+
 @Test func defaultSystemPromptDefinesConnorAsPersonalizedGeneralPurposeAgent() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
@@ -81,6 +131,21 @@ import ConnorGraphAgent
     #expect(prompt.contains("Calibrate closeness to the user's current cues and configured preferences"))
     #expect(prompt.contains("never pressure the user toward intimacy, dependence, exclusivity, or disclosure"))
     #expect(prompt.contains("do not claim a human relationship, consciousness, feelings, or unsupported memories"))
+}
+
+@Test func defaultSystemPromptDefinesDurableCrossRunHandoffs() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Cross-Run Continuity"))
+    #expect(prompt.contains("working context for the current user run only"))
+    #expect(prompt.contains("They will not be available as conversation history in a later user run"))
+    #expect(prompt.contains("user messages, your final assistant messages"))
+    #expect(prompt.contains("final response as the durable handoff record"))
+    #expect(prompt.contains("verification actually performed and its result"))
+    #expect(prompt.contains("Do not copy raw tool transcripts"))
+    #expect(prompt.contains("not automatically fresh evidence"))
+    #expect(prompt.contains("inspect the durable source of truth again"))
+    #expect(prompt.contains("explicit user output-format requirements"))
 }
 
 @Test func defaultSystemPromptDistinguishesNoteSessionsFromFileArtifacts() {
@@ -200,6 +265,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("All three continuity tools are paginated"))
     #expect(prompt.contains("Their input Schemas accept `page` and `pageSize`"))
     #expect(prompt.contains("`pageSize` defaults to 100 and may be chosen from 1 through 500"))
+    #expect(prompt.contains("explicitly request the largest `pageSize` allowed by its input Schema (currently 500)"))
     #expect(prompt.contains("Keep the same `pageSize` throughout one pagination chain"))
     #expect(prompt.contains("For recent context and durable knowledge, choose how many consecutive pages to read"))
     #expect(prompt.contains("always begin at page 1 and read every consecutive page through terminal `nextPage: null`"))
@@ -210,14 +276,20 @@ import ConnorGraphAgent
     #expect(prompt.contains("`page: 1` as a JSON integer, never a quoted string"))
     #expect(prompt.contains("`page` set to exactly `nextPage`"))
     #expect(prompt.contains("keep `query`, time bounds, and (for knowledge) `depth` unchanged"))
-    #expect(prompt.contains("Do not browse for an ordinary self-contained request merely because external material might offer marginal improvement"))
+    #expect(prompt.contains("do not browse for an ordinary self-contained request when the likely benefit is only marginal"))
     #expect(prompt.contains("Use `web_search` when the user asks to search, research, look up, verify, or consult external sources"))
+    #expect(prompt.contains("strongly prefer checking current authoritative guidance and established external best practices"))
+    #expect(prompt.contains("This is a recommended decision rule, not a mandatory startup step or a requirement for every request"))
+    #expect(prompt.contains("first form a provisional approach from the user's goals and known constraints"))
+    #expect(prompt.contains("compare relevant external approaches against it for authority, freshness, applicability, trade-offs, and compatibility"))
+    #expect(prompt.contains("Adopt or adapt only the parts that materially improve the result"))
+    #expect(prompt.contains("Never copy an Internet solution blindly"))
     #expect(prompt.contains("For emotional support, distress, interpersonal difficulty"))
     #expect(prompt.contains("carefully selected first-person accounts"))
     #expect(prompt.contains("Treat first-person accounts as perspectives rather than general facts"))
     #expect(prompt.contains("never assume another person's experience matches the user"))
     #expect(prompt.contains("do not delay urgent support merely to browse"))
-    #expect(prompt.contains("Do not use Web search for pure rewriting, calculation, local-file operations"))
+    #expect(prompt.contains("Do not use Web search for pure rewriting, calculation, routine mechanical local-file operations"))
     #expect(prompt.contains("Use `web_fetch` to read original pages"))
     #expect(prompt.contains("If `web_fetch` returns HTTP 403"))
     #expect(prompt.contains("use `browser_fetch` as the fallback"))
@@ -287,6 +359,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("call every available Memory OS continuity source"))
     #expect(prompt.contains("give the two context tools only compact topic keywords, entity names, or subject phrases tied to the actual user request"))
     #expect(prompt.contains("Use `web_search` when the user asks to search, research, look up, verify, or consult external sources"))
+    #expect(prompt.contains("strongly prefer checking current authoritative guidance and established external best practices"))
+    #expect(prompt.contains("recommended decision rule, not a mandatory startup step"))
+    #expect(prompt.contains("Adopt or adapt only the parts that materially improve the result"))
     #expect(prompt.contains("Memory and Web are evidence sources for the same user task"))
     #expect(prompt.contains("Do not include unused search results"))
     #expect(prompt.contains("specialized external knowledge that should not be answered from model recall alone"))
@@ -298,6 +373,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("a blocked or failed retrieval or operation is not complete"))
     #expect(prompt.contains("must not block an unrelated non-time-dependent task"))
     #expect(!prompt.contains("Every other task must call `web_search`"))
+    #expect(!prompt.contains("Always call `web_search` before beginning task execution"))
 }
 
 @Test func defaultSystemPromptDefinesBootstrapOncePerUserRun() {
@@ -336,6 +412,10 @@ import ConnorGraphAgent
     #expect(prompt.contains("always check the user's calendar from the authoritative current time through the next 48 hours"))
     #expect(prompt.contains("`timeFilterMode: intervalOverlapsRange`"))
     #expect(prompt.contains("includes events already in progress at the current time as well as events that begin later"))
+    #expect(prompt.contains("correctable argument or timestamp-format error"))
+    #expect(prompt.contains("correct the arguments, and try once more"))
+    #expect(prompt.contains("do not repeat the identical failing call"))
+    #expect(prompt.contains("do not retry permission, authentication, or service-availability failures"))
     #expect(prompt.contains("Use the successful current-time result and its timezone as the local schedule frame"))
     #expect(prompt.contains("call `get_current_environment` with `refresh: false`"))
     #expect(prompt.contains("do not classify from title keywords alone"))

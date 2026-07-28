@@ -13,13 +13,27 @@ struct CalendarMutationServiceTests {
         let event = CalendarEvent(id: .init(rawValue: "e"), calendarID: collection.id, title: "Created", start: .init(date: Date(timeIntervalSince1970: 10)), end: .init(date: Date(timeIntervalSince1970: 20)), updatedAt: Date(timeIntervalSince1970: 30))
         let result = CalendarMutationResult(receipt: .init(mutationKind: .createEvent, eventID: event.id, approved: true, summary: "Created"), confirmedEvent: event, remoteVersion: .init(value: "v1"))
         let adapter = StubCalendarMutationAdapter(result: result)
-        let service = CalendarMutationService(store: store, adapters: [.genericCalDAV: adapter])
+        let notificationCenter = NotificationCenter()
+        let notifications = CalendarMutationNotificationRecorder()
+        let observer = notificationCenter.addObserver(forName: .connorCalendarCacheDidChange, object: nil, queue: nil) {
+            notifications.record($0)
+        }
+        defer { notificationCenter.removeObserver(observer) }
+        let service = CalendarMutationService(
+            store: store,
+            adapters: [.genericCalDAV: adapter],
+            notificationCenter: notificationCenter
+        )
         let request = CalendarMutationRequest(operation: .create, draft: .init(calendarID: collection.id, title: "Created", start: event.start, end: event.end), runID: "run", sessionID: "session")
         _ = try await service.mutate(request)
         let snapshot = try await store.loadSnapshot()
         #expect(snapshot.events == [event])
         #expect(snapshot.mutationAudits.count == 1)
         #expect(snapshot.mutationAudits[0].status == .confirmed)
+        let notification = try #require(notifications.notifications.first)
+        #expect(notification.userInfo?[CalendarCacheChangeNotificationUserInfoKey.accountID] as? String == account.id.rawValue)
+        #expect(notification.userInfo?[CalendarCacheChangeNotificationUserInfoKey.eventID] as? String == event.id.rawValue)
+        #expect(notification.userInfo?[CalendarCacheChangeNotificationUserInfoKey.operation] as? String == CalendarMutationOperation.create.rawValue)
     }
 
     @Test func rejectsUnknownCalendarIDWithoutMutationAudit() async throws {
@@ -50,6 +64,17 @@ struct CalendarMutationServiceTests {
     }
 
     private func temporaryURL() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("calendar-mutation-\(UUID().uuidString).json") }
+}
+
+private final class CalendarMutationNotificationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var notifications: [Notification] = []
+
+    func record(_ notification: Notification) {
+        lock.lock()
+        defer { lock.unlock() }
+        notifications.append(notification)
+    }
 }
 
 private actor StubCalendarMutationAdapter: CalendarMutationAdapter {

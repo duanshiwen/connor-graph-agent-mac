@@ -177,5 +177,10 @@ final class ChatFeatureModel {
     let approvals = ChatApprovalModel()
     let workspaceExplorer = WorkspaceExplorerFeatureModel()
 
+    func dismissPreviewsForSessionChange() {
+        composer.attachmentPreviewModel = nil
+        workspaceExplorer.closePreview()
+    }
+
     func shutdown() { workspaceExplorer.shutdown() }
 }

@@ -481,7 +481,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var updatedAt: Date
 
     public init(
-        schemaVersion: Int = 3,
+        schemaVersion: Int = 5,
         loop: AgentLoopConfiguration = AgentLoopConfiguration(),
         ui: AgentRuntimeUISettings = AgentRuntimeUISettings(),
         app: AgentRuntimeAppSettings = AgentRuntimeAppSettings(),
@@ -560,11 +560,35 @@ public struct AppRuntimeSettingsRepository: @unchecked Sendable {
             let data = try Data(contentsOf: fileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(AgentRuntimeSettings.self, from: data)
+            let decoded = try decoder.decode(AgentRuntimeSettings.self, from: data)
+            let migrated = Self.migrateLegacyDefaults(decoded)
+            if migrated != decoded {
+                try save(migrated)
+            }
+            return migrated
         }
         let settings = AgentRuntimeSettings.default
         try save(settings)
         return settings
+    }
+
+    private static func migrateLegacyDefaults(_ settings: AgentRuntimeSettings) -> AgentRuntimeSettings {
+        guard settings.schemaVersion < 5 else { return settings }
+        var migrated = settings
+        if migrated.loop.maxToolIterations == 256 {
+            migrated.loop.maxToolIterations = 2_048
+        }
+        if migrated.loop.maxToolResultBytes == 32_768 {
+            migrated.loop.maxToolResultBytes = 1_000_000
+        }
+        if migrated.loop.promptMaxEstimatedTokens == 160_000 {
+            migrated.loop.promptMaxEstimatedTokens = 1_000_000
+        }
+        if migrated.loop.budget.maxTotalTokens == 120_000 {
+            migrated.loop.budget.maxTotalTokens = 10_000_000
+        }
+        migrated.schemaVersion = 5
+        return migrated
     }
 
     public func save(_ settings: AgentRuntimeSettings) throws {

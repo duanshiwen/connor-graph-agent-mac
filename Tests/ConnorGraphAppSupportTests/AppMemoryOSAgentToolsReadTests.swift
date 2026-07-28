@@ -109,7 +109,7 @@ import ConnorGraphAppSupport
     let profileProperties = try #require(profileDefinition.inputSchema.jsonObject["properties"] as? [String: Any])
     #expect(profileProperties["page"] != nil)
     #expect(profileProperties["pageSize"] != nil)
-    #expect(profileDefinition.description.contains("pageSize defaults to 100"))
+    #expect(profileDefinition.description.contains("explicitly set pageSize to the largest value allowed by this tool, currently 500"))
     #expect(profileDefinition.description.contains("same pageSize"))
     #expect(profileDefinition.description.contains("whenever nextPage is non-null"))
     #expect(profileDefinition.description.contains("Repeat until nextPage is null"))

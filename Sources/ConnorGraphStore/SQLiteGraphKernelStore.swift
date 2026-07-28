@@ -168,6 +168,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "note_search_fts",
         "session_background_tasks",
         "agent_runs",
+        "conversation_summary_states",
+        "conversation_compaction_records",
         "agent_events",
         "agent_audit_events",
         "agent_pending_approvals",
@@ -186,6 +188,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_graph_anomalies_graph_status",
         "idx_graph_jobs_v3_runnable",
         "idx_agent_sessions_updated",
+        "idx_conversation_compaction_records_session",
         "idx_agent_sessions_updated_page",
         "idx_agent_sessions_governance",
         "idx_notes_source_message",
@@ -441,6 +444,24 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_session_messages_id ON agent_session_messages(session_id, message_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_session_messages_page ON agent_session_messages(session_id, position DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS conversation_summary_states (
+            session_id TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL,
+            state_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS conversation_compaction_records (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            generation INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_conversation_compaction_records_session ON conversation_compaction_records(session_id, generation DESC);")
         try execute("""
         CREATE TABLE IF NOT EXISTS notes (
             id TEXT PRIMARY KEY,
@@ -883,6 +904,65 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return AgentSessionMessagePage(messages: messages, nextBeforePosition: nextCursor)
     }
 
+    public func conversationSummaryState(sessionID: String) throws -> ConversationSummaryState? {
+        let rows = try query(sql: "SELECT state_json FROM conversation_summary_states WHERE session_id = \(quote(sessionID)) LIMIT 1")
+        guard let encoded = rows.first?.first else { return nil }
+        return try decode(ConversationSummaryState.self, encoded)
+    }
+
+    public func conversationCompactionRecords(sessionID: String, limit: Int = 100) throws -> [ConversationCompactionRecord] {
+        let boundedLimit = min(max(limit, 1), 1_000)
+        return try query(sql: """
+        SELECT record_json
+        FROM conversation_compaction_records
+        WHERE session_id = \(quote(sessionID))
+        ORDER BY generation DESC
+        LIMIT \(boundedLimit)
+        """).map { try decode(ConversationCompactionRecord.self, $0[0]) }
+    }
+
+    public func commitConversationCompaction(
+        state: ConversationSummaryState,
+        record: ConversationCompactionRecord,
+        expectedRevision: Int?
+    ) throws -> Bool {
+        try withDatabaseLock {
+            do {
+                try execute("BEGIN IMMEDIATE;")
+                let stateJSON = quote(json(state))
+                if let expectedRevision {
+                    try execute("""
+                    UPDATE conversation_summary_states
+                    SET revision = \(state.revision), state_json = \(stateJSON), updated_at = \(quote(iso(state.generatedAt)))
+                    WHERE session_id = \(quote(state.sessionID)) AND revision = \(expectedRevision)
+                    """)
+                    guard sqlite3_changes(db) == 1 else {
+                        try execute("ROLLBACK;")
+                        return false
+                    }
+                } else {
+                    try execute("""
+                    INSERT OR IGNORE INTO conversation_summary_states (session_id, revision, state_json, updated_at)
+                    VALUES (\(quote(state.sessionID)), \(state.revision), \(stateJSON), \(quote(iso(state.generatedAt))))
+                    """)
+                    guard sqlite3_changes(db) == 1 else {
+                        try execute("ROLLBACK;")
+                        return false
+                    }
+                }
+                try execute("""
+                INSERT INTO conversation_compaction_records (id, session_id, generation, record_json, created_at)
+                VALUES (\(quote(record.id)), \(quote(record.sessionID)), \(record.generation), \(quote(json(record))), \(quote(iso(record.completedAt))))
+                """)
+                try execute("COMMIT;")
+                return true
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
     public func recentSessions(limit: Int = 50, includeArchived: Bool = true, includeDeleted: Bool = false) throws -> [AgentSession] {
         var conditions: [String] = []
         // Archive is no longer a product capability. Keep the stored is_archived
@@ -1039,6 +1119,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
                 DELETE FROM agent_audit_events;
                 DELETE FROM agent_pending_approvals;
                 DELETE FROM agent_runs;
+                DELETE FROM conversation_compaction_records;
+                DELETE FROM conversation_summary_states;
                 DELETE FROM session_pending_plans;
                 DELETE FROM session_branch_records;
                 DELETE FROM agent_session_messages;

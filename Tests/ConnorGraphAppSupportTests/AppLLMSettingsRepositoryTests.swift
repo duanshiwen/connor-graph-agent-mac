@@ -277,6 +277,24 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(loaded.defaultConnectionID == original.id)
 }
 
+@Test func settingsRepositoryPersistsConnectionContextWindow() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "million-token-model",
+        name: "Million Token Model",
+        providerMode: .openAICompatible,
+        baseURLString: "https://example.com/v1",
+        model: "model-a",
+        selectedModel: "model-a",
+        contextWindowTokens: 1_000_000
+    )
+
+    try repository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: "secret")
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.defaultConnection?.contextWindowTokens == 1_000_000)
+}
+
 @Test func saveConnectionCanExplicitlyMakeNewConnectionDefault() throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     let original = AppLLMConnectionConfig(

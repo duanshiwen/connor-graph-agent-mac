@@ -34,6 +34,50 @@ import ConnorGraphStore
     #expect(backend.requests.first?.attachmentRefs == [ref])
 }
 
+@Test func nativeSessionManagerDoesNotRouteSummaryCoveredAttachmentContent() async throws {
+    let backend = RecordingAttachmentBackend()
+    let store = try SQLiteGraphKernelStore(path: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite").path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let coveredRef = AgentMessageAttachmentRef(id: "covered", displayName: "covered.txt", kind: .text, byteCount: 10, lifecycleStatus: .ready, extractionStatus: .extracted, manifestRelativePath: "covered/manifest.json")
+    let tailRef = AgentMessageAttachmentRef(id: "tail", displayName: "tail.txt", kind: .text, byteCount: 10, lifecycleStatus: .ready, extractionStatus: .extracted, manifestRelativePath: "tail/manifest.json")
+    let coveredMessages = [AgentMessage(id: "covered-message", role: .user, content: "old", attachments: [coveredRef])]
+    let session = AgentSession(
+        id: "attachment-summary-session",
+        title: "Summary Attachments",
+        messages: coveredMessages + [AgentMessage(id: "tail-message", role: .assistant, content: "recent", attachments: [tailRef])]
+    )
+    try repository.saveSession(session)
+    let summary = ConversationSummaryState(
+        sessionID: session.id,
+        revision: 1,
+        compressionGeneration: 1,
+        payload: ConversationSummaryPayload(currentGoal: "Continue"),
+        coveredThroughMessageID: "covered-message",
+        coveredMessageCount: 1,
+        coveredPrefixHash: try ConversationSummaryIntegrity.coveredPrefixHash(messages: coveredMessages),
+        currentSummaryHash: "summary-hash",
+        sourceTokenEstimate: 5,
+        summaryTokenEstimate: 2,
+        generationModelID: "summary-model"
+    )
+    let plan = AttachmentContextPlan(inlineBlocks: [
+        AttachmentInlineBlock(attachmentID: coveredRef.id, displayName: coveredRef.displayName, kind: .text, content: "covered bytes"),
+        AttachmentInlineBlock(attachmentID: tailRef.id, displayName: tailRef.displayName, kind: .text, content: "tail bytes")
+    ])
+    var manager = NativeSessionManager(
+        backend: backend,
+        sessionRepository: repository,
+        session: session,
+        conversationSummaryState: summary
+    )
+
+    _ = try await manager.submit("Continue", sessionSummary: nil, attachmentContextPlan: plan)
+
+    let routedPlan = try #require(backend.requests.first?.attachmentContextPlan)
+    #expect(routedPlan.inlineBlocks.map(\.attachmentID) == [tailRef.id])
+}
+
 @Test func nativeSessionManagerBindsGeneratedImageToolResultsToAssistantMessage() async throws {
     let generatedRef = AgentMessageAttachmentRef(
         id: "generated-image-1",
@@ -64,6 +108,43 @@ import ConnorGraphStore
     #expect(reloaded.messages.last?.attachments == [generatedRef])
 }
 
+@Test func nativeSessionManagerBindsEditedImageToolResultsToAssistantMessage() async throws {
+    let editedRef = AgentMessageAttachmentRef(
+        id: "edited-image-1",
+        displayName: "edited.png",
+        kind: .image,
+        byteCount: 8,
+        lifecycleStatus: .ready,
+        extractionStatus: .pending,
+        manifestRelativePath: "attachments/edited-image-1/manifest.json"
+    )
+    let metadata = AgentAttachmentGenerationMetadata(
+        providerID: "openai-responses",
+        modelID: "gpt-5.6",
+        parameters: [AgentAttachmentGenerationMetadata.sourceAttachmentIDParameterKey: "source-image-1"]
+    )
+    let backend = GeneratedImageAttachmentBackend(
+        attachment: editedRef,
+        metadata: metadata,
+        toolName: "edit_image"
+    )
+    let store = try SQLiteGraphKernelStore(path: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite").path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "edited-image-session", title: "New Chat")
+    try repository.saveSession(session)
+    var manager = NativeSessionManager(backend: backend, sessionRepository: repository, session: session)
+
+    _ = try await manager.submit("Edit the image", sessionSummary: Optional<AgentSessionSummary>.none)
+
+    let assistant = try #require(manager.session.messages.last)
+    #expect(assistant.role == AgentRole.assistant)
+    #expect(assistant.attachments == [editedRef])
+    let loadedSession = try repository.loadSession(id: session.id)
+    let reloaded = try #require(loadedSession)
+    #expect(reloaded.messages.last?.attachments == [editedRef])
+}
+
 @Test func nativeSessionManagerRejectsSpoofedOrMismatchedGeneratedImageResults() async throws {
     let generatedRef = AgentMessageAttachmentRef(
         id: "spoofed-image",
@@ -90,6 +171,7 @@ import ConnorGraphStore
 private struct GeneratedImageAttachmentBackend: AgentBackend {
     var attachment: AgentMessageAttachmentRef
     var metadata: AgentAttachmentGenerationMetadata
+    var toolName = "generate_image"
 
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -100,7 +182,7 @@ private struct GeneratedImageAttachmentBackend: AgentBackend {
                 runID: request.runID,
                 sessionID: request.sessionID,
                 toolCallID: "image-call",
-                toolName: "generate_image",
+                toolName: toolName,
                 contentText: "generated",
                 contentJSON: contentJSON
             )

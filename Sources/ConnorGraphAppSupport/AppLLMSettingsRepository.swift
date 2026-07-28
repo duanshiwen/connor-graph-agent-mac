@@ -121,12 +121,15 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var extraHTTPHeaders: [String: String]
     /// Explicit override for vision support. When nil, capability is inferred from model name heuristics.
     public var explicitVisionSupport: Bool?
+    /// Provider/model-specific context window. When nil, the runtime uses its model catalog fallback.
+    public var contextWindowTokens: Int?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
         case shouldFetchModelsList
         case extraHTTPHeaders
         case explicitVisionSupport
+        case contextWindowTokens
     }
 
     public init(
@@ -140,7 +143,8 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         hasAPIKey: Bool = false,
         shouldFetchModelsList: Bool = true,
         extraHTTPHeaders: [String: String] = [:],
-        explicitVisionSupport: Bool? = nil
+        explicitVisionSupport: Bool? = nil,
+        contextWindowTokens: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -154,6 +158,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         self.shouldFetchModelsList = shouldFetchModelsList
         self.extraHTTPHeaders = extraHTTPHeaders
         self.explicitVisionSupport = explicitVisionSupport
+        self.contextWindowTokens = contextWindowTokens.map { max(1, $0) }
     }
 
     public init(from decoder: Decoder) throws {
@@ -170,7 +175,8 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
             shouldFetchModelsList: try container.decodeIfPresent(Bool.self, forKey: .shouldFetchModelsList) ?? true,
             extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:],
-            explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport)
+            explicitVisionSupport: try container.decodeIfPresent(Bool.self, forKey: .explicitVisionSupport),
+            contextWindowTokens: try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens)
         )
     }
 
@@ -259,6 +265,17 @@ public struct AppLLMModelConnection: Sendable, Identifiable, Equatable {
     }
 }
 
+public enum AppLLMSettingsError: Error, LocalizedError, Equatable, Sendable {
+    case invalidDefaultConnectionID(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .invalidDefaultConnectionID(connectionID):
+            return "默认 AI 连接不存在：\(connectionID)"
+        }
+    }
+}
+
 public struct AppLLMSettings: Sendable, Equatable {
     public var connections: [AppLLMConnectionConfig]
     public var defaultConnectionID: String
@@ -320,7 +337,7 @@ public struct AppLLMSettings: Sendable, Equatable {
     }
 
     public var defaultConnection: AppLLMConnectionConfig? {
-        connections.first(where: { $0.id == defaultConnectionID }) ?? connections.first
+        connections.first(where: { $0.id == defaultConnectionID })
     }
 
     public var baseURLString: String { defaultConnection?.baseURLString ?? "" }
@@ -424,7 +441,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             }
             return AppLLMSettings(
                 connections: hydrated,
-                defaultConnectionID: settingsStore.string(forKey: Keys.defaultConnectionID) ?? hydrated.first?.id ?? "",
+                defaultConnectionID: settingsStore.string(forKey: Keys.defaultConnectionID) ?? "",
                 defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
             )
         }
@@ -498,19 +515,17 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     }
 
     public func save(settings: AppLLMSettings, apiKey: String?) throws {
-        let effectiveDefaultConnectionID: String = {
-            if settings.connections.contains(where: { $0.id == settings.defaultConnectionID }) {
-                return settings.defaultConnectionID
-            }
-            return settings.connections.first?.id ?? ""
-        }()
+        if !settings.connections.isEmpty,
+           !settings.connections.contains(where: { $0.id == settings.defaultConnectionID }) {
+            throw AppLLMSettingsError.invalidDefaultConnectionID(settings.defaultConnectionID)
+        }
         let sanitized = AppLLMSettings(
             connections: settings.connections.map { connection in
                 var copy = connection
                 copy.hasAPIKey = false
                 return copy
             },
-            defaultConnectionID: effectiveDefaultConnectionID,
+            defaultConnectionID: settings.defaultConnectionID,
             defaultThinkingLevel: settings.defaultThinkingLevel
         )
         settingsStore.set(sanitized.defaultThinkingLevel.rawValue, forKey: Keys.defaultThinkingLevel)

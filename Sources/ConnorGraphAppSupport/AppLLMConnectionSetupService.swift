@@ -19,6 +19,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var makeDefault: Bool
     public var explicitVisionSupport: Bool?
+    public var contextWindowTokens: Int?
     public var shouldFetchModelsList: Bool
 
     public init(
@@ -35,6 +36,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         makeDefault: Bool = false,
         explicitVisionSupport: Bool? = nil,
+        contextWindowTokens: Int? = nil,
         shouldFetchModelsList: Bool = true
     ) {
         self.id = id
@@ -50,6 +52,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.openAIAPIKeyHeaderKind = openAIAPIKeyHeaderKind
         self.makeDefault = makeDefault
         self.explicitVisionSupport = explicitVisionSupport
+        self.contextWindowTokens = contextWindowTokens.map { max(1, $0) }
         self.shouldFetchModelsList = shouldFetchModelsList
     }
 }
@@ -165,7 +168,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
-            explicitVisionSupport: input.explicitVisionSupport
+            explicitVisionSupport: input.explicitVisionSupport,
+            contextWindowTokens: input.contextWindowTokens
         )
         let discovery = await capabilityDiscoveryService?.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: suppliedAPIKey))
             ?? AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
@@ -199,7 +203,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             hasAPIKey: true,
             shouldFetchModelsList: input.shouldFetchModelsList,
             extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind),
-            explicitVisionSupport: input.explicitVisionSupport
+            explicitVisionSupport: input.explicitVisionSupport,
+            contextWindowTokens: input.contextWindowTokens
         )
         let discovery = await capabilityDiscoveryService?.probeSetupCapabilities(context: AppProviderCapabilityProbeContext(connection: connection, credential: apiKey))
             ?? AppProviderCapabilityDiscoveryResult(connectionID: connection.id, evidence: [])
@@ -236,7 +241,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             baseURLString: baseURLString,
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
-            hasAPIKey: true
+            hasAPIKey: true,
+            contextWindowTokens: input.contextWindowTokens
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: tokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "Codex · ChatGPT 连接验证成功：\(health.model)")
@@ -268,7 +274,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
-            extraHTTPHeaders: extraHeaders
+            extraHTTPHeaders: extraHeaders,
+            contextWindowTokens: input.contextWindowTokens
         )
         try settingsRepository.saveConnection(connection, apiKey: runtimeToken, oauthTokens: tokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "GitHub Copilot 连接验证成功：\(health.model)")
@@ -297,7 +304,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
             hasAPIKey: true,
             extraHTTPHeaders: [AppLLMSettingsRepository.anthropicAuthHeaderKindMetadataKey: input.anthropicAuthHeaderKind.rawValue],
-            explicitVisionSupport: input.explicitVisionSupport
+            explicitVisionSupport: input.explicitVisionSupport,
+            contextWindowTokens: input.contextWindowTokens
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "Anthropic Compatible 连接验证成功：\(health.model)")

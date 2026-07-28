@@ -185,4 +185,30 @@ struct ChatFeatureModelTests {
         #expect(model.sessions.selectedSessionID == "session-1")
         #expect(model.composer.input == "draft")
     }
+
+    @Test func sessionChangeDismissesUnifiedAttachmentPreview() {
+        let model = ChatFeatureModel()
+        let attachment = AgentMessageAttachmentRef(
+            id: "image-1",
+            displayName: "preview.png",
+            kind: .image,
+            byteCount: 128,
+            lifecycleStatus: .ready,
+            extractionStatus: .unsupported,
+            manifestRelativePath: "attachments/image-1/manifest.json"
+        )
+        model.composer.attachmentPreviewModel = AttachmentPreviewModel(
+            attachment: attachment,
+            title: attachment.displayName,
+            subtitle: "image",
+            body: "",
+            bodyMode: .image
+        )
+
+        model.dismissPreviewsForSessionChange()
+
+        #expect(model.composer.attachmentPreviewModel == nil)
+        #expect(model.workspaceExplorer.previewModel == nil)
+        #expect(!model.workspaceExplorer.isLoadingPreview)
+    }
 }

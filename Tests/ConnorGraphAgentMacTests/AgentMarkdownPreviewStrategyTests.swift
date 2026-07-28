@@ -169,6 +169,14 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(linkRanges == 1)
     }
 
+    @Test @MainActor func markdownLinkTextViewWrapsInsideNarrowListRows() {
+        let textView = AgentMarkdownLinkText.LinkTextView()
+
+        #expect(textView.textContainer?.lineBreakMode == .byWordWrapping)
+        #expect(textView.contentHuggingPriority(for: .horizontal) == .defaultLow)
+        #expect(textView.contentCompressionResistancePriority(for: .horizontal) == .defaultLow)
+    }
+
     @Test func markdownImageSourcePolicyAllowsOnlyFilesInsideTheSessionRoot() {
         let root = URL(fileURLWithPath: "/tmp/connor/sessions/session-1")
         let inside = root.appendingPathComponent("attachments/image/original/chart.png")
