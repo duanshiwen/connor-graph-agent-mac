@@ -256,6 +256,44 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(manager.session.messages.map(\.content) == loaded.messages.map(\.content))
 }
 
+@MainActor
+@Test func nativeSessionManagerPersistsAndPublishesProgressMessagesImmediately() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "native-session-progress", title: "Progress", createdAt: Date(timeIntervalSince1970: 1_000))
+    try repository.saveSession(session)
+    var registry = AgentToolRegistry()
+    registry.register(ShareProgressUpdateTool())
+    let loop = AgentLoopController(
+        modelProvider: NativeSessionScriptedProvider(responses: [
+            AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "progress-call", name: "share_progress_update", argumentsJSON: #"{"message":"资料已经核对完毕，接下来整理结论。"}"#)],
+                finishReason: .toolCalls
+            ),
+            AgentModelResponse(text: "这是最终结论。")
+        ]),
+        toolRegistry: registry
+    )
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+    var publishedMessages: [AgentMessage] = []
+
+    let response = try await manager.submit(
+        "核对资料并总结",
+        sessionSummary: nil,
+        onAssistantMessageCreated: { message in
+            publishedMessages.append(message)
+        }
+    )
+    let loaded = try #require(try repository.loadSession(id: session.id))
+
+    #expect(publishedMessages.map(\.content) == ["资料已经核对完毕，接下来整理结论。"])
+    #expect(loaded.messages.map(\.role) == [.user, .assistant, .assistant])
+    #expect(loaded.messages.map(\.content) == ["核对资料并总结", "资料已经核对完毕，接下来整理结论。", "这是最终结论。"])
+    #expect(loaded.messages.dropFirst().allSatisfy { $0.runID == response.events.first?.runID })
+    #expect(loaded.messages.dropFirst().allSatisfy { $0.sessionID == session.id })
+}
+
 @Test func nativeSessionManagerPersistsAndPromptsStructuredPersonReferences() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)

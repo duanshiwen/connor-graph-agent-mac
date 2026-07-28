@@ -3297,6 +3297,9 @@ final class AppRuntimeLifecycle {
                         self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason, backend: liveBackend)
                     }
                 },
+                onAssistantMessageCreated: { [weak self] message in
+                    self?.chatRunCoordinator.appendAssistantMessage(message, sessionID: submittingSessionID)
+                },
                 onEventPresentation: { [weak self] presentation in
                     guard let self else { return }
                     self.chatRunCoordinator.appendEvent(presentation, sessionID: submittingSessionID)
