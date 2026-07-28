@@ -796,9 +796,12 @@ private struct AgentChatConversationView: View {
             )
         } else if let process = item.process {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                AgentAssistantHeaderView()
+                if item.showsAssistantHeader {
+                    AgentAssistantHeaderView()
+                }
                 AgentChatTurnProcessRow(
                     process: process,
+                    isAssistantContinuation: !item.showsAssistantHeader,
                     initialEvents: initialActivityEvents(for: process, latestProcessID: latestProcessID),
                     loadEvents: {
                         await loadActivityEvents(for: process, latestProcessID: latestProcessID)
