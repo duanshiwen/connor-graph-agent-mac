@@ -179,6 +179,100 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     #expect(provider.modelID == "gpt-4o")
 }
 
+@Test func factoryAgentModelProviderUsesConfiguredDefaultProviderAndModel() throws {
+    let (store, dbURL) = try makeSessionLLMOverrideStore()
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+    let settingsStore = SessionLLMOverrideSettingsStore()
+    let credentialStore = SessionLLMOverrideCredentialStore()
+    let settingsRepository = AppLLMSettingsRepository(settingsStore: settingsStore, credentialStore: credentialStore)
+    let first = AppLLMConnectionConfig(
+        id: "first-connection",
+        name: "First",
+        providerMode: .openAICompatible,
+        connectionKind: .openAICompatible,
+        baseURLString: "https://first.example.com/v1",
+        model: "first-model",
+        selectedModel: "first-model"
+    )
+    let configuredDefault = AppLLMConnectionConfig(
+        id: "configured-default",
+        name: "Configured Default",
+        providerMode: .openAICompatible,
+        connectionKind: .openAICompatible,
+        baseURLString: "https://default.example.com/v1",
+        model: "other-model,default-model",
+        selectedModel: "default-model"
+    )
+    try settingsRepository.save(
+        settings: AppLLMSettings(
+            connections: [first, configuredDefault],
+            defaultConnectionID: configuredDefault.id
+        ),
+        apiKey: "default-key"
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+
+    #expect(factory.makeAgentModelProvider().modelID == "default-model")
+}
+
+@Test func appLLMSettingsDoesNotTreatFirstConnectionAsAnInvalidDefault() {
+    let first = AppLLMConnectionConfig(
+        id: "first-connection",
+        name: "First",
+        providerMode: .openAICompatible,
+        model: "first-model",
+        selectedModel: "first-model"
+    )
+    let settings = AppLLMSettings(
+        connections: [first],
+        defaultConnectionID: "missing-connection"
+    )
+
+    #expect(settings.defaultConnection == nil)
+    #expect(settings.connection(id: nil) == nil)
+}
+
+@Test func appLLMSettingsRepositoryRejectsAnInvalidDefaultConnection() throws {
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: SessionLLMOverrideSettingsStore(),
+        credentialStore: SessionLLMOverrideCredentialStore()
+    )
+    let first = AppLLMConnectionConfig(
+        id: "first-connection",
+        name: "First",
+        providerMode: .openAICompatible,
+        model: "first-model",
+        selectedModel: "first-model"
+    )
+
+    #expect(throws: AppLLMSettingsError.invalidDefaultConnectionID("missing-connection")) {
+        try settingsRepository.save(
+            settings: AppLLMSettings(
+                connections: [first],
+                defaultConnectionID: "missing-connection"
+            ),
+            apiKey: nil
+        )
+    }
+}
+
+@Test func legacyConnectionWithoutSelectedModelUsesFirstConfiguredModel() throws {
+    let data = try JSONSerialization.data(withJSONObject: [
+        "id": "legacy-connection",
+        "name": "Legacy",
+        "providerMode": "openai_compatible",
+        "connectionKind": "openai_compatible",
+        "baseURLString": "https://legacy.example.com/v1",
+        "model": "legacy-first,legacy-second",
+        "hasAPIKey": false
+    ])
+
+    let connection = try JSONDecoder().decode(AppLLMConnectionConfig.self, from: data)
+
+    #expect(connection.selectedModel == "legacy-first")
+    #expect(connection.effectiveModel == "legacy-first")
+}
+
 @Test func factoryNativeSessionManagerReceivesSessionLLMOverride() throws {
     let (store, dbURL) = try makeSessionLLMOverrideStore()
     defer { try? FileManager.default.removeItem(at: dbURL) }

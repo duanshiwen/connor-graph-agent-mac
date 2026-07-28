@@ -483,7 +483,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AnyAgentModelProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.connections.first else {
+            guard let connection = settings.connection(id: sessionLLMOverride?.connectionID) else {
                 let requestedMode = sessionLLMOverride.flatMap { AppLLMProviderMode(rawValue: $0.providerMode) } ?? settings.defaultConnection?.providerMode ?? .openAICompatible
                 let requestedKind = settings.connection(id: sessionLLMOverride?.connectionID)?.connectionKind
                     ?? settings.defaultConnection?.connectionKind
