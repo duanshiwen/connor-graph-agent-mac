@@ -492,9 +492,12 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
     /// Internal instruction payload. The agent loop accepts this only from a
     /// successful built-in activation tool and never exposes it as ordinary tool text.
     public var instructionPromotion: AgentToolInstructionPromotion?
+    /// Optional conversational output emitted by a trusted built-in tool.
+    /// It remains a standard assistant message and does not terminate the run.
+    public var assistantMessage: AgentMessage?
 
     private enum CodingKeys: String, CodingKey {
-        case id, runID, sessionID, toolCallID, toolName, contentText, contentJSON, citations, createdAt, error, instructionPromotion
+        case id, runID, sessionID, toolCallID, toolName, contentText, contentJSON, citations, createdAt, error, instructionPromotion, assistantMessage
     }
 
     public init(
@@ -523,6 +526,7 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         self.error = error
         self.modelContentParts = modelContentParts
         self.instructionPromotion = instructionPromotion
+        self.assistantMessage = nil
     }
 
     public init(from decoder: Decoder) throws {
@@ -539,6 +543,7 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         error = try container.decodeIfPresent(String.self, forKey: .error)
         modelContentParts = nil
         instructionPromotion = try container.decodeIfPresent(AgentToolInstructionPromotion.self, forKey: .instructionPromotion)
+        assistantMessage = try container.decodeIfPresent(AgentMessage.self, forKey: .assistantMessage)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -554,6 +559,7 @@ public struct AgentToolResult: Codable, Sendable, Equatable, Identifiable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(error, forKey: .error)
         try container.encodeIfPresent(instructionPromotion, forKey: .instructionPromotion)
+        try container.encodeIfPresent(assistantMessage, forKey: .assistantMessage)
     }
 }
 
