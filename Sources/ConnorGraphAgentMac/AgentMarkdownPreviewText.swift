@@ -290,26 +290,33 @@ struct AgentMarkdownPreviewText: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .unorderedItem(let text, let inline):
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Text("•")
                     .font(font)
+                    .foregroundStyle(.secondary)
                     .frame(width: 12, alignment: .trailing)
+                    .padding(.top, 1)
                 inlineText(RenderCache.shared.inlineRendered(text, attributed: inline), font: font, nativeFont: bodyNSFont)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 4)
         case .orderedItem(let number, let text, let inline):
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Text("\(number).")
                     .font(font)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 22, alignment: .trailing)
+                    .padding(.top, 1)
                 inlineText(RenderCache.shared.inlineRendered(text, attributed: inline), font: font, nativeFont: bodyNSFont)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 2)
         case .quote(let text, let inline):
             inlineText(
@@ -334,11 +341,12 @@ struct AgentMarkdownPreviewText: View {
                 allowedRoot: allowedImageRoot
             )
         case .taskItem(let isCompleted, let text, let inline):
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .tertiary)
                     .frame(width: 14, alignment: .center)
+                    .padding(.top, 1)
                 inlineText(
                     RenderCache.shared.inlineRendered(text, attributed: inline),
                     font: font,
@@ -350,7 +358,9 @@ struct AgentMarkdownPreviewText: View {
                     .strikethrough(isCompleted, color: .secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 4)
         case .code(let language, let text):
             VStack(alignment: .leading, spacing: 6) {
@@ -674,7 +684,10 @@ struct AgentMarkdownLinkText: NSViewRepresentable {
             isVerticallyResizable = true
             textContainerInset = .zero
             container.lineFragmentPadding = 0
+            container.lineBreakMode = .byWordWrapping
             container.widthTracksTextView = true
+            setContentHuggingPriority(.defaultLow, for: .horizontal)
+            setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             linkTextAttributes = [
                 .foregroundColor: NSColor.linkColor,
                 .underlineStyle: NSUnderlineStyle.single.rawValue
