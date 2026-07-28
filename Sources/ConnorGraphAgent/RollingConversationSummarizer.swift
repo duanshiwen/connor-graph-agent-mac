@@ -12,6 +12,53 @@ public enum RollingConversationSummaryError: Error, Sendable, Equatable {
     case requiredAttachmentsMissing([String])
 }
 
+public struct ConversationSummaryIntegrity: Sendable {
+    public init() {}
+
+    public static func coveredPrefixHash(messages: [AgentMessage]) throws -> String {
+        let rows = messages.map { message in
+            [
+                "id": message.id,
+                "role": message.role.rawValue,
+                "content": message.content,
+                "attachments": message.attachments.map { "\($0.id):\($0.displayName):\($0.byteCount)" }.joined(separator: "|")
+            ]
+        }
+        let data = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+public struct ConversationSummaryHistorySelection: Sendable, Equatable {
+    public var summaryState: ConversationSummaryState?
+    public var messages: [AgentMessage]
+
+    public init(summaryState: ConversationSummaryState?, messages: [AgentMessage]) {
+        self.summaryState = summaryState
+        self.messages = messages
+    }
+}
+
+public struct ConversationSummaryHistorySelector: Sendable {
+    public init() {}
+
+    public func select(messages: [AgentMessage], state: ConversationSummaryState?) -> ConversationSummaryHistorySelection {
+        let conversation = messages.filter { $0.role == .user || $0.role == .assistant }
+        guard let state, state.status == .active,
+              let cutoff = conversation.firstIndex(where: { $0.id == state.coveredThroughMessageID }) else {
+            return ConversationSummaryHistorySelection(summaryState: nil, messages: conversation)
+        }
+        let covered = Array(conversation[...cutoff])
+        guard (try? ConversationSummaryIntegrity.coveredPrefixHash(messages: covered)) == state.coveredPrefixHash else {
+            return ConversationSummaryHistorySelection(summaryState: nil, messages: conversation)
+        }
+        return ConversationSummaryHistorySelection(
+            summaryState: state,
+            messages: Array(conversation[conversation.index(after: cutoff)...])
+        )
+    }
+}
+
 public struct ConversationCompactionPlan: Sendable, Equatable {
     public var baseState: ConversationSummaryState?
     public var deltaMessages: [AgentMessage]
@@ -150,7 +197,7 @@ public struct RollingConversationSummarizer<Provider: LLMProvider>: Sendable {
 
         let previous = plan.baseState
         let summaryHash = Self.sha256(encodedPayload)
-        let prefixHash = try Self.coveredPrefixHash(messages: plan.coveredMessages)
+        let prefixHash = try ConversationSummaryIntegrity.coveredPrefixHash(messages: plan.coveredMessages)
         let generation = (previous?.compressionGeneration ?? 0) + 1
         let revision = (previous?.revision ?? 0) + 1
         let state = ConversationSummaryState(
@@ -190,19 +237,6 @@ public struct RollingConversationSummarizer<Provider: LLMProvider>: Sendable {
             expectedRevision: previous?.revision,
             recentMessages: plan.recentMessages
         )
-    }
-
-    public static func coveredPrefixHash(messages: [AgentMessage]) throws -> String {
-        let rows = messages.map { message in
-            [
-                "id": message.id,
-                "role": message.role.rawValue,
-                "content": message.content,
-                "attachments": message.attachments.map { "\($0.id):\($0.displayName):\($0.byteCount)" }.joined(separator: "|")
-            ]
-        }
-        let data = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
-        return sha256(data)
     }
 
     private static func prompt(

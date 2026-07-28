@@ -127,6 +127,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         allowedMCPToolNames: [String]? = nil
     ) -> NativeSessionManager {
         let intentProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
+        let summaryProvider = AnyLLMProvider { prompt, _ in
+            let response = try await intentProvider.complete(AgentModelRequest(
+                messages: [AgentModelMessage(role: .user, content: prompt)],
+                tools: [],
+                temperature: 0
+            ))
+            return LLMResponse(text: response.text ?? "", citations: [])
+        }
         return NativeSessionManager(
             backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride, remoteKnowledgeBaseIDs: remoteKnowledgeBaseIDs, allowedMCPToolNames: allowedMCPToolNames)),
             sessionRepository: AppChatSessionRepository(store: store),
@@ -134,7 +142,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             groupID: groupID,
             permissionMode: permissionMode,
             memoryOSFacade: makeMemoryOSFacade(),
-            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider))
+            memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider)),
+            contextWindowSize: SessionContextBudget.inferContextWindowSize(modelID: intentProvider.modelID),
+            rollingSummaryProvider: summaryProvider,
+            rollingSummaryModelID: intentProvider.modelID
         )
     }
 

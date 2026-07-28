@@ -78,10 +78,9 @@ public struct NativeSessionManager: Sendable {
     public private(set) var anchorState: SessionAnchorState?
     /// Model's context window size in tokens (for percentage-based budget).
     public var contextWindowSize: Int
-    /// Compression pipeline (type-erased).  Nil when compression is disabled.
-    private let compressionProvider: AnyLLMProvider?
-    /// Recent message keep count for compression (default 7).
-    public var compressionRecentMessageKeepCount: Int = 7
+    public private(set) var conversationSummaryState: ConversationSummaryState?
+    private let rollingSummaryProvider: AnyLLMProvider?
+    private let rollingSummaryModelID: String?
 
     private let presenter: AgentEventPresenter
     private let memoryOSFacade: AppMemoryOSFacade?
@@ -100,9 +99,11 @@ public struct NativeSessionManager: Sendable {
         memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
         eventRecorder: AgentEventRecorder? = nil,
         pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
-        compressionProvider: AnyLLMProvider? = nil,
         contextWindowSize: Int = 200_000,
-        anchorState: SessionAnchorState? = nil
+        anchorState: SessionAnchorState? = nil,
+        conversationSummaryState: ConversationSummaryState? = nil,
+        rollingSummaryProvider: AnyLLMProvider? = nil,
+        rollingSummaryModelID: String? = nil
     ) {
         self.backend = AnyAgentBackend(backend)
         self.sessionRepository = sessionRepository
@@ -118,9 +119,11 @@ public struct NativeSessionManager: Sendable {
         self.memoryOSIngestionWriter = memoryOSFacade.map { MemoryOSIngestionWriter(facade: $0, intentNormalizer: memoryOSIntentNormalizer) }
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
-        self.compressionProvider = compressionProvider
         self.contextWindowSize = contextWindowSize
         self.anchorState = anchorState
+        self.conversationSummaryState = conversationSummaryState
+        self.rollingSummaryProvider = rollingSummaryProvider
+        self.rollingSummaryModelID = rollingSummaryModelID
     }
 
     public init<Provider: AgentModelProvider>(
@@ -168,10 +171,14 @@ public struct NativeSessionManager: Sendable {
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
         let persistedSession = try? sessionRepository.loadSession(id: session.id)
-        let conversationMessages = (persistedSession ?? session).messages.filter {
-            $0.role == .user || $0.role == .assistant
-        }
-        let recentMessages = Array(conversationMessages.suffix(max(0, recentMessageLimit)))
+        let persistedMessages = (persistedSession ?? session).messages
+        let storedSummaryState = try? sessionRepository.loadConversationSummaryState(sessionID: session.id)
+        let historySelection = ConversationSummaryHistorySelector().select(
+            messages: persistedMessages,
+            state: storedSummaryState ?? conversationSummaryState
+        )
+        conversationSummaryState = historySelection.summaryState
+        let recentMessages = Array(historySelection.messages.suffix(max(0, recentMessageLimit)))
         let activeSkillContextSnapshot: String? = {
             let displayName = activeSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let slug = activeSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -203,12 +210,13 @@ public struct NativeSessionManager: Sendable {
             groupID: groupID,
             userMessage: prompt,
             currentUserMessageID: userMessage.id,
-            sessionSummary: sessionSummary,
+            sessionSummary: conversationSummaryState == nil ? sessionSummary : nil,
             recentMessages: recentMessages,
             permissionMode: permissionMode,
             attachmentRefs: attachments,
             attachmentContextPlan: attachmentContextPlan,
             anchorState: anchorState,
+            conversationSummaryState: conversationSummaryState,
             explicitPersonContexts: explicitPersonContexts,
             skillInstructions: skillInstructions,
             activeSkillSlug: activeSkillSlug,
@@ -399,9 +407,7 @@ public struct NativeSessionManager: Sendable {
                     message: runFailure == nil ? "Session run completed" : (runFailure?.message ?? "Session run failed")
                 )
         }
-            if runFailure == nil {
-                try await maybeCompressContext()
-            }
+            if runFailure == nil { await maybeUpdateRollingSummary() }
             return AgentLoopChatResponse(
                 session: session,
                 events: collectedEvents,
@@ -534,34 +540,45 @@ public struct NativeSessionManager: Sendable {
 
     // MARK: - Context Compression
 
-    /// Check if context compression should be triggered.
-    /// If so, compress older messages into the anchor state for future turns.
-    ///
-    /// This intentionally runs after the primary AgentLoop turn completes. The
-    /// user-facing model call must always flow through AgentLoopController prompt
-    /// assembly first, so maintenance LLM calls such as compression cannot race
-    /// ahead of the main system prompt or produce a visible refusal before the
-    /// assembled prompt exists.
-    private mutating func maybeCompressContext() async throws {
-        guard let provider = compressionProvider else { return }
-
-        let tokenCount = SessionTokenCounter().estimate(messages: session.messages)
+    private mutating func maybeUpdateRollingSummary() async {
+        guard let provider = rollingSummaryProvider, let modelID = rollingSummaryModelID else { return }
+        let conversation = session.messages.filter { $0.role == .user || $0.role == .assistant }
+        let totalTokens = SessionTokenCounter().estimate(messages: conversation).totalTokenCount
         let budget = SessionContextBudget(contextWindowSize: contextWindowSize)
-        let status = budget.status(tokenCount: tokenCount.totalTokenCount)
+        guard budget.status(tokenCount: totalTokens) >= .shouldCompress else { return }
 
-        guard status >= .shouldCompress else { return }
-
-        let pipeline = ContextCompressionPipeline(
-            provider: provider,
-            recentMessageKeepCount: compressionRecentMessageKeepCount
-        )
-        let compressed = try await pipeline.compress(
-            messages: session.messages,
-            existingAnchor: anchorState
-        )
-        anchorState = compressed.anchor
-        // Persist anchor state to the session capsule
-        try persistAnchorState()
+        do {
+            let latestState = try sessionRepository.loadConversationSummaryState(sessionID: session.id) ?? conversationSummaryState
+            let selection = ConversationSummaryHistorySelector().select(messages: conversation, state: latestState)
+            let validState = selection.summaryState
+            let plan = try ConversationCompactionPlanner().plan(
+                messages: conversation,
+                existingState: validState,
+                contextWindowTokens: contextWindowSize
+            )
+            let maximumSummaryTokens = min(8_000, max(512, Int(Double(contextWindowSize) * 0.05)))
+            let draft = try await RollingConversationSummarizer(
+                provider: provider,
+                modelID: modelID,
+                maximumSummaryTokens: maximumSummaryTokens
+            ).summarize(sessionID: session.id, plan: plan)
+            guard try sessionRepository.commitConversationCompaction(
+                state: draft.state,
+                record: draft.record,
+                expectedRevision: draft.expectedRevision
+            ) else { return }
+            conversationSummaryState = draft.state
+        } catch RollingConversationSummaryError.noMessagesToCompact {
+            return
+        } catch {
+            try? sessionRepository.appendJournalEvent(
+                runID: UUID().uuidString,
+                sessionID: session.id,
+                kind: .runFailed,
+                action: "conversation_summary_update_failed",
+                message: String(describing: error)
+            )
+        }
     }
 
     /// Update anchor state externally (e.g., when loading from Session Capsule).
