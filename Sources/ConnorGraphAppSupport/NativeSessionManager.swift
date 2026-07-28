@@ -283,7 +283,7 @@ public struct NativeSessionManager: Sendable {
             runtimeState.lastCompletedAt = Date()
             runtimeState.cancellationReason = reason
             _ = try await appendTerminationMessage(
-                "操作已终止：\(reason)",
+                Self.terminationHandoffMessage(reason: reason),
                 runID: run.id
             )
             throw NativeSessionManagerError.runCancelled(reason)
@@ -386,7 +386,7 @@ public struct NativeSessionManager: Sendable {
             }.last
             if assistantMessage == nil, let runFailure {
                 assistantMessage = try await appendTerminationMessage(
-                    "操作已终止：\(runFailure.message)",
+                    Self.terminationHandoffMessage(reason: runFailure.message),
                     runID: run.id
                 )
             }
@@ -431,7 +431,7 @@ public struct NativeSessionManager: Sendable {
                 try? sessionRepository.saveRun(cancelledRun)
             }
             _ = try await appendTerminationMessage(
-                "操作已终止：\(reason)",
+                Self.terminationHandoffMessage(reason: reason),
                 runID: run.id
             )
             try persistSession()
@@ -445,7 +445,7 @@ public struct NativeSessionManager: Sendable {
                 let reason = existingRun.metadata["cancellation_reason"] ?? "cancelled by user"
                 runtimeState.cancellationReason = reason
                 _ = try await appendTerminationMessage(
-                    "操作已终止：\(reason)",
+                    Self.terminationHandoffMessage(reason: reason),
                     runID: run.id
                 )
                 try persistSession()
@@ -467,7 +467,7 @@ public struct NativeSessionManager: Sendable {
         }
             // Connor owns session state. A backend failure must not roll back the user's input.
             _ = try await appendTerminationMessage(
-                "操作已终止：\(String(describing: error))",
+                Self.terminationHandoffMessage(reason: String(describing: error)),
                 runID: run.id
             )
             try persistSession()
@@ -613,6 +613,14 @@ public struct NativeSessionManager: Sendable {
         try persistSession()
         try await persistMemoryOSAfterAssistantMessage(message)
         return message
+    }
+
+    private static func terminationHandoffMessage(reason: String) -> String {
+        """
+        操作已终止：\(reason)
+
+        已完成边界：本轮用户消息已保存，但未能确认整体任务完成。工具或外部状态可能已部分变化；继续前请重新检查相关持久状态。
+        """
     }
 
     private func throwIfRunCancelled(runID: String) throws {
