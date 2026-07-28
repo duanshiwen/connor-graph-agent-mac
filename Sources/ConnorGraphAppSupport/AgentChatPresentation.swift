@@ -254,9 +254,8 @@ public struct AgentChatTurnTimestampPresentation: Sendable, Equatable {
 
 public struct AgentChatTurnCursor: Sendable, Hashable {
     private var currentTurn: Int
-    private var hasOpenUserTurn: Bool
 
-    public static let initial = AgentChatTurnCursor(currentTurn: 0, hasOpenUserTurn: false)
+    public static let initial = AgentChatTurnCursor(currentTurn: 0)
 
     public static func beforeVisibleSuffix(of messages: [AgentMessage], visibleCount: Int) -> Self {
         var cursor = Self.initial
@@ -271,12 +270,10 @@ public struct AgentChatTurnCursor: Sendable, Hashable {
         switch role {
         case .user:
             currentTurn += 1
-            hasOpenUserTurn = true
         case .assistant:
-            if !hasOpenUserTurn {
+            if currentTurn == 0 {
                 currentTurn += 1
             }
-            hasOpenUserTurn = false
         case .system:
             if currentTurn == 0 { currentTurn = 1 }
         }
@@ -287,7 +284,7 @@ public struct AgentChatTurnCursor: Sendable, Hashable {
     }
 
     fileprivate var pendingTurnNumber: Int {
-        hasOpenUserTurn ? displayedTurnNumber : max(currentTurn + 1, 1)
+        displayedTurnNumber
     }
 }
 

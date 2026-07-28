@@ -34,6 +34,21 @@ import ConnorGraphAppSupport
     #expect(rows.map(\.roleLabel) == ["用户", "助手", "用户", "助手"])
 }
 
+@Test func agentChatPresentationKeepsConsecutiveAssistantMessagesInOneTurn() {
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "Start"),
+        AgentMessage(id: "assistant-progress-1", role: .assistant, content: "Stage one"),
+        AgentMessage(id: "assistant-progress-2", role: .assistant, content: "Stage two"),
+        AgentMessage(id: "assistant-final", role: .assistant, content: "Done")
+    ]
+
+    let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: nil)
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
+
+    #expect(rows.map(\.turnNumber) == [1, 1, 1, 1])
+    #expect(items.compactMap(\.process).map(\.turnNumber) == [1, 1, 1])
+}
+
 @Test func agentChatTurnTimelinePlacesTimestampAndProcessBetweenUserAndAssistant() {
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: false,

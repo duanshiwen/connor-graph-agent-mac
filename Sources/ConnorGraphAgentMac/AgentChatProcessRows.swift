@@ -218,7 +218,10 @@ struct AgentChatTurnProcessRow: View {
 
     private func activityHeaderText(_ summary: AgentTurnActivitySummaryPresentation) -> String {
         let skillPart = process.activeSkillLabel.map { " · 技能：\($0)" } ?? ""
-        return "\(summary.title) · \(summary.subtitle)\(skillPart)"
+        let operationText = summary.toolCallCount > 0
+            ? "\(summary.toolCallCount) 项操作 · \(summary.compactToolText)"
+            : summary.subtitle
+        return "\(summary.statusText) · \(operationText)\(skillPart)"
     }
 
     @ViewBuilder
@@ -269,7 +272,7 @@ struct AgentTurnActivitySummaryDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if !summary.toolSummaries.isEmpty {
-                detailLine(icon: "wrench.and.screwdriver", text: "本轮调用：\(toolSummaryText)")
+                detailLine(icon: "wrench.and.screwdriver", text: toolSummaryText)
             }
 
             detailLine(icon: "checklist", text: resultText)
@@ -319,7 +322,7 @@ struct AgentTurnActivitySummaryDetailView: View {
         if parts.isEmpty {
             parts.append(summary.statusText)
         }
-        return "执行结果：\(parts.joined(separator: "，"))"
+        return parts.joined(separator: "，")
     }
 
     private func detailLine(icon: String, text: String, color: Color = .secondary) -> some View {
