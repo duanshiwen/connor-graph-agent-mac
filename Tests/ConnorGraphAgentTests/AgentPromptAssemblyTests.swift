@@ -708,6 +708,22 @@ import ConnorGraphAgent
     #expect(prompt.contains("Never invent an image path"))
 }
 
+@Test func defaultSystemPromptRecommendsNaturalConversationalProgressUpdates() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Conversational Progress Updates"))
+    #expect(prompt.contains("strongly prefer calling `share_progress_update` after completing a meaningful stage"))
+    #expect(prompt.contains("recommendation, not a mandatory cadence or completion requirement"))
+    #expect(prompt.contains("Skip it for short or straightforward work"))
+    #expect(prompt.contains("does not finish the run"))
+    #expect(prompt.contains("A progress update is a normal assistant message"))
+    #expect(prompt.contains("Write each update from the user's point of view"))
+    #expect(prompt.contains("Do not inventory tool names, commands, file reads, internal mechanisms"))
+    #expect(prompt.contains("Apply the active Connor personality to progress messages"))
+    #expect(prompt.contains("Be selective and avoid interruption fatigue"))
+    #expect(prompt.contains("many tasks need none"))
+}
+
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {
     let summary = AgentSessionSummary(
         id: "summary-1",
