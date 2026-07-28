@@ -249,6 +249,41 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentText.contains("event-fractional-time"))
     }
 
+    @Test func calendarTimestampParserAcceptsCommonTimezoneQualifiedFormats() throws {
+        let expected = try #require(ISO8601DateFormatter().date(from: "2026-07-28T21:03:12Z"))
+        let values = [
+            "2026-07-29T05:03:12.844+08:00",
+            "2026-07-29T05:03:12+08:00",
+            "2026-07-29 05:03:12 +0800",
+            "2026\u{2212}07\u{2212}29T05\u{FF1A}03\u{FF1A}12,844\u{FF0B}08\u{FF1A}00"
+        ]
+
+        for value in values {
+            let parsed = try #require(AgentToolTimestampParser.parse(value))
+            #expect(abs(parsed.timeIntervalSince(expected)) < 1)
+        }
+        #expect(AgentToolTimestampParser.parse("2026-07-29T05:03:12") == nil)
+    }
+
+    @Test func calendarSearchEventsNormalizesCommonAliasesAndValueTypes() async throws {
+        let event = CalendarEvent(
+            id: CalendarEventID(rawValue: "event-aliases"),
+            calendarID: CalendarID(rawValue: "calendar-work"),
+            title: "Alias review",
+            start: CalendarEventDateTime(date: try #require(ISO8601DateFormatter().date(from: "2026-07-30T01:00:00Z"))),
+            end: CalendarEventDateTime(date: try #require(ISO8601DateFormatter().date(from: "2026-07-30T02:00:00Z")))
+        )
+        var registry = AgentToolRegistry()
+        registry.register(CalendarSearchEventsTool(runtime: InMemoryAgentCalendarRuntime(events: [event])))
+
+        let result = try await registry.execute(
+            AgentToolCall(name: "calendar_search_events", argumentsJSON: #"{"search_text":"","start_time":"2026-07-29 05:03:12 +0800","end_time":"2026-07-31T05:03:12+08:00","filter_mode":"interval_overlaps_range","sort_order":"time_asc_then_relevance","max_results":"50","time_preset":null}"#),
+            context: Self.context(toolCallID: "call-calendar-aliases")
+        )
+
+        #expect(result.contentText.contains("event-aliases"))
+    }
+
     @Test func calendarWritePreflightRequiresMatchingTrustedDetailRead() async throws {
         let evidence = CalendarDetailReadEvidenceRegistry()
         let runtime = InMemoryAgentCalendarRuntime(events: [Self.versionedEvent])

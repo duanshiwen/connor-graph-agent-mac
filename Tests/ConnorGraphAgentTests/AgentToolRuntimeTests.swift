@@ -198,6 +198,11 @@ private struct ApprovalAwareTool: AgentTool {
     #expect(object["timeZone"] as? String == "Asia/Shanghai")
     #expect(object["time_zone"] == nil)
     #expect(object["unixTimestamp"] as? Double == 1_781_976_000)
+    let iso8601 = try #require(object["iso8601"] as? String)
+    let preciseISO8601 = try #require(object["iso8601WithFractionalSeconds"] as? String)
+    #expect(!iso8601.contains("."))
+    #expect(preciseISO8601.contains("."))
+    #expect(AgentToolTimestampParser.parse(iso8601) == fixedDate)
 }
 
 @Test func graphSearchToolReturnsStructuredHitsWithCitations() async throws {

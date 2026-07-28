@@ -154,7 +154,7 @@ public struct CalendarSearchEventsTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "calendar_search_events" }
-    public var description: String { "Search Connor-owned calendar events as candidate results; use calendar_read with operation get_event for selected event detail reads that should become Memory OS evidence." }
+    public var description: String { "Search Connor-owned calendar events as candidate results. For an absolute range, pass startDate and endDate as timezone-qualified RFC 3339 timestamps; the canonical form is 2026-07-29T05:03:12+08:00, and fractional seconds are also accepted. Alternatively pass timePreset without dates. Empty query performs a time-only search. Common legacy aliases and snake_case parameters are normalized. Use calendar_read with operation get_event for selected event detail reads that should become Memory OS evidence." }
     public var permission: AgentPermissionCapability { .readCalendar }
     public var inputSchema: AgentToolInputSchema {
         .closedObject(properties: [
@@ -173,11 +173,39 @@ public struct CalendarSearchEventsTool: AgentTool {
         self.recorder = recorder
     }
 
+    public var inputExamples: [[String: SendableJSONValue]] {
+        [[
+            "query": .string(""),
+            "startDate": .string("2026-07-29T05:03:12+08:00"),
+            "endDate": .string("2026-07-31T05:03:12+08:00"),
+            "timeFilterMode": .string("intervalOverlapsRange"),
+            "timeSort": .string("timeAscThenRelevance"),
+            "limit": .int(50)
+        ]]
+    }
+
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        arguments.normalizingAliases([
+            "query": ["q", "keyword", "searchText", "searchQuery"],
+            "startDate": ["start", "startTime", "from", "fromDate"],
+            "endDate": ["end", "endTime", "to", "toDate"],
+            "timePreset": ["preset"],
+            "timeFilterMode": ["filterMode"],
+            "timeSort": ["sort", "sortOrder"],
+            "limit": ["maxResults", "maxItems", "pageSize"]
+        ])
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let startDate = try arguments.iso8601Date("startDate")
+        let endDate = try arguments.iso8601Date("endDate")
+        if let startDate, let endDate, startDate >= endDate {
+            throw AgentToolError.invalidArguments("startDate must be earlier than endDate")
+        }
         let events = try await runtime.searchEvents(
             query: arguments.string("query") ?? "",
-            startDate: try arguments.iso8601Date("startDate"),
-            endDate: try arguments.iso8601Date("endDate"),
+            startDate: startDate,
+            endDate: endDate,
             timePreset: arguments.string("timePreset"),
             timeFilterMode: arguments.string("timeFilterMode"),
             timeSort: arguments.string("timeSort"),
@@ -302,7 +330,7 @@ public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let evidenceRegistry: CalendarDetailReadEvidenceRegistry?
     public var name: String { "calendar_write" }
-    public var description: String { "Create, update, or delete a non-recurring calendar event through the current session permission policy. Every call must include operation, even when the other fields make it seem obvious; for creation use {\"operation\":\"create_event\",\"calendarID\":\"<exact writable ID>\",\"title\":\"<title>\",\"start\":\"<ISO-8601>\",\"end\":\"<ISO-8601>\",\"isAllDay\":false}. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict." }
+    public var description: String { "Create, update, or delete a non-recurring calendar event through the current session permission policy. Every call must include operation, even when the other fields make it seem obvious; for creation use {\"operation\":\"create_event\",\"calendarID\":\"<exact writable ID>\",\"title\":\"<title>\",\"start\":\"2026-07-29T05:03:12+08:00\",\"end\":\"2026-07-29T06:03:12+08:00\",\"isAllDay\":false}. start and end require timezone-qualified RFC 3339 timestamps; fractional seconds are accepted. calendarID is only for create_event; first call calendar_read list_calendars and copy an exact writable ID, because 'default', display names, and example IDs are invalid. eventID and expectedVersion are only for update_event and delete_event; copy both exactly from a successful calendar_read get_event and never overwrite a conflict." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputExamples: [[String: SendableJSONValue]] {
         [
@@ -334,8 +362,8 @@ public struct CalendarWriteTool: AgentTool {
             "eventID": .string(description: "Exact eventID returned by calendar_read get_event; copy the field without renaming it. Required for update_event and delete_event"),
             "expectedVersion": .string(description: "Exact expectedVersion returned by the latest calendar_read get_event; copy the field without renaming it. Required for update_event and delete_event"),
             "title": .string(description: "Event title"),
-            "start": .string(description: "ISO-8601 start timestamp"),
-            "end": .string(description: "ISO-8601 end timestamp"),
+            "start": .string(description: "RFC 3339/ISO-8601 start timestamp with timezone; fractional seconds are accepted"),
+            "end": .string(description: "RFC 3339/ISO-8601 end timestamp with timezone; fractional seconds are accepted"),
             "isAllDay": .boolean(description: "Whether this is an all-day event"),
             "location": .string(description: "Event location"),
             "url": .string(description: "Event URL"),
@@ -349,6 +377,13 @@ public struct CalendarWriteTool: AgentTool {
     public init(runtime: any AgentCalendarRuntime, evidenceRegistry: CalendarDetailReadEvidenceRegistry? = nil) {
         self.runtime = runtime
         self.evidenceRegistry = evidenceRegistry
+    }
+
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        arguments.normalizingAliases([
+            "start": ["startDate", "startTime"],
+            "end": ["endDate", "endTime"]
+        ])
     }
 
     public func preflight(call: AgentToolCall, context: AgentToolExecutionContext) async throws {
@@ -382,7 +417,6 @@ public struct CalendarWriteTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard context.approvedCapabilities.contains(.mutateCalendar) else { throw AgentToolError.permissionDenied("Calendar write requires an authorized mutateCalendar capability") }
-        let formatter = ISO8601DateFormatter()
         guard let operation = arguments.string("operation") else {
             throw AgentToolError.invalidArguments("Missing required calendar_write argument: operation. Use create_event, update_event, or delete_event.")
         }
@@ -398,17 +432,17 @@ public struct CalendarWriteTool: AgentTool {
             let title = arguments.string("title")!
             let startText = arguments.string("start")!
             let endText = arguments.string("end")!
-            guard let start = formatter.date(from: startText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp: \(startText)") }
-            guard let end = formatter.date(from: endText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp: \(endText)") }
+            guard let start = AgentToolTimestampParser.parse(startText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp; RFC 3339 with timezone is required: \(startText)") }
+            guard let end = AgentToolTimestampParser.parse(endText) else { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp; RFC 3339 with timezone is required: \(endText)") }
             request = CalendarMutationRequest(operation: .create, draft: CalendarEventDraft(calendarID: CalendarID(rawValue: calendarID), title: title, start: CalendarEventDateTime(date: start), end: CalendarEventDateTime(date: end), isAllDay: arguments.bool("isAllDay") ?? false, location: arguments.string("location"), url: arguments.string("url").flatMap(URL.init(string:)), notes: arguments.string("notes")), runID: context.runID, sessionID: context.sessionID)
         case "update_event":
             let missingKeys = ["eventID", "expectedVersion"].filter { arguments.string($0) == nil }
             guard missingKeys.isEmpty else { throw AgentToolError.invalidArguments("Missing required update_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are eventID, expectedVersion.") }
             let eventID = arguments.string("eventID")!
             let expectedVersion = arguments.string("expectedVersion")!
-            if let startText = arguments.string("start"), formatter.date(from: startText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp: \(startText)") }
-            if let endText = arguments.string("end"), formatter.date(from: endText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp: \(endText)") }
-            request = CalendarMutationRequest(operation: .update, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), patch: CalendarEventPatch(title: arguments.string("title").map(CalendarPatchValue.set) ?? .unchanged, start: datePatch("start", arguments: arguments, formatter: formatter), end: datePatch("end", arguments: arguments, formatter: formatter), isAllDay: arguments.bool("isAllDay").map(CalendarPatchValue.set) ?? .unchanged, location: optionalPatch(value: arguments.string("location"), clear: arguments.bool("clearLocation") == true), url: optionalPatch(value: arguments.string("url").flatMap(URL.init(string:)), clear: arguments.bool("clearURL") == true), notes: optionalPatch(value: arguments.string("notes"), clear: arguments.bool("clearNotes") == true)), runID: context.runID, sessionID: context.sessionID)
+            if let startText = arguments.string("start"), AgentToolTimestampParser.parse(startText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 start timestamp; RFC 3339 with timezone is required: \(startText)") }
+            if let endText = arguments.string("end"), AgentToolTimestampParser.parse(endText) == nil { throw AgentToolError.invalidArguments("Invalid ISO-8601 end timestamp; RFC 3339 with timezone is required: \(endText)") }
+            request = CalendarMutationRequest(operation: .update, eventID: CalendarEventID(rawValue: eventID), expectedVersion: CalendarMutationVersion(value: expectedVersion), patch: CalendarEventPatch(title: arguments.string("title").map(CalendarPatchValue.set) ?? .unchanged, start: datePatch("start", arguments: arguments), end: datePatch("end", arguments: arguments), isAllDay: arguments.bool("isAllDay").map(CalendarPatchValue.set) ?? .unchanged, location: optionalPatch(value: arguments.string("location"), clear: arguments.bool("clearLocation") == true), url: optionalPatch(value: arguments.string("url").flatMap(URL.init(string:)), clear: arguments.bool("clearURL") == true), notes: optionalPatch(value: arguments.string("notes"), clear: arguments.bool("clearNotes") == true)), runID: context.runID, sessionID: context.sessionID)
         case "delete_event":
             let missingKeys = ["eventID", "expectedVersion"].filter { arguments.string($0) == nil }
             guard missingKeys.isEmpty else { throw AgentToolError.invalidArguments("Missing required delete_event arguments: \(missingKeys.joined(separator: ", ")). Required fields are eventID, expectedVersion.") }
@@ -455,8 +489,8 @@ public struct CalendarWriteTool: AgentTool {
         }
     }
 
-    private func datePatch(_ key: String, arguments: AgentToolArguments, formatter: ISO8601DateFormatter) -> CalendarPatchValue<CalendarEventDateTime> {
-        guard let text = arguments.string(key), let date = formatter.date(from: text) else { return .unchanged }
+    private func datePatch(_ key: String, arguments: AgentToolArguments) -> CalendarPatchValue<CalendarEventDateTime> {
+        guard let text = arguments.string(key), let date = AgentToolTimestampParser.parse(text) else { return .unchanged }
         return .set(CalendarEventDateTime(date: date))
     }
 

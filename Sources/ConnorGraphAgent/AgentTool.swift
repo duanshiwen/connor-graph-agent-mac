@@ -127,18 +127,37 @@ public extension AgentToolInputSchema {
 
     func normalizingLegacyPropertyAliases(_ value: SendableJSONValue) -> SendableJSONValue {
         switch (self, value) {
+        case let (.stringEnumeration(values, _), .string(value)):
+            let normalizedValue = Self.normalizedEnumToken(value)
+            let matches = values.filter { Self.normalizedEnumToken($0) == normalizedValue }
+            return matches.count == 1 ? .string(matches[0]) : .string(value)
+        case let (.integer, .string(value)):
+            guard let integer = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) else { return .string(value) }
+            return .int(integer)
+        case let (.number, .string(value)):
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let number = Double(trimmed) else { return .string(value) }
+            return number.rounded(.towardZero) == number ? .int(Int(number)) : .double(number)
+        case let (.boolean, .string(value)):
+            switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true": return .bool(true)
+            case "false": return .bool(false)
+            default: return .string(value)
+            }
         case let (.array(items, _), .array(values)):
             return .array(values.map { items.normalizingLegacyPropertyAliases($0) })
         case let (.nullable(wrapped), value):
             return wrapped.normalizingLegacyPropertyAliases(value)
-        case let (.object(properties, _), .object(values)), let (.closedObject(properties, _), .object(values)):
+        case let (.object(properties, required), .object(values)), let (.closedObject(properties, required), .object(values)):
             var normalized: [String: SendableJSONValue] = [:]
             for key in values.keys.sorted() where properties[key] != nil {
+                if values[key] == .null, !required.contains(key), !properties[key]!.acceptsNull { continue }
                 normalized[key] = properties[key]!.normalizingLegacyPropertyAliases(values[key]!)
             }
             for key in values.keys.sorted() where properties[key] == nil {
                 let resolvedKey = matchingProperty(for: key, in: properties.keys) ?? key
                 guard normalized[resolvedKey] == nil else { continue }
+                if values[key] == .null, !required.contains(resolvedKey), properties[resolvedKey]?.acceptsNull == false { continue }
                 normalized[resolvedKey] = properties[resolvedKey]?.normalizingLegacyPropertyAliases(values[key]!) ?? values[key]!
             }
             return .object(normalized)
@@ -152,6 +171,15 @@ public extension AgentToolInputSchema {
         let normalizedLegacy = legacyKey.replacingOccurrences(of: "_", with: "").lowercased()
         let matches = properties.filter { $0.lowercased() == normalizedLegacy }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    private static func normalizedEnumToken(_ value: String) -> String {
+        value.filter(\.isLetter).lowercased()
+    }
+
+    private var acceptsNull: Bool {
+        if case .nullable = self { return true }
+        return false
     }
 
     func argumentValidationIssues(_ value: SendableJSONValue, path: String = "$") -> [String] {
@@ -272,12 +300,81 @@ public struct AgentToolArguments: Sendable, Equatable {
 
     public func iso8601Date(_ key: String) throws -> Date? {
         guard let value = string(key) else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) else {
-            throw AgentToolError.invalidArguments("\(key) must be a valid ISO-8601 timestamp")
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let date = AgentToolTimestampParser.parse(trimmed) else {
+            throw AgentToolError.invalidArguments("\(key) must be a valid RFC 3339/ISO-8601 timestamp with timezone, for example 2026-07-29T05:03:12+08:00")
         }
         return date
+    }
+
+    public func normalizingAliases(_ aliases: [String: [String]]) -> AgentToolArguments {
+        var normalized = values
+        for canonicalKey in aliases.keys.sorted() {
+            let aliasKeys = aliases[canonicalKey] ?? []
+            let matchingKeys = normalized.keys.filter { key in
+                aliasKeys.contains { Self.normalizedParameterKey($0) == Self.normalizedParameterKey(key) }
+            }.sorted()
+            if normalized[canonicalKey] == nil, let alias = matchingKeys.first {
+                normalized[canonicalKey] = normalized[alias]
+            }
+            for alias in matchingKeys { normalized.removeValue(forKey: alias) }
+        }
+        return AgentToolArguments(values: normalized)
+    }
+
+    private static func normalizedParameterKey(_ key: String) -> String {
+        key.filter(\.isLetter).lowercased()
+    }
+}
+
+public enum AgentToolTimestampParser {
+    public static func parse(_ value: String) -> Date? {
+        let normalized = normalize(value)
+
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: normalized) { return date }
+        if let date = ISO8601DateFormatter().date(from: normalized) { return date }
+
+        let formats = [
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mmXXXXX"
+        ]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.dateFormat = format
+            formatter.isLenient = false
+            if let date = formatter.date(from: normalized) { return date }
+        }
+        return nil
+    }
+
+    private static func normalize(_ value: String) -> String {
+        var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replacements = [
+            "\u{2010}": "-", "\u{2011}": "-", "\u{2012}": "-", "\u{2013}": "-", "\u{2212}": "-", "\u{FF0D}": "-",
+            "\u{FF1A}": ":", "\u{FF0B}": "+", "\u{FF0E}": ".", ",": "."
+        ]
+        for (source, target) in replacements {
+            normalized = normalized.replacingOccurrences(of: source, with: target)
+        }
+        if normalized.count > 10 {
+            let separator = normalized.index(normalized.startIndex, offsetBy: 10)
+            if normalized[separator].isWhitespace { normalized.replaceSubrange(separator...separator, with: "T") }
+        }
+        normalized = normalized
+            .replacingOccurrences(of: " Z", with: "Z")
+            .replacingOccurrences(of: " +", with: "+")
+            .replacingOccurrences(of: " -", with: "-")
+        if normalized.hasSuffix("z") { normalized.replaceSubrange(normalized.index(before: normalized.endIndex)..., with: "Z") }
+        if normalized.hasSuffix(" UTC") || normalized.hasSuffix(" GMT") {
+            normalized = String(normalized.dropLast(4)) + "Z"
+        }
+        return normalized
     }
 }
 
