@@ -27,6 +27,26 @@ import ConnorGraphAgent
     #expect(rendered.contains("Current user request:"))
 }
 
+@Test func chatPromptContextPreservesHistoricalAttachmentIdentity() {
+    let attachment = AgentMessageAttachmentRef(
+        id: "historical-image",
+        displayName: "diagram.png",
+        kind: .image,
+        byteCount: 128,
+        lifecycleStatus: .ready,
+        extractionStatus: .pending,
+        manifestRelativePath: "attachments/historical-image/manifest.json"
+    )
+    let context = AgentChatPromptContext(
+        userPrompt: "Continue",
+        recentMessages: [
+            AgentMessage(role: .assistant, content: "Here is the diagram.", attachments: [attachment])
+        ]
+    )
+
+    #expect(context.renderedPrompt.contains("Attachments: diagram.png [id=historical-image, kind=image]"))
+}
+
 @Test func agentChatPromptContextRendersContactMethodsForMentionedPeople() {
     let profile = PersonProfile(
         id: ContactID(rawValue: "person-duan-fuqiang"),

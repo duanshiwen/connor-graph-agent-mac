@@ -18,15 +18,15 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var budget: AgentBudgetConfiguration
 
     public init(
-        maxToolIterations: Int = 256,
+        maxToolIterations: Int = 2_048,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
-        maxToolResultBytes: Int = 32 * 1024,
+        maxToolResultBytes: Int = 1_000_000,
         allowParallelToolCalls: Bool = false,
         maxConsecutiveToolResultErrors: Int = 0,
         stopAfterTurnWhenBudgetExceeded: Bool = false,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
-        promptMaxEstimatedTokens: Int = 160_000,
+        promptMaxEstimatedTokens: Int = 1_000_000,
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
@@ -62,15 +62,15 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 256
+        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 2_048
         self.maxToolCallsPerIteration = try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4
         self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800
-        self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1024
+        self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 1_000_000
         self.allowParallelToolCalls = try container.decodeIfPresent(Bool.self, forKey: .allowParallelToolCalls) ?? false
         self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 0
         self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
-        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 160_000
+        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 1_000_000
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
         self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()

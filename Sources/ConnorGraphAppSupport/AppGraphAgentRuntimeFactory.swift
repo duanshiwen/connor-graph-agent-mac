@@ -251,6 +251,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
         registry.register(LocalBashTool(policy: localWorkspacePolicy))
         if let storagePaths {
+            registry.register(PresentImageAgentTool(
+                store: AppSessionAttachmentStore(paths: storagePaths),
+                localWorkspacePolicy: localWorkspacePolicy
+            ))
             let skillMutationService = SkillManagerMutationService(storagePaths: storagePaths)
             registry.register(ConnorSkillCreateTool(service: skillMutationService))
             registry.register(ConnorSkillUpdateTool(service: skillMutationService))
@@ -297,12 +301,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
             registry.registerNativeRSSTools(runtime: effectiveRSSRuntime, recorder: nativeSourceReferenceRecorder)
-            let effectiveMailRuntime: MailRuntime
+            var effectiveMailRuntime: MailRuntime
             if let mailRuntime {
                 effectiveMailRuntime = mailRuntime
             } else {
                 let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
                 effectiveMailRuntime = MailRuntime(repository: mailStore, cache: mailStore, preferencesStore: FileBackedMailPreferencesStore(storagePaths: storagePaths))
+            }
+            if effectiveMailRuntime.outboundAttachmentResolver == nil {
+                effectiveMailRuntime.outboundAttachmentResolver = AppSessionOutboundMailAttachmentResolver(
+                    store: AppSessionAttachmentStore(paths: storagePaths)
+                )
             }
             registry.registerNativeMailTools(
                 runtime: effectiveMailRuntime,
@@ -318,6 +327,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(BrowserFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
 
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
+        registry.register(NativeImageSearchTool())
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         if let browserControlHandler {
             registry.register(BrowserTabsTool(handler: browserControlHandler))

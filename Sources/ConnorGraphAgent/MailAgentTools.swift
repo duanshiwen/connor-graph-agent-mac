@@ -453,7 +453,7 @@ public struct MailCreateDraftTool: AgentTool {
             "htmlBody": .string(description: "Optional HTML body"),
             "messageID": .string(description: "Optional exact messageID returned by a mail list/search result; copy the field without renaming it when creating a reply draft"),
             "inReplyToMessageID": .string(description: "Legacy reply source message ID accepted for compatibility. Prefer messageID."),
-            "attachmentIDs": .array(items: .string(description: "Attachment ID"), description: "Attachment IDs"),
+            "attachmentIDs": .array(items: .string(description: "Exact attachment ID from the current User Attachments section"), description: "Optional current-session attachment IDs. Copy exact IDs from User Attachments; never pass local paths, invent IDs, or reuse IDs from another session."),
             "intentSummary": .string(description: "Short user intent summary for auditing")
         ], required: ["to", "subject", "body"])
     }
@@ -569,7 +569,7 @@ public struct MailCreateDraftToPeopleTool: AgentTool {
             "body": .string(description: "Plain-text body"),
             "htmlBody": .string(description: "Optional HTML body"),
             "inReplyToMessageID": .string(description: "Optional source message ID for replies"),
-            "attachmentIDs": .array(items: .string(description: "Attachment ID"), description: "Attachment IDs"),
+            "attachmentIDs": .array(items: .string(description: "Exact attachment ID from the current User Attachments section"), description: "Optional current-session attachment IDs. Copy exact IDs from User Attachments; never pass local paths, invent IDs, or reuse IDs from another session."),
             "intentSummary": .string(description: "Short user intent summary for auditing")
         ], required: ["toPersonIDs", "subject", "body"])
     }

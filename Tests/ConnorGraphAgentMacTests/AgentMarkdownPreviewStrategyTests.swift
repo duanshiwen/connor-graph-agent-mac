@@ -44,6 +44,31 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(!preview.contains("不应进入折叠预览"))
     }
 
+    @Test func fileAndAttachmentPreviewsOfferFullMarkdownExpansion() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let root = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let markdownPreview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift"),
+            encoding: .utf8
+        )
+        let workspacePreview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/WorkspaceFilePreviewOverlay.swift"),
+            encoding: .utf8
+        )
+        let attachmentPreview = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(markdownPreview.contains("Label(\"展开完整内容\", systemImage: \"chevron.down\")"))
+        #expect(markdownPreview.contains("allowsDeferredPreview && !isUserExpanded"))
+        #expect(workspacePreview.contains("allowsUserExpansion: true"))
+        #expect(attachmentPreview.contains("allowsUserExpansion: true"))
+    }
+
     @Test func messageBodyPointSizeIsDisplayedAndClamped() {
         #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)
@@ -104,12 +129,16 @@ struct AgentMarkdownPreviewStrategyTests {
             encoding: .utf8
         )
 
-        #expect(preview.contains("deferred:\\(allowsDeferredPreview)"))
+        #expect(preview.contains("deferred:\\(effectiveAllowsDeferredPreview)"))
         #expect(preview.contains("deferredPreviewView(statusText: \"正在展开完整内容…\", showsProgress: true)"))
         #expect(messageRows.components(separatedBy: "allowsDeferredPreview: !isMessageExpanded").count == 3)
         #expect(messageRows.contains("transaction.disablesAnimations = true"))
-        #expect(messageRows.contains("if assistantExpansionPresentation.isAvailable, !isMessageExpanded"))
+        #expect(messageRows.contains("if isUser, assistantExpansionPresentation.isAvailable"))
         #expect(messageRows.contains("private var messageExpansionControl: some View"))
+        #expect(messageRows.contains("expansionPresentation: assistantExpansionPresentation"))
+        #expect(messageRows.contains("private var expansionButton: some View"))
+        #expect(messageRows.contains(".frame(width: 24, height: 24)"))
+        #expect(messageRows.contains(".stroke(Color.accentColor.opacity(0.72), lineWidth: 1)"))
         #expect(messageRows.contains(".foregroundStyle(Color.accentColor)"))
         #expect(messageRows.contains(".frame(minHeight: 32)"))
         #expect(!messageRows.contains("allowsDeferredPreview: false"))
@@ -138,5 +167,15 @@ struct AgentMarkdownPreviewStrategyTests {
         }
 
         #expect(linkRanges == 1)
+    }
+
+    @Test func markdownImageSourcePolicyAllowsOnlyFilesInsideTheSessionRoot() {
+        let root = URL(fileURLWithPath: "/tmp/connor/sessions/session-1")
+        let inside = root.appendingPathComponent("attachments/image/original/chart.png")
+        let outside = URL(fileURLWithPath: "/tmp/private.png")
+
+        #expect(AgentMarkdownImageSourcePolicy.localFileURL(source: inside.absoluteString, allowedRoot: root) == inside)
+        #expect(AgentMarkdownImageSourcePolicy.localFileURL(source: outside.absoluteString, allowedRoot: root) == nil)
+        #expect(AgentMarkdownImageSourcePolicy.localFileURL(source: "https://example.com/chart.png", allowedRoot: root) == nil)
     }
 }

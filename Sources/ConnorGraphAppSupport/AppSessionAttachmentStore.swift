@@ -328,18 +328,21 @@ public struct AppSessionAttachmentStore: Sendable {
             case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             case "doc": return "application/msword"
             case "rtf": return "application/rtf"
+            case "pages": return "application/vnd.apple.pages"
             default: return "application/document"
             }
         case .spreadsheet:
             switch fileExtension?.lowercased() {
             case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             case "xls": return "application/vnd.ms-excel"
+            case "numbers": return "application/vnd.apple.numbers"
             default: return "application/spreadsheet"
             }
         case .presentation:
             switch fileExtension?.lowercased() {
             case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             case "ppt": return "application/vnd.ms-powerpoint"
+            case "keynote": return "application/vnd.apple.keynote"
             default: return "application/presentation"
             }
         case .audio:

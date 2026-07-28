@@ -102,6 +102,7 @@ public enum AgentAttachmentDerivativeKind: String, Codable, Sendable, Equatable 
 public enum AgentAttachmentExtractionEngine: String, Codable, Sendable, Equatable {
     case builtinText
     case builtinPDFText
+    case builtinIWorkText
     case markItDown
     case docling
     case providerNative

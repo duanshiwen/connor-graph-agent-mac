@@ -53,6 +53,66 @@ struct MailRuntimeSendPipelineTests {
         #expect(request.rawMessage.contains("Subject: Real send"))
     }
 
+    @Test func approvedSendIncludesCurrentSessionAttachmentInSMTPMessageAndSentCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mail-send-attachment-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let sourceURL = root.appendingPathComponent("report.txt")
+        let attachmentData = Data("quarterly attachment".utf8)
+        try attachmentData.write(to: sourceURL)
+        let attachmentStore = AppSessionAttachmentStore(paths: paths)
+        let manifest = try attachmentStore.importFile(at: sourceURL, sessionID: "session-attachment")
+
+        let accountID = MailAccountID(rawValue: "account-attachment")
+        let identityID = MailIdentityID(rawValue: "identity-attachment")
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
+        let account = MailAccount(
+            id: accountID,
+            provider: .genericIMAPSMTP,
+            displayName: "Attachment Account",
+            identities: [MailIdentity(id: identityID, displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            credentialBinding: binding,
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let rawCredentialStore = TestMailCredentialStore()
+        try rawCredentialStore.saveSecret("app-password", service: binding.credentialNamespace, account: binding.accountName)
+        let smtpClient = FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-attachment"))
+        let cache = InMemoryMailSourceCache()
+        let draftRepository = InMemoryMailDraftRepository()
+        let runtime = MailRuntime(
+            repository: InMemoryMailSourceRepository(accounts: [account]),
+            cache: cache,
+            draftStore: draftRepository,
+            credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
+            smtpClient: smtpClient,
+            outboundAttachmentResolver: AppSessionOutboundMailAttachmentResolver(store: attachmentStore)
+        )
+        let draft = try await runtime.createDraft(
+            accountID: accountID,
+            identityID: identityID,
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Attachment send",
+            body: "See attachment",
+            attachmentIDs: [MailAttachmentID(rawValue: manifest.id)]
+        )
+        _ = try await draftRepository.updateApprovedEnvelopeHash(id: draft.id, envelopeHash: draft.envelopeHash())
+
+        _ = try await runtime.sendDraft(draftID: draft.id, approved: true, sessionID: "session-attachment")
+
+        let request = try #require(await smtpClient.requests.first)
+        #expect(request.rawMessage.contains("Content-Type: multipart/mixed"))
+        #expect(request.rawMessage.contains("Content-Disposition: attachment; filename=\"report.txt\""))
+        #expect(request.rawMessage.contains(attachmentData.base64EncodedString()))
+        let sentMessage = try #require(try await cache.message(id: MailMessageID(rawValue: "provider-attachment")))
+        let descriptor = try #require(sentMessage.attachments.first)
+        #expect(descriptor.filename == "report.txt")
+        #expect(descriptor.mimeType == "text/plain")
+        #expect(descriptor.byteCount == attachmentData.count)
+        #expect(descriptor.contentHash == manifest.sha256)
+    }
+
     @Test func sendHistoryAggregatesReceiptAttemptsAndAuditRecords() async throws {
         let accountID = MailAccountID(rawValue: "account-history")
         let identityID = MailIdentityID(rawValue: "identity-history")
@@ -173,6 +233,23 @@ struct MailRuntimeSendPipelineTests {
         let stored = try #require(try await draftRepository.draft(id: draft.id))
         #expect(payload.envelopeHash == draft.envelopeHash())
         #expect(stored.approvedEnvelopeHash == payload.envelopeHash)
+    }
+
+    @Test func sendApprovalPayloadKeepsTheCompleteDraftBodyForReview() async throws {
+        let runtime = MailRuntime.fixture()
+        let body = String(repeating: "完整审批正文段落。", count: 80)
+        let draft = try await runtime.createDraft(
+            accountID: MailAccountID(rawValue: "fixture-account"),
+            identityID: MailIdentityID(rawValue: "fixture-identity"),
+            to: [MailAddress(email: "alice@example.com")],
+            subject: "Long approval body",
+            body: body
+        )
+
+        let payload = try await runtime.sendApprovalPayload(draftID: draft.id)
+
+        #expect(body.count > 500)
+        #expect(payload.bodyPreview == body)
     }
 
     @Test func approvedSendRequiresApprovedEnvelopeHashAndDoesNotCallSMTPWhenMissing() async throws {

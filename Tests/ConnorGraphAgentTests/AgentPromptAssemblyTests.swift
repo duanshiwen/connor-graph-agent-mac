@@ -412,6 +412,14 @@ import ConnorGraphAgent
     #expect(prompt.contains("status: deleted"))
 }
 
+@Test func defaultSystemPromptDocumentsOutboundMailAttachments() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("current User Attachments section into `attachmentIDs`"))
+    #expect(prompt.contains("never pass local paths"))
+    #expect(prompt.contains("reuse attachments from another session"))
+}
+
 @Test func defaultSystemPromptAllowsAutomaticActivePersonCreation() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
@@ -600,6 +608,24 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("memory_os_get_current_user_profile"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
+}
+
+@Test func defaultSystemPromptEncouragesRelevantInlineImages() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Rich Media Responses"))
+    #expect(prompt.contains("proactively consider whether one or more relevant images"))
+    #expect(prompt.contains("a strong preference, not a completion requirement"))
+    #expect(prompt.contains("never delay, weaken, or block an otherwise complete answer"))
+    #expect(prompt.contains("prefer existing source-grounded images"))
+    #expect(prompt.contains("When `image_search` is available"))
+    #expect(prompt.contains("Do not call `generate_image` merely to make factual or researched content look richer"))
+    #expect(prompt.contains("Clearly identify generated visuals as generated"))
+    #expect(prompt.contains("copy the exact Markdown returned by the tool"))
+    #expect(prompt.contains("Place each image immediately after the paragraph"))
+    #expect(prompt.contains("distribute them beside their relevant sections"))
+    #expect(prompt.contains("omit images when they add little value"))
+    #expect(prompt.contains("Never invent an image path"))
 }
 
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {

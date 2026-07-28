@@ -95,7 +95,7 @@ public struct NativeSessionManager: Sendable {
         session: AgentSession = AgentSession(),
         groupID: String = "default",
         permissionMode: AgentPermissionMode = .askToWrite,
-        recentMessageLimit: Int = 6,
+        recentMessageLimit: Int = .max,
         memoryOSFacade: AppMemoryOSFacade? = nil,
         memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer? = nil,
         eventRecorder: AgentEventRecorder? = nil,
@@ -167,7 +167,11 @@ public struct NativeSessionManager: Sendable {
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
-        let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
+        let persistedSession = try? sessionRepository.loadSession(id: session.id)
+        let conversationMessages = (persistedSession ?? session).messages.filter {
+            $0.role == .user || $0.role == .assistant
+        }
+        let recentMessages = Array(conversationMessages.suffix(max(0, recentMessageLimit)))
         let activeSkillContextSnapshot: String? = {
             let displayName = activeSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let slug = activeSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -344,7 +348,7 @@ public struct NativeSessionManager: Sendable {
                 }
 
                 if case .toolFinished(let result) = event,
-                   let attachment = generatedImageAttachment(from: result, runID: run.id, sessionID: session.id),
+                   let attachment = assistantImageAttachment(from: result, runID: run.id, sessionID: session.id),
                    !generatedAttachmentRefs.contains(where: { $0.id == attachment.id }) {
                     generatedAttachmentRefs.append(attachment)
                 }
@@ -605,18 +609,24 @@ public struct NativeSessionManager: Sendable {
         try eventRecorder.record(event, sequence: sequence)
     }
 
-    private func generatedImageAttachment(from result: AgentToolResult, runID: String, sessionID: String) -> AgentMessageAttachmentRef? {
-        guard result.toolName == "generate_image",
-              result.runID == runID,
+    private func assistantImageAttachment(from result: AgentToolResult, runID: String, sessionID: String) -> AgentMessageAttachmentRef? {
+        guard result.runID == runID,
               result.sessionID == sessionID,
               result.error == nil,
               let contentJSON = result.contentJSON,
-              let data = contentJSON.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: data),
-              payload.attachment.kind == .image else {
+              let data = contentJSON.data(using: .utf8) else {
             return nil
         }
-        return payload.attachment
+        let attachment: AgentMessageAttachmentRef?
+        switch result.toolName {
+        case "generate_image":
+            attachment = (try? JSONDecoder().decode(GeneratedImageToolResultPayload.self, from: data))?.attachment
+        case "present_image":
+            attachment = (try? JSONDecoder().decode(PresentImageToolResultPayload.self, from: data))?.attachment
+        default:
+            attachment = nil
+        }
+        return attachment?.kind == .image ? attachment : nil
     }
 
     private func recordPendingApprovalIfNeeded(_ event: AgentEvent) throws {

@@ -179,13 +179,14 @@ public struct MailMessageComposer: Sendable {
         parts.append("")
         parts.append(bodyPart.body)
         for attachment in attachments {
+            let filenameParameters = mimeFilenameParameters(attachment.filename)
             parts.append("--\(boundary)")
-            parts.append("Content-Type: \(attachment.mimeType); name=\"\(attachment.filename)\"")
+            parts.append("Content-Type: \(attachment.mimeType); name=\"\(filenameParameters.compatible)\"; name*=UTF-8''\(filenameParameters.encoded)")
             parts.append("Content-Transfer-Encoding: base64")
-            parts.append("Content-Disposition: \(attachment.isInline ? "inline" : "attachment"); filename=\"\(attachment.filename)\"")
+            parts.append("Content-Disposition: \(attachment.isInline ? "inline" : "attachment"); filename=\"\(filenameParameters.compatible)\"; filename*=UTF-8''\(filenameParameters.encoded)")
             if let contentID = attachment.contentID { parts.append("Content-ID: <\(contentID)>") }
             parts.append("")
-            parts.append(attachment.data.base64EncodedString())
+            parts.append(wrapBase64(attachment.data.base64EncodedString()))
         }
         parts.append("--\(boundary)--")
         parts.append("")
@@ -221,6 +222,31 @@ public struct MailMessageComposer: Sendable {
     private func encodeHeaderIfNeeded(_ value: String) -> String {
         guard value.unicodeScalars.contains(where: { $0.value > 127 }) else { return value }
         return "=?UTF-8?B?\(Data(value.utf8).base64EncodedString())?="
+    }
+
+    private func mimeFilenameParameters(_ filename: String) -> (compatible: String, encoded: String) {
+        let allowedFallback = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        let asciiOnly = filename.unicodeScalars.allSatisfy { $0.isASCII }
+        let sanitized = filename.unicodeScalars.map { scalar in
+            allowedFallback.contains(scalar) ? String(scalar) : "_"
+        }.joined()
+        let compatible = asciiOnly && !sanitized.isEmpty ? sanitized : encodeHeaderIfNeeded(filename)
+        return (compatible, percentEncodeMIMEParameter(filename))
+    }
+
+    private func percentEncodeMIMEParameter(_ value: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$&+-.^_`|~".utf8)
+        return value.utf8.map { byte in
+            allowed.contains(byte) ? String(UnicodeScalar(byte)) : String(format: "%%%02X", byte)
+        }.joined()
+    }
+
+    private func wrapBase64(_ value: String) -> String {
+        stride(from: 0, to: value.count, by: 76).map { offset in
+            let start = value.index(value.startIndex, offsetBy: offset)
+            let end = value.index(start, offsetBy: min(76, value.count - offset))
+            return String(value[start..<end])
+        }.joined(separator: "\r\n")
     }
 
     private func normalizeBody(_ body: String) -> String {

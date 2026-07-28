@@ -28,8 +28,8 @@ public struct AgentPromptBudgetEstimator: Sendable, Equatable {
     }
 
     public func status(estimatedTokenCount: Int) -> AgentPromptBudgetStatus {
-        if estimatedTokenCount >= 160_000 { return .over }
-        if estimatedTokenCount >= 120_000 { return .warning }
+        if estimatedTokenCount >= 1_000_000 { return .over }
+        if estimatedTokenCount >= 800_000 { return .warning }
         return .safe
     }
 }

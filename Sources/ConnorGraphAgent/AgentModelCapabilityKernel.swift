@@ -197,13 +197,8 @@ public enum AgentModelCapabilityKernel {
             confidence = .high
             signals.append(.providerPreset)
         }
-        if normalized.contains("tts") {
-            result.formUnion([.speechGeneration, .streamingAudioOutput])
-            confidence = .medium
-            signals.append(.modelNameHeuristic)
-        }
         if normalized.contains("realtime") && providerKind != .anthropicCompatible {
-            result.formUnion([.audioInput, .speechGeneration, .streamingAudioOutput])
+            result.insert(.audioInput)
             confidence = .medium
             signals.append(.modelNameHeuristic)
         }

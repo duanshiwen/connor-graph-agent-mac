@@ -58,7 +58,7 @@ struct AgentAssistantMessageExpansionPresentation: Equatable {
             && message.content.utf8.count >= AgentMarkdownPreviewRenderStrategy.deferredPreviewCharacterThreshold
         self.isExpanded = isExpanded
         let contentName = message.role == .user ? "消息" : "回复"
-        self.title = isExpanded ? "收起\(contentName)" : "展开完整\(contentName)"
+        self.title = isExpanded ? "收起" : "展开"
         self.systemImage = isExpanded ? "chevron.up" : "chevron.down"
         let accessibilityContentName = message.role == .user ? "用户消息" : "助理回复"
         self.accessibilityLabel = isExpanded ? "收起这条\(accessibilityContentName)" : "展开这条\(accessibilityContentName)"
@@ -175,13 +175,6 @@ struct AgentChatMessageRow: View {
     var onCopyAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onExportAssistantMessage: (AgentChatMessagePresentation) -> Void = { _ in }
     var onEditNoteBody: ((String) async -> Bool)? = nil
-    var speechPresentation = ConnorSpeechActionPresentation(
-        isConfigured: false,
-        isAvailable: false,
-        phase: .idle,
-        messageID: ""
-    )
-    var onToggleSpeech: (AgentChatMessagePresentation) -> Void = { _ in }
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
@@ -205,6 +198,11 @@ struct AgentChatMessageRow: View {
             message: row.message,
             isExpanded: isMessageExpanded
         )
+    }
+    private var supplementalAttachments: [AgentMessageAttachmentRef] {
+        row.attachments.filter { attachment in
+            !row.message.content.contains("/attachments/\(attachment.id)/")
+        }
     }
 
     private var activeSkillLabel: String? {
@@ -233,19 +231,16 @@ struct AgentChatMessageRow: View {
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
                     }
-                    if assistantExpansionPresentation.isAvailable, isMessageExpanded {
-                        messageExpansionControl
-                    }
                     messageContent
-                    if !row.attachments.isEmpty {
+                    if !supplementalAttachments.isEmpty {
                         AgentMessageAttachmentRefsView(
-                            attachments: row.attachments,
+                            attachments: supplementalAttachments,
                             localFileURL: localAttachmentFileURL,
                             onPreview: onPreviewAttachment,
                             onSaveImage: onSaveImageAttachment
                         )
                     }
-                    if assistantExpansionPresentation.isAvailable, !isMessageExpanded {
+                    if isUser, assistantExpansionPresentation.isAvailable {
                         messageExpansionControl
                     }
                 }
@@ -262,8 +257,8 @@ struct AgentChatMessageRow: View {
                 if assistantActionsPresentation.showsActions {
                     AgentAssistantMessageActionsView(
                         presentation: assistantActionsPresentation,
-                        speechPresentation: speechPresentation,
-                        onToggleSpeech: { onToggleSpeech(row) },
+                        expansionPresentation: assistantExpansionPresentation,
+                        onToggleExpansion: toggleMessageExpansion,
                         onCopy: { onCopyAssistantMessage(row) },
                         onExport: { onExportAssistantMessage(row) }
                     )
@@ -474,23 +469,15 @@ private struct AgentNoteBodyEditorSheet: View {
 
 private struct AgentAssistantMessageActionsView: View {
     var presentation: AgentAssistantMessageActionsPresentation
-    var speechPresentation: ConnorSpeechActionPresentation
-    var onToggleSpeech: () -> Void
+    var expansionPresentation: AgentAssistantMessageExpansionPresentation
+    var onToggleExpansion: () -> Void
     var onCopy: () -> Void
     var onExport: () -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceM) {
-            if presentation.showsActions, speechPresentation.isVisible {
-                actionButton(
-                    title: speechPresentation.title,
-                    systemImage: speechPresentation.systemImage,
-                    accessibilityLabel: speechPresentation.accessibilityLabel,
-                    help: speechPresentation.help,
-                    showsProgress: speechPresentation.isLoading,
-                    isEnabled: speechPresentation.isEnabled,
-                    action: onToggleSpeech
-                )
+            if expansionPresentation.isAvailable {
+                expansionButton
             }
             if presentation.showsActions {
                 actionButton(
@@ -511,6 +498,25 @@ private struct AgentAssistantMessageActionsView: View {
         }
         .padding(.top, 2)
         .accessibilityElement(children: .contain)
+    }
+
+    private var expansionButton: some View {
+        Button(action: onToggleExpansion) {
+            HStack(spacing: 4) {
+                Image(systemName: expansionPresentation.systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .imageScale(.small)
+                Text(expansionPresentation.title)
+                    .font(AgentChatTypography.microEmphasis)
+            }
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+        .accessibilityLabel(expansionPresentation.accessibilityLabel)
+        .help(expansionPresentation.help)
     }
 
     private func actionButton(

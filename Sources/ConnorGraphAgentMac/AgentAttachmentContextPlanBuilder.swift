@@ -7,6 +7,16 @@ struct AgentAttachmentContextPlanBuilder: Sendable {
     var perAttachmentCharacterLimit: Int = 20_000
     var totalCharacterLimit: Int = 60_000
 
+    static func conversationAttachments(
+        messages: [AgentMessage],
+        currentAttachments: [AgentMessageAttachmentRef]
+    ) -> [AgentMessageAttachmentRef] {
+        var seenIDs = Set<String>()
+        return (messages.flatMap(\.attachments) + currentAttachments).filter {
+            seenIDs.insert($0.id).inserted
+        }
+    }
+
     func build(sessionID: String, attachments: [AgentMessageAttachmentRef]) -> AttachmentContextPlan {
         guard !attachments.isEmpty, let storagePaths else { return AttachmentContextPlan() }
         let store = AppSessionAttachmentStore(paths: storagePaths)
@@ -24,6 +34,14 @@ struct AgentAttachmentContextPlanBuilder: Sendable {
                 if manifest.kind == .image {
                     let imageURL = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(manifest.storedRelativePath)
                     let data = try Data(contentsOf: imageURL)
+                    guard AppSessionAttachmentStore.sha256Hex(data) == manifest.sha256 else {
+                        omissions.append(AttachmentOmission(
+                            attachmentID: attachment.id,
+                            displayName: attachment.displayName,
+                            reason: "Stored image content failed integrity verification."
+                        ))
+                        continue
+                    }
                     let mimeType = manifest.mimeType ?? "image/png"
                     let dataURL = "data:\(mimeType);base64,\(data.base64EncodedString())"
                     imageBlocks.append(AttachmentImageBlock(

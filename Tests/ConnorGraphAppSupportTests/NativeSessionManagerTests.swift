@@ -243,6 +243,45 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(renderedMessages.contains("memoryEntityID: memory-person-duan"))
 }
 
+@Test func nativeSessionManagerPromptsWithCompletePersistedConversationWithoutHistoricalSystemMessages() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let persistedMessages = [
+        AgentMessage(id: "history-user-1", role: .user, content: "EARLIEST_USER_HISTORY"),
+        AgentMessage(id: "history-assistant-1", role: .assistant, content: "EARLIEST_ASSISTANT_HISTORY"),
+        AgentMessage(id: "history-system", role: .system, content: "LEGACY_SYSTEM_MARKER"),
+        AgentMessage(id: "history-user-2", role: .user, content: "LATEST_USER_HISTORY"),
+        AgentMessage(id: "history-assistant-2", role: .assistant, content: "LATEST_ASSISTANT_HISTORY")
+    ]
+    let persistedSession = AgentSession(
+        id: "native-session-complete-history",
+        title: "Complete History",
+        messages: persistedMessages
+    )
+    try repository.saveSession(persistedSession)
+
+    var partiallyLoadedSession = persistedSession
+    partiallyLoadedSession.messages = Array(persistedMessages.suffix(2))
+    let provider = NativeSessionPromptRecordingProvider()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+    var manager = NativeSessionManager(
+        loopController: loop,
+        sessionRepository: repository,
+        session: partiallyLoadedSession
+    )
+
+    _ = try await manager.submit("CURRENT_USER_REQUEST")
+    let request = try #require(await provider.lastRequest())
+    let renderedMessages = request.messages.map(\.content).joined(separator: "\n\n")
+
+    #expect(renderedMessages.contains("EARLIEST_USER_HISTORY"))
+    #expect(renderedMessages.contains("EARLIEST_ASSISTANT_HISTORY"))
+    #expect(renderedMessages.contains("LATEST_USER_HISTORY"))
+    #expect(renderedMessages.contains("LATEST_ASSISTANT_HISTORY"))
+    #expect(renderedMessages.contains("CURRENT_USER_REQUEST"))
+    #expect(!renderedMessages.contains("LEGACY_SYSTEM_MARKER"))
+}
+
 @Test func nativeSessionManagerCanAppendRevisionReplyWithoutAppendingAnotherUserMessage() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)

@@ -46,7 +46,7 @@ import ConnorGraphAgent
     let estimator = AgentPromptBudgetEstimator()
 
     #expect(estimator.status(estimatedTokenCount: 119_999) == .safe)
-    #expect(estimator.status(estimatedTokenCount: 120_000) == .warning)
-    #expect(estimator.status(estimatedTokenCount: 159_999) == .warning)
-    #expect(estimator.status(estimatedTokenCount: 160_000) == .over)
+    #expect(estimator.status(estimatedTokenCount: 800_000) == .warning)
+    #expect(estimator.status(estimatedTokenCount: 999_999) == .warning)
+    #expect(estimator.status(estimatedTokenCount: 1_000_000) == .over)
 }

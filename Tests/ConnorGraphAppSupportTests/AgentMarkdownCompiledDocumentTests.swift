@@ -89,6 +89,18 @@ struct AgentMarkdownCompiledDocumentTests {
         #expect(first.blocks.map(\.id) == second.blocks.map(\.id))
     }
 
+    @Test func compilerPreservesImageSourceAndAltText() throws {
+        let document = AgentMarkdownDocumentCompiler().compile("![A chart](file:///tmp/chart.png)")
+        let block = try #require(document.blocks.first)
+        #expect(block.kind == .image)
+        guard case .image(let altText, let source) = block.content else {
+            Issue.record("Expected an image block")
+            return
+        }
+        #expect(altText == "A chart")
+        #expect(source == "file:///tmp/chart.png")
+    }
+
     @Test func renderWindowLimitsMaterializedBlocksAndReportsOmittedCount() {
         let markdown = (1...20)
             .map { "Paragraph \($0)" }
