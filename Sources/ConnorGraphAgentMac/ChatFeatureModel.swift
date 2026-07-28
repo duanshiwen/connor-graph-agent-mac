@@ -150,6 +150,7 @@ final class ChatRunModel {
     var submittingSessionIDs: Set<String> = []
     var isSubmitting = false
     var eventTimeline: [AgentEventPresentation] = []
+    var selectedToolInvocation: AgentToolInvocationPresentation?
     var latestSummary: AgentSessionSummary?
     var isSummarizing = false
     var summaryMessage: String?
@@ -179,6 +180,7 @@ final class ChatFeatureModel {
 
     func dismissPreviewsForSessionChange() {
         composer.attachmentPreviewModel = nil
+        run.selectedToolInvocation = nil
         workspaceExplorer.closePreview()
     }
 
