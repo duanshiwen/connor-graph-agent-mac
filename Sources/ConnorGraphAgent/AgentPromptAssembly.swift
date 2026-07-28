@@ -486,7 +486,7 @@ public struct AgentPromptDiagnosticsTransformer: AgentContextTransformer, Sendab
         if let attachmentContext = assembly.attachmentContext {
             append(
                 id: "attachments",
-                title: "User attachments",
+                title: "Conversation attachments",
                 role: "user",
                 text: attachmentContext.renderedText,
                 notes: [

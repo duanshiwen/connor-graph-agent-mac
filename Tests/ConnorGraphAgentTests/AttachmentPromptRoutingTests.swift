@@ -67,7 +67,7 @@ struct AttachmentPromptRoutingTests {
 
         let rendered = AgentAttachmentContextSection(plan: plan).renderedText
 
-        #expect(rendered.contains("## User Attachments"))
+        #expect(rendered.contains("## Conversation Attachments"))
         #expect(rendered.contains("Attachment content truncated"))
         #expect(rendered.contains("attachments/a/derivatives/current/extracted.md"))
     }

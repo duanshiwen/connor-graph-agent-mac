@@ -3235,9 +3235,18 @@ final class AppRuntimeLifecycle {
             if !attachmentsForSubmission.isEmpty {
                 await chatComposerCoordinator.awaitAttachmentExtraction(sessionID: submittingSessionID)
             }
+            var attachmentHistoryMessages = manager.session.messages
+            if let chatSessionRepository,
+               let persistedSession = try? chatSessionRepository.loadSession(id: submittingSessionID) {
+                attachmentHistoryMessages = persistedSession.messages
+            }
+            let conversationAttachments = AgentAttachmentContextPlanBuilder.conversationAttachments(
+                messages: attachmentHistoryMessages,
+                currentAttachments: attachmentsForSubmission
+            )
             let attachmentContextPlan = await buildAttachmentContextPlanOffMain(
                 sessionID: submittingSessionID,
-                attachments: attachmentsForSubmission
+                attachments: conversationAttachments
             )
             let noteAugmentedPrompt = NoteSessionPromptBuilder.augmentedPrompt(
                 prompt,
