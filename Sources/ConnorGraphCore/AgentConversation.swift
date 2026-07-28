@@ -338,4 +338,12 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         updatedAt = message.createdAt
         return message
     }
+
+    @discardableResult
+    public mutating func appendAssistantMessage(_ message: AgentMessage) -> AgentMessage {
+        precondition(message.role == .assistant)
+        messages.append(message)
+        updatedAt = message.createdAt
+        return message
+    }
 }

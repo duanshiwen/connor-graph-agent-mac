@@ -124,6 +124,13 @@ final class ChatRunCoordinator {
         model.lastPromptInspection = nil
     }
 
+    func appendAssistantMessage(_ message: AgentMessage, sessionID: String) {
+        guard selectedSessionID() == sessionID,
+              !model.transcript.contains(where: { $0.id == message.id }) else { return }
+        model.transcript.append(message)
+        model.transcriptRevision += 1
+    }
+
     @discardableResult
     func applyCompletedRun(
         manager: NativeSessionManager,

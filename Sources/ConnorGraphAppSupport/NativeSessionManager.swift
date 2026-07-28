@@ -165,6 +165,7 @@ public struct NativeSessionManager: Sendable {
         existingUserMessageID: String? = nil,
         rehydratedHistoricalAttachmentIDs: Set<String> = [],
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
+        onAssistantMessageCreated: (@MainActor @Sendable (AgentMessage) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
         let persistedSession = try? sessionRepository.loadSession(id: session.id)
@@ -364,6 +365,18 @@ public struct NativeSessionManager: Sendable {
                     generatedAttachmentRefs.append(attachment)
                 }
 
+                if case .assistantMessageCreated(var message) = event,
+                   !session.messages.contains(where: { $0.id == message.id }) {
+                    message.runID = message.runID ?? run.id
+                    message.sessionID = message.sessionID ?? session.id
+                    session.appendAssistantMessage(message)
+                    try persistSession()
+                    try await persistMemoryOSAfterAssistantMessage(message)
+                    if let onAssistantMessageCreated {
+                        await onAssistantMessageCreated(message)
+                    }
+                }
+
                 if case .textComplete(let payload) = event {
                     assistantMessage = session.appendAssistantMessage(
                         payload.text,
@@ -372,6 +385,12 @@ public struct NativeSessionManager: Sendable {
                         promptInspection: promptInspectionSnapshot,
                         attachments: generatedAttachmentRefs
                     )
+                    if let messageID = assistantMessage?.id,
+                       let index = session.messages.lastIndex(where: { $0.id == messageID }) {
+                        session.messages[index].runID = run.id
+                        session.messages[index].sessionID = session.id
+                        assistantMessage = session.messages[index]
+                    }
                     try persistSession()
                     if let assistantMessage {
                         try await persistMemoryOSAfterAssistantMessage(assistantMessage)
