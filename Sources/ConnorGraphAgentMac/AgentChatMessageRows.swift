@@ -258,11 +258,18 @@ struct AgentChatMessageRow: View {
                 .padding(.horizontal, messageContainerHorizontalPadding)
                 .padding(.vertical, messageContainerVerticalPadding)
                 .frame(maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
-                .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                        .stroke(messageBorder, lineWidth: 1)
-                )
+                .background {
+                    if isUser || isNoteBody {
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                            .fill(messageBackground)
+                    }
+                }
+                .overlay {
+                    if isNoteBody {
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                            .stroke(messageBorder, lineWidth: 1)
+                    }
+                }
                 .contentShape(Rectangle())
                 .onHover(perform: updateAssistantBodyHover)
 
