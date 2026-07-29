@@ -26,6 +26,46 @@ private struct AgentTurnActivitySummaryLoadKey: Hashable {
     var lastEventID: String?
 }
 
+struct AgentActivityHeaderDisclosurePresentation: Equatable {
+    var showsChevron: Bool
+    var systemImage: String
+
+    init(isExpanded: Bool, isHovering: Bool) {
+        showsChevron = isExpanded || isHovering
+        systemImage = isExpanded ? "chevron.down" : "chevron.right"
+    }
+}
+
+struct AgentActivityHeaderTextPresentation: Equatable {
+    var text: String
+
+    init(statusText: String, toolNames: [String]) {
+        let visibleToolNames = toolNames.filter { !Self.routineToolNames.contains($0) }
+        guard !visibleToolNames.isEmpty else {
+            text = statusText
+            return
+        }
+        let operationText: String
+        if visibleToolNames.count <= 3 {
+            operationText = visibleToolNames.joined(separator: "、")
+        } else {
+            operationText = "\(visibleToolNames.prefix(3).joined(separator: "、"))等"
+        }
+        text = "\(statusText) · \(operationText)"
+    }
+
+    private static let routineToolNames: Set<String> = [
+        "获取当前时间",
+        "查询近期记忆",
+        "搜索短期记忆",
+        "查询长期记忆",
+        "搜索长期记忆",
+        "读取用户偏好",
+        "获取用户偏好",
+        "搜索笔记"
+    ]
+}
+
 fileprivate struct AgentTurnActivityPreparedTool: Sendable, Identifiable {
     var id: String { invocation.id }
     var invocation: AgentToolInvocationPresentation
@@ -76,6 +116,7 @@ private enum AgentTurnActivityDetailBuilder {
 
 struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
+    var isAssistantContinuation = false
     var initialEvents: [AgentEventPresentation]?
     var loadEvents: () async -> [AgentEventPresentation]
     var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
@@ -85,18 +126,26 @@ struct AgentChatTurnProcessRow: View {
     @State private var preparedSummary: AgentTurnActivitySummaryPresentation?
     @State private var preparedSummaryProcessID: String?
     @State private var startedAt: Date = Date()
+    @State private var isHoveringHeader = false
 
     var body: some View {
         let currentDetail = preparedDetailProcessID == process.id ? preparedDetail : nil
-        let summary = currentDetail?.summary
+        let preparedProcessSummary = currentDetail?.summary
             ?? (preparedSummaryProcessID == process.id ? preparedSummary : nil)
+        let summary = preparedProcessSummary
             ?? fallbackSummary
+        let isLoadingSummary = initialEvents == nil && preparedProcessSummary == nil
         return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             VStack(alignment: .leading, spacing: 2) {
                 Button(action: { isExpanded.toggle() }) {
-                    activityHeader(summary)
+                    activityHeader(summary, isLoadingSummary: isLoadingSummary)
                 }
                 .buttonStyle(.plain)
+                .onHover { isHovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringHeader = isHovering
+                    }
+                }
 
                 if isExpanded {
                     Group {
@@ -112,7 +161,6 @@ struct AgentChatTurnProcessRow: View {
                             AgentTurnActivityDetailLoadingView()
                         }
                     }
-                    .padding(.leading, AgentChatLayout.spaceM)
                     .transition(.opacity)
                 }
             }
@@ -159,20 +207,20 @@ struct AgentChatTurnProcessRow: View {
             eventCount: initialEvents?.count ?? 0,
             lastEventID: initialEvents?.last?.id
         )) {
-            guard let initialEvents else {
-                if preparedSummaryProcessID != process.id {
-                    preparedSummary = nil
-                    preparedSummaryProcessID = nil
-                }
-                return
+            let events: [AgentEventPresentation]
+            if let initialEvents {
+                events = initialEvents
+            } else {
+                events = await loadEvents()
             }
+            guard !Task.isCancelled else { return }
             do {
                 try await Task.sleep(for: .milliseconds(40))
             } catch {
                 return
             }
             let summaryTask = Task.detached(priority: .utility) {
-                AgentTurnActivitySummaryBuilder().summary(process: process, events: initialEvents)
+                AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
             }
             let summary = await withTaskCancellationHandler {
                 await summaryTask.value
@@ -192,55 +240,170 @@ struct AgentChatTurnProcessRow: View {
         )
     }
 
-    private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
-        HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
-            statusIcon(summary.state)
+    private func activityHeader(
+        _ summary: AgentTurnActivitySummaryPresentation,
+        isLoadingSummary: Bool
+    ) -> some View {
+        let disclosure = AgentActivityHeaderDisclosurePresentation(
+            isExpanded: isExpanded,
+            isHovering: isHoveringHeader
+        )
+        return HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
+            statusIcon(summary.state, isLoadingSummary: isLoadingSummary, color: activityHeaderForegroundColor)
                 .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
 
-            Text(activityHeaderText(summary))
-                .font(AgentChatTypography.micro.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            activityHeaderTitle(summary, isLoadingSummary: isLoadingSummary)
+
+            if disclosure.showsChevron {
+                Image(systemName: disclosure.systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(activityHeaderControlColor)
+                    .padding(.leading, 2)
+                    .transition(.opacity)
+            }
 
             Spacer(minLength: 0)
-
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
-                .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, AgentChatLayout.spaceM)
+        .padding(.trailing, AgentChatLayout.spaceM)
         .padding(.vertical, AgentChatLayout.spaceXS)
         .frame(minHeight: AgentChatLayout.activityRowMinHeight)
-        .background(Color.clear)
+        .overlay(alignment: .leading) {
+            if isAssistantContinuation {
+                Capsule(style: .continuous)
+                    .fill(continuationAccentColor(for: summary.state))
+                    .frame(width: 2, height: 16)
+            }
+        }
         .contentShape(Rectangle())
     }
 
-    private func activityHeaderText(_ summary: AgentTurnActivitySummaryPresentation) -> String {
-        let skillPart = process.activeSkillLabel.map { " · 技能：\($0)" } ?? ""
-        return "\(summary.title) · \(summary.subtitle)\(skillPart)"
+    private var emphasizesActivityHeader: Bool {
+        isExpanded || isHoveringHeader
+    }
+
+    private var activityHeaderForegroundColor: Color {
+        Color.primary.opacity(emphasizesActivityHeader ? 0.82 : 0.42)
+    }
+
+    private var activityHeaderControlColor: Color {
+        Color.primary.opacity(emphasizesActivityHeader ? 0.56 : 0.24)
     }
 
     @ViewBuilder
-    private func statusIcon(_ state: AgentTurnActivitySummaryState) -> some View {
+    private func activityHeaderTitle(
+        _ summary: AgentTurnActivitySummaryPresentation,
+        isLoadingSummary: Bool
+    ) -> some View {
+        let title = isLoadingSummary ? "读取调用记录…" : activityHeaderText(summary)
+        if summary.state == .running {
+            AgentRunningActivityShimmerText(text: title, baseColor: activityHeaderForegroundColor)
+        } else {
+            Text(title)
+                .font(AgentChatTypography.micro.weight(.medium))
+                .foregroundStyle(activityHeaderForegroundColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    private func continuationAccentColor(for state: AgentTurnActivitySummaryState) -> Color {
         switch state {
         case .running:
+            ConnorCraftPalette.accent.opacity(0.42)
+        case .completed:
+            Color.secondary.opacity(0.18)
+        case .failed:
+            Color.red.opacity(0.34)
+        case .cancelled, .waitingForPermission:
+            Color.orange.opacity(0.34)
+        }
+    }
+
+    private func activityHeaderText(_ summary: AgentTurnActivitySummaryPresentation) -> String {
+        AgentActivityHeaderTextPresentation(
+            statusText: summary.statusText,
+            toolNames: summary.toolNames
+        ).text
+    }
+
+    @ViewBuilder
+    private func statusIcon(
+        _ state: AgentTurnActivitySummaryState,
+        isLoadingSummary: Bool,
+        color: Color
+    ) -> some View {
+        if isLoadingSummary {
             ProgressView()
                 .controlSize(.small)
                 .fixedSize()
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .failed:
-            Image(systemName: "xmark.octagon.fill")
-                .foregroundStyle(.red)
-        case .cancelled:
-            Image(systemName: "slash.circle.fill")
-                .foregroundStyle(.orange)
-        case .waitingForPermission:
-            Image(systemName: "lock.fill")
-                .foregroundStyle(.orange)
+                .tint(color)
+        } else {
+            switch state {
+            case .running:
+                ProgressView()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .tint(color)
+            case .completed:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(color)
+            case .failed:
+                Image(systemName: "xmark.octagon.fill")
+                    .foregroundStyle(color)
+            case .cancelled:
+                Image(systemName: "slash.circle.fill")
+                    .foregroundStyle(color)
+            case .waitingForPermission:
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(color)
+            }
         }
+    }
+}
+
+private struct AgentRunningActivityShimmerText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var text: String
+    var baseColor: Color
+
+    var body: some View {
+        Text(text)
+            .font(AgentChatTypography.micro.weight(.medium))
+            .foregroundStyle(baseColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .overlay {
+                if !reduceMotion {
+                    GeometryReader { geometry in
+                        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                            let duration = 1.8
+                            let progress = context.date.timeIntervalSinceReferenceDate
+                                .truncatingRemainder(dividingBy: duration) / duration
+                            let highlightWidth = max(36, geometry.size.width * 0.24)
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    ConnorCraftPalette.accent.opacity(0.28),
+                                    Color.primary.opacity(0.72),
+                                    ConnorCraftPalette.accent.opacity(0.34),
+                                    .clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: highlightWidth)
+                            .offset(x: -highlightWidth + progress * (geometry.size.width + highlightWidth))
+                        }
+                    }
+                }
+            }
+            .mask {
+                Text(text)
+                    .font(AgentChatTypography.micro.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .allowsHitTesting(false)
     }
 }
 
@@ -269,7 +432,7 @@ struct AgentTurnActivitySummaryDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if !summary.toolSummaries.isEmpty {
-                detailLine(icon: "wrench.and.screwdriver", text: "本轮调用：\(toolSummaryText)")
+                detailLine(icon: "wrench.and.screwdriver", text: toolSummaryText)
             }
 
             detailLine(icon: "checklist", text: resultText)
@@ -296,7 +459,6 @@ struct AgentTurnActivitySummaryDetailView: View {
 
             if isRunning {
                 AgentActivityLoadingRow(startedAt: startedAt)
-                    .padding(.leading, -AgentChatLayout.spaceM)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,7 +481,7 @@ struct AgentTurnActivitySummaryDetailView: View {
         if parts.isEmpty {
             parts.append(summary.statusText)
         }
-        return "执行结果：\(parts.joined(separator: "，"))"
+        return parts.joined(separator: "，")
     }
 
     private func detailLine(icon: String, text: String, color: Color = .secondary) -> some View {
@@ -450,7 +612,7 @@ struct AgentActivityLoadingRow: View {
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.trailing, AgentChatLayout.spaceM)
             .padding(.vertical, 3)
             .frame(minHeight: AgentChatLayout.activityRowMinHeight)
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))

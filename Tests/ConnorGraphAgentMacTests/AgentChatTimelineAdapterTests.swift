@@ -11,8 +11,7 @@ struct AgentChatTimelineAdapterTests {
         let header = AgentAssistantHeaderView()
 
         #expect(header.displayName == "康纳同学")
-        #expect(header.subtitle == "一个拥有记忆、可以自我进化的 Agent")
-        #expect(header.slogan == "从共同经验中学习，并把知识直接用于真实任务。")
+        #expect(header.description == "你的私人小助理 · 一个有记忆、可以和你一起成长进化的 AI Agent")
     }
 
     @Test func adapterPreservesStableTimelineIDsAndKinds() {
@@ -24,7 +23,36 @@ struct AgentChatTimelineAdapterTests {
         #expect(items.map(\.id) == timeline.map(\.id))
         #expect(items.contains { $0.kind == .timestamp })
         #expect(items.contains { $0.kind == .message })
-        #expect(items.contains { $0.kind == .process })
+        #expect(!items.contains { $0.kind == .process })
+    }
+
+    @Test func adapterUsesLargerSpacingBetweenUserAndAssistantTurns() {
+        let timeline = AgentChatTurnTimelineItem.items(
+            messages: sampleMessages(),
+            lastContext: nil,
+            isSubmitting: false,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        let items = AgentChatTimelineAdapter().items(from: timeline)
+
+        #expect(items.first { $0.id == "assistant-1" }?.spacingBefore == .conversationBoundary)
+    }
+
+    @Test func adapterKeepsIntermediateAssistantItemsInCompactGroup() {
+        let messages = sampleMessages() + [
+            AgentMessage(id: "assistant-2", role: .assistant, content: "继续处理", createdAt: Date(timeIntervalSince1970: 102))
+        ]
+        let timeline = AgentChatTurnTimelineItem.items(
+            messages: messages,
+            lastContext: nil,
+            isSubmitting: false,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        let items = AgentChatTimelineAdapter().items(from: timeline)
+
+        #expect(items.first { $0.id == "assistant-2" }?.spacingBefore == .assistantContinuation)
     }
 
     @Test func adapterInsertsUnreadMarkerBeforeBoundaryItem() {

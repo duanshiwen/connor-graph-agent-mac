@@ -694,18 +694,54 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Rich Media Responses"))
-    #expect(prompt.contains("proactively consider whether one or more relevant images"))
-    #expect(prompt.contains("a strong preference, not a completion requirement"))
+    #expect(prompt.contains("Decide early whether seeing the subject would materially improve the answer"))
+    #expect(prompt.contains("strongly prefer one bounded image search"))
+    #expect(prompt.contains("not a quota or completion requirement"))
     #expect(prompt.contains("never delay, weaken, or block an otherwise complete answer"))
+    #expect(prompt.contains("concise English keywords in `englishQuery`"))
+    #expect(prompt.contains("Follow the returned `retryAdvice` exactly"))
+    #expect(prompt.contains("never repeat the call during the current run for `retry_later` or `do_not_retry`"))
+    #expect(prompt.contains("Openverse and Wikimedia Commons may both be unreachable"))
+    #expect(prompt.contains("`fallbackAction: continue_without_image`"))
+    #expect(prompt.contains("continue the user's task with a complete text response"))
     #expect(prompt.contains("prefer existing source-grounded images"))
-    #expect(prompt.contains("When `image_search` is available"))
+    #expect(prompt.contains("pass its exact `imageURL` to `present_image` in the same run"))
+    #expect(prompt.contains("continue without an image rather than forcing one"))
     #expect(prompt.contains("Do not call `generate_image` merely to make factual or researched content look richer"))
     #expect(prompt.contains("Clearly identify generated visuals as generated"))
     #expect(prompt.contains("copy the exact Markdown returned by the tool"))
     #expect(prompt.contains("Place each image immediately after the paragraph"))
     #expect(prompt.contains("distribute them beside their relevant sections"))
-    #expect(prompt.contains("omit images when they add little value"))
+    #expect(prompt.contains("Skip images for routine coding changes"))
     #expect(prompt.contains("Never invent an image path"))
+}
+
+@Test func defaultSystemPromptClassifiesUnavailableToolRetries() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("read and preserve the concrete failure reason"))
+    #expect(prompt.contains("`retry_later` means do not call the tool again in the current run"))
+    #expect(prompt.contains("`do_not_retry` means another call cannot help"))
+    #expect(prompt.contains("An unavailable or unregistered tool cannot be retried in the current run"))
+}
+
+@Test func defaultSystemPromptRecommendsNaturalConversationalProgressUpdates() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Conversational Progress Updates"))
+    #expect(prompt.contains("strongly prefer calling `share_progress_update` after completing a meaningful stage"))
+    #expect(prompt.contains("recommendation, not a mandatory cadence or completion requirement"))
+    #expect(prompt.contains("Skip it for short or straightforward work"))
+    #expect(prompt.contains("does not finish the run"))
+    #expect(prompt.contains("A progress update is a temporary assistant message"))
+    #expect(prompt.contains("not returned as context for later model calls"))
+    #expect(prompt.contains("removed after the final response"))
+    #expect(prompt.contains("keep the final response self-contained"))
+    #expect(prompt.contains("Write each update from the user's point of view"))
+    #expect(prompt.contains("Do not inventory tool names, commands, file reads, internal mechanisms"))
+    #expect(prompt.contains("Apply the active Connor personality to progress messages"))
+    #expect(prompt.contains("Be selective and avoid interruption fatigue"))
+    #expect(prompt.contains("many tasks need none"))
 }
 
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {

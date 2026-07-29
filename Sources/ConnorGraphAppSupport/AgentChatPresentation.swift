@@ -80,20 +80,28 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     }
     public var sourceUserMessageID: String?
     public var assistantMessageID: String?
+    public var runID: String?
+    public var aggregatesRunActivity: Bool
     public var activeSkillLabel: String?
 
-    public init(completedAssistant row: AgentChatMessagePresentation, conversationHistory: [AgentChatMessagePresentation]) {
+    public init(
+        completedAssistant row: AgentChatMessagePresentation,
+        conversationHistory: [AgentChatMessagePresentation],
+        aggregatesRunActivity: Bool = false
+    ) {
         self.init(
             completedAssistant: row,
             conversationHistoryStorage: AgentChatConversationHistoryStorage(rows: conversationHistory),
-            conversationHistoryCount: conversationHistory.count
+            conversationHistoryCount: conversationHistory.count,
+            aggregatesRunActivity: aggregatesRunActivity
         )
     }
 
     fileprivate init(
         completedAssistant row: AgentChatMessagePresentation,
         conversationHistoryStorage: AgentChatConversationHistoryStorage,
-        conversationHistoryCount: Int
+        conversationHistoryCount: Int,
+        aggregatesRunActivity: Bool
     ) {
         self.id = "process-\(row.id)"
         self.turnNumber = row.turnNumber
@@ -105,6 +113,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
         self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = row.id
+        self.runID = row.message.runID
+        self.aggregatesRunActivity = aggregatesRunActivity
         self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         if let inspection = row.message.promptInspection {
             self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistoryCount)
@@ -144,6 +154,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
         self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = nil
+        self.runID = nil
+        self.aggregatesRunActivity = false
         self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         switch state {
         case .running:
@@ -179,6 +191,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
             && historiesAreEqual(lhs, rhs)
             && lhs.sourceUserMessageID == rhs.sourceUserMessageID
             && lhs.assistantMessageID == rhs.assistantMessageID
+            && lhs.runID == rhs.runID
+            && lhs.aggregatesRunActivity == rhs.aggregatesRunActivity
             && lhs.activeSkillLabel == rhs.activeSkillLabel
     }
 
@@ -254,9 +268,8 @@ public struct AgentChatTurnTimestampPresentation: Sendable, Equatable {
 
 public struct AgentChatTurnCursor: Sendable, Hashable {
     private var currentTurn: Int
-    private var hasOpenUserTurn: Bool
 
-    public static let initial = AgentChatTurnCursor(currentTurn: 0, hasOpenUserTurn: false)
+    public static let initial = AgentChatTurnCursor(currentTurn: 0)
 
     public static func beforeVisibleSuffix(of messages: [AgentMessage], visibleCount: Int) -> Self {
         var cursor = Self.initial
@@ -271,12 +284,10 @@ public struct AgentChatTurnCursor: Sendable, Hashable {
         switch role {
         case .user:
             currentTurn += 1
-            hasOpenUserTurn = true
         case .assistant:
-            if !hasOpenUserTurn {
+            if currentTurn == 0 {
                 currentTurn += 1
             }
-            hasOpenUserTurn = false
         case .system:
             if currentTurn == 0 { currentTurn = 1 }
         }
@@ -287,7 +298,7 @@ public struct AgentChatTurnCursor: Sendable, Hashable {
     }
 
     fileprivate var pendingTurnNumber: Int {
-        hasOpenUserTurn ? displayedTurnNumber : max(currentTurn + 1, 1)
+        displayedTurnNumber
     }
 }
 
@@ -298,6 +309,7 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
     public var message: AgentChatMessagePresentation?
     public var process: AgentChatTurnProcessPresentation?
     public var timestamp: AgentChatTurnTimestampPresentation?
+    public var showsAssistantHeader: Bool
 
     public var kindLabel: String {
         if message != nil { return "message" }
@@ -305,12 +317,30 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         return "timestamp"
     }
 
-    public static func message(_ message: AgentChatMessagePresentation) -> AgentChatTurnTimelineItem {
-        AgentChatTurnTimelineItem(id: message.id, message: message, process: nil, timestamp: nil)
+    public static func message(
+        _ message: AgentChatMessagePresentation,
+        showsAssistantHeader: Bool = false
+    ) -> AgentChatTurnTimelineItem {
+        AgentChatTurnTimelineItem(
+            id: message.id,
+            message: message,
+            process: nil,
+            timestamp: nil,
+            showsAssistantHeader: showsAssistantHeader
+        )
     }
 
-    public static func process(_ process: AgentChatTurnProcessPresentation) -> AgentChatTurnTimelineItem {
-        AgentChatTurnTimelineItem(id: process.id, message: nil, process: process, timestamp: nil)
+    public static func process(
+        _ process: AgentChatTurnProcessPresentation,
+        showsAssistantHeader: Bool = true
+    ) -> AgentChatTurnTimelineItem {
+        AgentChatTurnTimelineItem(
+            id: process.id,
+            message: nil,
+            process: process,
+            timestamp: nil,
+            showsAssistantHeader: showsAssistantHeader
+        )
     }
 
     public static func timestamp(turnNumber: Int, date: Date, now: Date = Date(), calendar: Calendar = .current) -> AgentChatTurnTimelineItem {
@@ -318,7 +348,8 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
             id: "timestamp-turn-\(turnNumber)",
             message: nil,
             process: nil,
-            timestamp: AgentChatTurnTimestampPresentation(date: date, now: now, calendar: calendar)
+            timestamp: AgentChatTurnTimestampPresentation(date: date, now: now, calendar: calendar),
+            showsAssistantHeader: false
         )
     }
 
@@ -332,6 +363,10 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         var items: [AgentChatTurnTimelineItem] = []
         var lastTimestampDate: Date?
         for (index, row) in rows.enumerated() {
+            let previousRow = index > 0 ? rows[index - 1] : nil
+            let continuesAssistantGroup = row.message.role == .assistant
+                && previousRow?.message.role == .assistant
+                && previousRow?.turnNumber == row.turnNumber
             if row.message.role == .user,
                shouldInsertTimestamp(
                    for: row.message.createdAt,
@@ -342,26 +377,41 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                 items.append(.timestamp(turnNumber: row.turnNumber, date: row.message.createdAt, now: now, calendar: calendar))
                 lastTimestampDate = row.message.createdAt
             }
-            if row.message.role == .assistant {
-                items.append(.process(AgentChatTurnProcessPresentation(
-                    completedAssistant: row,
-                    conversationHistoryStorage: conversationHistoryStorage,
-                    conversationHistoryCount: index
-                )))
+            if isSubmitting, row.message.role == .assistant {
+                items.append(.process(
+                    AgentChatTurnProcessPresentation(
+                        completedAssistant: row,
+                        conversationHistoryStorage: conversationHistoryStorage,
+                        conversationHistoryCount: index,
+                        aggregatesRunActivity: false
+                    ),
+                    showsAssistantHeader: !continuesAssistantGroup
+                ))
             }
-            items.append(.message(row))
+            items.append(.message(
+                row,
+                showsAssistantHeader: !isSubmitting
+                    && row.message.role == .assistant
+                    && !continuesAssistantGroup
+            ))
         }
         if isSubmitting || preservesOpenProcess {
             let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
-            items.append(.process(AgentChatTurnProcessPresentation(
-                pending: AgentChatPendingAssistantPresentation(
-                    messages: messages,
-                    startingTurnCursor: startingTurnCursor
+            let pending = AgentChatPendingAssistantPresentation(
+                messages: messages,
+                startingTurnCursor: startingTurnCursor
+            )
+            let continuesAssistantGroup = rows.last?.message.role == .assistant
+                && rows.last?.turnNumber == pending.turnNumber
+            items.append(.process(
+                AgentChatTurnProcessPresentation(
+                    pending: pending,
+                    conversationHistoryStorage: conversationHistoryStorage,
+                    conversationHistoryCount: rows.count,
+                    state: state
                 ),
-                conversationHistoryStorage: conversationHistoryStorage,
-                conversationHistoryCount: rows.count,
-                state: state
-            )))
+                showsAssistantHeader: !continuesAssistantGroup
+            ))
         }
         return items
     }

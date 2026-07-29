@@ -31,6 +31,29 @@ private actor ScriptedModelProvider: AgentModelProvider {
     }
 }
 
+private actor AutomaticProgressProvider: AgentModelProvider {
+    let modelID = "automatic-progress"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private var mainCallCount = 0
+    private(set) var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        if request.tools.isEmpty {
+            return AgentModelResponse(text: "日历范围已经核对清楚，我继续查看需要你关注的邮件。")
+        }
+        defer { mainCallCount += 1 }
+        if mainCallCount == 0 {
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "calendar-stage", name: "echo_args", argumentsJSON: #"{"value":"calendar checked"}"#)],
+                finishReason: .toolCalls
+            )
+        }
+        return AgentModelResponse(text: "全部核对完成。")
+    }
+}
+
 private actor SuspendingModelProvider: AgentModelProvider {
     let modelID = "suspending"
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
@@ -140,6 +163,151 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     #expect(textDeltas == ["Hel", "lo"])
     #expect(completeText == "Hello")
+}
+
+@Test func progressUpdateToolEmitsAssistantMessageAndContinuesRun() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(
+                id: "progress-1",
+                name: ShareProgressUpdateTool.toolName,
+                argumentsJSON: #"{"message":"关键结构已经确认，我接着处理界面衔接。"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "全部完成。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.registerShareProgressUpdateTool()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-progress",
+        sessionID: "session-progress",
+        userMessage: "完成一项多阶段任务"
+    )) {
+        events.append(event)
+    }
+
+    let progressMessage = try #require(events.compactMap { event -> AgentMessage? in
+        if case .assistantMessageCreated(let message) = event { return message }
+        return nil
+    }.first)
+    #expect(progressMessage.role == .assistant)
+    #expect(progressMessage.content == "关键结构已经确认，我接着处理界面衔接。")
+    #expect(progressMessage.runID == "run-progress")
+    #expect(progressMessage.sessionID == "session-progress")
+    #expect(events.map(\.kind).firstIndex(of: .assistantMessageCreated)! < events.map(\.kind).firstIndex(of: .textComplete)!)
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    #expect(requests[1].messages.contains { message in
+        message.role == .assistant && message.content == "关键结构已经确认，我接着处理界面衔接。"
+    } == false)
+    let progressToolCall = try #require(requests[1].messages.first { message in
+        message.role == .assistant && message.toolCalls?.first?.id == "progress-1"
+    })
+    #expect(progressToolCall.content.isEmpty)
+    #expect(progressToolCall.toolCalls?.first?.argumentsJSON == #"{"message":""}"#)
+    let toolResult = try #require(requests[1].messages.first { message in
+        message.role == .tool
+            && message.toolCallID == "progress-1"
+            && message.name == ShareProgressUpdateTool.toolName
+    })
+    #expect(toolResult.content.contains("\"status\":\"success\""))
+    #expect(toolResult.content.contains("\"displayedToUser\":true"))
+    #expect(toolResult.content.contains("Progress update displayed successfully."))
+    #expect(!toolResult.content.contains("关键结构已经确认，我接着处理界面衔接。"))
+}
+
+@Test func agentLoopPublishesAssistantTextBeforeExecutingMixedToolResponse() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: "日历范围已经确认，我接着核对邮件。",
+            toolCalls: [AgentToolCall(
+                id: "mixed-1",
+                name: "echo_args",
+                argumentsJSON: #"{"value":"mail"}"#
+            )],
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "日历和邮件都核对完成。", finishReason: .stop)
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-mixed-response",
+        sessionID: "session-mixed-response",
+        userMessage: "分阶段检查日历和邮件"
+    )) {
+        events.append(event)
+    }
+
+    let progressMessage = try #require(events.compactMap { event -> AgentMessage? in
+        if case .assistantMessageCreated(let message) = event { return message }
+        return nil
+    }.first)
+    #expect(progressMessage.role == .assistant)
+    #expect(progressMessage.content == "日历范围已经确认，我接着核对邮件。")
+    #expect(progressMessage.runID == "run-mixed-response")
+    #expect(progressMessage.sessionID == "session-mixed-response")
+    #expect(events.map(\.kind).firstIndex(of: .assistantMessageCreated)! < events.map(\.kind).firstIndex(of: .toolStarted)!)
+
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    let mixedAssistantMessage = try #require(requests[1].messages.first { message in
+        message.role == .assistant && message.toolCalls?.first?.id == "mixed-1"
+    })
+    #expect(mixedAssistantMessage.content.isEmpty)
+    #expect(events.contains { event in
+        if case .textComplete(let payload) = event {
+            return payload.text == "日历和邮件都核对完成。"
+        }
+        return false
+    })
+}
+
+@Test func agentLoopSelectivelySynthesizesProgressWithoutAddingItToActiveContext() async throws {
+    let provider = AutomaticProgressProvider()
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        automaticallySynthesizesProgressUpdates: true
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-automatic-progress",
+        sessionID: "session-automatic-progress",
+        userMessage: "分阶段核对日历和邮件，并在有实质结果时告诉我"
+    )) {
+        events.append(event)
+    }
+
+    let progress = try #require(events.compactMap { event -> AgentMessage? in
+        if case .assistantMessageCreated(let message) = event { return message }
+        return nil
+    }.first)
+    #expect(progress.content == "日历范围已经核对清楚，我继续查看需要你关注的邮件。")
+    #expect(progress.runID == "run-automatic-progress")
+    #expect(progress.sessionID == "session-automatic-progress")
+
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    #expect(requests[1].tools.isEmpty)
+    #expect(requests[2].messages.contains { message in
+        message.role == .assistant && message.content == progress.content
+    } == false)
+    #expect(events.contains { event in
+        if case .textComplete(let payload) = event { return payload.text == "全部核对完成。" }
+        return false
+    })
 }
 
 @Test func agentLoopEmitsPromptAssembledDiagnosticsBeforeModelCall() async throws {

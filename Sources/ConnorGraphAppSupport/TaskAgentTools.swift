@@ -57,10 +57,9 @@ public struct TaskUpdateScheduledSessionMessageTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let taskID = nonEmpty(arguments.string("taskID") ?? arguments.string("task_id")) else { throw AgentToolError.invalidArguments("taskID is required") }
-        let formatter = ISO8601DateFormatter()
         let expectedUpdatedAt: Date?
         if let raw = nonEmpty(arguments.string("expectedUpdatedAt") ?? arguments.string("expected_updated_at")) {
-            guard let value = formatter.date(from: raw) else { throw AgentToolError.invalidArguments("expectedUpdatedAt must be ISO-8601") }
+            guard let value = AgentToolTimestampParser.parse(raw) else { throw AgentToolError.invalidArguments("expectedUpdatedAt must be RFC 3339/ISO-8601 with timezone") }
             expectedUpdatedAt = value
         } else {
             expectedUpdatedAt = nil
@@ -75,7 +74,7 @@ public struct TaskUpdateScheduledSessionMessageTool: AgentTool {
                 task.name = value
             }
             if arguments.values["runAt"] != nil {
-                guard let raw = arguments.string("runAt"), let value = formatter.date(from: raw) else { throw AgentToolError.invalidArguments("runAt must be ISO-8601") }
+                guard let raw = arguments.string("runAt"), let value = AgentToolTimestampParser.parse(raw) else { throw AgentToolError.invalidArguments("runAt must be RFC 3339/ISO-8601 with timezone") }
                 task.trigger.runAt = value
                 task.lifecycle.nextRunAt = value
             }
@@ -139,7 +138,7 @@ public struct TaskCreateScheduledSessionMessageTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let name = arguments.string("name") else { throw AgentToolError.invalidArguments("name is required") }
-        guard let runAtRaw = arguments.string("runAt"), let runAt = ISO8601DateFormatter().date(from: runAtRaw) else { throw AgentToolError.invalidArguments("runAt must be ISO-8601") }
+        guard let runAtRaw = arguments.string("runAt"), let runAt = AgentToolTimestampParser.parse(runAtRaw) else { throw AgentToolError.invalidArguments("runAt must be RFC 3339/ISO-8601 with timezone") }
         guard let recurrenceRaw = arguments.string("recurrence"), let recurrence = ConnorTaskRecurrence(rawValue: recurrenceRaw) else { throw AgentToolError.invalidArguments("recurrence must be once, daily, weekly, or monthly") }
         let task = try service.createScheduledSessionMessageTask(
             origin: .ai,

@@ -648,6 +648,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_session_branch_records_source ON session_branch_records(source_session_id, created_at DESC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_session_branch_records_target ON session_branch_records(target_session_id, created_at DESC);")
+        try deleteCompletedToolCallEvents()
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
     }
 
@@ -1493,6 +1494,27 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         FROM agent_events WHERE run_id = \(quote(runID))
         ORDER BY sequence ASC, created_at ASC\(limitClause)
         """).map(decodePersistedAgentEvent)
+    }
+
+    public func deleteToolCallEvents(runID: String) throws {
+        try execute("DELETE FROM agent_events WHERE run_id = \(quote(runID)) AND kind IN (\(toolEventKindsSQL));")
+    }
+
+    private func deleteCompletedToolCallEvents() throws {
+        let terminalStatuses = [AgentRunStatus.completed, .failed, .cancelled]
+            .map { quote($0.rawValue) }
+            .joined(separator: ", ")
+        try execute("""
+        DELETE FROM agent_events
+        WHERE kind IN (\(toolEventKindsSQL))
+          AND run_id IN (SELECT id FROM agent_runs WHERE status IN (\(terminalStatuses)));
+        """)
+    }
+
+    private var toolEventKindsSQL: String {
+        [AgentEventKind.toolRequested, .toolApproved, .toolStarted, .toolFinished, .toolFailed]
+            .map { quote($0.rawValue) }
+            .joined(separator: ", ")
     }
 
     public func runs(sessionID: String, statuses: [AgentRunStatus]? = nil, limit: Int = 100) throws -> [AgentRun] {

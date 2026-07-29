@@ -16,6 +16,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
     public var severity: AgentEventPresentationSeverity
     public var runID: String?
     public var sessionID: String?
+    public var assistantMessageID: String?
     public var toolActivity: AgentToolActivityPresentation?
 
     public init(
@@ -26,6 +27,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
         severity: AgentEventPresentationSeverity,
         runID: String?,
         sessionID: String?,
+        assistantMessageID: String? = nil,
         toolActivity: AgentToolActivityPresentation? = nil
     ) {
         self.id = id
@@ -35,6 +37,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
         self.severity = severity
         self.runID = runID
         self.sessionID = sessionID
+        self.assistantMessageID = assistantMessageID
         self.toolActivity = toolActivity
     }
 }
@@ -72,7 +75,7 @@ public struct AgentEventPresenter: Sendable {
         case .textComplete(let payload):
             return item(event, title: "Answer completed", detail: payload.text, severity: .success)
         case .assistantMessageCreated(let message):
-            return item(event, title: "Assistant message saved", detail: message.content, severity: .success)
+            return item(event, title: "Assistant message saved", detail: message.content, severity: .success, assistantMessageID: message.id)
         case .toolRequested(let call):
             return item(
                 event,
@@ -167,6 +170,7 @@ public struct AgentEventPresenter: Sendable {
         title: String,
         detail: String,
         severity: AgentEventPresentationSeverity,
+        assistantMessageID: String? = nil,
         toolActivity: AgentToolActivityPresentation? = nil
     ) -> AgentEventPresentation {
         AgentEventPresentation(
@@ -176,6 +180,7 @@ public struct AgentEventPresenter: Sendable {
             severity: severity,
             runID: event.runID,
             sessionID: event.sessionID,
+            assistantMessageID: assistantMessageID,
             toolActivity: toolActivity
         )
     }
