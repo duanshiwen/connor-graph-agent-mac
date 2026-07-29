@@ -70,6 +70,33 @@ enum AgentChatTypography {
     }
 }
 
+struct AgentMessageExpansionButton: View {
+    var title: String
+    var systemImage: String
+    var accessibilityLabel: String
+    var help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .imageScale(.small)
+                Text(title)
+                    .font(AgentChatTypography.microEmphasis)
+            }
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+        .accessibilityLabel(accessibilityLabel)
+        .help(help)
+    }
+}
+
 enum AgentChatFontPreferences {
     static let messageBodyPointSizeKey = "agentChat.messageBodyPointSize"
     static let messageBodyPointSizeRange = 11.0...22.0

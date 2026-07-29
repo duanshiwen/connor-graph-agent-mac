@@ -212,6 +212,12 @@ struct NativeWebClientTests {
         #expect(properties["englishQuery"] != nil)
         #expect(properties["query"] == nil)
         #expect(required == ["englishQuery"])
+        let englishQuerySchema = try #require(properties["englishQuery"] as? [String: Any])
+        let englishQueryDescription = try #require(englishQuerySchema["description"] as? String)
+        #expect(englishQueryDescription.contains("Exactly one concise English image-search phrase"))
+        #expect(englishQueryDescription.contains("Do not provide a list or alternatives"))
+        #expect(tool.description.contains("never pack alternative queries into englishQuery"))
+        #expect(tool.description.contains("never issue multiple image_search calls in parallel"))
 
         let normalized = tool.normalizeLegacyArguments(AgentToolArguments(values: [
             "query": .string("West Lake Hangzhou"),

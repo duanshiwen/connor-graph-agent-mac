@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Testing
+import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @Suite("Agent Markdown Preview Strategy Tests")
@@ -62,8 +63,15 @@ struct AgentMarkdownPreviewStrategyTests {
             contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift"),
             encoding: .utf8
         )
+        let messageRows = try String(
+            contentsOf: root.appendingPathComponent("Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift"),
+            encoding: .utf8
+        )
 
-        #expect(markdownPreview.contains("Label(\"展开完整内容\", systemImage: \"chevron.down\")"))
+        #expect(markdownPreview.contains("AgentMessageExpansionButton("))
+        #expect(markdownPreview.contains("title: \"展开完整内容\""))
+        #expect(markdownPreview.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(messageRows.contains("AgentMessageExpansionButton("))
         #expect(markdownPreview.contains("allowsDeferredPreview && !isUserExpanded"))
         #expect(workspacePreview.contains("allowsUserExpansion: true"))
         #expect(attachmentPreview.contains("allowsUserExpansion: true"))
@@ -73,6 +81,22 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(AgentChatFontPreferences.pointSizeLabel(14) == "14 pt")
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(8) == 11)
         #expect(AgentChatFontPreferences.validatedMessageBodyPointSize(30) == 22)
+    }
+
+    @Test func workspaceFilePreviewActionsCoverAllFileTypesAndCopyOnlyText() {
+        let textRenderers: [WorkspaceFilePreviewRenderer] = [.markdown, .monospacedText, .plainText]
+        let nonTextRenderers: [WorkspaceFilePreviewRenderer] = [.pdf, .quickLook, .html, .unsupported]
+
+        for renderer in textRenderers {
+            let presentation = WorkspaceFilePreviewActionsPresentation(renderer: renderer)
+            #expect(presentation.showsShare)
+            #expect(presentation.showsCopyFullText)
+        }
+        for renderer in nonTextRenderers {
+            let presentation = WorkspaceFilePreviewActionsPresentation(renderer: renderer)
+            #expect(presentation.showsShare)
+            #expect(!presentation.showsCopyFullText)
+        }
     }
 
     @Test func compiledMarkdownUsesIntrinsicVerticalHeight() throws {

@@ -65,6 +65,19 @@ public struct WorkspaceFilePreviewModel: Identifiable, Sendable, Equatable {
     }
 }
 
+public struct WorkspaceFileFullTextReader: Sendable {
+    private let decoder: TextDecodingService
+
+    public init(decoder: TextDecodingService = TextDecodingService()) {
+        self.decoder = decoder
+    }
+
+    public func read(fileURL: URL) throws -> String {
+        let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+        return try decoder.decode(TextDecodingRequest(data: data, allowLossy: false)).text
+    }
+}
+
 public actor WorkspaceFilePreviewLoader {
     public static let defaultMaximumTextByteCount = 2 * 1_024 * 1_024
 

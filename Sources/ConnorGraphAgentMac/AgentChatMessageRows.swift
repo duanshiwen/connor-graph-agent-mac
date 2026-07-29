@@ -519,22 +519,13 @@ private struct AgentAssistantMessageActionsView: View {
     }
 
     private var expansionButton: some View {
-        Button(action: onToggleExpansion) {
-            HStack(spacing: 4) {
-                Image(systemName: expansionPresentation.systemImage)
-                    .font(.system(size: 10, weight: .semibold))
-                    .imageScale(.small)
-                Text(expansionPresentation.title)
-                    .font(AgentChatTypography.microEmphasis)
-            }
-            .padding(.horizontal, 3)
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.accentColor)
-        .accessibilityLabel(expansionPresentation.accessibilityLabel)
-        .help(expansionPresentation.help)
+        AgentMessageExpansionButton(
+            title: expansionPresentation.title,
+            systemImage: expansionPresentation.systemImage,
+            accessibilityLabel: expansionPresentation.accessibilityLabel,
+            help: expansionPresentation.help,
+            action: onToggleExpansion
+        )
     }
 
     private func actionButton(
