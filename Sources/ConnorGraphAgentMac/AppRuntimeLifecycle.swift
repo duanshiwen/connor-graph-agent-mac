@@ -2683,10 +2683,12 @@ final class AppRuntimeLifecycle {
                 return []
             }
         }.value
-        let sliced = AgentAssistantMessageEventSlicer().events(
-            forAssistantMessageID: process.assistantMessageID,
-            from: restored
-        )
+        let sliced = process.aggregatesRunActivity
+            ? AgentAssistantMessageEventSlicer().events(forRunID: process.runID, from: restored)
+            : AgentAssistantMessageEventSlicer().events(
+                forAssistantMessageID: process.assistantMessageID,
+                from: restored
+            )
         chatRunCoordinator.cacheProcessTimeline(sliced, key: cacheKey)
         return sliced
     }

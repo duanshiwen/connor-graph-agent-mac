@@ -76,6 +76,30 @@ import ConnorGraphAppSupport
     #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false])
 }
 
+@Test func agentChatPresentationAggregatesRunActivityOnlyForCompletedFinalMessage() throws {
+    var progress = AgentMessage(id: "assistant-progress", role: .assistant, content: "Working")
+    progress.runID = "run-1"
+    var final = AgentMessage(id: "assistant-final", role: .assistant, content: "Done")
+    final.runID = "run-1"
+    let user = AgentMessage(id: "user-1", role: .user, content: "Start")
+
+    let runningItems = AgentChatTurnTimelineItem.items(
+        messages: [user, progress],
+        lastContext: nil,
+        isSubmitting: true
+    )
+    let completedItems = AgentChatTurnTimelineItem.items(
+        messages: [user, final],
+        lastContext: nil,
+        isSubmitting: false
+    )
+
+    #expect(runningItems.compactMap(\.process).allSatisfy { !$0.aggregatesRunActivity })
+    let completedProcess = try #require(completedItems.compactMap(\.process).first)
+    #expect(completedProcess.aggregatesRunActivity)
+    #expect(completedProcess.runID == "run-1")
+}
+
 @Test func agentChatTurnTimelinePlacesTimestampAndProcessBetweenUserAndAssistant() {
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: false,

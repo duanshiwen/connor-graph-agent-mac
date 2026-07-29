@@ -26,6 +26,32 @@ private struct AgentTurnActivitySummaryLoadKey: Hashable {
     var lastEventID: String?
 }
 
+struct AgentActivityHeaderDisclosurePresentation: Equatable {
+    var showsChevron: Bool
+    var systemImage: String
+
+    init(isExpanded: Bool, isHovering: Bool) {
+        showsChevron = isExpanded || isHovering
+        systemImage = isExpanded ? "chevron.down" : "chevron.right"
+    }
+}
+
+struct AgentActivityHeaderTextPresentation: Equatable {
+    var text: String
+
+    init(statusText: String, toolNames: [String], fallbackText: String) {
+        let operationText: String
+        if toolNames.isEmpty {
+            operationText = fallbackText
+        } else if toolNames.count <= 3 {
+            operationText = toolNames.joined(separator: "、")
+        } else {
+            operationText = "\(toolNames.prefix(3).joined(separator: "、"))等"
+        }
+        text = "\(statusText) · \(operationText)"
+    }
+}
+
 fileprivate struct AgentTurnActivityPreparedTool: Sendable, Identifiable {
     var id: String { invocation.id }
     var invocation: AgentToolInvocationPresentation
@@ -199,15 +225,23 @@ struct AgentChatTurnProcessRow: View {
     }
 
     private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
-        HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
-            statusIcon(summary.state)
+        let disclosure = AgentActivityHeaderDisclosurePresentation(
+            isExpanded: isExpanded,
+            isHovering: isHoveringHeader
+        )
+        return HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
+            statusIcon(summary.state, color: activityHeaderForegroundColor)
                 .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
 
             activityHeaderTitle(summary)
 
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
-                .foregroundStyle(activityHeaderControlColor)
+            if disclosure.showsChevron {
+                Image(systemName: disclosure.systemImage)
+                    .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
+                    .foregroundStyle(activityHeaderControlColor)
+                    .padding(.leading, 2)
+                    .transition(.opacity)
+            }
 
             Spacer(minLength: 0)
         }
@@ -264,32 +298,33 @@ struct AgentChatTurnProcessRow: View {
     }
 
     private func activityHeaderText(_ summary: AgentTurnActivitySummaryPresentation) -> String {
-        let skillPart = process.activeSkillLabel.map { " · 技能：\($0)" } ?? ""
-        let operationText = summary.toolCallCount > 0
-            ? "\(summary.toolCallCount) 项操作 · \(summary.compactToolText)"
-            : summary.subtitle
-        return "\(summary.statusText) · \(operationText)\(skillPart)"
+        AgentActivityHeaderTextPresentation(
+            statusText: summary.statusText,
+            toolNames: summary.toolNames,
+            fallbackText: summary.subtitle
+        ).text
     }
 
     @ViewBuilder
-    private func statusIcon(_ state: AgentTurnActivitySummaryState) -> some View {
+    private func statusIcon(_ state: AgentTurnActivitySummaryState, color: Color) -> some View {
         switch state {
         case .running:
             ProgressView()
                 .controlSize(.small)
                 .fixedSize()
+                .tint(color)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(color)
         case .failed:
             Image(systemName: "xmark.octagon.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(color)
         case .cancelled:
             Image(systemName: "slash.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(color)
         case .waitingForPermission:
             Image(systemName: "lock.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(color)
         }
     }
 }

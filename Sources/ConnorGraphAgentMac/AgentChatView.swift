@@ -558,6 +558,15 @@ private struct AgentChatConversationView: View {
             || model.run.nextMessageBeforePosition != nil
     }
 
+    private var temporaryAssistantMessageIDs: Set<String> {
+        guard model.run.isSubmitting,
+              let userIndex = model.run.transcript.lastIndex(where: { $0.role == .user })
+        else { return [] }
+        return Set(model.run.transcript.suffix(from: model.run.transcript.index(after: userIndex)).compactMap { message in
+            message.role == .assistant ? message.id : nil
+        })
+    }
+
     private var expandedApproval: AgentPendingApproval? {
         guard let expandedApprovalID else { return nil }
         return chatActions.approval.activeChatPendingApprovals.first { $0.id == expandedApprovalID }
@@ -744,6 +753,12 @@ private struct AgentChatConversationView: View {
             model.run.eventTimeline.contains { $0.assistantMessageID == messageID }
         } ?? false
         if !model.run.eventTimeline.isEmpty, process.id == latestProcessID || hasLiveBoundary {
+            if process.aggregatesRunActivity {
+                return AgentAssistantMessageEventSlicer().events(
+                    forRunID: process.runID,
+                    from: model.run.eventTimeline
+                )
+            }
             return AgentAssistantMessageEventSlicer().events(
                 forAssistantMessageID: process.assistantMessageID,
                 from: model.run.eventTimeline
@@ -769,6 +784,7 @@ private struct AgentChatConversationView: View {
             AgentChatMessageRow(
                 row: message,
                 isNoteBody: isNoteBodyMessage(message),
+                allowsAssistantActions: !temporaryAssistantMessageIDs.contains(message.id),
                 persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
                 localAttachmentFileURL: { attachment in
                     chatActions.composer.localAttachmentFileURL(attachment)

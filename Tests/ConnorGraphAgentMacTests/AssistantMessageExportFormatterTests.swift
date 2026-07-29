@@ -53,8 +53,38 @@ struct AssistantMessageExportFormatterTests {
     @Test("actions are shown only for non-empty assistant messages")
     func actionsAreShownOnlyForNonEmptyAssistantMessages() {
         #expect(AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .assistant, content: "回答")).showsActions)
+        #expect(!AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .assistant, content: "处理中"), isEnabled: false).showsActions)
         #expect(!AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .user, content: "问题")).showsActions)
         #expect(!AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .assistant, content: "  \n\t ")).showsActions)
+    }
+
+    @Test("activity header chevron appears only on hover or while expanded")
+    func activityHeaderChevronAppearsOnlyOnHoverOrWhileExpanded() {
+        let idle = AgentActivityHeaderDisclosurePresentation(isExpanded: false, isHovering: false)
+        let hovered = AgentActivityHeaderDisclosurePresentation(isExpanded: false, isHovering: true)
+        let expanded = AgentActivityHeaderDisclosurePresentation(isExpanded: true, isHovering: false)
+
+        #expect(!idle.showsChevron)
+        #expect(idle.systemImage == "chevron.right")
+        #expect(hovered.showsChevron)
+        #expect(hovered.systemImage == "chevron.right")
+        #expect(expanded.showsChevron)
+        #expect(expanded.systemImage == "chevron.down")
+    }
+
+    @Test("activity header omits turn and operation counts")
+    func activityHeaderOmitsTurnAndOperationCounts() {
+        let presentation = AgentActivityHeaderTextPresentation(
+            statusText: "已完成",
+            toolNames: ["查找文件", "执行终端命令", "搜索知识图谱", "读取日历"],
+            fallbackText: "未调用工具"
+        )
+
+        #expect(presentation.text == "已完成 · 查找文件、执行终端命令、搜索知识图谱等")
+        #expect(!presentation.text.contains("第"))
+        #expect(!presentation.text.contains("轮"))
+        #expect(!presentation.text.contains("4"))
+        #expect(!presentation.text.contains("项操作"))
     }
 
     @Test("actions expose compact titles and accessibility copy")

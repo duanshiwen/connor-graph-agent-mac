@@ -23,14 +23,33 @@ import ConnorGraphAppSupport
     #expect(AgentAssistantMessageEventSlicer().events(forAssistantMessageID: "final", from: events) == events)
 }
 
-private func presentation(id: String, kind: String, assistantMessageID: String? = nil) -> AgentEventPresentation {
+@Test func assistantMessageEventSlicerAggregatesEveryEventFromOneCompletedRun() {
+    let events = [
+        presentation(id: "run-1-tool-1", kind: "toolFinished", runID: "run-1"),
+        presentation(id: "run-1-progress", kind: "assistantMessageCreated", runID: "run-1", assistantMessageID: "progress-1"),
+        presentation(id: "run-2-tool", kind: "toolFinished", runID: "run-2"),
+        presentation(id: "run-1-tool-2", kind: "toolFinished", runID: "run-1"),
+        presentation(id: "run-1-complete", kind: "runCompleted", runID: "run-1")
+    ]
+
+    let aggregated = AgentAssistantMessageEventSlicer().events(forRunID: "run-1", from: events)
+
+    #expect(aggregated.map(\.id) == ["run-1-tool-1", "run-1-progress", "run-1-tool-2", "run-1-complete"])
+}
+
+private func presentation(
+    id: String,
+    kind: String,
+    runID: String = "run",
+    assistantMessageID: String? = nil
+) -> AgentEventPresentation {
     AgentEventPresentation(
         id: id,
         kind: kind,
         title: kind,
         detail: kind,
         severity: .success,
-        runID: "run",
+        runID: runID,
         sessionID: "session",
         assistantMessageID: assistantMessageID
     )

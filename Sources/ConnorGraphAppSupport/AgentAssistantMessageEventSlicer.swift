@@ -3,6 +3,11 @@ import Foundation
 public struct AgentAssistantMessageEventSlicer: Sendable {
     public init() {}
 
+    public func events(forRunID runID: String?, from events: [AgentEventPresentation]) -> [AgentEventPresentation] {
+        guard let runID else { return events }
+        return events.filter { $0.runID == runID }
+    }
+
     public func events(
         forAssistantMessageID messageID: String?,
         from events: [AgentEventPresentation]
