@@ -39,17 +39,31 @@ struct AgentActivityHeaderDisclosurePresentation: Equatable {
 struct AgentActivityHeaderTextPresentation: Equatable {
     var text: String
 
-    init(statusText: String, toolNames: [String], fallbackText: String) {
+    init(statusText: String, toolNames: [String]) {
+        let visibleToolNames = toolNames.filter { !Self.routineToolNames.contains($0) }
+        guard !visibleToolNames.isEmpty else {
+            text = statusText
+            return
+        }
         let operationText: String
-        if toolNames.isEmpty {
-            operationText = fallbackText
-        } else if toolNames.count <= 3 {
-            operationText = toolNames.joined(separator: "、")
+        if visibleToolNames.count <= 3 {
+            operationText = visibleToolNames.joined(separator: "、")
         } else {
-            operationText = "\(toolNames.prefix(3).joined(separator: "、"))等"
+            operationText = "\(visibleToolNames.prefix(3).joined(separator: "、"))等"
         }
         text = "\(statusText) · \(operationText)"
     }
+
+    private static let routineToolNames: Set<String> = [
+        "获取当前时间",
+        "查询近期记忆",
+        "搜索短期记忆",
+        "查询长期记忆",
+        "搜索长期记忆",
+        "读取用户偏好",
+        "获取用户偏好",
+        "搜索笔记"
+    ]
 }
 
 fileprivate struct AgentTurnActivityPreparedTool: Sendable, Identifiable {
@@ -300,8 +314,7 @@ struct AgentChatTurnProcessRow: View {
     private func activityHeaderText(_ summary: AgentTurnActivitySummaryPresentation) -> String {
         AgentActivityHeaderTextPresentation(
             statusText: summary.statusText,
-            toolNames: summary.toolNames,
-            fallbackText: summary.subtitle
+            toolNames: summary.toolNames
         ).text
     }
 

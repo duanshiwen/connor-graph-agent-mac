@@ -76,8 +76,7 @@ struct AssistantMessageExportFormatterTests {
     func activityHeaderOmitsTurnAndOperationCounts() {
         let presentation = AgentActivityHeaderTextPresentation(
             statusText: "已完成",
-            toolNames: ["查找文件", "执行终端命令", "搜索知识图谱", "读取日历"],
-            fallbackText: "未调用工具"
+            toolNames: ["查找文件", "执行终端命令", "搜索知识图谱", "读取日历"]
         )
 
         #expect(presentation.text == "已完成 · 查找文件、执行终端命令、搜索知识图谱等")
@@ -85,6 +84,21 @@ struct AssistantMessageExportFormatterTests {
         #expect(!presentation.text.contains("轮"))
         #expect(!presentation.text.contains("4"))
         #expect(!presentation.text.contains("项操作"))
+    }
+
+    @Test("activity header omits routine preflight tools")
+    func activityHeaderOmitsRoutinePreflightTools() {
+        let mixed = AgentActivityHeaderTextPresentation(
+            statusText: "已完成",
+            toolNames: ["获取当前时间", "查询近期记忆", "查询长期记忆", "读取用户偏好", "搜索笔记", "搜索日程"]
+        )
+        let routineOnly = AgentActivityHeaderTextPresentation(
+            statusText: "正在处理",
+            toolNames: ["获取当前时间", "搜索短期记忆", "搜索长期记忆", "获取用户偏好"]
+        )
+
+        #expect(mixed.text == "已完成 · 搜索日程")
+        #expect(routineOnly.text == "正在处理")
     }
 
     @Test("actions expose compact titles and accessibility copy")
