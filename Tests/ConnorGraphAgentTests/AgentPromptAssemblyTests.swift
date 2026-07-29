@@ -729,7 +729,7 @@ import ConnorGraphAgent
 }
 
 @Test func defaultSystemPromptRecommendsNaturalConversationalProgressUpdates() {
-    let prompt = AgentInstructionSection.defaultConnorInstruction
+    let prompt = AgentInstructionSection.conversationalProgressUpdateInstruction
 
     #expect(prompt.contains("## Conversational Progress Updates"))
     #expect(prompt.contains("strongly prefer calling `share_progress_update` after completing a meaningful stage"))
@@ -745,6 +745,22 @@ import ConnorGraphAgent
     #expect(prompt.contains("Apply the active Connor personality to progress messages"))
     #expect(prompt.contains("Be selective and avoid interruption fatigue"))
     #expect(prompt.contains("many tasks need none"))
+    #expect(!AgentInstructionSection.defaultConnorInstruction.contains("## Conversational Progress Updates"))
+}
+
+@Test func conversationalProgressUpdateInstructionsRequireGPT55OrNewerAndTheTool() {
+    let progressTool = ShareProgressUpdateTool().definition
+    for supportedModel in ["gpt-5.5", "gpt-5.6", "gpt-5.6-mini", "openai/gpt-6"] {
+        #expect(AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(modelID: supportedModel))
+        #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: supportedModel, toolIsAvailable: true) != nil)
+        #expect(AgentProgressUpdateCapabilityPolicy.modelVisibleToolDefinitions([progressTool], modelID: supportedModel) == [progressTool])
+    }
+    for unsupportedModel in ["gpt-5", "gpt-5.4", "deepseek-v4-pro", "claude-sonnet-4", ""] {
+        #expect(!AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(modelID: unsupportedModel))
+        #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: unsupportedModel, toolIsAvailable: true) == nil)
+        #expect(AgentProgressUpdateCapabilityPolicy.modelVisibleToolDefinitions([progressTool], modelID: unsupportedModel).isEmpty)
+    }
+    #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: "gpt-5.6", toolIsAvailable: false) == nil)
 }
 
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {

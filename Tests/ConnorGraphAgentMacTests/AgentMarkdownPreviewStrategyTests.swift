@@ -74,6 +74,8 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(messageRows.contains("AgentMessageExpansionButton("))
         #expect(markdownPreview.contains("allowsDeferredPreview && !isUserExpanded"))
         #expect(workspacePreview.contains("allowsUserExpansion: true"))
+        #expect(workspacePreview.contains("Image(systemName: \"doc.on.doc\")"))
+        #expect(!workspacePreview.contains("Label(\"复制全文\""))
         #expect(attachmentPreview.contains("allowsUserExpansion: true"))
     }
 

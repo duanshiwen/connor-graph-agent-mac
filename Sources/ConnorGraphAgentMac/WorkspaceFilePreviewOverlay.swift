@@ -77,7 +77,7 @@ struct WorkspaceFilePreviewOverlay: View {
 
     private func preview(_ model: WorkspaceFilePreviewModel) -> some View {
         let actions = WorkspaceFilePreviewActionsPresentation(renderer: model.renderer)
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+        return VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
             HStack(spacing: AgentChatLayout.spaceM) {
                 Image(systemName: iconName(for: model.renderer))
                     .font(.system(size: 26, weight: .semibold))
@@ -102,7 +102,7 @@ struct WorkspaceFilePreviewOverlay: View {
                     Button {
                         onCopyFullText(model.node.url)
                     } label: {
-                        Label("复制全文", systemImage: "doc.on.doc")
+                        Image(systemName: "doc.on.doc")
                     }
                     .buttonStyle(.bordered)
                     .accessibilityLabel("复制这个文件的全部文字")

@@ -233,12 +233,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 } else {
                     environmentSnapshot = nil
                 }
-                let promptAssembly = await buildPromptAssembly(for: request, environmentSnapshot: environmentSnapshot)
+                let modelVisibleToolDefinitions = AgentProgressUpdateCapabilityPolicy.modelVisibleToolDefinitions(
+                    toolRegistry.definitions,
+                    modelID: modelProvider.modelID
+                )
+                let promptAssembly = await buildPromptAssembly(
+                    for: request,
+                    environmentSnapshot: environmentSnapshot,
+                    modelVisibleToolDefinitions: modelVisibleToolDefinitions
+                )
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
-                var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
+                var modelRequest = promptProjector.project(promptAssembly, tools: modelVisibleToolDefinitions)
                 var messages = modelRequest.messages
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
@@ -295,7 +303,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         modelRequest.messages = messages
                         let profileStartupIsComplete = requiredCurrentUserProfilePage == nil
                             && invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
-                        modelRequest.tools = toolRegistry.definitions.filter { definition in
+                        modelRequest.tools = modelVisibleToolDefinitions.filter { definition in
                             if definition.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
                                 return false
                             }
@@ -632,7 +640,34 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             continuation: continuation
                         )
 
-                        for batchResult in batchResults {
+                        let contextGuard = AgentModelContextGuard()
+                        let contextWindowTokens = configuration.modelContextWindowTokens
+                            ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+                        let maximumInputTokens = contextGuard.maximumInputTokens(
+                            contextWindowTokens: contextWindowTokens,
+                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            reservedOutputTokens: configuration.reservedOutputTokens
+                        )
+                        let contextSafetyMarginTokens = min(512, max(32, maximumInputTokens / 100))
+                        let gatedBatchContents = batchResults.map { toolResultGate.gatedContent(for: $0.result) }
+                        let gatedBatchTokenDemands = gatedBatchContents.map {
+                            contextGuard.estimator.estimate($0).estimatedTokenCount
+                        }
+                        let modelContentPartTokenDemands = batchResults.map { batchResult -> Int in
+                            guard let parts = batchResult.result.modelContentParts, !parts.isEmpty else { return 0 }
+                            var partRequest = modelRequest
+                            partRequest.messages = [AgentModelMessage(
+                                role: .user,
+                                content: "Requested attachment context loaded for this run.",
+                                contentParts: [.text("Requested attachment context loaded for this run.")] + parts
+                            )]
+                            partRequest.tools = []
+                            return contextGuard.estimatedInputTokens(partRequest)
+                        }
+                        var remainingToolContentDemand = gatedBatchTokenDemands.reduce(0, +)
+                        var remainingModelContentPartDemand = modelContentPartTokenDemands.reduce(0, +)
+
+                        for (batchIndex, batchResult) in batchResults.enumerated() {
                             if batchResult.call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName {
                                 requiredCurrentUserProfilePage = continuityPreflightPolicy
                                     .nextRequiredCurrentUserProfilePage(after: batchResult.result)
@@ -659,9 +694,37 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             } else if batchResult.call.name != AgentCurrentTimePreflightPolicy.requiredToolName {
                                 consecutiveToolResultErrors += 1
                             }
+                            var requestBeforeToolResult = modelRequest
+                            requestBeforeToolResult.messages = messages
+                            let tokensBeforeToolResult = contextGuard.estimatedInputTokens(requestBeforeToolResult)
+                            let availableToolContentTokens = max(
+                                0,
+                                maximumInputTokens
+                                    - contextSafetyMarginTokens
+                                    - tokensBeforeToolResult
+                                    - remainingModelContentPartDemand
+                            )
+                            let currentDemand = gatedBatchTokenDemands[batchIndex]
+                            let allocatedTokens: Int
+                            if remainingToolContentDemand > availableToolContentTokens,
+                               remainingToolContentDemand > 0 {
+                                allocatedTokens = Int(
+                                    Double(availableToolContentTokens)
+                                        * Double(currentDemand)
+                                        / Double(remainingToolContentDemand)
+                                )
+                            } else {
+                                allocatedTokens = currentDemand
+                            }
+                            let modelVisibleToolContent = toolResultGate.gatedContent(
+                                for: batchResult.result,
+                                maximumEstimatedTokens: allocatedTokens,
+                                estimator: contextGuard.estimator
+                            )
+                            remainingToolContentDemand = max(0, remainingToolContentDemand - currentDemand)
                             messages.append(AgentModelMessage(
                                 role: .tool,
-                                content: toolResultGate.gatedContent(for: batchResult.result),
+                                content: modelVisibleToolContent,
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
@@ -677,6 +740,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     contentParts: [.text("Requested attachment context loaded for this run.")] + parts
                                 ))
                             }
+                            remainingModelContentPartDemand = max(
+                                0,
+                                remainingModelContentPartDemand - modelContentPartTokenDemands[batchIndex]
+                            )
                         }
 
                         if !didPublishUserFacingMessage,
@@ -1021,6 +1088,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func shouldConsiderAutomaticProgressUpdate(for calls: [AgentToolCall]) -> Bool {
         guard automaticallySynthesizesProgressUpdates else { return false }
+        guard AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(
+            modelID: modelProvider.modelID
+        ) else { return false }
         let backgroundToolNames = Set(AgentContinuityPreflightPolicy.requiredToolNames).union([
             AgentCurrentTimePreflightPolicy.requiredToolName,
             AgentNoteSearchPreflightPolicy.requiredToolName,
@@ -1101,9 +1171,24 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func buildPromptAssembly(
         for request: AgentChatRequest,
-        environmentSnapshot: AgentEnvironmentSnapshot?
+        environmentSnapshot: AgentEnvironmentSnapshot?,
+        modelVisibleToolDefinitions: [AgentToolDefinition]
     ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+        let progressUpdateToolIsAvailable = modelVisibleToolDefinitions.contains {
+            $0.name == ShareProgressUpdateTool.toolName
+        }
+        if let progressUpdateInstruction = AgentProgressUpdateCapabilityPolicy.systemPromptSection(
+            modelID: modelProvider.modelID,
+            toolIsAvailable: progressUpdateToolIsAvailable
+        ) {
+            assembly.instruction.text = [
+                assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                progressUpdateInstruction
+            ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        }
         let appendix = configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines)
         if !appendix.isEmpty {
             assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), appendix]
