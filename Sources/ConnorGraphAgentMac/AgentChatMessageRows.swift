@@ -31,11 +31,11 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
     var copyHelp: String
     var exportHelp: String
 
-    init(message: AgentMessage) {
+    init(message: AgentMessage, isEnabled: Bool = true) {
         let hasContent = message.content.unicodeScalars.contains {
             !CharacterSet.whitespacesAndNewlines.contains($0)
         }
-        self.showsActions = message.role == .assistant && hasContent
+        self.showsActions = isEnabled && message.role == .assistant && hasContent
         self.copyTitle = "复制"
         self.exportTitle = "导出到文件"
         self.copyAccessibilityLabel = "复制这条助理回复"
@@ -168,6 +168,7 @@ struct AgentChatDateSeparatorRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var isNoteBody = false
+    var allowsAssistantActions = true
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
@@ -203,7 +204,7 @@ struct AgentChatMessageRow: View {
         isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding + 1 : 0
     }
     private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
-        AgentAssistantMessageActionsPresentation(message: row.message)
+        AgentAssistantMessageActionsPresentation(message: row.message, isEnabled: allowsAssistantActions)
     }
     private var assistantExpansionPresentation: AgentAssistantMessageExpansionPresentation {
         AgentAssistantMessageExpansionPresentation(
@@ -260,7 +261,7 @@ struct AgentChatMessageRow: View {
                         .opacity(isHoveringAssistantMessage ? 1 : 0)
                         .allowsHitTesting(isHoveringAssistantMessage)
                         .accessibilityHidden(!isHoveringAssistantMessage)
-                        .offset(y: AgentChatLayout.chatViewportSpacing + 2)
+                        .offset(y: AgentChatLayout.chatViewportSpacing + AgentChatLayout.spaceXS)
                         .transition(.opacity)
                         .onHover(perform: updateAssistantActionsHover)
                 }

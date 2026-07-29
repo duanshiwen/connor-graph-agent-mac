@@ -80,20 +80,28 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     }
     public var sourceUserMessageID: String?
     public var assistantMessageID: String?
+    public var runID: String?
+    public var aggregatesRunActivity: Bool
     public var activeSkillLabel: String?
 
-    public init(completedAssistant row: AgentChatMessagePresentation, conversationHistory: [AgentChatMessagePresentation]) {
+    public init(
+        completedAssistant row: AgentChatMessagePresentation,
+        conversationHistory: [AgentChatMessagePresentation],
+        aggregatesRunActivity: Bool = false
+    ) {
         self.init(
             completedAssistant: row,
             conversationHistoryStorage: AgentChatConversationHistoryStorage(rows: conversationHistory),
-            conversationHistoryCount: conversationHistory.count
+            conversationHistoryCount: conversationHistory.count,
+            aggregatesRunActivity: aggregatesRunActivity
         )
     }
 
     fileprivate init(
         completedAssistant row: AgentChatMessagePresentation,
         conversationHistoryStorage: AgentChatConversationHistoryStorage,
-        conversationHistoryCount: Int
+        conversationHistoryCount: Int,
+        aggregatesRunActivity: Bool
     ) {
         self.id = "process-\(row.id)"
         self.turnNumber = row.turnNumber
@@ -105,6 +113,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
         self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = row.id
+        self.runID = row.message.runID
+        self.aggregatesRunActivity = aggregatesRunActivity
         self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         if let inspection = row.message.promptInspection {
             self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistoryCount)
@@ -144,6 +154,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
         self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = nil
+        self.runID = nil
+        self.aggregatesRunActivity = false
         self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         switch state {
         case .running:
@@ -179,6 +191,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
             && historiesAreEqual(lhs, rhs)
             && lhs.sourceUserMessageID == rhs.sourceUserMessageID
             && lhs.assistantMessageID == rhs.assistantMessageID
+            && lhs.runID == rhs.runID
+            && lhs.aggregatesRunActivity == rhs.aggregatesRunActivity
             && lhs.activeSkillLabel == rhs.activeSkillLabel
     }
 
@@ -364,7 +378,8 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                     AgentChatTurnProcessPresentation(
                         completedAssistant: row,
                         conversationHistoryStorage: conversationHistoryStorage,
-                        conversationHistoryCount: index
+                        conversationHistoryCount: index,
+                        aggregatesRunActivity: !isSubmitting && row.message.runID != nil
                     ),
                     showsAssistantHeader: !continuesAssistantGroup
                 ))
