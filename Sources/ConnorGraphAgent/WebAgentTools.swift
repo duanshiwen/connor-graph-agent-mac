@@ -507,10 +507,10 @@ public struct NativeWebSearchTool: AgentTool {
 
 public struct NativeImageSearchTool: AgentTool {
     public let name = "image_search"
-    public let description = "Search the public internet for existing, source-attributed images through Openverse. Returns direct image URLs plus original source pages, creators, and license details. Use this to discover relevant real-world images before calling present_image; it is optional and must not block an otherwise complete answer."
+    public let description = "Search the public internet for existing, source-attributed images through Openverse. Returns direct image URLs plus original source pages, creators, and license details. For a visually grounded task where seeing the real subject would materially improve the answer, strongly prefer one bounded search and call present_image when a clearly relevant candidate is found. This remains optional and must not block an otherwise complete answer."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "query": .string(description: "Focused image search keywords describing the real subject or visual evidence needed."),
+        "query": .string(description: "Focused image search keywords describing the real subject or visual evidence needed. Preserve proper names; concise English keywords often improve recall for globally catalogued subjects."),
         "maxResults": .integer(description: "Maximum number of candidates, 1-10. Defaults to 5."),
         "licenseFilter": .stringEnumeration(values: ["all", "commercial", "modification"], description: "Optional reuse filter. Defaults to all.")
     ], required: ["query"])
