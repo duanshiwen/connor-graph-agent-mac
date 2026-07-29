@@ -86,6 +86,7 @@ struct AgentChatTurnProcessRow: View {
     @State private var preparedSummary: AgentTurnActivitySummaryPresentation?
     @State private var preparedSummaryProcessID: String?
     @State private var startedAt: Date = Date()
+    @State private var isHoveringHeader = false
 
     var body: some View {
         let currentDetail = preparedDetailProcessID == process.id ? preparedDetail : nil
@@ -98,6 +99,11 @@ struct AgentChatTurnProcessRow: View {
                     activityHeader(summary)
                 }
                 .buttonStyle(.plain)
+                .onHover { isHovering in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isHoveringHeader = isHovering
+                    }
+                }
 
                 if isExpanded {
                     Group {
@@ -200,7 +206,7 @@ struct AgentChatTurnProcessRow: View {
 
             Text(activityHeaderText(summary))
                 .font(AgentChatTypography.micro.weight(.medium))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(activityHeaderForegroundColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
@@ -208,7 +214,7 @@ struct AgentChatTurnProcessRow: View {
 
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(activityHeaderControlColor)
         }
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, AgentChatLayout.spaceXS)
@@ -226,6 +232,18 @@ struct AgentChatTurnProcessRow: View {
             }
         }
         .contentShape(Rectangle())
+    }
+
+    private var emphasizesActivityHeader: Bool {
+        isExpanded || isHoveringHeader
+    }
+
+    private var activityHeaderForegroundColor: Color {
+        Color.primary.opacity(emphasizesActivityHeader ? 0.82 : 0.42)
+    }
+
+    private var activityHeaderControlColor: Color {
+        Color.primary.opacity(emphasizesActivityHeader ? 0.56 : 0.24)
     }
 
     private func continuationAccentColor(for state: AgentTurnActivitySummaryState) -> Color {
