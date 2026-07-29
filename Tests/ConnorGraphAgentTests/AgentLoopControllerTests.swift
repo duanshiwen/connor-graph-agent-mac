@@ -631,6 +631,23 @@ private struct LongResultTool: AgentTool {
     }
 }
 
+private struct OversizedResultTool: AgentTool {
+    let name = "oversized_result"
+    let description = "Return a result larger than a small model context window"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: String(repeating: "oversized tool output ", count: 25_000)
+        )
+    }
+}
+
 private struct BashLikeOutputTool: AgentTool {
     let name = "Bash"
     let description = "Return shell-like stdout plus JSON metadata"
@@ -795,6 +812,54 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(toolMessage.content.contains("tool=long_result"))
     #expect(toolMessage.content.contains("kept=10 chars"))
     #expect(toolMessage.content.contains("original=26 chars"))
+}
+
+@Test func agentLoopFitsOversizedToolResultIntoModelContextInsteadOfStoppingRun() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-oversized-result", name: "oversized_result", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Handled context-fitted result.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(OversizedResultTool())
+    let configuration = AgentLoopConfiguration(
+        maxToolResultBytes: 1_000_000,
+        modelContextWindowTokens: 80_000,
+        reservedOutputTokens: 8_192
+    )
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: configuration
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-context-fitted-tool-result", userMessage: "Run oversized result")) {
+        events.append(event)
+    }
+
+    let followUpRequest = try #require(await provider.requests.last)
+    let toolMessage = try #require(followUpRequest.messages.first {
+        $0.role == .tool && $0.toolCallID == "call-oversized-result"
+    })
+    let maximumInputTokens = AgentModelContextGuard().maximumInputTokens(
+        contextWindowTokens: 80_000,
+        configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+        reservedOutputTokens: configuration.reservedOutputTokens
+    )
+
+    #expect(events.last?.kind == .runCompleted)
+    #expect(toolMessage.content.contains("truncated tool result to fit context"))
+    #expect(AgentModelContextGuard().estimatedInputTokens(followUpRequest) <= maximumInputTokens)
 }
 
 @Test func agentLoopPreservesAssistantToolCallsBeforeToolResult() async throws {
