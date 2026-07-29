@@ -71,7 +71,25 @@ import ConnorGraphAppSupport
 
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: true)
 
-    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [false])
+    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false])
+}
+
+@Test func agentChatPresentationInterleavesToolSegmentsAroundIntermediateMessages() {
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "Start"),
+        AgentMessage(id: "assistant-progress-1", role: .assistant, content: "Stage one"),
+        AgentMessage(id: "assistant-progress-2", role: .assistant, content: "Stage two")
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(
+        messages: messages,
+        lastContext: nil,
+        isSubmitting: true
+    )
+
+    #expect(items.map(\.kindLabel) == ["timestamp", "message", "process", "message", "process", "message", "process"])
+    #expect(items.compactMap(\.process).map(\.assistantMessageID) == ["assistant-progress-1", "assistant-progress-2", nil])
+    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false, false])
 }
 
 @Test func agentChatPresentationDropsRunActivityAfterFinalMessage() {
