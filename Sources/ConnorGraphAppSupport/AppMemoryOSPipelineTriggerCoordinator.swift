@@ -22,8 +22,20 @@ public struct AppMemoryOSPipelineTriggerCoordinator: @unchecked Sendable {
         return try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1CountPolicy, now: now)
     }
 
+    public func evaluateAfterPreferenceWrite(now: Date = Date()) throws -> [MemoryOSQueueItem] {
+        guard let item = try facade.enqueuePreferenceCompactionBackgroundJob(now: now)
+        else { return [] }
+        return [item]
+    }
+
     public func runDailySweep(now: Date = Date()) throws -> [MemoryOSQueueItem] {
-        guard L1ExtractionEligibility.shared.canRun(now: now) else { return [] }
-        return try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
+        var items: [MemoryOSQueueItem] = []
+        if L1ExtractionEligibility.shared.canRun(now: now) {
+            items = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
+        }
+        if let preferenceItem = try facade.enqueuePreferenceCompactionBackgroundJob(forceIfOlderThan24Hours: true, now: now) {
+            items.append(preferenceItem)
+        }
+        return items
     }
 }

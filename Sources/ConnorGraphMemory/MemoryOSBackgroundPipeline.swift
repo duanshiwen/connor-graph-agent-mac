@@ -4,9 +4,14 @@ import ConnorGraphCore
 public enum MemoryOSBackgroundJobKind: String, Sendable, Codable, Equatable, CaseIterable {
     case l1SynthesizeKnowledge = "memory.l1.synthesize_knowledge"
     case l1UnifiedProjection = "memory.l1.unified_projection"
+    case preferenceCompaction = "memory.profile.compact"
 
     public static var l1ExecutableRawValues: [String] {
         [Self.l1SynthesizeKnowledge.rawValue, Self.l1UnifiedProjection.rawValue]
+    }
+
+    public static var executableRawValues: [String] {
+        l1ExecutableRawValues + [Self.preferenceCompaction.rawValue]
     }
 
     public static func isL1KnowledgeKind(_ rawValue: String) -> Bool {

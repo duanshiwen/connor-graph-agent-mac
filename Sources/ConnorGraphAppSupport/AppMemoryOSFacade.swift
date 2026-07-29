@@ -287,8 +287,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return try MemoryOSPersonIdentityService().currentUserProfileContext(store: store, now: now)
     }
 
-    public func currentUserProfileHits() throws -> [MemoryOSRetrievalHit] {
-        try MemoryOSPersonIdentityService().currentUserProfileHits(store: store)
+    public func currentUserProfileHits(view: MemoryOSCurrentUserProfileView = .compressed) throws -> [MemoryOSRetrievalHit] {
+        try MemoryOSPersonIdentityService().currentUserProfileHits(store: store, view: view)
     }
 
     public func expandMemoryOSL4(entityName: String, depth: Int = 5, limit: Int = 200) throws -> [MemoryOSL4ExpansionHit] {
@@ -663,7 +663,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) throws -> [MemoryOSProjectionRunSummary] {
-        let kinds = requestedKinds ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
+        let kinds = requestedKinds ?? MemoryOSBackgroundJobKind.executableRawValues
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
         }.sorted { lhs, rhs in
@@ -685,6 +685,31 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     _ = try recordQueueSuccess(leased, now: now)
                     try saveBackgroundJobAudit(eventType: "memory_os.background_job.completed", subjectID: leased.id, payload: ["event_count": String(draft.captureEventIDs.count)], now: now)
                     summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: true))
+                case MemoryOSBackgroundJobKind.preferenceCompaction.rawValue:
+                    var draft = try store.decode(MemoryOSPreferenceCompactionJobDraft.self, leased.payloadJSON)
+                    draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
+                    let execution = try MemoryOSPreferenceCompactionWorker(executor: executor).run(draft)
+                    let snapshot = try publishPreferenceCompaction(
+                        draft: draft,
+                        rawOutput: execution.rawArtifactJSON,
+                        modelID: execution.metadata["model_id"],
+                        now: now
+                    )
+                    _ = try recordQueueSuccess(leased, now: now)
+                    try saveBackgroundJobAudit(
+                        eventType: "memory_os.preference_compaction.completed",
+                        subjectID: leased.id,
+                        payload: [
+                            "batch_count": String(draft.records.count),
+                            "snapshot_id": snapshot.id,
+                            "source_record_count": String(snapshot.sourceRecordCount),
+                            "canonical_item_count": String(snapshot.profile.items.count)
+                        ],
+                        now: now
+                    )
+                    let shouldDrainBacklog = draft.metadata["drain_backlog"] == "true"
+                    _ = try? enqueuePreferenceCompactionBackgroundJob(drainBacklog: shouldDrainBacklog, now: now)
+                    summaries.append(MemoryOSProjectionRunSummary(artifactID: snapshot.id, accepted: true))
                 default:
                     let failed = try recordQueueFailure(leased, errorCode: "unsupported_background_job_kind", errorMessage: "Unsupported Memory OS background job kind: \(leased.kind)", now: now)
                     summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "unsupported_background_job_kind", message: failed.errorMessage ?? leased.kind)]))
@@ -732,18 +757,19 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         retryable: Bool = true,
         retryDelay: TimeInterval? = nil
     ) throws -> MemoryOSQueueItem {
-        let isL1BackgroundJob = MemoryOSBackgroundJobKind.isL1KnowledgeKind(item.kind)
+        let isDurableBackgroundJob = MemoryOSBackgroundJobKind.isL1KnowledgeKind(item.kind)
+            || item.kind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue
         var failureItem = item
-        if isL1BackgroundJob {
+        if isDurableBackgroundJob {
             failureItem.maxAttempts = .max
         }
-        let effectiveRetryDelay = retryDelay ?? (isL1BackgroundJob && !retryable ? 3_600 : nil)
+        let effectiveRetryDelay = retryDelay ?? (isDurableBackgroundJob && !retryable ? 3_600 : nil)
         let transitioned = MemoryOSQueueTransitionService().markFailed(
             failureItem,
             errorCode: errorCode,
             errorMessage: errorMessage,
             now: now,
-            retryable: isL1BackgroundJob || retryable,
+            retryable: isDurableBackgroundJob || retryable,
             retryDelay: effectiveRetryDelay
         )
         try store.enqueue(transitioned)
@@ -773,7 +799,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 now: now
             )
         }
-        let legacyDeadLetters = try store.deadLetterQueueItems(kinds: MemoryOSBackgroundJobKind.l1ExecutableRawValues, limit: limit)
+        let legacyDeadLetters = try store.deadLetterQueueItems(kinds: MemoryOSBackgroundJobKind.executableRawValues, limit: limit)
         for item in legacyDeadLetters {
             var recovered = item
             recovered.status = .retryScheduled

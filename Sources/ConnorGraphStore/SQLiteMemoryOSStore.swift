@@ -23,7 +23,7 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 7
+    public static let currentSchemaVersion = 8
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
@@ -32,6 +32,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
         "memory_l1_capture_events", "memory_l1_time_blocks", "memory_l1_time_block_events", "memory_l1_processing_queue", "memory_l1_queue_attempts", "memory_l1_dead_letter_queue",
         "memory_background_runs", "memory_background_messages", "memory_background_tool_calls",
+        "memory_profile_compaction_snapshots",
         "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
         "memory_l3_beliefs", "memory_l3_belief_evidence", "memory_l3_belief_relations", "memory_l3_promotion_records",
         "memory_l4_entities", "memory_l4_entity_aliases", "memory_l4_entity_statements", "memory_l4_entity_statement_evidence", "memory_l4_archive_runs", "memory_l4_archive_statement_links", "memory_l4_merge_events", "memory_l4_split_events",
@@ -42,6 +43,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "idx_memory_l0_provenance_source", "idx_memory_l0_provenance_time", "idx_memory_l0_spans_object",
         "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
         "idx_memory_background_runs_queue", "idx_memory_background_messages_run", "idx_memory_background_tool_calls_run",
+        "idx_memory_profile_compaction_published",
         "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal",
         "idx_memory_l3_beliefs_domain", "idx_memory_l3_beliefs_updated_at", "idx_memory_l3_belief_evidence_belief",
         "idx_memory_l4_entities_key", "idx_memory_l4_aliases_entity", "idx_memory_l4_statements_entity", "idx_memory_l4_statement_evidence_statement",
@@ -90,7 +92,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
-        VALUES (\(Self.currentSchemaVersion), 'memory_os_l1_safe_intent_schema', \(quote(iso(Date()))), '{}')
+        VALUES (\(Self.currentSchemaVersion), 'memory_os_profile_compaction_snapshots', \(quote(iso(Date()))), '{}')
         """)
         // Optimize indexes after migration
         try execute("PRAGMA optimize;")
@@ -926,6 +928,9 @@ public extension SQLiteMemoryOSStore {
     CREATE INDEX IF NOT EXISTS idx_memory_background_runs_queue ON memory_background_runs(queue_item_id, kind, status, started_at);
     CREATE INDEX IF NOT EXISTS idx_memory_background_messages_run ON memory_background_messages(run_id, sequence);
     CREATE INDEX IF NOT EXISTS idx_memory_background_tool_calls_run ON memory_background_tool_calls(run_id, iteration);
+
+    CREATE TABLE IF NOT EXISTS memory_profile_compaction_snapshots (id TEXT PRIMARY KEY, status TEXT NOT NULL, base_snapshot_id TEXT, covered_through_committed_at TEXT NOT NULL, covered_through_statement_id TEXT NOT NULL, structured_profile_json TEXT NOT NULL, rendered_text TEXT NOT NULL, source_record_count INTEGER NOT NULL, model_id TEXT, created_at TEXT NOT NULL, published_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE INDEX IF NOT EXISTS idx_memory_profile_compaction_published ON memory_profile_compaction_snapshots(status, published_at DESC);
 
     CREATE TABLE IF NOT EXISTS memory_l2_nodes (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, node_type TEXT NOT NULL, name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l2_nodes_key ON memory_l2_nodes(stable_key);

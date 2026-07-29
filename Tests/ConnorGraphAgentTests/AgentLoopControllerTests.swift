@@ -1315,8 +1315,10 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(policy.correctionInstruction(for: [names[0]])?.contains("successful empty result still counts") == true)
     #expect(policy.call(AgentToolCall(id: "profile-default-page", name: names[2], argumentsJSON: "{}"), matchesRequiredCurrentUserProfilePage: 1))
     #expect(policy.call(AgentToolCall(id: "profile-exact-page", name: names[2], argumentsJSON: #"{"page":2}"#), matchesRequiredCurrentUserProfilePage: 2))
+    #expect(!policy.call(AgentToolCall(id: "profile-raw-page", name: names[2], argumentsJSON: #"{"page":2,"view":"raw"}"#), matchesRequiredCurrentUserProfilePage: 2))
     #expect(!policy.call(AgentToolCall(id: "profile-wrong-page", name: names[2], argumentsJSON: #"{"page":3}"#), matchesRequiredCurrentUserProfilePage: 2))
     #expect(!policy.call(AgentToolCall(id: "profile-string-page", name: names[2], argumentsJSON: #"{"page":"2"}"#), matchesRequiredCurrentUserProfilePage: 2))
+    #expect(policy.correctionInstruction(for: [names[2]])?.contains("Never use view=raw merely to satisfy preflight") == true)
 }
 
 @Test func noteSearchPreflightPolicyRequiresOneAvailableAttempt() {

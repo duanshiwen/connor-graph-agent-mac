@@ -112,7 +112,14 @@ public struct MemoryOSHeadlessKnowledgeLoopExecutor<Model: MemoryOSBackgroundToo
     public func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
         let startedAt = now()
         let runID = request.metadata["background_run_id"] ?? UUID().uuidString
-        let source = MemoryOSBackgroundJobKind.isL1KnowledgeKind(request.kind) ? "l1_capture_events" : "l2_statements"
+        let source: String
+        if MemoryOSBackgroundJobKind.isL1KnowledgeKind(request.kind) {
+            source = "l1_capture_events"
+        } else if request.kind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue {
+            source = "profile_preferences"
+        } else {
+            source = "l2_statements"
+        }
         var run = MemoryOSBackgroundRunRecord(
             id: runID,
             queueItemID: request.metadata["queue_item_id"],
