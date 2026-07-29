@@ -262,6 +262,8 @@ struct AgentChatMessageRow: View {
                     RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
                         .stroke(messageBorder, lineWidth: 1)
                 )
+                .contentShape(Rectangle())
+                .onHover(perform: updateAssistantMessageHover)
 
                 if isNoteBody, assistantActionsPresentation.showsActions {
                     assistantActions
@@ -276,16 +278,10 @@ struct AgentChatMessageRow: View {
                 if !isNoteBody, assistantActionsPresentation.showsActions {
                     assistantActions
                         .opacity(isHoveringAssistantMessage ? 1 : 0)
-                        .allowsHitTesting(isHoveringAssistantMessage)
                         .accessibilityHidden(!isHoveringAssistantMessage)
                         .offset(y: AgentChatLayout.chatViewportSpacing - 2)
                         .transition(.opacity)
-                }
-            }
-            .onHover { isHovering in
-                guard !isNoteBody, !isUser else { return }
-                withAnimation(.easeOut(duration: 0.12)) {
-                    isHoveringAssistantMessage = isHovering
+                        .onHover(perform: updateAssistantMessageHover)
                 }
             }
             .zIndex(isHoveringAssistantMessage ? 1 : 0)
@@ -313,6 +309,13 @@ struct AgentChatMessageRow: View {
             onCopy: { onCopyAssistantMessage(row) },
             onExport: { onExportAssistantMessage(row) }
         )
+    }
+
+    private func updateAssistantMessageHover(_ isHovering: Bool) {
+        guard !isNoteBody, !isUser else { return }
+        withAnimation(.easeOut(duration: 0.12)) {
+            isHoveringAssistantMessage = isHovering
+        }
     }
 
     private var noteBodyHeader: some View {
