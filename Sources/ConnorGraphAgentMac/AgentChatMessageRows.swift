@@ -253,7 +253,7 @@ struct AgentChatMessageRow: View {
                         .opacity(isHoveringAssistantMessage ? 1 : 0)
                         .allowsHitTesting(isHoveringAssistantMessage)
                         .accessibilityHidden(!isHoveringAssistantMessage)
-                        .offset(y: AgentChatLayout.chatViewportSpacing - 2)
+                        .offset(y: AgentChatLayout.chatViewportSpacing + 2)
                         .transition(.opacity)
                         .onHover(perform: updateAssistantActionsHover)
                 }
