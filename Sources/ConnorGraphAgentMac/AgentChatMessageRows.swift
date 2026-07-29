@@ -236,42 +236,7 @@ struct AgentChatMessageRow: View {
             if usesTrailingUserLayout { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: usesTrailingUserLayout ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    if isNoteBody {
-                        noteBodyHeader
-                    }
-                    if isUser, let activeSkillLabel {
-                        userActiveSkillChip(activeSkillLabel)
-                    }
-                    messageContent
-                    if !supplementalAttachments.isEmpty {
-                        AgentMessageAttachmentRefsView(
-                            attachments: supplementalAttachments,
-                            localFileURL: localAttachmentFileURL,
-                            onPreview: onPreviewAttachment,
-                            onSaveImage: onSaveImageAttachment,
-                            onShare: onShareAttachment
-                        )
-                    }
-                }
-                .foregroundStyle(Color.primary)
-                .padding(.horizontal, messageContainerHorizontalPadding)
-                .padding(.vertical, messageContainerVerticalPadding)
-                .frame(maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
-                .background {
-                    if isUser || isNoteBody {
-                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                            .fill(messageBackground)
-                    }
-                }
-                .overlay {
-                    if isNoteBody {
-                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                            .stroke(messageBorder, lineWidth: 1)
-                    }
-                }
-                .contentShape(Rectangle())
-                .onHover(perform: updateAssistantBodyHover)
+                messageContainer
 
                 if isNoteBody, assistantActionsPresentation.showsActions {
                     assistantActions
@@ -308,6 +273,56 @@ struct AgentChatMessageRow: View {
                 onSaved: { isNoteEditorPresented = false }
             )
         }
+    }
+
+    @ViewBuilder
+    private var messageContainer: some View {
+        if isUser || isNoteBody {
+            messageContainerContent
+                .padding(.horizontal, messageContainerHorizontalPadding)
+                .padding(.vertical, messageContainerVerticalPadding)
+                .frame(
+                    maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity,
+                    alignment: .leading
+                )
+                .background(
+                    messageBackground,
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                )
+                .overlay {
+                    if isNoteBody {
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                            .stroke(messageBorder, lineWidth: 1)
+                    }
+                }
+        } else {
+            messageContainerContent
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onHover(perform: updateAssistantBodyHover)
+        }
+    }
+
+    private var messageContainerContent: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if isNoteBody {
+                noteBodyHeader
+            }
+            if isUser, let activeSkillLabel {
+                userActiveSkillChip(activeSkillLabel)
+            }
+            messageContent
+            if !supplementalAttachments.isEmpty {
+                AgentMessageAttachmentRefsView(
+                    attachments: supplementalAttachments,
+                    localFileURL: localAttachmentFileURL,
+                    onPreview: onPreviewAttachment,
+                    onSaveImage: onSaveImageAttachment,
+                    onShare: onShareAttachment
+                )
+            }
+        }
+        .foregroundStyle(Color.primary)
     }
 
     private var assistantActions: some View {
