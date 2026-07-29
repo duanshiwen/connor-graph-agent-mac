@@ -34,7 +34,7 @@ import ConnorGraphAppSupport
     #expect(rows.map(\.roleLabel) == ["用户", "助手", "用户", "助手"])
 }
 
-@Test func agentChatPresentationKeepsConsecutiveAssistantMessagesInOneTurn() {
+@Test func agentChatPresentationDoesNotKeepProcessesForCompletedAssistantMessages() {
     let messages = [
         AgentMessage(id: "user-1", role: .user, content: "Start"),
         AgentMessage(id: "assistant-progress-1", role: .assistant, content: "Stage one"),
@@ -44,14 +44,11 @@ import ConnorGraphAppSupport
 
     let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: nil)
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
-    let assistantProcesses = items.filter { $0.process != nil }
-
     #expect(rows.map(\.turnNumber) == [1, 1, 1, 1])
-    #expect(assistantProcesses.compactMap(\.process).map(\.turnNumber) == [1, 1, 1])
-    #expect(assistantProcesses.map(\.showsAssistantHeader) == [true, false, false])
+    #expect(items.compactMap(\.process).isEmpty)
 }
 
-@Test func agentChatPresentationRestartsAssistantHeaderAfterUserMessage() {
+@Test func agentChatPresentationKeepsOnlyMessagesAfterCompletedTurns() {
     let messages = [
         AgentMessage(id: "user-1", role: .user, content: "Start"),
         AgentMessage(id: "assistant-progress", role: .assistant, content: "Working"),
@@ -62,7 +59,8 @@ import ConnorGraphAppSupport
 
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
 
-    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false, true])
+    #expect(items.compactMap(\.process).isEmpty)
+    #expect(items.compactMap(\.message).map(\.id) == messages.map(\.id))
 }
 
 @Test func agentChatPresentationKeepsPendingProcessInExistingAssistantGroup() {
@@ -73,10 +71,10 @@ import ConnorGraphAppSupport
 
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: true)
 
-    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [true, false])
+    #expect(items.filter { $0.process != nil }.map(\.showsAssistantHeader) == [false])
 }
 
-@Test func agentChatPresentationAggregatesRunActivityOnlyForCompletedFinalMessage() throws {
+@Test func agentChatPresentationDropsRunActivityAfterFinalMessage() {
     var progress = AgentMessage(id: "assistant-progress", role: .assistant, content: "Working")
     progress.runID = "run-1"
     var final = AgentMessage(id: "assistant-final", role: .assistant, content: "Done")
@@ -95,12 +93,10 @@ import ConnorGraphAppSupport
     )
 
     #expect(runningItems.compactMap(\.process).allSatisfy { !$0.aggregatesRunActivity })
-    let completedProcess = try #require(completedItems.compactMap(\.process).first)
-    #expect(completedProcess.aggregatesRunActivity)
-    #expect(completedProcess.runID == "run-1")
+    #expect(completedItems.compactMap(\.process).isEmpty)
 }
 
-@Test func agentChatTurnTimelinePlacesTimestampAndProcessBetweenUserAndAssistant() {
+@Test func agentChatTurnTimelinePlacesTimestampBeforeCompletedMessages() {
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: false,
         recentMessageCount: 2,
@@ -117,12 +113,9 @@ import ConnorGraphAppSupport
 
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: Date(timeIntervalSince1970: 1_900))
 
-    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1"])
-    #expect(items.map(\.kindLabel) == ["timestamp", "message", "process", "message"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "assistant-1"])
+    #expect(items.map(\.kindLabel) == ["timestamp", "message", "message"])
     #expect(items[0].timestamp?.text == "上午 8:16")
-    #expect(items[2].process?.turnNumber == 1)
-    #expect(items[2].process?.state == .completed)
-    #expect(items[2].process?.summary == "第 1 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 1 条 · 约 30 tokens · 安全")
 }
 
 @Test func agentChatTurnTimestampFormatsTodayYesterdayAndOlderDates() {
@@ -155,7 +148,7 @@ import ConnorGraphAppSupport
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: now, calendar: calendar)
 
     #expect(items.compactMap(\.timestamp?.text) == ["上午 10:00", "上午 10:08"])
-    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "user-2", "process-assistant-2", "assistant-2", "timestamp-turn-3", "user-3"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "assistant-1", "user-2", "assistant-2", "timestamp-turn-3", "user-3"])
 }
 
 @Test func agentChatTurnTimelineShowsTimestampWhenUserTurnCrossesDayEvenWithinInterval() {
@@ -171,10 +164,10 @@ import ConnorGraphAppSupport
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: now, calendar: calendar)
 
     #expect(items.compactMap(\.timestamp?.text) == ["昨天 下午 11:59", "上午 12:01"])
-    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "timestamp-turn-2", "user-2"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "assistant-1", "timestamp-turn-2", "user-2"])
 }
 
-@Test func agentChatTurnTimelineCarriesFullConversationHistoryForEachProcess() {
+@Test func agentChatTurnTimelineDoesNotRetainCompletedProcessHistory() {
     let firstSnapshot = AgentPromptInspectionSnapshot(
         includesSummary: false,
         recentMessageCount: 0,
@@ -201,18 +194,8 @@ import ConnorGraphAppSupport
     ]
 
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
-    let processes = items.compactMap(\.process)
-
-    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "user-2", "process-assistant-2", "assistant-2"])
-    #expect(processes[0].fullConversationMessageCount == 1)
-    #expect(processes[0].conversationHistory.map(\.message.content) == ["你好"])
-    #expect(processes[0].sourceUserMessageID == "user-1")
-    #expect(processes[0].assistantMessageID == "assistant-1")
-    #expect(processes[1].fullConversationMessageCount == 3)
-    #expect(processes[1].conversationHistory.map(\.message.content) == ["你好", "你好！", "我们会说些什么呢？"])
-    #expect(processes[1].sourceUserMessageID == "user-2")
-    #expect(processes[1].assistantMessageID == "assistant-2")
-    #expect(processes[1].summary == "第 2 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 3 条 · 约 36 tokens · 安全")
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "assistant-1", "user-2", "assistant-2"])
+    #expect(items.compactMap(\.process).isEmpty)
 }
 
 @Test func paginatedTimelinePreservesAbsoluteTurnNumbers() {
@@ -235,12 +218,9 @@ import ConnorGraphAppSupport
         startingTurnCursor: cursor
     )
     let messageRows = items.compactMap(\.message)
-    let processes = items.compactMap(\.process)
-
     #expect(messageRows.first?.turnNumber == 15)
     #expect(messageRows.last?.turnNumber == 18)
-    #expect(processes.last?.turnNumber == 18)
-    #expect(processes.last?.title == "第 18 轮处理详情")
+    #expect(items.compactMap(\.process).isEmpty)
 }
 
 @Test func paginatedTimelinePreservesAnOpenUserTurnAcrossWindowBoundary() {

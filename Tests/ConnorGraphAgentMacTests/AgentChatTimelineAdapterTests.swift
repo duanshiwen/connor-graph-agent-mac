@@ -24,7 +24,7 @@ struct AgentChatTimelineAdapterTests {
         #expect(items.map(\.id) == timeline.map(\.id))
         #expect(items.contains { $0.kind == .timestamp })
         #expect(items.contains { $0.kind == .message })
-        #expect(items.contains { $0.kind == .process })
+        #expect(!items.contains { $0.kind == .process })
     }
 
     @Test func adapterInsertsUnreadMarkerBeforeBoundaryItem() {

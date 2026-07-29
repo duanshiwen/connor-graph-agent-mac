@@ -359,7 +359,7 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         let conversationHistoryStorage = AgentChatConversationHistoryStorage(rows: rows)
         var items: [AgentChatTurnTimelineItem] = []
         var lastTimestampDate: Date?
-        for (index, row) in rows.enumerated() {
+        for row in rows {
             if row.message.role == .user,
                shouldInsertTimestamp(
                    for: row.message.createdAt,
@@ -369,20 +369,6 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                ) {
                 items.append(.timestamp(turnNumber: row.turnNumber, date: row.message.createdAt, now: now, calendar: calendar))
                 lastTimestampDate = row.message.createdAt
-            }
-            if row.message.role == .assistant {
-                let previousRow = index > 0 ? rows[index - 1] : nil
-                let continuesAssistantGroup = previousRow?.message.role == .assistant
-                    && previousRow?.turnNumber == row.turnNumber
-                items.append(.process(
-                    AgentChatTurnProcessPresentation(
-                        completedAssistant: row,
-                        conversationHistoryStorage: conversationHistoryStorage,
-                        conversationHistoryCount: index,
-                        aggregatesRunActivity: !isSubmitting && row.message.runID != nil
-                    ),
-                    showsAssistantHeader: !continuesAssistantGroup
-                ))
             }
             items.append(.message(row))
         }
