@@ -258,15 +258,15 @@ struct AgentChatMessageRow: View {
             .overlay(alignment: .bottomLeading) {
                 if !isNoteBody, assistantActionsPresentation.showsActions {
                     assistantActions
-                        .opacity(isHoveringAssistantMessage ? 1 : 0)
-                        .allowsHitTesting(isHoveringAssistantMessage)
-                        .accessibilityHidden(!isHoveringAssistantMessage)
+                        .opacity(showsAssistantActions ? 1 : 0)
+                        .allowsHitTesting(showsAssistantActions)
+                        .accessibilityHidden(!showsAssistantActions)
                         .offset(y: AgentChatLayout.chatViewportSpacing + AgentChatLayout.spaceXS)
                         .transition(.opacity)
                         .onHover(perform: updateAssistantActionsHover)
                 }
             }
-            .zIndex(isHoveringAssistantMessage ? 1 : 0)
+            .zIndex(showsAssistantActions ? 1 : 0)
         }
         .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
         .sheet(isPresented: $isNoteEditorPresented) {
@@ -345,6 +345,10 @@ struct AgentChatMessageRow: View {
 
     private var isHoveringAssistantMessage: Bool {
         isHoveringAssistantBody || isHoveringAssistantActions
+    }
+
+    private var showsAssistantActions: Bool {
+        (row.isLatestAssistantMessage && allowsAssistantActions) || isHoveringAssistantMessage
     }
 
     private func updateAssistantBodyHover(_ isHovering: Bool) {

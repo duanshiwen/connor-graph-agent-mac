@@ -251,7 +251,7 @@ struct AgentChatTurnProcessRow: View {
 
             if disclosure.showsChevron {
                 Image(systemName: disclosure.systemImage)
-                    .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(activityHeaderControlColor)
                     .padding(.leading, 2)
                     .transition(.opacity)
