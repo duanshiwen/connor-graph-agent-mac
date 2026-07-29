@@ -65,7 +65,9 @@ enum AgentChatTypography {
     static let monoMetaEmphasis = AppTypography.monoMetaEmphasis
     static let monoMicro = AppTypography.monoMicro
 
-    static var composerNSFont: NSFont { .preferredFont(forTextStyle: .body) }
+    static var composerNSFont: NSFont {
+        .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize + 1)
+    }
 }
 
 enum AgentChatFontPreferences {
