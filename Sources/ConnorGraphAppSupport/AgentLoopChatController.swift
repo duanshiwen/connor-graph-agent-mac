@@ -95,12 +95,24 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 collectedPresentations.append(presentation)
                 events.append(event)
                 eventPresentations.append(presentation)
+                if case .assistantMessageCreated(let message) = event,
+                   !session.messages.contains(where: { $0.id == message.id }) {
+                    session.appendAssistantMessage(message)
+                    transcript = session.messages
+                }
                 if case .textComplete(let payload) = event {
+                    session.removeAssistantMessages(forRunID: request.runID)
                     assistantMessage = session.appendAssistantMessage(
                         payload.text,
                         citations: payload.citations,
                         contextSnapshot: payload.contextSnapshot
                     )
+                    if let messageID = assistantMessage?.id,
+                       let index = session.messages.lastIndex(where: { $0.id == messageID }) {
+                        session.messages[index].runID = request.runID
+                        session.messages[index].sessionID = session.id
+                        assistantMessage = session.messages[index]
+                    }
                     transcript = session.messages
                     if let assistantMessage {
                         try await persistMemoryOSAfterAssistantMessage(assistantMessage)

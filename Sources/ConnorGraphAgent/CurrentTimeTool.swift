@@ -27,9 +27,13 @@ public struct GetCurrentTimeTool: AgentTool {
         }
 
         let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        isoFormatter.formatOptions = [.withInternetDateTime]
         isoFormatter.timeZone = timeZone
         let iso8601 = isoFormatter.string(from: now)
+
+        let preciseISOFormatter = ISO8601DateFormatter()
+        preciseISOFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        preciseISOFormatter.timeZone = timeZone
 
         let displayFormatter = DateFormatter()
         displayFormatter.locale = Locale(identifier: "en_US_POSIX")
@@ -40,6 +44,7 @@ public struct GetCurrentTimeTool: AgentTool {
 
         let contentJSON = LocalToolJSON.encode([
             "iso8601": iso8601,
+            "iso8601WithFractionalSeconds": preciseISOFormatter.string(from: now),
             "unixTimestamp": now.timeIntervalSince1970,
             "timeZone": timeZone.identifier,
             "timeZoneSecondsFromGMT": timeZone.secondsFromGMT(for: now),

@@ -400,16 +400,29 @@ private struct AgentChatSessionListView: View {
 
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
-            Button(action: { chatActions.session.newChatSession() }) {
-                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil", minHeight: 32)
-            }
-            .buttonStyle(SidebarActionButtonStyle())
-
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
                     Text("会话")
                         .font(AgentChatTypography.sectionTitle)
                     Spacer()
+                    Menu {
+                        Button(action: { chatActions.session.newChatSession() }) {
+                            Label("新建会话", systemImage: "square.and.pencil")
+                        }
+                        Button(action: { chatActions.session.newNoteSession() }) {
+                            Label("新建或导入笔记", systemImage: "note.text.badge.plus")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("新建")
+
                     Button(action: { chatActions.session.reloadChatSessions() }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
@@ -504,7 +517,6 @@ private struct AgentChatConversationView: View {
     @Bindable var model: ChatFeatureModel
     var chatActions: ChatFeatureActions
     @Binding var isSessionInfoPresented: Bool
-    @State private var selectedToolInvocation: AgentToolInvocationPresentation?
     @State private var expandedApprovalID: String?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
@@ -544,6 +556,15 @@ private struct AgentChatConversationView: View {
     private var hasOlderMessages: Bool {
         visibleMessageLimit < model.run.transcript.count
             || model.run.nextMessageBeforePosition != nil
+    }
+
+    private var temporaryAssistantMessageIDs: Set<String> {
+        guard model.run.isSubmitting,
+              let userIndex = model.run.transcript.lastIndex(where: { $0.role == .user })
+        else { return [] }
+        return Set(model.run.transcript.suffix(from: model.run.transcript.index(after: userIndex)).compactMap { message in
+            message.role == .assistant ? message.id : nil
+        })
     }
 
     private var expandedApproval: AgentPendingApproval? {
@@ -728,8 +749,20 @@ private struct AgentChatConversationView: View {
     }
 
     private func initialActivityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation]? {
-        if process.id == latestProcessID, !model.run.eventTimeline.isEmpty {
-            return model.run.eventTimeline
+        let hasLiveBoundary = process.assistantMessageID.map { messageID in
+            model.run.eventTimeline.contains { $0.assistantMessageID == messageID }
+        } ?? false
+        if !model.run.eventTimeline.isEmpty, process.id == latestProcessID || hasLiveBoundary {
+            if process.aggregatesRunActivity {
+                return AgentAssistantMessageEventSlicer().events(
+                    forRunID: process.runID,
+                    from: model.run.eventTimeline
+                )
+            }
+            return AgentAssistantMessageEventSlicer().events(
+                forAssistantMessageID: process.assistantMessageID,
+                from: model.run.eventTimeline
+            )
         }
         return nil
     }
@@ -748,58 +781,67 @@ private struct AgentChatConversationView: View {
     @ViewBuilder
     private func chatTimelineRow(_ item: AgentChatTurnTimelineItem, latestProcessID: String?) -> some View {
         if let message = item.message {
-            AgentChatMessageRow(
-                row: message,
-                isNoteBody: isNoteBodyMessage(message),
-                persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
-                localAttachmentFileURL: { attachment in
-                    chatActions.composer.localAttachmentFileURL(attachment)
-                },
-                onPreviewAttachment: { attachment in
-                    chatActions.composer.previewAttachment(attachment)
-                },
-                onSaveImageAttachment: { attachment in
-                    guard let sourceURL = chatActions.composer.localAttachmentFileURL(attachment) else {
-                        chatActions.composer.showAttachmentToast(
-                            title: "图片另存为失败",
-                            message: "图片原件不存在或已不可用。",
-                            systemImage: "xmark.circle"
+            VStack(alignment: .leading, spacing: AgentChatLayout.assistantIdentityContentSpacing) {
+                if item.showsAssistantHeader, !isNoteBodyMessage(message) {
+                    AgentAssistantHeaderView()
+                }
+                AgentChatMessageRow(
+                    row: message,
+                    isNoteBody: isNoteBodyMessage(message),
+                    allowsAssistantActions: !temporaryAssistantMessageIDs.contains(message.id),
+                    persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
+                    localAttachmentFileURL: { attachment in
+                        chatActions.composer.localAttachmentFileURL(attachment)
+                    },
+                    onPreviewAttachment: { attachment in
+                        chatActions.composer.previewAttachment(attachment)
+                    },
+                    onSaveImageAttachment: { attachment in
+                        guard let sourceURL = chatActions.composer.localAttachmentFileURL(attachment) else {
+                            chatActions.composer.showAttachmentToast(
+                                title: "图片另存为失败",
+                                message: "图片原件不存在或已不可用。",
+                                systemImage: "xmark.circle"
+                            )
+                            return
+                        }
+                        chatActions.run.downloadPreviewImage(
+                            AttachmentPreviewModel(
+                                attachment: attachment,
+                                title: attachment.displayName,
+                                subtitle: "",
+                                body: "",
+                                bodyMode: .image,
+                                sourceFileURL: sourceURL
+                            )
                         )
-                        return
-                    }
-                    chatActions.run.downloadPreviewImage(
-                        AttachmentPreviewModel(
-                            attachment: attachment,
-                            title: attachment.displayName,
-                            subtitle: "",
-                            body: "",
-                            bodyMode: .image,
-                            sourceFileURL: sourceURL
-                        )
-                    )
-                },
-                onShareAttachment: { attachment in
-                    shareAttachment(fileURL: chatActions.composer.localAttachmentFileURL(attachment))
-                },
-                onCopyAssistantMessage: { message in
-                    chatActions.run.copyAssistantMessageToPasteboard(message)
-                },
-                onExportAssistantMessage: { message in
-                    chatActions.run.exportAssistantMessageToFile(message)
-                },
-                onEditNoteBody: noteBodyEditAction(for: message)
-            )
+                    },
+                    onShareAttachment: { attachment in
+                        shareAttachment(fileURL: chatActions.composer.localAttachmentFileURL(attachment))
+                    },
+                    onCopyAssistantMessage: { message in
+                        chatActions.run.copyAssistantMessageToPasteboard(message)
+                    },
+                    onExportAssistantMessage: { message in
+                        chatActions.run.exportAssistantMessageToFile(message)
+                    },
+                    onEditNoteBody: noteBodyEditAction(for: message)
+                )
+            }
         } else if let process = item.process {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                AgentAssistantHeaderView()
+                if item.showsAssistantHeader {
+                    AgentAssistantHeaderView()
+                }
                 AgentChatTurnProcessRow(
                     process: process,
+                    isAssistantContinuation: !item.showsAssistantHeader,
                     initialEvents: initialActivityEvents(for: process, latestProcessID: latestProcessID),
                     loadEvents: {
                         await loadActivityEvents(for: process, latestProcessID: latestProcessID)
                     },
                     onOpenToolInvocation: { invocation in
-                        selectedToolInvocation = invocation
+                        model.run.selectedToolInvocation = invocation
                     }
                 )
             }
@@ -900,13 +942,16 @@ private struct AgentChatConversationView: View {
                             )
                         }
                     ) { chatItem in
-                        if let item = chatItem.timelineItem {
-                            chatTimelineRow(item, latestProcessID: latestProcessID)
-                        } else if let unreadMarker = chatItem.unreadMarker {
-                            AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
-                        } else if let dateSeparator = chatItem.dateSeparator {
-                            AgentChatDateSeparatorRow(title: dateSeparator.title)
+                        Group {
+                            if let item = chatItem.timelineItem {
+                                chatTimelineRow(item, latestProcessID: latestProcessID)
+                            } else if let unreadMarker = chatItem.unreadMarker {
+                                AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
+                            } else if let dateSeparator = chatItem.dateSeparator {
+                                AgentChatDateSeparatorRow(title: dateSeparator.title)
+                            }
                         }
+                        .padding(.top, spacingAdjustment(for: chatItem.spacingBefore))
                     }
                 }
             }
@@ -974,9 +1019,9 @@ private struct AgentChatConversationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .overlay {
-            if let invocation = selectedToolInvocation {
+            if let invocation = model.run.selectedToolInvocation {
                 AgentToolInvocationDetailOverlay(invocation: invocation) {
-                    selectedToolInvocation = nil
+                    model.run.selectedToolInvocation = nil
                 }
                 .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
             }
@@ -991,6 +1036,17 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
+    }
+
+    private func spacingAdjustment(for spacing: CommercialChatItemSpacing) -> CGFloat {
+        switch spacing {
+        case .standard:
+            return 0
+        case .assistantContinuation:
+            return AgentChatLayout.assistantGroupSpacing - AgentChatLayout.chatViewportSpacing
+        case .conversationBoundary:
+            return AgentChatLayout.conversationTurnSpacing - AgentChatLayout.chatViewportSpacing
+        }
     }
 }
 

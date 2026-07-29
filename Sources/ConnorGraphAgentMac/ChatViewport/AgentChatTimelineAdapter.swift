@@ -10,6 +10,12 @@ enum CommercialChatItemKind: String, Equatable {
     case dateSeparator
 }
 
+enum CommercialChatItemSpacing: Equatable {
+    case standard
+    case assistantContinuation
+    case conversationBoundary
+}
+
 struct CommercialChatUnreadBoundary: Equatable {
     var beforeItemID: String
     var unreadCount: Int
@@ -35,6 +41,7 @@ struct CommercialChatItem: Identifiable, Equatable {
     var timelineItem: AgentChatTurnTimelineItem?
     var unreadMarker: CommercialChatUnreadMarker?
     var dateSeparator: CommercialChatDateSeparator?
+    var spacingBefore: CommercialChatItemSpacing
 
     static func timeline(_ item: AgentChatTurnTimelineItem) -> CommercialChatItem {
         let kind: CommercialChatItemKind
@@ -47,7 +54,14 @@ struct CommercialChatItem: Identifiable, Equatable {
         } else {
             kind = .system
         }
-        return CommercialChatItem(id: item.id, kind: kind, timelineItem: item, unreadMarker: nil, dateSeparator: nil)
+        return CommercialChatItem(
+            id: item.id,
+            kind: kind,
+            timelineItem: item,
+            unreadMarker: nil,
+            dateSeparator: nil,
+            spacingBefore: .standard
+        )
     }
 
     static func unreadMarker(_ boundary: CommercialChatUnreadBoundary) -> CommercialChatItem {
@@ -56,7 +70,8 @@ struct CommercialChatItem: Identifiable, Equatable {
             kind: .unreadSeparator,
             timelineItem: nil,
             unreadMarker: CommercialChatUnreadMarker(unreadCount: max(0, boundary.unreadCount)),
-            dateSeparator: nil
+            dateSeparator: nil,
+            spacingBefore: .standard
         )
     }
 
@@ -66,7 +81,8 @@ struct CommercialChatItem: Identifiable, Equatable {
             kind: .dateSeparator,
             timelineItem: nil,
             unreadMarker: nil,
-            dateSeparator: separator
+            dateSeparator: separator,
+            spacingBefore: .standard
         )
     }
 }
@@ -86,12 +102,45 @@ struct AgentChatTimelineAdapter {
         var items = insertsDateSeparators
             ? itemsWithDateSeparators(from: timelineItems, now: now, calendar: calendar)
             : timelineItems.map(CommercialChatItem.timeline)
-        guard let unreadBoundary,
-              unreadBoundary.unreadCount > 0,
-              let insertionIndex = items.firstIndex(where: { $0.id == unreadBoundary.beforeItemID })
-        else { return items }
+        if let unreadBoundary,
+           unreadBoundary.unreadCount > 0,
+           let insertionIndex = items.firstIndex(where: { $0.id == unreadBoundary.beforeItemID }) {
+            items.insert(.unreadMarker(unreadBoundary), at: insertionIndex)
+        }
+        return applyingConversationSpacing(to: items)
+    }
 
-        items.insert(.unreadMarker(unreadBoundary), at: insertionIndex)
+    private func applyingConversationSpacing(to source: [CommercialChatItem]) -> [CommercialChatItem] {
+        enum Speaker { case user, assistant }
+
+        var items = source
+        var previousSpeaker: Speaker?
+        for index in items.indices {
+            guard let timelineItem = items[index].timelineItem else { continue }
+            let speaker: Speaker?
+            if let message = timelineItem.message {
+                speaker = message.message.role == .user ? .user : .assistant
+            } else if timelineItem.process != nil {
+                speaker = .assistant
+            } else {
+                speaker = nil
+            }
+            guard let speaker else { continue }
+
+            switch speaker {
+            case .user:
+                if previousSpeaker == .assistant {
+                    items[index].spacingBefore = .conversationBoundary
+                }
+            case .assistant:
+                if !timelineItem.showsAssistantHeader {
+                    items[index].spacingBefore = .assistantContinuation
+                } else if previousSpeaker == .user {
+                    items[index].spacingBefore = .conversationBoundary
+                }
+            }
+            previousSpeaker = speaker
+        }
         return items
     }
 

@@ -45,6 +45,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     public var role: AgentRole
     public var content: String
     public var createdAt: Date
+    public var runID: String?
+    public var sessionID: String?
     public var citations: [String]
     public var contextSnapshot: String?
     public var promptInspection: AgentPromptInspectionSnapshot?
@@ -85,6 +87,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         self.role = role
         self.content = content
         self.createdAt = createdAt
+        self.runID = nil
+        self.sessionID = nil
         self.citations = citations
         self.contextSnapshot = contextSnapshot
         self.promptInspection = nil
@@ -107,6 +111,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         self.role = role
         self.content = content
         self.createdAt = createdAt
+        self.runID = nil
+        self.sessionID = nil
         self.citations = citations
         self.contextSnapshot = contextSnapshot
         self.promptInspection = promptInspection
@@ -119,6 +125,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         case role
         case content
         case createdAt
+        case runID
+        case sessionID
         case citations
         case contextSnapshot
         case promptInspection
@@ -132,6 +140,8 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         role = try container.decode(AgentRole.self, forKey: .role)
         content = try container.decode(String.self, forKey: .content)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
+        runID = try container.decodeIfPresent(String.self, forKey: .runID)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
         citations = try container.decodeIfPresent([String].self, forKey: .citations) ?? []
         contextSnapshot = try container.decodeIfPresent(String.self, forKey: .contextSnapshot)
         promptInspection = try container.decodeIfPresent(AgentPromptInspectionSnapshot.self, forKey: .promptInspection)
@@ -327,5 +337,27 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         messages.append(message)
         updatedAt = message.createdAt
         return message
+    }
+
+    @discardableResult
+    public mutating func appendAssistantMessage(_ message: AgentMessage) -> AgentMessage {
+        precondition(message.role == .assistant)
+        messages.append(message)
+        updatedAt = message.createdAt
+        return message
+    }
+
+    @discardableResult
+    public mutating func removeAssistantMessages(forRunID runID: String) -> [AgentMessage] {
+        var removed: [AgentMessage] = []
+        messages.removeAll { message in
+            let shouldRemove = message.role == .assistant && message.runID == runID
+            if shouldRemove { removed.append(message) }
+            return shouldRemove
+        }
+        if !removed.isEmpty {
+            updatedAt = messages.last?.createdAt ?? createdAt
+        }
+        return removed
     }
 }

@@ -31,11 +31,11 @@ struct AgentAssistantMessageActionsPresentation: Equatable {
     var copyHelp: String
     var exportHelp: String
 
-    init(message: AgentMessage) {
+    init(message: AgentMessage, isEnabled: Bool = true) {
         let hasContent = message.content.unicodeScalars.contains {
             !CharacterSet.whitespacesAndNewlines.contains($0)
         }
-        self.showsActions = message.role == .assistant && hasContent
+        self.showsActions = isEnabled && message.role == .assistant && hasContent
         self.copyTitle = "复制"
         self.exportTitle = "导出到文件"
         self.copyAccessibilityLabel = "复制这条助理回复"
@@ -168,6 +168,7 @@ struct AgentChatDateSeparatorRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var isNoteBody = false
+    var allowsAssistantActions = true
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var localAttachmentFileURL: (AgentMessageAttachmentRef) -> URL? = { _ in nil }
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
@@ -179,6 +180,7 @@ struct AgentChatMessageRow: View {
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
+    @State private var isHoveringMessageBubble = false
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -191,8 +193,14 @@ struct AgentChatMessageRow: View {
     private var messageBodyFont: Font {
         AgentChatTypography.messageBody(pointSize: messageBodyPointSize)
     }
+    private var messageContainerHorizontalPadding: CGFloat {
+        isUser || isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding : 0
+    }
+    private var messageContainerVerticalPadding: CGFloat {
+        isUser || isNoteBody ? AgentChatLayout.messageBubbleVerticalPadding : 0
+    }
     private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
-        AgentAssistantMessageActionsPresentation(message: row.message)
+        AgentAssistantMessageActionsPresentation(message: row.message, isEnabled: allowsAssistantActions)
     }
     private var assistantExpansionPresentation: AgentAssistantMessageExpansionPresentation {
         AgentAssistantMessageExpansionPresentation(
@@ -225,47 +233,7 @@ struct AgentChatMessageRow: View {
             if usesTrailingUserLayout { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: usesTrailingUserLayout ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    if isNoteBody {
-                        noteBodyHeader
-                    }
-                    if isUser, let activeSkillLabel {
-                        userActiveSkillChip(activeSkillLabel)
-                    }
-                    messageContent
-                    if !supplementalAttachments.isEmpty {
-                        AgentMessageAttachmentRefsView(
-                            attachments: supplementalAttachments,
-                            localFileURL: localAttachmentFileURL,
-                            onPreview: onPreviewAttachment,
-                            onSaveImage: onSaveImageAttachment,
-                            onShare: onShareAttachment
-                        )
-                    }
-                    if isUser, assistantExpansionPresentation.isAvailable {
-                        messageExpansionControl
-                    }
-                }
-                .foregroundStyle(Color.primary)
-                .padding(.horizontal, AgentChatLayout.messageBubbleHorizontalPadding)
-                .padding(.vertical, AgentChatLayout.messageBubbleVerticalPadding)
-                .frame(maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
-                .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                        .stroke(messageBorder, lineWidth: 1)
-                )
-
-                if assistantActionsPresentation.showsActions {
-                    AgentAssistantMessageActionsView(
-                        presentation: assistantActionsPresentation,
-                        expansionPresentation: assistantExpansionPresentation,
-                        onToggleExpansion: toggleMessageExpansion,
-                        onCopy: { onCopyAssistantMessage(row) },
-                        onExport: { onExportAssistantMessage(row) }
-                    )
-                    .padding(.leading, AgentChatLayout.messageBubbleHorizontalPadding + 1)
-                }
+                messageContainer
             }
         }
         .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
@@ -280,6 +248,82 @@ struct AgentChatMessageRow: View {
                 },
                 onSaved: { isNoteEditorPresented = false }
             )
+        }
+    }
+
+    @ViewBuilder
+    private var messageContainer: some View {
+        if isUser || isNoteBody {
+            messageContainerContent
+                .padding(.horizontal, messageContainerHorizontalPadding)
+                .padding(.vertical, messageContainerVerticalPadding)
+                .frame(
+                    maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity,
+                    alignment: .leading
+                )
+                .background(
+                    messageBackground,
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                )
+                .overlay {
+                    if isNoteBody {
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                            .stroke(messageBorder, lineWidth: 1)
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+                .onHover(perform: updateMessageBubbleHover)
+        } else {
+            messageContainerContent
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onHover(perform: updateMessageBubbleHover)
+        }
+    }
+
+    private var messageContainerContent: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if isNoteBody {
+                noteBodyHeader
+            }
+            if isUser, let activeSkillLabel {
+                userActiveSkillChip(activeSkillLabel)
+            }
+            messageContent
+            if !supplementalAttachments.isEmpty {
+                AgentMessageAttachmentRefsView(
+                    attachments: supplementalAttachments,
+                    localFileURL: localAttachmentFileURL,
+                    onPreview: onPreviewAttachment,
+                    onSaveImage: onSaveImageAttachment,
+                    onShare: onShareAttachment
+                )
+            }
+            if assistantActionsPresentation.showsActions || assistantExpansionPresentation.isAvailable {
+                assistantActions
+                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                    .opacity(isHoveringMessageBubble ? 1 : 0)
+                    .allowsHitTesting(isHoveringMessageBubble)
+                    .accessibilityHidden(!isHoveringMessageBubble)
+                    .transition(.opacity)
+            }
+        }
+        .foregroundStyle(Color.primary)
+    }
+
+    private var assistantActions: some View {
+        AgentAssistantMessageActionsView(
+            presentation: assistantActionsPresentation,
+            expansionPresentation: assistantExpansionPresentation,
+            onToggleExpansion: toggleMessageExpansion,
+            onCopy: { onCopyAssistantMessage(row) },
+            onExport: { onExportAssistantMessage(row) }
+        )
+    }
+
+    private func updateMessageBubbleHover(_ isHovering: Bool) {
+        withAnimation(.easeOut(duration: 0.12)) {
+            isHoveringMessageBubble = isHovering
         }
     }
 
@@ -371,43 +415,15 @@ struct AgentChatMessageRow: View {
         }
     }
 
-    private var messageExpansionControl: some View {
-        Button(action: toggleMessageExpansion) {
-            HStack(spacing: 7) {
-                Image(systemName: assistantExpansionPresentation.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                Text(assistantExpansionPresentation.title)
-                    .font(AgentChatTypography.metaEmphasis)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 10)
-            .frame(minHeight: 32)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.09))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(assistantExpansionPresentation.accessibilityLabel)
-        .help(assistantExpansionPresentation.help)
-    }
-
     private var messageBackground: Color {
         if isNoteBody { return Color(nsColor: .textBackgroundColor).opacity(0.72) }
         if isUser { return ConnorCraftPalette.userBubble }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+        return .clear
     }
 
     private var messageBorder: Color {
         if isNoteBody { return ConnorCraftPalette.accent.opacity(0.20) }
-        return isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity)
+        return .clear
     }
 }
 
@@ -583,8 +599,7 @@ struct AgentMessageAttachmentRefsView: View {
 /// 现阶段固定为康纳同学。
 struct AgentAssistantHeaderView: View {
     var displayName: String = "康纳同学"
-    var subtitle: String = "一个拥有记忆、可以自我进化的 Agent"
-    var slogan: String = "从共同经验中学习，并把知识直接用于真实任务。"
+    var description: String = "你的私人小助理 · 一个有记忆、可以和你一起成长进化的 AI Agent"
     var avatarImage: NSImage? = nil
 
     var body: some View {
@@ -592,22 +607,16 @@ struct AgentAssistantHeaderView: View {
             avatarView
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
-                    .font(AgentChatTypography.microEmphasis)
-                    .foregroundStyle(.primary.opacity(0.85))
-                HStack(spacing: 4) {
-                    Text(subtitle)
-                        .font(AgentChatTypography.micro)
-                        .foregroundStyle(.secondary)
-                    Text("·")
-                        .font(AgentChatTypography.micro)
-                        .foregroundStyle(.quaternary)
-                    Text(slogan)
-                        .font(AppTypography.micro)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                }
+                    .font(AgentChatTypography.metaEmphasis)
+                    .foregroundStyle(.primary.opacity(0.88))
+                Text(description)
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("康纳同学，你的私人小助理，一个有记忆、可以和你一起成长进化的 AI Agent")
     }
 
     @ViewBuilder

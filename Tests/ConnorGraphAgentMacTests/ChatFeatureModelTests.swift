@@ -186,7 +186,7 @@ struct ChatFeatureModelTests {
         #expect(model.composer.input == "draft")
     }
 
-    @Test func sessionChangeDismissesUnifiedAttachmentPreview() {
+    @Test func sessionChangeDismissesUnifiedChatPreviews() {
         let model = ChatFeatureModel()
         let attachment = AgentMessageAttachmentRef(
             id: "image-1",
@@ -204,10 +204,24 @@ struct ChatFeatureModelTests {
             body: "",
             bodyMode: .image
         )
+        model.run.selectedToolInvocation = AgentToolInvocationPresentation(
+            id: "tool-invocation-calendar-1",
+            callID: "calendar-1",
+            runID: "run-1",
+            sessionID: "session-1",
+            toolName: "calendar_search_events",
+            semanticKind: .calendar,
+            phase: .finished,
+            severity: .success,
+            title: "Search calendar",
+            icon: "calendar",
+            rawEventIDs: ["finished-1"]
+        )
 
         model.dismissPreviewsForSessionChange()
 
         #expect(model.composer.attachmentPreviewModel == nil)
+        #expect(model.run.selectedToolInvocation == nil)
         #expect(model.workspaceExplorer.previewModel == nil)
         #expect(!model.workspaceExplorer.isLoadingPreview)
     }

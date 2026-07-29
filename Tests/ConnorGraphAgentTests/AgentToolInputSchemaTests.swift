@@ -126,6 +126,29 @@ import ConnorGraphAgent
     ])
 }
 
+@Test func agentToolInputSchemaNormalizesUnambiguousLegacyValueFormats() {
+    let schema = AgentToolInputSchema.closedObject(
+        properties: [
+            "timeSort": .stringEnumeration(values: ["timeAscThenRelevance", "timeDescThenRelevance"], description: "Sort"),
+            "limit": .integer(description: "Limit"),
+            "enabled": .boolean(description: "Enabled"),
+            "optionalText": .string(description: "Optional text")
+        ],
+        required: []
+    )
+
+    #expect(schema.normalizingLegacyPropertyAliases(.object([
+        "time_sort": .string("time_asc_then_relevance"),
+        "limit": .string("50"),
+        "enabled": .string("true"),
+        "optionalText": .null
+    ])) == .object([
+        "timeSort": .string("timeAscThenRelevance"),
+        "limit": .int(50),
+        "enabled": .bool(true)
+    ]))
+}
+
 @Test func agentToolRegistryAcceptsLegacySnakeCaseAliasesWithoutExposingThem() async throws {
     var registry = AgentToolRegistry()
     registry.register(LegacyAliasTestTool())

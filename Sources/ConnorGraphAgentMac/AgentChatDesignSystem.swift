@@ -65,7 +65,9 @@ enum AgentChatTypography {
     static let monoMetaEmphasis = AppTypography.monoMetaEmphasis
     static let monoMicro = AppTypography.monoMicro
 
-    static var composerNSFont: NSFont { .preferredFont(forTextStyle: .body) }
+    static var composerNSFont: NSFont {
+        .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize + 1)
+    }
 }
 
 enum AgentChatFontPreferences {
@@ -137,7 +139,7 @@ enum AgentChatLayout {
     static let hairlineOpacity: Double = 0.14
     static let chipHeight = AppButtonLayout.height
     static let iconButtonSize = AppButtonLayout.iconButtonSize
-    static let primaryButtonSize = AppButtonLayout.iconButtonSize
+    static let primaryButtonSize: CGFloat = 30
     static let hitTargetSize: CGFloat = 44
     static let activityRowMinHeight: CGFloat = 24
     static let composerTextMinHeight: CGFloat = 56
@@ -147,6 +149,8 @@ enum AgentChatLayout {
 
     static let chatContentMaxWidth: CGFloat = 740
     static let chatViewportSpacing: CGFloat = 16
+    static let assistantGroupSpacing: CGFloat = 8
+    static let conversationTurnSpacing: CGFloat = 20
     static let chatViewportVerticalInset: CGFloat = 20
     static let chatViewportHorizontalInset: CGFloat = 0
     static let chatBottomPinnedThreshold: CGFloat = 8
@@ -161,4 +165,5 @@ enum AgentChatLayout {
     static let assistantMessageTrailingPadding: CGFloat = 4
 
     static let avatarSize: CGFloat = 28
+    static let assistantIdentityContentSpacing: CGFloat = 8
 }

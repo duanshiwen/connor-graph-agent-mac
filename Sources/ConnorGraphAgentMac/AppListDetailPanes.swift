@@ -623,14 +623,21 @@ struct CraftSessionListPane: View {
     @Bindable var governanceModel: GovernanceFeatureModel
     let sessionActions: any ChatSessionCommanding
     let rowActions: ChatSessionListActions
+    @State private var isCreationMenuPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(sessionListTitle)
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, AppShellLayout.paneHeaderHorizontalPadding)
-                .padding(.vertical, AppShellLayout.paneHeaderVerticalPadding)
+            AppListPaneHeader(title: sessionListTitle) {
+                Button(action: { isCreationMenuPresented.toggle() }) {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.appIcon)
+                .help("新建")
+                .accessibilityLabel("打开新建菜单")
+                .popover(isPresented: $isCreationMenuPresented, arrowEdge: .bottom) {
+                    sessionCreationMenu
+                }
+            }
 
             ListSearchFilterBanner(query: model.sessions.searchQuery, sourceTitle: "对话历史") {
                 model.sessions.searchQuery = ""
@@ -658,6 +665,28 @@ struct CraftSessionListPane: View {
         .onChange(of: model.sessions.searchQuery) { _, _ in
             sessionActions.reloadChatSessions(restoreWorkspaceMode: false)
         }
+    }
+
+    private var sessionCreationMenu: some View {
+        VStack(spacing: AppShellLayout.spaceS) {
+            Button {
+                isCreationMenuPresented = false
+                sessionActions.newChatSession()
+            } label: {
+                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
+            }
+            .buttonStyle(SidebarActionButtonStyle())
+
+            Button {
+                isCreationMenuPresented = false
+                sessionActions.newNoteSession()
+            } label: {
+                SidebarActionButtonLabel(title: "新建或导入笔记", systemImage: "note.text.badge.plus", minHeight: 32)
+            }
+            .buttonStyle(SidebarActionButtonStyle())
+        }
+        .padding(AppShellLayout.spaceM)
+        .frame(width: 224)
     }
 
     private func sessionRow(_ row: AgentChatSessionPresentation) -> some View {

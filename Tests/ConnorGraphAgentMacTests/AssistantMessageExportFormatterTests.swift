@@ -53,8 +53,52 @@ struct AssistantMessageExportFormatterTests {
     @Test("actions are shown only for non-empty assistant messages")
     func actionsAreShownOnlyForNonEmptyAssistantMessages() {
         #expect(AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .assistant, content: "回答")).showsActions)
+        #expect(!AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .assistant, content: "处理中"), isEnabled: false).showsActions)
         #expect(!AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .user, content: "问题")).showsActions)
         #expect(!AgentAssistantMessageActionsPresentation(message: AgentMessage(role: .assistant, content: "  \n\t ")).showsActions)
+    }
+
+    @Test("activity header chevron appears only on hover or while expanded")
+    func activityHeaderChevronAppearsOnlyOnHoverOrWhileExpanded() {
+        let idle = AgentActivityHeaderDisclosurePresentation(isExpanded: false, isHovering: false)
+        let hovered = AgentActivityHeaderDisclosurePresentation(isExpanded: false, isHovering: true)
+        let expanded = AgentActivityHeaderDisclosurePresentation(isExpanded: true, isHovering: false)
+
+        #expect(!idle.showsChevron)
+        #expect(idle.systemImage == "chevron.right")
+        #expect(hovered.showsChevron)
+        #expect(hovered.systemImage == "chevron.right")
+        #expect(expanded.showsChevron)
+        #expect(expanded.systemImage == "chevron.down")
+    }
+
+    @Test("activity header omits turn and operation counts")
+    func activityHeaderOmitsTurnAndOperationCounts() {
+        let presentation = AgentActivityHeaderTextPresentation(
+            statusText: "已完成",
+            toolNames: ["查找文件", "执行终端命令", "搜索知识图谱", "读取日历"]
+        )
+
+        #expect(presentation.text == "已完成 · 查找文件、执行终端命令、搜索知识图谱等")
+        #expect(!presentation.text.contains("第"))
+        #expect(!presentation.text.contains("轮"))
+        #expect(!presentation.text.contains("4"))
+        #expect(!presentation.text.contains("项操作"))
+    }
+
+    @Test("activity header omits routine preflight tools")
+    func activityHeaderOmitsRoutinePreflightTools() {
+        let mixed = AgentActivityHeaderTextPresentation(
+            statusText: "已完成",
+            toolNames: ["获取当前时间", "查询近期记忆", "查询长期记忆", "读取用户偏好", "搜索笔记", "搜索日程"]
+        )
+        let routineOnly = AgentActivityHeaderTextPresentation(
+            statusText: "正在处理",
+            toolNames: ["获取当前时间", "搜索短期记忆", "搜索长期记忆", "获取用户偏好"]
+        )
+
+        #expect(mixed.text == "已完成 · 搜索日程")
+        #expect(routineOnly.text == "正在处理")
     }
 
     @Test("actions expose compact titles and accessibility copy")

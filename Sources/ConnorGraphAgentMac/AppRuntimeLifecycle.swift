@@ -956,6 +956,7 @@ final class AppRuntimeLifecycle {
                 loadMore: { [weak self] in self?.chatSessionCoordinator.loadMoreIfNeeded(currentSessionID: $0) },
                 loadPickerPage: { [weak self] in await self?.loadChatSessionPickerPage(cursor: $0) },
                 new: { [weak self] in self?.newChatSession() },
+                newNote: { [weak self] in self?.newNoteSession() },
                 select: { [weak self] in self?.selectChatSession($0) },
                 rename: { [weak self] in self?.renameChatSession($0, title: $1) },
                 filter: { [weak self] in self?.setSessionListFilter($0, restoreWorkspaceMode: $1) },
@@ -2682,8 +2683,14 @@ final class AppRuntimeLifecycle {
                 return []
             }
         }.value
-        chatRunCoordinator.cacheProcessTimeline(restored, key: cacheKey)
-        return restored
+        let sliced = process.aggregatesRunActivity
+            ? AgentAssistantMessageEventSlicer().events(forRunID: process.runID, from: restored)
+            : AgentAssistantMessageEventSlicer().events(
+                forAssistantMessageID: process.assistantMessageID,
+                from: restored
+            )
+        chatRunCoordinator.cacheProcessTimeline(sliced, key: cacheKey)
+        return sliced
     }
 
     private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {
@@ -3297,6 +3304,9 @@ final class AppRuntimeLifecycle {
                         self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason, backend: liveBackend)
                     }
                 },
+                onAssistantMessageCreated: { [weak self] message in
+                    self?.chatRunCoordinator.appendAssistantMessage(message, sessionID: submittingSessionID)
+                },
                 onEventPresentation: { [weak self] presentation in
                     guard let self else { return }
                     self.chatRunCoordinator.appendEvent(presentation, sessionID: submittingSessionID)
@@ -3637,6 +3647,7 @@ extension AppRuntimeLifecycle {
             loadMore: { [weak sessionCoordinator] in sessionCoordinator?.loadMoreIfNeeded(currentSessionID: $0) },
             loadPickerPage: { [weak model] in await model?.loadChatSessionPickerPage(cursor: $0) },
             new: { [weak model] in model?.newChatSession() },
+            newNote: { [weak model] in model?.newNoteSession() },
             select: { [weak sessionCoordinator] in sessionCoordinator?.select($0) },
             rename: { [weak model] in model?.renameChatSession($0, title: $1) },
             filter: { [weak sessionCoordinator] in sessionCoordinator?.setFilter($0, restoreWorkspaceMode: $1) },
