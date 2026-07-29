@@ -205,6 +205,11 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(requests[1].messages.contains { message in
         message.role == .assistant && message.content == "关键结构已经确认，我接着处理界面衔接。"
     } == false)
+    let progressToolCall = try #require(requests[1].messages.first { message in
+        message.role == .assistant && message.toolCalls?.first?.id == "progress-1"
+    })
+    #expect(progressToolCall.content.isEmpty)
+    #expect(progressToolCall.toolCalls?.first?.argumentsJSON == #"{"message":""}"#)
     let toolResult = try #require(requests[1].messages.first { message in
         message.role == .tool
             && message.toolCallID == "progress-1"
@@ -257,7 +262,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     let mixedAssistantMessage = try #require(requests[1].messages.first { message in
         message.role == .assistant && message.toolCalls?.first?.id == "mixed-1"
     })
-    #expect(mixedAssistantMessage.content == "日历范围已经确认，我接着核对邮件。")
+    #expect(mixedAssistantMessage.content.isEmpty)
     #expect(events.contains { event in
         if case .textComplete(let payload) = event {
             return payload.text == "日历和邮件都核对完成。"

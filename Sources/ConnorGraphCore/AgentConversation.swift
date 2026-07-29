@@ -346,4 +346,18 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         updatedAt = message.createdAt
         return message
     }
+
+    @discardableResult
+    public mutating func removeAssistantMessages(forRunID runID: String) -> [AgentMessage] {
+        var removed: [AgentMessage] = []
+        messages.removeAll { message in
+            let shouldRemove = message.role == .assistant && message.runID == runID
+            if shouldRemove { removed.append(message) }
+            return shouldRemove
+        }
+        if !removed.isEmpty {
+            updatedAt = messages.last?.createdAt ?? createdAt
+        }
+        return removed
+    }
 }

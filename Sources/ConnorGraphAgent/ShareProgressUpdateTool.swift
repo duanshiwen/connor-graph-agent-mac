@@ -6,7 +6,7 @@ public struct ShareProgressUpdateTool: AgentTool {
 
     public var name: String { Self.toolName }
     public var description: String {
-        "Share a user-facing progress update as a normal assistant message without ending the current run. Use it only after completing a meaningful stage of multi-step work."
+        "Temporarily display a user-facing progress update as an assistant message without ending the current run. The update is not returned as model context and is removed after the final response, so keep the final response self-contained."
     }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {

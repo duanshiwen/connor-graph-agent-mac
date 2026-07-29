@@ -371,13 +371,13 @@ public struct NativeSessionManager: Sendable {
                     message.sessionID = message.sessionID ?? session.id
                     session.appendAssistantMessage(message)
                     try persistSession()
-                    try await persistMemoryOSAfterAssistantMessage(message)
                     if let onAssistantMessageCreated {
                         await onAssistantMessageCreated(message)
                     }
                 }
 
                 if case .textComplete(let payload) = event {
+                    session.removeAssistantMessages(forRunID: run.id)
                     assistantMessage = session.appendAssistantMessage(
                         payload.text,
                         citations: payload.citations,
