@@ -179,7 +179,8 @@ struct AgentChatMessageRow: View {
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
-    @State private var isHoveringAssistantMessage = false
+    @State private var isHoveringAssistantBody = false
+    @State private var isHoveringAssistantActions = false
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -263,7 +264,7 @@ struct AgentChatMessageRow: View {
                         .stroke(messageBorder, lineWidth: 1)
                 )
                 .contentShape(Rectangle())
-                .onHover(perform: updateAssistantMessageHover)
+                .onHover(perform: updateAssistantBodyHover)
 
                 if isNoteBody, assistantActionsPresentation.showsActions {
                     assistantActions
@@ -278,10 +279,11 @@ struct AgentChatMessageRow: View {
                 if !isNoteBody, assistantActionsPresentation.showsActions {
                     assistantActions
                         .opacity(isHoveringAssistantMessage ? 1 : 0)
+                        .allowsHitTesting(isHoveringAssistantMessage)
                         .accessibilityHidden(!isHoveringAssistantMessage)
                         .offset(y: AgentChatLayout.chatViewportSpacing - 2)
                         .transition(.opacity)
-                        .onHover(perform: updateAssistantMessageHover)
+                        .onHover(perform: updateAssistantActionsHover)
                 }
             }
             .zIndex(isHoveringAssistantMessage ? 1 : 0)
@@ -311,10 +313,20 @@ struct AgentChatMessageRow: View {
         )
     }
 
-    private func updateAssistantMessageHover(_ isHovering: Bool) {
+    private var isHoveringAssistantMessage: Bool {
+        isHoveringAssistantBody || isHoveringAssistantActions
+    }
+
+    private func updateAssistantBodyHover(_ isHovering: Bool) {
         guard !isNoteBody, !isUser else { return }
         withAnimation(.easeOut(duration: 0.12)) {
-            isHoveringAssistantMessage = isHovering
+            isHoveringAssistantBody = isHovering
+        }
+    }
+
+    private func updateAssistantActionsHover(_ isHovering: Bool) {
+        withAnimation(.easeOut(duration: 0.12)) {
+            isHoveringAssistantActions = isHovering
         }
     }
 
