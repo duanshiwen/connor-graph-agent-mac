@@ -244,7 +244,14 @@ struct AgentChatMessageRow: View {
                 }
                 if isUser, assistantExpansionPresentation.isAvailable {
                     assistantActions
-                        .frame(maxWidth: AgentChatLayout.userMessageMaxWidth, alignment: .trailing)
+                        .frame(
+                            maxWidth: isNoteBody ? .infinity : AgentChatLayout.userMessageMaxWidth,
+                            alignment: .trailing
+                        )
+                        .padding(
+                            .trailing,
+                            isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding : 0
+                        )
                 }
             }
             .overlay(alignment: .bottomLeading) {
