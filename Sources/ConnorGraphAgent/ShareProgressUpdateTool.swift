@@ -43,7 +43,12 @@ public struct ShareProgressUpdateTool: AgentTool {
             sessionID: context.sessionID,
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Progress update shared with the user. Continue the current run."
+            contentText: "Progress update displayed successfully. Continue the current run.",
+            contentJSON: LocalToolJSON.encode([
+                "status": "success",
+                "displayedToUser": true,
+                "continueRun": true
+            ])
         )
         result.assistantMessage = assistantMessage
         return result

@@ -205,6 +205,15 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(requests[1].messages.contains { message in
         message.role == .assistant && message.content == "关键结构已经确认，我接着处理界面衔接。"
     } == false)
+    let toolResult = try #require(requests[1].messages.first { message in
+        message.role == .tool
+            && message.toolCallID == "progress-1"
+            && message.name == ShareProgressUpdateTool.toolName
+    })
+    #expect(toolResult.content.contains("\"status\":\"success\""))
+    #expect(toolResult.content.contains("\"displayedToUser\":true"))
+    #expect(toolResult.content.contains("Progress update displayed successfully."))
+    #expect(!toolResult.content.contains("关键结构已经确认，我接着处理界面衔接。"))
 }
 
 @Test func agentLoopPublishesAssistantTextBeforeExecutingMixedToolResponse() async throws {
