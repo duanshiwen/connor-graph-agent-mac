@@ -119,7 +119,6 @@ struct AgentChatTurnProcessRow: View {
                             AgentTurnActivityDetailLoadingView()
                         }
                     }
-                    .padding(.leading, AgentChatLayout.spaceM)
                     .transition(.opacity)
                 }
             }
@@ -206,13 +205,13 @@ struct AgentChatTurnProcessRow: View {
 
             activityHeaderTitle(summary)
 
-            Spacer(minLength: 0)
-
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
                 .foregroundStyle(activityHeaderControlColor)
+
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, AgentChatLayout.spaceM)
+        .padding(.trailing, AgentChatLayout.spaceM)
         .padding(.vertical, AgentChatLayout.spaceXS)
         .frame(minHeight: AgentChatLayout.activityRowMinHeight)
         .overlay(alignment: .leading) {
@@ -393,7 +392,6 @@ struct AgentTurnActivitySummaryDetailView: View {
 
             if isRunning {
                 AgentActivityLoadingRow(startedAt: startedAt)
-                    .padding(.leading, -AgentChatLayout.spaceM)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -547,7 +545,7 @@ struct AgentActivityLoadingRow: View {
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.trailing, AgentChatLayout.spaceM)
             .padding(.vertical, 3)
             .frame(minHeight: AgentChatLayout.activityRowMinHeight)
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
