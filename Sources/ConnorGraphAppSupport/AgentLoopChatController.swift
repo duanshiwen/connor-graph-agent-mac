@@ -99,9 +99,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                    !session.messages.contains(where: { $0.id == message.id }) {
                     session.appendAssistantMessage(message)
                     transcript = session.messages
-                    try await persistMemoryOSAfterAssistantMessage(message)
                 }
                 if case .textComplete(let payload) = event {
+                    session.removeAssistantMessages(forRunID: request.runID)
                     assistantMessage = session.appendAssistantMessage(
                         payload.text,
                         citations: payload.citations,

@@ -593,10 +593,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             didPublishUserFacingMessage = true
                         }
 
+                        let modelHistoryCalls = calls.map { call in
+                            guard call.name == ShareProgressUpdateTool.toolName else { return call }
+                            var sanitized = call
+                            sanitized.argumentsJSON = #"{"message":""}"#
+                            return sanitized
+                        }
                         messages.append(AgentModelMessage(
                             role: .assistant,
-                            content: modelResponse.text ?? "",
-                            toolCalls: calls,
+                            content: "",
+                            toolCalls: modelHistoryCalls,
                             providerMetadata: modelResponse.providerMetadata
                         ))
 

@@ -288,10 +288,10 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     let loaded = try #require(try repository.loadSession(id: session.id))
 
     #expect(publishedMessages.map(\.content) == ["资料已经核对完毕，接下来整理结论。"])
-    #expect(loaded.messages.map(\.role) == [.user, .assistant, .assistant])
-    #expect(loaded.messages.map(\.content) == ["核对资料并总结", "资料已经核对完毕，接下来整理结论。", "这是最终结论。"])
-    #expect(loaded.messages.dropFirst().allSatisfy { $0.runID == response.events.first?.runID })
-    #expect(loaded.messages.dropFirst().allSatisfy { $0.sessionID == session.id })
+    #expect(loaded.messages.map(\.role) == [.user, .assistant])
+    #expect(loaded.messages.map(\.content) == ["核对资料并总结", "这是最终结论。"])
+    #expect(loaded.messages.last?.runID == response.events.first?.runID)
+    #expect(loaded.messages.last?.sessionID == session.id)
 }
 
 @Test func nativeSessionManagerPersistsAndPromptsStructuredPersonReferences() async throws {
