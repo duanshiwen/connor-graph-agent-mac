@@ -31,7 +31,22 @@ public struct EditImageAgentTool: AgentTool {
             sourceURL: sourceURL
         )
         var completed: AgentGeneratedMediaArtifact?
-        for try await event in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: prompt, inputAttachments: [reference], inputImages: [inputImage], imageAction: .edit)) { try Task.checkCancellation(); if case .completed(let artifact) = event { completed = artifact } }
+        for try await event in provider.generateMedia(AgentGeneratedMediaRequest(
+            kind: .image,
+            prompt: prompt,
+            inputAttachments: [reference],
+            inputImages: [inputImage],
+            imageAction: .edit,
+            auditContext: AgentLLMRequestAuditContext(
+                requestKind: .generatedMedia,
+                sessionID: context.sessionID,
+                runID: context.runID,
+                correlationID: context.toolCallID,
+                operation: "EditImageAgentTool.execute",
+                initiator: .foreground,
+                metadata: ["tool_name": name]
+            )
+        )) { try Task.checkCancellation(); if case .completed(let artifact) = event { completed = artifact } }
         guard var completed else { throw EditImageAgentToolError.completedArtifactMissing }
         completed.generationMetadata.parameters[AgentAttachmentGenerationMetadata.sourceAttachmentIDParameterKey] = attachmentID
         let output = try ingestionService.ingest(artifact: completed, sessionID: context.sessionID); let payload = GeneratedImageToolResultPayload(attachment: output.messageRef, generationMetadata: completed.generationMetadata)

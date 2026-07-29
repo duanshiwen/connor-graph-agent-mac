@@ -233,20 +233,17 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 } else {
                     environmentSnapshot = nil
                 }
-                let modelVisibleToolDefinitions = AgentProgressUpdateCapabilityPolicy.modelVisibleToolDefinitions(
-                    toolRegistry.definitions,
-                    modelID: modelProvider.modelID
-                )
+                let availableToolDefinitions = toolRegistry.definitions
                 let promptAssembly = await buildPromptAssembly(
                     for: request,
                     environmentSnapshot: environmentSnapshot,
-                    modelVisibleToolDefinitions: modelVisibleToolDefinitions
+                    availableToolDefinitions: availableToolDefinitions
                 )
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
-                var modelRequest = promptProjector.project(promptAssembly, tools: modelVisibleToolDefinitions)
+                var modelRequest = promptProjector.project(promptAssembly, tools: availableToolDefinitions)
                 var messages = modelRequest.messages
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
@@ -301,9 +298,18 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         try Task.checkCancellation()
                         modelRequest.messages = messages
+                        modelRequest.auditContext = AgentLLMRequestAuditContext(
+                            requestKind: .conversationTurn,
+                            sessionID: run.sessionID,
+                            runID: run.id,
+                            correlationID: request.runID,
+                            iteration: iterationCount,
+                            operation: "AgentLoopController.completeModelRequest",
+                            initiator: .foreground
+                        )
                         let profileStartupIsComplete = requiredCurrentUserProfilePage == nil
                             && invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
-                        modelRequest.tools = modelVisibleToolDefinitions.filter { definition in
+                        modelRequest.tools = availableToolDefinitions.filter { definition in
                             if definition.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
                                 return false
                             }
@@ -334,7 +340,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             guard Self.isProviderContextOverflow(error) else { throw error }
                             let originalEstimate = AgentModelContextGuard().estimatedInputTokens(modelRequest)
                             let recoveryTarget = max(1, originalEstimate / 2)
-                            let recoveredRequest = try await contextRecoveredModelRequest(
+                            var recoveredRequest = try await contextRecoveredModelRequest(
                                 modelRequest,
                                 promptAssembly: promptAssembly,
                                 iterationCount: iterationCount,
@@ -343,6 +349,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             guard AgentModelContextGuard().estimatedInputTokens(recoveredRequest) < originalEstimate else {
                                 throw error
                             }
+                            recoveredRequest.auditContext = modelRequest.auditContext
+                            recoveredRequest.auditContext.metadata["context_recovery"] = "true"
                             modelRequest = recoveredRequest
                             messages = recoveredRequest.messages
                             modelResponse = try await completeModelRequest(
@@ -1186,9 +1194,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func shouldConsiderAutomaticProgressUpdate(for calls: [AgentToolCall]) -> Bool {
         guard automaticallySynthesizesProgressUpdates else { return false }
-        guard AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(
-            modelID: modelProvider.modelID
-        ) else { return false }
         let backgroundToolNames = Set(AgentContinuityPreflightPolicy.requiredToolNames).union([
             AgentCurrentTimePreflightPolicy.requiredToolName,
             AgentNoteSearchPreflightPolicy.requiredToolName,
@@ -1234,7 +1239,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 ],
                 tools: [],
                 temperature: 0.2,
-                instructionPlacement: instructionPlacement
+                instructionPlacement: instructionPlacement,
+                auditContext: AgentLLMRequestAuditContext(
+                    requestKind: .conversationProgressUpdate,
+                    sessionID: run.sessionID,
+                    runID: run.id,
+                    operation: "AgentLoopController.automaticProgressUpdate",
+                    initiator: .system
+                )
             ))
             try Task.checkCancellation()
             guard let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1270,19 +1282,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     private func buildPromptAssembly(
         for request: AgentChatRequest,
         environmentSnapshot: AgentEnvironmentSnapshot?,
-        modelVisibleToolDefinitions: [AgentToolDefinition]
+        availableToolDefinitions: [AgentToolDefinition]
     ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
-        let progressUpdateToolIsAvailable = modelVisibleToolDefinitions.contains {
+        let progressUpdateToolIsAvailable = availableToolDefinitions.contains {
             $0.name == ShareProgressUpdateTool.toolName
         }
-        if let progressUpdateInstruction = AgentProgressUpdateCapabilityPolicy.systemPromptSection(
-            modelID: modelProvider.modelID,
-            toolIsAvailable: progressUpdateToolIsAvailable
-        ) {
+        if progressUpdateToolIsAvailable {
             assembly.instruction.text = [
                 assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                progressUpdateInstruction
+                AgentInstructionSection.conversationalProgressUpdateInstruction
             ]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
@@ -1326,7 +1335,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             reservedOutputTokens: configuration.reservedOutputTokens
         )
         let toolDefinitionTokens = contextGuard.estimatedInputTokens(
-            AgentModelRequest(messages: [], tools: modelVisibleToolDefinitions)
+            AgentModelRequest(messages: [], tools: availableToolDefinitions)
         )
         let safetyMarginTokens = min(4_096, max(256, maximumInputTokens / 100))
         let promptContentBudget = max(1, maximumInputTokens - toolDefinitionTokens - safetyMarginTokens)

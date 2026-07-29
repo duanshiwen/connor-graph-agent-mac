@@ -24,6 +24,7 @@ public struct AppLLMProviderHealthChecker: Sendable {
     public var openAIResponsesHealthCheck: OpenAIResponsesHealthCheck
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
     public var anthropicCompatibleHealthCheck: AnthropicCompatibleHealthCheck
+    public var auditRecorder: (any LLMUsageAuditRecording)?
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
@@ -35,12 +36,14 @@ public struct AppLLMProviderHealthChecker: Sendable {
         },
         anthropicCompatibleHealthCheck: @escaping AnthropicCompatibleHealthCheck = { config in
             try await AnthropicCompatibleProvider(config: config).healthCheck()
-        }
+        },
+        auditRecorder: (any LLMUsageAuditRecording)? = nil
     ) {
         self.settingsRepository = settingsRepository
         self.openAIResponsesHealthCheck = openAIResponsesHealthCheck
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
         self.anthropicCompatibleHealthCheck = anthropicCompatibleHealthCheck
+        self.auditRecorder = auditRecorder
     }
 
     public func testConnection() async -> AppLLMProviderHealthCheckResult {
@@ -54,7 +57,9 @@ public struct AppLLMProviderHealthChecker: Sendable {
                 guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Responses 连接缺少 API Key。")
                 }
-                let result = try await openAIResponsesHealthCheck(config)
+                let result = try await auditedHealthCheck(modelID: config.model, connectionID: connection.id, providerMode: connection.providerMode.rawValue) {
+                    try await openAIResponsesHealthCheck(config)
+                }
                 return AppLLMProviderHealthCheckResult(
                     status: result.ok ? .success : .failed,
                     message: result.message
@@ -63,7 +68,9 @@ public struct AppLLMProviderHealthChecker: Sendable {
                 guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Anthropic Messages 连接缺少 API Key。")
                 }
-                let result = try await anthropicCompatibleHealthCheck(config)
+                let result = try await auditedHealthCheck(modelID: config.model, connectionID: connection.id, providerMode: connection.providerMode.rawValue) {
+                    try await anthropicCompatibleHealthCheck(config)
+                }
                 return AppLLMProviderHealthCheckResult(
                     status: result.ok ? .success : .failed,
                     message: result.message
@@ -72,7 +79,9 @@ public struct AppLLMProviderHealthChecker: Sendable {
                 guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Compatible 连接缺少 API Key。")
                 }
-                let result = try await openAICompatibleHealthCheck(config)
+                let result = try await auditedHealthCheck(modelID: config.model, connectionID: connection.id, providerMode: connection.providerMode.rawValue) {
+                    try await openAICompatibleHealthCheck(config)
+                }
                 return AppLLMProviderHealthCheckResult(
                     status: result.ok ? .success : .failed,
                     message: result.message
@@ -80,6 +89,23 @@ public struct AppLLMProviderHealthChecker: Sendable {
             }
         } catch {
             return AppLLMProviderHealthCheckResult(status: .failed, message: Self.userFacingMessage(for: error))
+        }
+    }
+
+    private func auditedHealthCheck(
+        modelID: String,
+        connectionID: String,
+        providerMode: String,
+        operation: () async throws -> LLMProviderHealthCheckResult
+    ) async throws -> LLMProviderHealthCheckResult {
+        let startedAt = Date()
+        do {
+            let result = try await operation()
+            LLMUsageAuditProbeRecorder.record(recorder: auditRecorder, kind: .providerHealthCheck, modelID: modelID, providerMode: providerMode, connectionID: connectionID, operation: "AppLLMProviderHealthChecker.testConnection", startedAt: startedAt)
+            return result
+        } catch {
+            LLMUsageAuditProbeRecorder.record(recorder: auditRecorder, kind: .providerHealthCheck, modelID: modelID, providerMode: providerMode, connectionID: connectionID, operation: "AppLLMProviderHealthChecker.testConnection", startedAt: startedAt, error: error)
+            throw error
         }
     }
 

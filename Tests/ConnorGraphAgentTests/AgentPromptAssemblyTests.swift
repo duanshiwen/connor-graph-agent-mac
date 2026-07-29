@@ -728,7 +728,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("An unavailable or unregistered tool cannot be retried in the current run"))
 }
 
-@Test func defaultSystemPromptRecommendsNaturalConversationalProgressUpdates() {
+@Test func conversationalProgressPromptRequiresACompleteFinalResponseAfterTemporaryMessagesAreDeleted() {
     let prompt = AgentInstructionSection.conversationalProgressUpdateInstruction
 
     #expect(prompt.contains("## Conversational Progress Updates"))
@@ -738,34 +738,17 @@ import ConnorGraphAgent
     #expect(prompt.contains("does not finish the run"))
     #expect(prompt.contains("A progress update is a temporary assistant message"))
     #expect(prompt.contains("not returned as context for later model calls"))
-    #expect(prompt.contains("removed after the final response"))
-    #expect(prompt.contains("keep the final response self-contained"))
+    #expect(prompt.contains("deleted after the final response"))
+    #expect(prompt.contains("will not remain in later conversation history"))
     #expect(prompt.contains("Write each update from the user's point of view"))
     #expect(prompt.contains("Do not inventory tool names, commands, file reads, internal mechanisms"))
     #expect(prompt.contains("Apply the active Connor personality to progress messages"))
     #expect(prompt.contains("Be selective and avoid interruption fatigue"))
     #expect(prompt.contains("many tasks need none"))
+    #expect(prompt.contains("the final response must be complete and self-contained"))
+    #expect(prompt.contains("restate every material outcome, artifact, verification result, limitation, blocker, and next action"))
+    #expect(prompt.contains("Do not merely refer back to an earlier update"))
     #expect(!AgentInstructionSection.defaultConnorInstruction.contains("## Conversational Progress Updates"))
-}
-
-@Test func conversationalProgressUpdateInstructionsRequireGPT55OrNewerAndTheTool() {
-    let progressToolImplementation = ShareProgressUpdateTool()
-    let progressTool = AgentToolDefinition(
-        name: progressToolImplementation.name,
-        description: progressToolImplementation.description,
-        inputSchema: progressToolImplementation.inputSchema
-    )
-    for supportedModel in ["gpt-5.5", "gpt-5.6", "gpt-5.6-mini", "openai/gpt-6"] {
-        #expect(AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(modelID: supportedModel))
-        #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: supportedModel, toolIsAvailable: true) != nil)
-        #expect(AgentProgressUpdateCapabilityPolicy.modelVisibleToolDefinitions([progressTool], modelID: supportedModel) == [progressTool])
-    }
-    for unsupportedModel in ["gpt-5", "gpt-5.4", "deepseek-v4-pro", "claude-sonnet-4", ""] {
-        #expect(!AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(modelID: unsupportedModel))
-        #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: unsupportedModel, toolIsAvailable: true) == nil)
-        #expect(AgentProgressUpdateCapabilityPolicy.modelVisibleToolDefinitions([progressTool], modelID: unsupportedModel).isEmpty)
-    }
-    #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: "gpt-5.6", toolIsAvailable: false) == nil)
 }
 
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {

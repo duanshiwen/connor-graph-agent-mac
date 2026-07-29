@@ -1,42 +1,12 @@
 import Foundation
 import ConnorGraphCore
 
-public enum AgentProgressUpdateCapabilityPolicy {
-    public static func supportsModelManagedProgressUpdates(modelID: String?) -> Bool {
-        guard let modelID else { return false }
-        let normalized = modelID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let modelName = normalized.split(separator: "/").last,
-              modelName.hasPrefix("gpt-") else {
-            return false
-        }
-        let versionAndVariant = modelName.dropFirst("gpt-".count)
-        let version = versionAndVariant.prefix { $0.isNumber || $0 == "." }
-        let components = version.split(separator: ".", omittingEmptySubsequences: false)
-        guard let major = components.first.flatMap({ Int($0) }) else { return false }
-        let minor = components.count > 1 ? Int(components[1]) ?? 0 : 0
-        return major > 5 || (major == 5 && minor >= 5)
-    }
-
-    public static func systemPromptSection(modelID: String?, toolIsAvailable: Bool) -> String? {
-        guard toolIsAvailable, supportsModelManagedProgressUpdates(modelID: modelID) else { return nil }
-        return AgentInstructionSection.conversationalProgressUpdateInstruction
-    }
-
-    public static func modelVisibleToolDefinitions(
-        _ definitions: [AgentToolDefinition],
-        modelID: String?
-    ) -> [AgentToolDefinition] {
-        guard !supportsModelManagedProgressUpdates(modelID: modelID) else { return definitions }
-        return definitions.filter { $0.name != ShareProgressUpdateTool.toolName }
-    }
-}
-
 public struct ShareProgressUpdateTool: AgentTool {
     public static let toolName = "share_progress_update"
 
     public var name: String { Self.toolName }
     public var description: String {
-        "Temporarily display a user-facing progress update as an assistant message without ending the current run. The update is not returned as model context and is removed after the final response, so keep the final response self-contained."
+        "Temporarily display a user-facing progress update without ending the current run. This message will be deleted after the final response and will not remain in later conversation history. Continue working, then include every material result the user needs in a complete, self-contained final response."
     }
     public var permission: AgentPermissionCapability { .readSession }
     public var inputSchema: AgentToolInputSchema {

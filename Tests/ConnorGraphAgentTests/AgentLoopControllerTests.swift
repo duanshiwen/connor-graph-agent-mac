@@ -170,6 +170,40 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(configuration.maxConsecutiveToolResultErrors == 0)
 }
 
+@Test func progressPromptAndToolStayAlignedForNonGPTModels() async throws {
+    let providerWithTool = CapturingFinalAnswerProvider()
+    var registry = AgentToolRegistry()
+    registry.registerShareProgressUpdateTool()
+    let loopWithTool = AgentLoopController(modelProvider: providerWithTool, toolRegistry: registry)
+
+    for try await _ in loopWithTool.run(AgentChatRequest(
+        sessionID: "session-progress-prompt-with-tool",
+        userMessage: "Complete a multi-step task"
+    )) {}
+
+    let requestWithTool = try #require(await providerWithTool.lastRequest)
+    let promptWithTool = requestWithTool.messages.map(\.content).joined(separator: "\n")
+    #expect(requestWithTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
+    #expect(promptWithTool.contains("## Conversational Progress Updates"))
+    #expect(promptWithTool.contains("the final response must be complete and self-contained"))
+
+    let providerWithoutTool = CapturingFinalAnswerProvider()
+    let loopWithoutTool = AgentLoopController(
+        modelProvider: providerWithoutTool,
+        toolRegistry: AgentToolRegistry()
+    )
+
+    for try await _ in loopWithoutTool.run(AgentChatRequest(
+        sessionID: "session-progress-prompt-without-tool",
+        userMessage: "Complete a multi-step task"
+    )) {}
+
+    let requestWithoutTool = try #require(await providerWithoutTool.lastRequest)
+    let promptWithoutTool = requestWithoutTool.messages.map(\.content).joined(separator: "\n")
+    #expect(!requestWithoutTool.tools.contains { $0.name == ShareProgressUpdateTool.toolName })
+    #expect(!promptWithoutTool.contains("## Conversational Progress Updates"))
+}
+
 @Test func agentLoopEmitsTextDeltaForStreamingProvider() async throws {
     let provider = StreamingFinalAnswerProvider()
     let loop = AgentLoopController(
