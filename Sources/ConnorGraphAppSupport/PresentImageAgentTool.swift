@@ -92,7 +92,7 @@ public struct PresentImageToolResultPayload: Codable, Sendable, Equatable {
 
 public struct PresentImageAgentTool: AgentTool {
     public let name = "present_image"
-    public let description = "Fetch a supported image from a local workspace path or HTTP/HTTPS URL, persist it in the current Connor session, and return exact Markdown for placing it in the assistant response. Use this when a relevant existing image would improve the answer."
+    public let description = "Fetch a supported image from a local workspace path or HTTP/HTTPS URL, persist it in the current Connor session, and return exact Markdown for placing it in the assistant response. Use this when a relevant existing image would materially improve a visually grounded answer, especially after image_search finds a clearly useful candidate. Include the returned Markdown near the paragraph that interprets the image; do not merely describe or link the candidate."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(
         properties: [

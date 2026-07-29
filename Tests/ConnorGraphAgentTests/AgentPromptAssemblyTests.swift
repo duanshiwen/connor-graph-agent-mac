@@ -694,17 +694,19 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Rich Media Responses"))
-    #expect(prompt.contains("proactively consider whether one or more relevant images"))
-    #expect(prompt.contains("a strong preference, not a completion requirement"))
+    #expect(prompt.contains("Decide early whether seeing the subject would materially improve the answer"))
+    #expect(prompt.contains("strongly prefer one bounded image search"))
+    #expect(prompt.contains("not a quota or completion requirement"))
     #expect(prompt.contains("never delay, weaken, or block an otherwise complete answer"))
     #expect(prompt.contains("prefer existing source-grounded images"))
-    #expect(prompt.contains("When `image_search` is available"))
+    #expect(prompt.contains("pass its exact `imageURL` to `present_image` in the same run"))
+    #expect(prompt.contains("continue without an image rather than forcing one"))
     #expect(prompt.contains("Do not call `generate_image` merely to make factual or researched content look richer"))
     #expect(prompt.contains("Clearly identify generated visuals as generated"))
     #expect(prompt.contains("copy the exact Markdown returned by the tool"))
     #expect(prompt.contains("Place each image immediately after the paragraph"))
     #expect(prompt.contains("distribute them beside their relevant sections"))
-    #expect(prompt.contains("omit images when they add little value"))
+    #expect(prompt.contains("Skip images for routine coding changes"))
     #expect(prompt.contains("Never invent an image path"))
 }
 
