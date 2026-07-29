@@ -127,6 +127,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         allowedMCPToolNames: [String]? = nil
     ) -> NativeSessionManager {
         let intentProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
+        let settings = (try? settingsRepository.loadSettings()) ?? .default
+        let configuredContextWindow = settings
+            .connection(id: sessionLLMOverride?.connectionID)?
+            .contextWindowTokens
+        let resolvedContextWindow = SessionContextBudget.resolvedContextWindowSize(
+            modelID: intentProvider.modelID,
+            configuredOverride: configuredContextWindow
+        )
         let summaryProvider = AnyLLMProvider { prompt, _ in
             let response = try await intentProvider.complete(AgentModelRequest(
                 messages: [AgentModelMessage(role: .user, content: prompt)],
@@ -143,7 +151,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             permissionMode: permissionMode,
             memoryOSFacade: makeMemoryOSFacade(),
             memoryOSIntentNormalizer: AnyMemoryOSUserIntentNormalizer(MemoryOSUserIntentNormalizer(provider: intentProvider)),
-            contextWindowSize: SessionContextBudget.inferContextWindowSize(modelID: intentProvider.modelID),
+            contextWindowSize: resolvedContextWindow,
             rollingSummaryProvider: summaryProvider,
             rollingSummaryModelID: intentProvider.modelID
         )
@@ -396,10 +404,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
         if effectiveConfiguration.modelContextWindowTokens == nil {
-            effectiveConfiguration.modelContextWindowTokens = settings
+            let configuredContextWindow = settings
                 .connection(id: sessionLLMOverride?.connectionID)?
                 .contextWindowTokens
-                ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+            effectiveConfiguration.modelContextWindowTokens = SessionContextBudget.resolvedContextWindowSize(
+                modelID: modelProvider.modelID,
+                configuredOverride: configuredContextWindow
+            )
         }
         let generatedImageInstruction = generatedImageToolIsAvailable
             ? "When the user asks to create or generate an image, use `generate_image`. When the user asks to modify a session image and `edit_image` is available, use `edit_image` with the exact latest source attachment ID instead of generating a replacement from scratch. Do not claim that image generation or editing is unavailable before attempting the corresponding available tool; if the tool fails, report the actual failure briefly."

@@ -749,7 +749,12 @@ import ConnorGraphAgent
 }
 
 @Test func conversationalProgressUpdateInstructionsRequireGPT55OrNewerAndTheTool() {
-    let progressTool = ShareProgressUpdateTool().definition
+    let progressToolImplementation = ShareProgressUpdateTool()
+    let progressTool = AgentToolDefinition(
+        name: progressToolImplementation.name,
+        description: progressToolImplementation.description,
+        inputSchema: progressToolImplementation.inputSchema
+    )
     for supportedModel in ["gpt-5.5", "gpt-5.6", "gpt-5.6-mini", "openai/gpt-6"] {
         #expect(AgentProgressUpdateCapabilityPolicy.supportsModelManagedProgressUpdates(modelID: supportedModel))
         #expect(AgentProgressUpdateCapabilityPolicy.systemPromptSection(modelID: supportedModel, toolIsAvailable: true) != nil)

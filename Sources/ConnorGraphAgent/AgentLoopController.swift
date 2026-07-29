@@ -323,11 +323,34 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             reservedOutputTokens: configuration.reservedOutputTokens,
                             isAfterToolExecution: iterationCount > 1
                         )
-                        var modelResponse = try await completeModelRequest(
-                            modelRequest,
-                            run: run,
-                            continuation: continuation
-                        )
+                        var modelResponse: AgentModelResponse
+                        do {
+                            modelResponse = try await completeModelRequest(
+                                modelRequest,
+                                run: run,
+                                continuation: continuation
+                            )
+                        } catch {
+                            guard Self.isProviderContextOverflow(error) else { throw error }
+                            let originalEstimate = AgentModelContextGuard().estimatedInputTokens(modelRequest)
+                            let recoveryTarget = max(1, originalEstimate / 2)
+                            let recoveredRequest = try await contextRecoveredModelRequest(
+                                modelRequest,
+                                promptAssembly: promptAssembly,
+                                iterationCount: iterationCount,
+                                maximumEstimatedTokens: recoveryTarget
+                            )
+                            guard AgentModelContextGuard().estimatedInputTokens(recoveredRequest) < originalEstimate else {
+                                throw error
+                            }
+                            modelRequest = recoveredRequest
+                            messages = recoveredRequest.messages
+                            modelResponse = try await completeModelRequest(
+                                recoveredRequest,
+                                run: run,
+                                continuation: continuation
+                            )
+                        }
                         try Task.checkCancellation()
 
                         // Propagate degradation warnings to the user
@@ -875,6 +898,81 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         return completedResponse
     }
 
+    private func contextRecoveredModelRequest(
+        _ request: AgentModelRequest,
+        promptAssembly: AgentPromptAssembly,
+        iterationCount: Int,
+        maximumEstimatedTokens: Int
+    ) async throws -> AgentModelRequest {
+        let contextGuard = AgentModelContextGuard()
+        if iterationCount == 1 {
+            let toolTokens = contextGuard.estimatedInputTokens(
+                AgentModelRequest(messages: [], tools: request.tools)
+            )
+            let transformer = AgentPromptBudgetTransformer(
+                maxEstimatedTokens: max(1, maximumEstimatedTokens - toolTokens)
+            )
+            let recoveredAssembly = try await transformer.transform(
+                promptAssembly,
+                projectionMode: configuration.promptProjectionMode
+            )
+            var recovered = AgentTranscriptProjector(
+                projectionMode: configuration.promptProjectionMode
+            ).project(recoveredAssembly, tools: request.tools)
+            recovered.temperature = request.temperature
+            return recovered
+        }
+
+        var recovered = request
+        let toolMessageIndices = recovered.messages.indices.filter {
+            recovered.messages[$0].role == .tool
+        }
+        guard !toolMessageIndices.isEmpty else { return request }
+
+        var requestWithoutToolBodies = recovered
+        for index in toolMessageIndices {
+            requestWithoutToolBodies.messages[index].content = ""
+        }
+        let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutToolBodies)
+        let availableToolTokens = max(0, maximumEstimatedTokens - fixedTokens)
+        let demands = toolMessageIndices.map {
+            contextGuard.estimator.estimate(recovered.messages[$0].content).estimatedTokenCount
+        }
+        let totalDemand = max(1, demands.reduce(0, +))
+        let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
+            maxResultCharacters: configuration.maxToolResultBytes
+        ))
+        for (offset, messageIndex) in toolMessageIndices.enumerated() {
+            let message = recovered.messages[messageIndex]
+            let allocatedTokens = Int(
+                Double(availableToolTokens) * Double(demands[offset]) / Double(totalDemand)
+            )
+            let syntheticResult = AgentToolResult(
+                toolCallID: message.toolCallID ?? "context-recovery",
+                toolName: message.name ?? "tool",
+                contentText: message.content
+            )
+            recovered.messages[messageIndex].content = gate.gatedContent(
+                for: syntheticResult,
+                maximumEstimatedTokens: allocatedTokens,
+                estimator: contextGuard.estimator
+            )
+        }
+        return recovered
+    }
+
+    private static func isProviderContextOverflow(_ error: Error) -> Bool {
+        let description = String(describing: error).lowercased()
+        return [
+            "exceeds the context window",
+            "context window exceeded",
+            "context length exceeded",
+            "maximum context length",
+            "model_context_window_exceeded",
+            "too many input tokens"
+        ].contains { description.contains($0) }
+    }
+
     private func trustedSkillPromotion(from result: AgentToolResult) -> AgentToolInstructionPromotion? {
         guard result.toolName == "connor_skill_activate",
               result.error == nil,
@@ -1219,7 +1317,23 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         }
-        let transformers: [any AgentContextTransformer] = [AgentPromptDiagnosticsTransformer()]
+        let contextWindowTokens = configuration.modelContextWindowTokens
+            ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+        let contextGuard = AgentModelContextGuard()
+        let maximumInputTokens = contextGuard.maximumInputTokens(
+            contextWindowTokens: contextWindowTokens,
+            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            reservedOutputTokens: configuration.reservedOutputTokens
+        )
+        let toolDefinitionTokens = contextGuard.estimatedInputTokens(
+            AgentModelRequest(messages: [], tools: modelVisibleToolDefinitions)
+        )
+        let safetyMarginTokens = min(4_096, max(256, maximumInputTokens / 100))
+        let promptContentBudget = max(1, maximumInputTokens - toolDefinitionTokens - safetyMarginTokens)
+        let transformers: [any AgentContextTransformer] = [
+            AgentPromptBudgetTransformer(maxEstimatedTokens: promptContentBudget),
+            AgentPromptDiagnosticsTransformer()
+        ]
         for transformer in transformers {
             do {
                 assembly = try await transformer.transform(assembly, projectionMode: configuration.promptProjectionMode)

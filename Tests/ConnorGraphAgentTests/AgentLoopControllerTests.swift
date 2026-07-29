@@ -31,6 +31,33 @@ private actor ScriptedModelProvider: AgentModelProvider {
     }
 }
 
+private actor ContextOverflowThenRecoveryProvider: AgentModelProvider {
+    let modelID = "deepseek-v4-pro"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private var callCount = 0
+    private(set) var requests: [AgentModelRequest] = []
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        requests.append(request)
+        defer { callCount += 1 }
+        switch callCount {
+        case 0:
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "context-recovery-tool", name: "oversized_result", argumentsJSON: #"{}"#)],
+                finishReason: .toolCalls
+            )
+        case 1:
+            throw OpenAICompatibleProviderError.httpStatus(
+                502,
+                message: "Your input exceeds the context window of this model. Please adjust your input and try again."
+            )
+        default:
+            return AgentModelResponse(text: "Recovered after fitting the provider's actual context window.")
+        }
+    }
+}
+
 private actor AutomaticProgressProvider: AgentModelProvider {
     let modelID = "automatic-progress"
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
@@ -860,6 +887,73 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(events.last?.kind == .runCompleted)
     #expect(toolMessage.content.contains("truncated tool result to fit context"))
     #expect(AgentModelContextGuard().estimatedInputTokens(followUpRequest) <= maximumInputTokens)
+}
+
+@Test func agentLoopTrimsOldestConversationBeforeTheFirstModelRequest() async throws {
+    let provider = CapturingFinalAnswerProvider()
+    let configuration = AgentLoopConfiguration(
+        promptMaxEstimatedTokens: 1_000_000,
+        modelContextWindowTokens: 30_000,
+        reservedOutputTokens: 2_000
+    )
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: configuration
+    )
+    let recentMessages = (0..<20).flatMap { index in
+        [
+            AgentMessage(role: .user, content: "old user \(index) " + String(repeating: "context ", count: 1_000)),
+            AgentMessage(role: .assistant, content: "old assistant \(index) " + String(repeating: "response ", count: 1_000))
+        ]
+    }
+
+    for try await _ in loop.run(AgentChatRequest(
+        sessionID: "session-initial-context-budget",
+        userMessage: "current request",
+        recentMessages: recentMessages
+    )) {}
+
+    let modelRequest = try #require(await provider.lastRequest)
+    let maximumInputTokens = AgentModelContextGuard().maximumInputTokens(
+        contextWindowTokens: 30_000,
+        configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+        reservedOutputTokens: configuration.reservedOutputTokens
+    )
+    let projectedText = modelRequest.messages.map(\.content).joined(separator: "\n")
+
+    #expect(AgentModelContextGuard().estimatedInputTokens(modelRequest) <= maximumInputTokens)
+    #expect(projectedText.contains("current request"))
+    #expect(!projectedText.contains("old user 0"))
+}
+
+@Test func agentLoopRetriesOneProviderReportedContextOverflowWithSmallerToolTrace() async throws {
+    let provider = ContextOverflowThenRecoveryProvider()
+    var registry = AgentToolRegistry()
+    registry.register(OversizedResultTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(
+            maxToolResultBytes: 1_000_000,
+            modelContextWindowTokens: 1_000_000,
+            reservedOutputTokens: 8_192
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        sessionID: "session-provider-context-recovery",
+        userMessage: "Run oversized result"
+    )) {
+        events.append(event)
+    }
+
+    let requests = await provider.requests
+    #expect(requests.count == 3)
+    #expect(AgentModelContextGuard().estimatedInputTokens(requests[2]) < AgentModelContextGuard().estimatedInputTokens(requests[1]))
+    #expect(requests[2].messages.contains { $0.role == .tool && $0.content.contains("truncated tool result to fit context") })
+    #expect(events.last?.kind == .runCompleted)
 }
 
 @Test func agentLoopPreservesAssistantToolCallsBeforeToolResult() async throws {

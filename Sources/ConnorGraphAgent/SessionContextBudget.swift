@@ -89,6 +89,7 @@ public struct SessionContextBudget: Sendable, Equatable {
 
 extension SessionContextBudget {
     /// Common context window sizes for popular models (2026 Q2).
+    /// Keep API models separate from product-hosted variants with different limits.
     public static let wellKnownContextWindows: [String: Int] = [
         // Anthropic Claude
         "claude-4": 200_000,
@@ -99,7 +100,12 @@ extension SessionContextBudget {
         // OpenAI GPT
         "gpt-4o": 128_000,
         "gpt-4-turbo": 128_000,
-        "gpt-5.6": 1_000_000,
+        "gpt-4.1": 1_047_576,
+        "gpt-5.4": 1_050_000,
+        "gpt-5.6-sol": 272_000,
+        "gpt-5.6-terra": 272_000,
+        "gpt-5.6-luna": 272_000,
+        "gpt-5.6": 272_000,
         "o3": 200_000,
         "o4-mini": 200_000,
         // Google Gemini
@@ -107,6 +113,8 @@ extension SessionContextBudget {
         "gemini-2.5-flash": 1_048_576,
         "gemini-2.0-pro": 2_097_152,
         // DeepSeek
+        "deepseek-v4-flash": 1_000_000,
+        "deepseek-v4-pro": 1_000_000,
         "deepseek-chat": 128_000,
         "deepseek-reasoner": 128_000,
         // Zhipu GLM
@@ -129,9 +137,18 @@ extension SessionContextBudget {
     public static func inferContextWindowSize(modelID: String?) -> Int {
         guard let modelID = modelID?.lowercased() else { return 200_000 }
         if let exactSize = wellKnownContextWindows[modelID] { return exactSize }
-        for (key, size) in wellKnownContextWindows {
-            if modelID.contains(key) { return size }
+        for key in wellKnownContextWindows.keys.sorted(by: { $0.count > $1.count }) {
+            if modelID.contains(key), let size = wellKnownContextWindows[key] { return size }
         }
         return 200_000  // safe default for most modern models
+    }
+
+    /// Resolve the one value used by session compaction and request validation.
+    /// An endpoint-level setting is explicit and therefore wins over the catalog.
+    public static func resolvedContextWindowSize(
+        modelID: String?,
+        configuredOverride: Int?
+    ) -> Int {
+        configuredOverride.map { max(1, $0) } ?? inferContextWindowSize(modelID: modelID)
     }
 }
