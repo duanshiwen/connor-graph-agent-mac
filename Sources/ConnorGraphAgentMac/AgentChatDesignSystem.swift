@@ -163,4 +163,5 @@ enum AgentChatLayout {
     static let assistantMessageTrailingPadding: CGFloat = 4
 
     static let avatarSize: CGFloat = 28
+    static let assistantIdentityContentSpacing: CGFloat = 8
 }
