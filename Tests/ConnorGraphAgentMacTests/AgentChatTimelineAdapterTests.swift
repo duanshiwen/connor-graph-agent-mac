@@ -26,6 +26,35 @@ struct AgentChatTimelineAdapterTests {
         #expect(!items.contains { $0.kind == .process })
     }
 
+    @Test func adapterUsesLargerSpacingBetweenUserAndAssistantTurns() {
+        let timeline = AgentChatTurnTimelineItem.items(
+            messages: sampleMessages(),
+            lastContext: nil,
+            isSubmitting: false,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        let items = AgentChatTimelineAdapter().items(from: timeline)
+
+        #expect(items.first { $0.id == "assistant-1" }?.spacingBefore == .conversationBoundary)
+    }
+
+    @Test func adapterKeepsIntermediateAssistantItemsInCompactGroup() {
+        let messages = sampleMessages() + [
+            AgentMessage(id: "assistant-2", role: .assistant, content: "继续处理", createdAt: Date(timeIntervalSince1970: 102))
+        ]
+        let timeline = AgentChatTurnTimelineItem.items(
+            messages: messages,
+            lastContext: nil,
+            isSubmitting: false,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        let items = AgentChatTimelineAdapter().items(from: timeline)
+
+        #expect(items.first { $0.id == "assistant-2" }?.spacingBefore == .assistantContinuation)
+    }
+
     @Test func adapterInsertsUnreadMarkerBeforeBoundaryItem() {
         let messages = sampleMessages()
         let timeline = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: Date(timeIntervalSince1970: 200))
