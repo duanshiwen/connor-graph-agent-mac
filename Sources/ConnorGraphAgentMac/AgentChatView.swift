@@ -400,16 +400,29 @@ private struct AgentChatSessionListView: View {
 
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
-            Button(action: { chatActions.session.newChatSession() }) {
-                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil", minHeight: 32)
-            }
-            .buttonStyle(SidebarActionButtonStyle())
-
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
                     Text("会话")
                         .font(AgentChatTypography.sectionTitle)
                     Spacer()
+                    Menu {
+                        Button(action: { chatActions.session.newChatSession() }) {
+                            Label("新建会话", systemImage: "square.and.pencil")
+                        }
+                        Button(action: { chatActions.session.newNoteSession() }) {
+                            Label("新建或导入笔记", systemImage: "note.text.badge.plus")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("新建")
+
                     Button(action: { chatActions.session.reloadChatSessions() }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
