@@ -48,3 +48,45 @@ import ConnorGraphStore
     #expect(try store.events(runID: run.id, limit: 300).count == 300)
     #expect(try store.events(runID: run.id, limit: nil).count == 350)
 }
+
+@Test func storeDeletesOnlyToolCallEventsForCompletedTurn() throws {
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
+    try store.migrate()
+    let run = AgentRun(sessionID: "session-cleanup", groupID: "default", status: .completed)
+    try store.upsert(run: run)
+    for (index, kind) in [AgentEventKind.runStarted, .toolStarted, .toolFinished, .runCompleted].enumerated() {
+        try store.append(event: PersistedAgentEvent(
+            runID: run.id,
+            sessionID: run.sessionID,
+            kind: kind,
+            payloadJSON: "{}",
+            sequence: index
+        ))
+    }
+
+    try store.deleteToolCallEvents(runID: run.id)
+
+    #expect(try store.events(runID: run.id, limit: nil).map(\.kind) == [.runStarted, .runCompleted])
+}
+
+@Test func migrationDeletesExistingToolCallEventsFromTerminalRuns() throws {
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
+    try store.migrate()
+    let completed = AgentRun(sessionID: "completed-session", groupID: "default", status: .completed)
+    let running = AgentRun(sessionID: "running-session", groupID: "default", status: .running)
+    try store.upsert(run: completed)
+    try store.upsert(run: running)
+    for run in [completed, running] {
+        try store.append(event: PersistedAgentEvent(
+            runID: run.id,
+            sessionID: run.sessionID,
+            kind: .toolFinished,
+            payloadJSON: #"{"large":"tool output"}"#
+        ))
+    }
+
+    try store.migrate()
+
+    #expect(try store.events(runID: completed.id, limit: nil).isEmpty)
+    #expect(try store.events(runID: running.id, limit: nil).count == 1)
+}

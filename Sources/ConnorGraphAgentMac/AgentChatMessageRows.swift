@@ -180,8 +180,7 @@ struct AgentChatMessageRow: View {
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
-    @State private var isHoveringAssistantBody = false
-    @State private var isHoveringAssistantActions = false
+    @State private var isHoveringMessageBubble = false
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -199,9 +198,6 @@ struct AgentChatMessageRow: View {
     }
     private var messageContainerVerticalPadding: CGFloat {
         isUser || isNoteBody ? AgentChatLayout.messageBubbleVerticalPadding : 0
-    }
-    private var assistantActionsLeadingPadding: CGFloat {
-        isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding + 1 : 0
     }
     private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
         AgentAssistantMessageActionsPresentation(message: row.message, isEnabled: allowsAssistantActions)
@@ -238,35 +234,7 @@ struct AgentChatMessageRow: View {
 
             VStack(alignment: usesTrailingUserLayout ? .trailing : .leading, spacing: AgentChatLayout.spaceXS) {
                 messageContainer
-
-                if isNoteBody, assistantActionsPresentation.showsActions {
-                    assistantActions
-                        .padding(.leading, assistantActionsLeadingPadding)
-                }
-                if isUser, assistantExpansionPresentation.isAvailable {
-                    assistantActions
-                        .frame(
-                            maxWidth: isNoteBody ? .infinity : AgentChatLayout.userMessageMaxWidth,
-                            alignment: .trailing
-                        )
-                        .padding(
-                            .trailing,
-                            isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding : 0
-                        )
-                }
             }
-            .overlay(alignment: .bottomLeading) {
-                if !isNoteBody, assistantActionsPresentation.showsActions {
-                    assistantActions
-                        .opacity(showsAssistantActions ? 1 : 0)
-                        .allowsHitTesting(showsAssistantActions)
-                        .accessibilityHidden(!showsAssistantActions)
-                        .offset(y: AgentChatLayout.chatViewportSpacing + AgentChatLayout.spaceXS)
-                        .transition(.opacity)
-                        .onHover(perform: updateAssistantActionsHover)
-                }
-            }
-            .zIndex(showsAssistantActions ? 1 : 0)
         }
         .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
         .sheet(isPresented: $isNoteEditorPresented) {
@@ -303,11 +271,13 @@ struct AgentChatMessageRow: View {
                             .stroke(messageBorder, lineWidth: 1)
                     }
                 }
+                .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+                .onHover(perform: updateMessageBubbleHover)
         } else {
             messageContainerContent
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .onHover(perform: updateAssistantBodyHover)
+                .onHover(perform: updateMessageBubbleHover)
         }
     }
 
@@ -329,6 +299,14 @@ struct AgentChatMessageRow: View {
                     onShare: onShareAttachment
                 )
             }
+            if assistantActionsPresentation.showsActions || assistantExpansionPresentation.isAvailable {
+                assistantActions
+                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                    .opacity(isHoveringMessageBubble ? 1 : 0)
+                    .allowsHitTesting(isHoveringMessageBubble)
+                    .accessibilityHidden(!isHoveringMessageBubble)
+                    .transition(.opacity)
+            }
         }
         .foregroundStyle(Color.primary)
     }
@@ -343,24 +321,9 @@ struct AgentChatMessageRow: View {
         )
     }
 
-    private var isHoveringAssistantMessage: Bool {
-        isHoveringAssistantBody || isHoveringAssistantActions
-    }
-
-    private var showsAssistantActions: Bool {
-        (row.isLatestAssistantMessage && allowsAssistantActions) || isHoveringAssistantMessage
-    }
-
-    private func updateAssistantBodyHover(_ isHovering: Bool) {
-        guard !isNoteBody, !isUser else { return }
+    private func updateMessageBubbleHover(_ isHovering: Bool) {
         withAnimation(.easeOut(duration: 0.12)) {
-            isHoveringAssistantBody = isHovering
-        }
-    }
-
-    private func updateAssistantActionsHover(_ isHovering: Bool) {
-        withAnimation(.easeOut(duration: 0.12)) {
-            isHoveringAssistantActions = isHovering
+            isHoveringMessageBubble = isHovering
         }
     }
 

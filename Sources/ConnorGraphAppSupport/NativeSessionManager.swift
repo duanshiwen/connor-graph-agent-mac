@@ -248,6 +248,7 @@ public struct NativeSessionManager: Sendable {
             metadata: runMetadata
         )
         try sessionRepository.saveRun(run)
+        defer { try? sessionRepository.deleteToolCallHistory(runID: run.id) }
         if eventRecorder == nil {
             try sessionRepository.appendJournalEvent(
                 runID: run.id,

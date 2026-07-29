@@ -610,6 +610,10 @@ public struct AppChatSessionRepository: Sendable {
         try store.events(runID: runID, limit: limit)
     }
 
+    public func deleteToolCallHistory(runID: String) throws {
+        try store.deleteToolCallEvents(runID: runID)
+    }
+
     public func savePendingApproval(_ approval: AgentPendingApproval) throws {
         try store.upsert(pendingApproval: approval)
     }
