@@ -599,8 +599,7 @@ struct AgentMessageAttachmentRefsView: View {
 /// 现阶段固定为康纳同学。
 struct AgentAssistantHeaderView: View {
     var displayName: String = "康纳同学"
-    var subtitle: String = "一个拥有记忆、可以自我进化的 Agent"
-    var slogan: String = "从共同经验中学习，并把知识直接用于真实任务。"
+    var description: String = "你的私人小助理 · 一个有记忆、可以和你一起成长进化的 AI Agent"
     var avatarImage: NSImage? = nil
 
     var body: some View {
@@ -608,22 +607,16 @@ struct AgentAssistantHeaderView: View {
             avatarView
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
-                    .font(AgentChatTypography.microEmphasis)
-                    .foregroundStyle(.primary.opacity(0.85))
-                HStack(spacing: 4) {
-                    Text(subtitle)
-                        .font(AgentChatTypography.micro)
-                        .foregroundStyle(.secondary)
-                    Text("·")
-                        .font(AgentChatTypography.micro)
-                        .foregroundStyle(.quaternary)
-                    Text(slogan)
-                        .font(AppTypography.micro)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                }
+                    .font(AgentChatTypography.metaEmphasis)
+                    .foregroundStyle(.primary.opacity(0.88))
+                Text(description)
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("康纳同学，你的私人小助理，一个有记忆、可以和你一起成长进化的 AI Agent")
     }
 
     @ViewBuilder

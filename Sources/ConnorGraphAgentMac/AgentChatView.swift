@@ -781,48 +781,53 @@ private struct AgentChatConversationView: View {
     @ViewBuilder
     private func chatTimelineRow(_ item: AgentChatTurnTimelineItem, latestProcessID: String?) -> some View {
         if let message = item.message {
-            AgentChatMessageRow(
-                row: message,
-                isNoteBody: isNoteBodyMessage(message),
-                allowsAssistantActions: !temporaryAssistantMessageIDs.contains(message.id),
-                persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
-                localAttachmentFileURL: { attachment in
-                    chatActions.composer.localAttachmentFileURL(attachment)
-                },
-                onPreviewAttachment: { attachment in
-                    chatActions.composer.previewAttachment(attachment)
-                },
-                onSaveImageAttachment: { attachment in
-                    guard let sourceURL = chatActions.composer.localAttachmentFileURL(attachment) else {
-                        chatActions.composer.showAttachmentToast(
-                            title: "图片另存为失败",
-                            message: "图片原件不存在或已不可用。",
-                            systemImage: "xmark.circle"
+            VStack(alignment: .leading, spacing: AgentChatLayout.assistantIdentityContentSpacing) {
+                if item.showsAssistantHeader, !isNoteBodyMessage(message) {
+                    AgentAssistantHeaderView()
+                }
+                AgentChatMessageRow(
+                    row: message,
+                    isNoteBody: isNoteBodyMessage(message),
+                    allowsAssistantActions: !temporaryAssistantMessageIDs.contains(message.id),
+                    persistentCacheContext: chatActions.run.markdownPersistentCacheContext(messageID: message.message.id),
+                    localAttachmentFileURL: { attachment in
+                        chatActions.composer.localAttachmentFileURL(attachment)
+                    },
+                    onPreviewAttachment: { attachment in
+                        chatActions.composer.previewAttachment(attachment)
+                    },
+                    onSaveImageAttachment: { attachment in
+                        guard let sourceURL = chatActions.composer.localAttachmentFileURL(attachment) else {
+                            chatActions.composer.showAttachmentToast(
+                                title: "图片另存为失败",
+                                message: "图片原件不存在或已不可用。",
+                                systemImage: "xmark.circle"
+                            )
+                            return
+                        }
+                        chatActions.run.downloadPreviewImage(
+                            AttachmentPreviewModel(
+                                attachment: attachment,
+                                title: attachment.displayName,
+                                subtitle: "",
+                                body: "",
+                                bodyMode: .image,
+                                sourceFileURL: sourceURL
+                            )
                         )
-                        return
-                    }
-                    chatActions.run.downloadPreviewImage(
-                        AttachmentPreviewModel(
-                            attachment: attachment,
-                            title: attachment.displayName,
-                            subtitle: "",
-                            body: "",
-                            bodyMode: .image,
-                            sourceFileURL: sourceURL
-                        )
-                    )
-                },
-                onShareAttachment: { attachment in
-                    shareAttachment(fileURL: chatActions.composer.localAttachmentFileURL(attachment))
-                },
-                onCopyAssistantMessage: { message in
-                    chatActions.run.copyAssistantMessageToPasteboard(message)
-                },
-                onExportAssistantMessage: { message in
-                    chatActions.run.exportAssistantMessageToFile(message)
-                },
-                onEditNoteBody: noteBodyEditAction(for: message)
-            )
+                    },
+                    onShareAttachment: { attachment in
+                        shareAttachment(fileURL: chatActions.composer.localAttachmentFileURL(attachment))
+                    },
+                    onCopyAssistantMessage: { message in
+                        chatActions.run.copyAssistantMessageToPasteboard(message)
+                    },
+                    onExportAssistantMessage: { message in
+                        chatActions.run.exportAssistantMessageToFile(message)
+                    },
+                    onEditNoteBody: noteBodyEditAction(for: message)
+                )
+            }
         } else if let process = item.process {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 if item.showsAssistantHeader {

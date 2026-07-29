@@ -46,6 +46,7 @@ import ConnorGraphAppSupport
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
     #expect(rows.map(\.turnNumber) == [1, 1, 1, 1])
     #expect(items.compactMap(\.process).isEmpty)
+    #expect(items.filter { $0.message != nil }.map(\.showsAssistantHeader) == [false, true, false, false])
 }
 
 @Test func agentChatPresentationKeepsOnlyMessagesAfterCompletedTurns() {
@@ -61,6 +62,7 @@ import ConnorGraphAppSupport
 
     #expect(items.compactMap(\.process).isEmpty)
     #expect(items.compactMap(\.message).map(\.id) == messages.map(\.id))
+    #expect(items.filter { $0.message != nil }.map(\.showsAssistantHeader) == [false, true, false, false, true])
 }
 
 @Test func agentChatPresentationKeepsPendingProcessInExistingAssistantGroup() {

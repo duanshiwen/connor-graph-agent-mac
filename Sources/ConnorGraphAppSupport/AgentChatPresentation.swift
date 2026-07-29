@@ -317,13 +317,16 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         return "timestamp"
     }
 
-    public static func message(_ message: AgentChatMessagePresentation) -> AgentChatTurnTimelineItem {
+    public static func message(
+        _ message: AgentChatMessagePresentation,
+        showsAssistantHeader: Bool = false
+    ) -> AgentChatTurnTimelineItem {
         AgentChatTurnTimelineItem(
             id: message.id,
             message: message,
             process: nil,
             timestamp: nil,
-            showsAssistantHeader: false
+            showsAssistantHeader: showsAssistantHeader
         )
     }
 
@@ -360,6 +363,10 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         var items: [AgentChatTurnTimelineItem] = []
         var lastTimestampDate: Date?
         for (index, row) in rows.enumerated() {
+            let previousRow = index > 0 ? rows[index - 1] : nil
+            let continuesAssistantGroup = row.message.role == .assistant
+                && previousRow?.message.role == .assistant
+                && previousRow?.turnNumber == row.turnNumber
             if row.message.role == .user,
                shouldInsertTimestamp(
                    for: row.message.createdAt,
@@ -371,9 +378,6 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                 lastTimestampDate = row.message.createdAt
             }
             if isSubmitting, row.message.role == .assistant {
-                let previousRow = index > 0 ? rows[index - 1] : nil
-                let continuesAssistantGroup = previousRow?.message.role == .assistant
-                    && previousRow?.turnNumber == row.turnNumber
                 items.append(.process(
                     AgentChatTurnProcessPresentation(
                         completedAssistant: row,
@@ -384,7 +388,12 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
                     showsAssistantHeader: !continuesAssistantGroup
                 ))
             }
-            items.append(.message(row))
+            items.append(.message(
+                row,
+                showsAssistantHeader: !isSubmitting
+                    && row.message.role == .assistant
+                    && !continuesAssistantGroup
+            ))
         }
         if isSubmitting || preservesOpenProcess {
             let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
