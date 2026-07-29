@@ -18,13 +18,13 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
             tools: request.availableTools.map(Self.agentToolDefinition),
             temperature: 0.2,
             auditContext: AgentLLMRequestAuditContext(
-                requestKind: MemoryOSBackgroundJobKind.isL1KnowledgeKind(request.job.kind) ? .memoryL1Extraction : .memoryBackgroundProcessing,
+                requestKind: Self.requestKind(for: request.job.kind),
                 runID: request.runID,
                 backgroundJobID: request.job.jobID,
                 correlationID: request.runID,
-                operation: "AgentModelBackgroundToolLoopModel.complete",
+                operation: Self.operation(for: request.job.kind),
                 initiator: .background,
-                metadata: ["background_job_kind": request.job.kind]
+                metadata: request.job.metadata.merging(["background_job_kind": request.job.kind]) { current, _ in current }
             )
         )
         let response = try runBlocking { try await provider.complete(agentRequest) }
@@ -49,6 +49,19 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
             toolCalls: response.toolCalls.map(Self.memoryOSToolCall),
             metadata: metadata
         )
+    }
+
+    private static func requestKind(for jobKind: String) -> AgentLLMRequestKind {
+        if MemoryOSBackgroundJobKind.isL1KnowledgeKind(jobKind) { return .memoryL1Extraction }
+        if jobKind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue { return .personalPreferenceCompaction }
+        return .memoryBackgroundProcessing
+    }
+
+    private static func operation(for jobKind: String) -> String {
+        if jobKind == MemoryOSBackgroundJobKind.preferenceCompaction.rawValue {
+            return "MemoryOSPreferenceCompactionWorker.compact"
+        }
+        return "AgentModelBackgroundToolLoopModel.complete"
     }
 
     public static func agentMessage(_ message: MemoryOSBackgroundLoopMessage) -> AgentModelMessage {

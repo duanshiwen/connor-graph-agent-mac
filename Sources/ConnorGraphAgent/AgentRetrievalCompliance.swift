@@ -116,7 +116,7 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         guard !missingToolNames.isEmpty else { return nil }
         let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
         return """
-        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Start `memory_os_get_current_user_profile` at page 1 with the largest `pageSize` allowed by its input Schema (currently 500), then follow every exact non-null `nextPage` with that same pageSize until it returns null. For the other continuity tools, repeat calls when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Start `memory_os_get_current_user_profile` at page 1 using its default compressed view and the largest `pageSize` allowed by its input Schema (currently 500), then follow every exact non-null `nextPage` with that same pageSize and view until it returns null. Never use view=raw merely to satisfy preflight. For the other continuity tools, repeat calls when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
         """
     }
 
@@ -129,7 +129,8 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
               let arguments = try? AgentToolArguments(json: call.argumentsJSON) else {
             return false
         }
-        return (arguments.int("page") ?? 1) == requiredPage
+        let view = arguments.string("view") ?? "compressed"
+        return view == "compressed" && (arguments.int("page") ?? 1) == requiredPage
     }
 
     public func nextRequiredCurrentUserProfilePage(after result: AgentToolResult) -> Int? {
@@ -146,7 +147,7 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
 
     public func currentUserProfileCorrectionInstruction(requiredPage: Int) -> String {
         """
-        Mandatory current-user profile pagination is incomplete. Before any task-specific tool call or final answer, call `memory_os_get_current_user_profile` with `page` set to the exact JSON integer \(requiredPage). Use the largest `pageSize` allowed by its input Schema (currently 500) for an initial page and preserve the pageSize already used when continuing a chain. Continue following each returned exact non-null `nextPage` until `nextPage` is null. Do not skip, guess, repeat, or stop early.
+        Mandatory current-user profile pagination is incomplete. Before any task-specific tool call or final answer, call `memory_os_get_current_user_profile` in compressed view with `page` set to the exact JSON integer \(requiredPage). Use the largest `pageSize` allowed by its input Schema (currently 500) for an initial page and preserve both pageSize and view when continuing a chain. Continue following each returned exact non-null `nextPage` until `nextPage` is null. Do not use view=raw for preflight, skip, guess, repeat, or stop early.
         """
     }
 }

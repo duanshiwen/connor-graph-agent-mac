@@ -1,5 +1,6 @@
 import Foundation
 import ConnorGraphCore
+import ConnorGraphMemory
 import ConnorGraphStore
 
 public enum MemoryOSPersonIdentityConstants {
@@ -112,7 +113,7 @@ public struct MemoryOSPersonIdentityService: Sendable {
         return lines
     }
 
-    public func currentUserProfileHits(store: SQLiteMemoryOSStore) throws -> [MemoryOSRetrievalHit] {
+    public func currentUserProfileHits(store: SQLiteMemoryOSStore, view: MemoryOSCurrentUserProfileView = .compressed) throws -> [MemoryOSRetrievalHit] {
         guard let anchor = try resolveCurrentUserAnchor(store: store) else { return [] }
         let formatter = ISO8601DateFormatter()
         let l4 = try loadEntityStatements(store: store, entityID: anchor.id, limit: nil).map { statement in
@@ -129,7 +130,18 @@ public struct MemoryOSPersonIdentityService: Sendable {
                 metadata: ["updated_at": updatedAt, "effective_updated_at": updatedAt, "confidence": String(statement.confidence), "status": statement.metadata["status"] ?? MemoryOSRecordTemporalStatus.active.rawValue]
             )
         }
-        let l2 = try loadCurrentUserL2Statements(store: store, anchor: anchor, limit: nil).map { statement in
+        let snapshot = view == .compressed ? try MemoryOSPreferenceCompactionStore(store: store).publishedSnapshot() : nil
+        let l2Statements = try loadCurrentUserL2Statements(store: store, anchor: anchor, limit: nil).filter { statement in
+            guard view == .compressed,
+                  let snapshot,
+                  statement.metadata["l2_fact_type"] == "profile_preference"
+            else { return true }
+            if statement.committedAt != snapshot.watermark.committedAt {
+                return statement.committedAt > snapshot.watermark.committedAt
+            }
+            return statement.id > snapshot.watermark.statementID
+        }
+        let l2 = l2Statements.map { statement in
             let updatedAt = formatter.string(from: statement.committedAt)
             return MemoryOSRetrievalHit(
                 layer: .l2,
@@ -143,7 +155,27 @@ public struct MemoryOSPersonIdentityService: Sendable {
                 metadata: ["updated_at": updatedAt, "effective_updated_at": updatedAt, "confidence": String(statement.confidence), "status": statement.metadata["status"] ?? MemoryOSRecordTemporalStatus.active.rawValue]
             )
         }
-        return (l4 + l2).sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
+        let compactedPreference = snapshot.map { snapshot in
+            MemoryOSRetrievalHit(
+                layer: .l2,
+                recordID: snapshot.id,
+                title: "compressed_profile_preferences",
+                summary: snapshot.renderedText,
+                matchedText: snapshot.renderedText,
+                score: 1,
+                evidenceRefs: [],
+                entityRefs: [anchor.id],
+                metadata: [
+                    "updated_at": formatter.string(from: snapshot.publishedAt ?? snapshot.createdAt),
+                    "effective_updated_at": formatter.string(from: snapshot.watermark.committedAt),
+                    "confidence": "1.0",
+                    "status": MemoryOSRecordTemporalStatus.active.rawValue,
+                    "profile_view": MemoryOSCurrentUserProfileView.compressed.rawValue,
+                    "source_record_count": String(snapshot.sourceRecordCount)
+                ]
+            )
+        }
+        return (l4 + (compactedPreference.map { [$0] } ?? []) + l2).sorted(by: SQLiteMemoryOSUnifiedRetrievalService.isOrderedBefore)
     }
 
     private func appendUpdatedAtSuffix(_ text: String, updatedAt: Date) -> String {

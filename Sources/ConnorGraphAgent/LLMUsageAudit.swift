@@ -9,6 +9,7 @@ public enum AgentLLMRequestKind: String, Codable, Sendable, Equatable, CaseItera
     case sessionSummary = "session_summary"
     case sessionTitleGeneration = "session_title_generation"
     case memoryL1Extraction = "memory_l1_extraction"
+    case personalPreferenceCompaction = "personal_preference_compaction"
     case memoryBackgroundProcessing = "memory_background_processing"
     case backgroundAgentToolLoop = "background_agent_tool_loop"
     case cloudKnowledgeGeneration = "cloud_knowledge_generation"
