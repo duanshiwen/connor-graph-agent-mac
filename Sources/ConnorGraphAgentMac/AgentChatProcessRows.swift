@@ -130,13 +130,15 @@ struct AgentChatTurnProcessRow: View {
 
     var body: some View {
         let currentDetail = preparedDetailProcessID == process.id ? preparedDetail : nil
-        let summary = currentDetail?.summary
+        let preparedProcessSummary = currentDetail?.summary
             ?? (preparedSummaryProcessID == process.id ? preparedSummary : nil)
+        let summary = preparedProcessSummary
             ?? fallbackSummary
+        let isLoadingSummary = initialEvents == nil && preparedProcessSummary == nil
         return HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             VStack(alignment: .leading, spacing: 2) {
                 Button(action: { isExpanded.toggle() }) {
-                    activityHeader(summary)
+                    activityHeader(summary, isLoadingSummary: isLoadingSummary)
                 }
                 .buttonStyle(.plain)
                 .onHover { isHovering in
@@ -205,20 +207,20 @@ struct AgentChatTurnProcessRow: View {
             eventCount: initialEvents?.count ?? 0,
             lastEventID: initialEvents?.last?.id
         )) {
-            guard let initialEvents else {
-                if preparedSummaryProcessID != process.id {
-                    preparedSummary = nil
-                    preparedSummaryProcessID = nil
-                }
-                return
+            let events: [AgentEventPresentation]
+            if let initialEvents {
+                events = initialEvents
+            } else {
+                events = await loadEvents()
             }
+            guard !Task.isCancelled else { return }
             do {
                 try await Task.sleep(for: .milliseconds(40))
             } catch {
                 return
             }
             let summaryTask = Task.detached(priority: .utility) {
-                AgentTurnActivitySummaryBuilder().summary(process: process, events: initialEvents)
+                AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
             }
             let summary = await withTaskCancellationHandler {
                 await summaryTask.value
@@ -238,16 +240,19 @@ struct AgentChatTurnProcessRow: View {
         )
     }
 
-    private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
+    private func activityHeader(
+        _ summary: AgentTurnActivitySummaryPresentation,
+        isLoadingSummary: Bool
+    ) -> some View {
         let disclosure = AgentActivityHeaderDisclosurePresentation(
             isExpanded: isExpanded,
             isHovering: isHoveringHeader
         )
         return HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
-            statusIcon(summary.state, color: activityHeaderForegroundColor)
+            statusIcon(summary.state, isLoadingSummary: isLoadingSummary, color: activityHeaderForegroundColor)
                 .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
 
-            activityHeaderTitle(summary)
+            activityHeaderTitle(summary, isLoadingSummary: isLoadingSummary)
 
             if disclosure.showsChevron {
                 Image(systemName: disclosure.systemImage)
@@ -285,8 +290,11 @@ struct AgentChatTurnProcessRow: View {
     }
 
     @ViewBuilder
-    private func activityHeaderTitle(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
-        let title = activityHeaderText(summary)
+    private func activityHeaderTitle(
+        _ summary: AgentTurnActivitySummaryPresentation,
+        isLoadingSummary: Bool
+    ) -> some View {
+        let title = isLoadingSummary ? "读取调用记录…" : activityHeaderText(summary)
         if summary.state == .running {
             AgentRunningActivityShimmerText(text: title, baseColor: activityHeaderForegroundColor)
         } else {
@@ -319,25 +327,36 @@ struct AgentChatTurnProcessRow: View {
     }
 
     @ViewBuilder
-    private func statusIcon(_ state: AgentTurnActivitySummaryState, color: Color) -> some View {
-        switch state {
-        case .running:
+    private func statusIcon(
+        _ state: AgentTurnActivitySummaryState,
+        isLoadingSummary: Bool,
+        color: Color
+    ) -> some View {
+        if isLoadingSummary {
             ProgressView()
                 .controlSize(.small)
                 .fixedSize()
                 .tint(color)
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(color)
-        case .failed:
-            Image(systemName: "xmark.octagon.fill")
-                .foregroundStyle(color)
-        case .cancelled:
-            Image(systemName: "slash.circle.fill")
-                .foregroundStyle(color)
-        case .waitingForPermission:
-            Image(systemName: "lock.fill")
-                .foregroundStyle(color)
+        } else {
+            switch state {
+            case .running:
+                ProgressView()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .tint(color)
+            case .completed:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(color)
+            case .failed:
+                Image(systemName: "xmark.octagon.fill")
+                    .foregroundStyle(color)
+            case .cancelled:
+                Image(systemName: "slash.circle.fill")
+                    .foregroundStyle(color)
+            case .waitingForPermission:
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(color)
+            }
         }
     }
 }
