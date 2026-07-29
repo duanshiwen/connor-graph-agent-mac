@@ -548,7 +548,8 @@ final class AppRuntimeLifecycle {
         self.shellFeatureModel = AppShellFeatureModel()
         self.aiConnectionsModel = AIConnectionsFeatureModel(
             settingsRepository: llmSettingsRepository,
-            setupServiceFactory: llmConnectionSetupServiceFactory
+            setupServiceFactory: llmConnectionSetupServiceFactory,
+            auditRecorder: storagePaths.map { FileLLMUsageAuditStore(storagePaths: $0) }
         )
         if let existingSettings = try? llmSettingsRepository.loadSettings(),
            !existingSettings.connections.isEmpty {
@@ -1911,11 +1912,17 @@ final class AppRuntimeLifecycle {
 
     private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
         let provider = try sessionAgentModelProvider(sessionID: sessionID)
-        return AnyLLMProvider { prompt, _ in
+        return AnyLLMProvider { prompt, context in
+            let requestKind: AgentLLMRequestKind = context.query == "Compress context" ? .contextCompression : .sessionSummary
             let response = try await provider.complete(AgentModelRequest(messages: [
                 AgentModelMessage(role: .system, content: AgentInstructionSection.runtimeConnorInstruction),
                 AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
-            ]))
+            ], auditContext: AgentLLMRequestAuditContext(
+                requestKind: requestKind,
+                sessionID: sessionID,
+                operation: requestKind == .contextCompression ? "ContextCompressionPipeline.compress" : "AgentSessionSummarizer.summarize",
+                initiator: .background
+            )))
             return LLMResponse(text: response.text ?? "", citations: [])
         }
     }
@@ -2429,7 +2436,13 @@ final class AppRuntimeLifecycle {
                 AgentModelMessage(role: .system, content: ChatSessionTitleGenerationPrompt.systemInstruction),
                 AgentModelMessage(role: .user, content: ChatSessionTitleGenerationPrompt.userMessage(prompts))
             ],
-            temperature: 1.0
+            temperature: 1.0,
+            auditContext: AgentLLMRequestAuditContext(
+                requestKind: .sessionTitleGeneration,
+                sessionID: sessionID,
+                operation: "AppRuntimeLifecycle.generateTitleFromUserPrompts",
+                initiator: .background
+            )
         ))
         return sanitizedSessionTitle(response.text ?? "")
     }

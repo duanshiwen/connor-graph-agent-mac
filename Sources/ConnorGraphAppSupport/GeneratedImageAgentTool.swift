@@ -62,7 +62,19 @@ public struct GeneratedImageAgentTool: AgentTool {
         }
 
         var completedArtifact: AgentGeneratedMediaArtifact?
-        for try await event in provider.generateMedia(AgentGeneratedMediaRequest(kind: .image, prompt: prompt)) {
+        for try await event in provider.generateMedia(AgentGeneratedMediaRequest(
+            kind: .image,
+            prompt: prompt,
+            auditContext: AgentLLMRequestAuditContext(
+                requestKind: .generatedMedia,
+                sessionID: context.sessionID,
+                runID: context.runID,
+                correlationID: context.toolCallID,
+                operation: "GeneratedImageAgentTool.execute",
+                initiator: .foreground,
+                metadata: ["tool_name": name]
+            )
+        )) {
             try Task.checkCancellation()
             if case .completed(let artifact) = event { completedArtifact = artifact }
         }

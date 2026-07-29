@@ -193,7 +193,8 @@ public struct ConnorPersonalityGenerator: Sendable {
         try ConnorPersonalitySafetyPolicy.validateRequest(request)
         return try await complete(
             userMessage: ConnorPersonalityGenerationPrompt.userMessage(request),
-            provider: provider
+            provider: provider,
+            requestKind: .personalityGeneration
         )
     }
 
@@ -209,17 +210,23 @@ public struct ConnorPersonalityGenerator: Sendable {
         try ConnorPersonalitySafetyPolicy.validateRequest(request)
         return try await complete(
             userMessage: ConnorPersonalityGenerationPrompt.updateUserMessage(request, mode: mode, current: current),
-            provider: provider
+            provider: provider,
+            requestKind: .personalityUpdate
         )
     }
 
-    private func complete(userMessage: String, provider: AnyAgentModelProvider) async throws -> ConnorPersonalitySettings {
+    private func complete(userMessage: String, provider: AnyAgentModelProvider, requestKind: AgentLLMRequestKind) async throws -> ConnorPersonalitySettings {
         let response = try await provider.complete(AgentModelRequest(
             messages: [
                 AgentModelMessage(role: .system, content: ConnorPersonalityGenerationPrompt.systemInstruction),
                 AgentModelMessage(role: .user, content: userMessage)
             ],
-            temperature: 0.3
+            temperature: 0.3,
+            auditContext: AgentLLMRequestAuditContext(
+                requestKind: requestKind,
+                operation: "ConnorPersonalityGenerator.complete",
+                initiator: .foreground
+            )
         ))
         guard response.finishReason != .contentFilter else {
             throw ConnorPersonalityError.modelSafetyRejected

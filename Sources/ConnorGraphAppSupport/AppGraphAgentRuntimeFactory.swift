@@ -24,6 +24,7 @@ private final class AppGraphAgentRuntimeSharedCache: @unchecked Sendable {
     private let lock = NSLock()
     /// `nil` means not initialized; an empty array caches an unavailable facade.
     private var memoryOSFacades: [AppMemoryOSFacade]?
+    private var llmUsageAuditStore: FileLLMUsageAuditStore?
 
     func memoryOSFacade(build: () -> AppMemoryOSFacade?) -> AppMemoryOSFacade? {
         lock.lock()
@@ -32,6 +33,15 @@ private final class AppGraphAgentRuntimeSharedCache: @unchecked Sendable {
         let facade = build()
         memoryOSFacades = facade.map { [$0] } ?? []
         return facade
+    }
+
+    func auditStore(storagePaths: AppStoragePaths) -> FileLLMUsageAuditStore {
+        lock.lock()
+        defer { lock.unlock() }
+        if let llmUsageAuditStore { return llmUsageAuditStore }
+        let store = FileLLMUsageAuditStore(storagePaths: storagePaths)
+        llmUsageAuditStore = store
+        return store
     }
 }
 
@@ -139,7 +149,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let response = try await intentProvider.complete(AgentModelRequest(
                 messages: [AgentModelMessage(role: .user, content: prompt)],
                 tools: [],
-                temperature: 0
+                temperature: 0,
+                auditContext: AgentLLMRequestAuditContext(
+                    requestKind: .conversationRollingSummary,
+                    sessionID: session.id,
+                    operation: "RollingConversationSummarizer.summarize",
+                    initiator: .background
+                )
             ))
             return LLMResponse(text: response.text ?? "", citations: [])
         }
@@ -223,12 +239,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         let modelProvider = makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
-        let supportsModelManagedProgressUpdates = AgentProgressUpdateCapabilityPolicy
-            .supportsModelManagedProgressUpdates(modelID: modelProvider.modelID)
         var registry = AgentToolRegistry()
-        if supportsModelManagedProgressUpdates {
-            registry.registerShareProgressUpdateTool()
-        }
+        registry.registerShareProgressUpdateTool()
         let environmentStore = environmentProvider.map { _ in AgentEnvironmentSnapshotStore() }
         let governanceConfig = storagePaths.flatMap { try? AppSessionGovernanceConfigRepository(configDirectory: $0.configDirectory).loadOrCreateDefault() } ?? .default
         let sessionRepository = AppChatSessionRepository(store: store, storagePaths: storagePaths)
@@ -377,10 +389,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(SkillListTool(packages: snapshot.packages))
             registry.register(LoadAttachmentContextAgentTool(store: AppSessionAttachmentStore(paths: storagePaths)))
         }
-        let generatedMediaProvider = generatedMediaProviderResolver?(modelProvider)
+        let separateGeneratedMediaProvider = generatedMediaProviderResolver?(modelProvider)
             ?? makeConfiguredGeneratedMediaProvider(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
             ?? makeVerifiedConversationMediaProvider(sessionLLMOverride: sessionLLMOverride)
-            ?? (modelProvider.supportsGeneratedMediaExecution ? modelProvider : nil)
+        let generatedMediaProvider = separateGeneratedMediaProvider.map {
+            auditedProvider(
+                $0,
+                attribution: LLMUsageAuditAttribution(connectionID: sessionLLMOverride?.generatedMediaConnectionID)
+            )
+        } ?? (modelProvider.supportsGeneratedMediaExecution ? modelProvider : nil)
         let generatedImageToolIsAvailable = storagePaths != nil
             && generatedMediaProvider?.supportsGeneratedMediaExecution == true
             && generatedMediaProvider?.capabilities.generatedMediaCapabilities.contains(.imageGeneration) == true
@@ -434,7 +451,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID),
             environmentProvider: environmentProvider,
             environmentStore: environmentStore,
-            automaticallySynthesizesProgressUpdates: supportsModelManagedProgressUpdates
+            automaticallySynthesizesProgressUpdates: true
         )
     }
 
@@ -511,6 +528,24 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     public func makeAgentModelProvider(
+        sessionLLMOverride: SessionLLMOverride? = nil
+    ) -> AnyAgentModelProvider {
+        let provider = makeUnauditedAgentModelProvider(sessionLLMOverride: sessionLLMOverride)
+        let settings = try? settingsRepository.loadSettings()
+        let connection = settings?.connection(id: sessionLLMOverride?.connectionID)
+        let attribution = LLMUsageAuditAttribution(
+            providerMode: sessionLLMOverride?.providerMode ?? connection?.providerMode.rawValue,
+            connectionID: sessionLLMOverride?.connectionID ?? connection?.id
+        )
+        return auditedProvider(provider, attribution: attribution)
+    }
+
+    private func auditedProvider(_ provider: AnyAgentModelProvider, attribution: LLMUsageAuditAttribution) -> AnyAgentModelProvider {
+        guard let storagePaths else { return provider }
+        return AnyAgentModelProvider(AuditedAgentModelProvider(provider: provider, recorder: sharedCache.auditStore(storagePaths: storagePaths), attribution: attribution))
+    }
+
+    private func makeUnauditedAgentModelProvider(
         sessionLLMOverride: SessionLLMOverride? = nil
     ) -> AnyAgentModelProvider {
         do {
@@ -656,46 +691,28 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     public func makeLLMProvider() -> AnyLLMProvider {
-        do {
-            let settings = try settingsRepository.loadSettings()
-            guard let connection = settings.defaultConnection else {
-                return AnyLLMProvider { _, _ in
-                    throw OpenAICompatibleProviderError.missingAPIKey
-                }
+        let provider = makeAgentModelProvider()
+        return AnyLLMProvider { prompt, context in
+            let kind: AgentLLMRequestKind
+            switch context.query {
+            case "Compress context": kind = .contextCompression
+            case "Summarize chat session": kind = .sessionSummary
+            case "Update rolling conversation summary": kind = .conversationRollingSummary
+            default: kind = .unclassified
             }
-            switch connection.providerMode {
-            case .openAIResponses:
-                guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
-                    return AnyLLMProvider { _, _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
-                    }
-                }
-                return AnyLLMProvider(OpenAIResponsesProvider(config: config))
-            case .anthropicMessages:
-                guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
-                    return AnyLLMProvider { _, _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
-                    }
-                }
-                return AnyLLMProvider(AnthropicCompatibleProvider(config: config))
-            case .openAICompatible:
-                if connection.connectionKind == .anthropicCompatible {
-                    guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
-                        return AnyLLMProvider { _, _ in
-                            throw OpenAICompatibleProviderError.missingAPIKey
-                        }
-                    }
-                    return AnyLLMProvider(AnthropicCompatibleProvider(config: config))
-                }
-                guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
-                    return AnyLLMProvider { _, _ in
-                        throw OpenAICompatibleProviderError.missingAPIKey
-                    }
-                }
-                return AnyLLMProvider(OpenAICompatibleProvider(config: config))
-            }
-        } catch {
-            return AnyLLMProvider { _, _ in throw error }
+            let response = try await provider.complete(AgentModelRequest(
+                messages: [
+                    AgentModelMessage(role: .system, content: AgentInstructionSection.runtimeConnorInstruction),
+                    AgentModelMessage(role: .user, content: "Question:\n\(prompt)")
+                ],
+                auditContext: AgentLLMRequestAuditContext(
+                    requestKind: kind,
+                    operation: "AppGraphAgentRuntimeFactory.makeLLMProvider",
+                    initiator: .background,
+                    metadata: ["context_query": context.query]
+                )
+            ))
+            return LLMResponse(text: response.text ?? "", citations: [])
         }
     }
 

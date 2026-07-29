@@ -16,7 +16,16 @@ public struct AgentModelBackgroundToolLoopModel: MemoryOSBackgroundToolLoopModel
         let agentRequest = AgentModelRequest(
             messages: request.messages.map(Self.agentMessage),
             tools: request.availableTools.map(Self.agentToolDefinition),
-            temperature: 0.2
+            temperature: 0.2,
+            auditContext: AgentLLMRequestAuditContext(
+                requestKind: MemoryOSBackgroundJobKind.isL1KnowledgeKind(request.job.kind) ? .memoryL1Extraction : .memoryBackgroundProcessing,
+                runID: request.runID,
+                backgroundJobID: request.job.jobID,
+                correlationID: request.runID,
+                operation: "AgentModelBackgroundToolLoopModel.complete",
+                initiator: .background,
+                metadata: ["background_job_kind": request.job.kind]
+            )
         )
         let response = try runBlocking { try await provider.complete(agentRequest) }
         var metadata: [String: String] = [

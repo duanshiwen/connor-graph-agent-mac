@@ -82,7 +82,12 @@ public struct MemoryOSUserIntentNormalizer: MemoryOSUserIntentNormalizing, Senda
                 AgentModelMessage(role: .user, content: Self.inputJSON(segments))
             ],
             tools: [Self.outputTool],
-            temperature: 0
+            temperature: 0,
+            auditContext: AgentLLMRequestAuditContext(
+                requestKind: .conversationIntentNormalization,
+                operation: "MemoryOSUserIntentNormalizer.normalize",
+                initiator: .system
+            )
         )
         let response = try await completeWithTimeout(request)
         let rawJSON = response.toolCalls.first(where: { $0.name == Self.toolName })?.argumentsJSON
