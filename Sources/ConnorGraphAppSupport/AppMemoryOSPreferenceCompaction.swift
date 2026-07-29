@@ -78,14 +78,22 @@ public extension AppMemoryOSFacade {
     ) throws -> MemoryOSPreferenceCompactionSnapshot {
         let validatedOutput = try MemoryOSPreferenceCompactionValidator().decodeAndValidate(rawJSON: rawOutput, draft: draft)
         let previousItemsByKey = Dictionary(uniqueKeysWithValues: draft.previousProfile.items.map { ($0.key, $0) })
-        var output = validatedOutput
-        output.items = output.items.map { item in
-            guard let previous = previousItemsByKey[item.key] else { return item }
+        var mergedItemsByKey = previousItemsByKey
+        for item in validatedOutput.items {
+            guard let previous = previousItemsByKey[item.key] else {
+                mergedItemsByKey[item.key] = item
+                continue
+            }
             var merged = item
             merged.supportingRecordIDs = Array(Set(previous.supportingRecordIDs + item.supportingRecordIDs)).sorted()
             merged.supersededRecordIDs = Array(Set(previous.supersededRecordIDs + item.supersededRecordIDs)).sorted()
-            return merged
+            mergedItemsByKey[item.key] = merged
         }
+        let output = MemoryOSPreferenceCompactionOutput(
+            items: mergedItemsByKey.values.sorted { $0.key < $1.key },
+            sourceDispositions: validatedOutput.sourceDispositions,
+            retiredItemKeys: []
+        )
         let rendered = MemoryOSPreferenceCompactionRenderer.render(output)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

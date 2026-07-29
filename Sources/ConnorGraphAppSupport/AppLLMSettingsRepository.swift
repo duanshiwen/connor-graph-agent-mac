@@ -422,7 +422,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
 
     /// CLI 环境专用的 settingsRepository，使用正确的 suite name 访问应用的 LLM 配置
     public static func cliRepository() -> AppLLMSettingsRepository {
-        let appDomain = Bundle.main.bundleIdentifier ?? "com.shiwen.connor-graph-agent-mac"
+        let appDomain = "com.shiwen.connor-graph-agent-mac"
         let suite = UserDefaults(suiteName: appDomain) ?? .standard
         let settingsStore = UserDefaultsLLMSettingsStore(userDefaults: suite)
         return AppLLMSettingsRepository(settingsStore: settingsStore)
