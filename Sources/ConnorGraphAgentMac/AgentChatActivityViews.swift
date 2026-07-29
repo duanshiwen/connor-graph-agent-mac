@@ -62,17 +62,66 @@ struct AgentEventTimelineView: View {
 }
 
 struct AgentChatSessionLoadingView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var startedAt = Date()
+
     var body: some View {
-        VStack(spacing: AgentChatLayout.spaceM) {
-            ProgressView()
-                .controlSize(.regular)
-            Text("正在加载会话…")
-                .font(AgentChatTypography.callout)
-                .foregroundStyle(.secondary)
+        if reduceMotion {
+            loadingIcon(lightProgress: nil)
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                loadingIcon(
+                    lightProgress: AgentChatLoadingLightEffect.progress(
+                        elapsed: context.date.timeIntervalSince(startedAt)
+                    )
+                )
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("正在加载会话")
+    }
+
+    private func loadingIcon(lightProgress: Double?) -> some View {
+        let icon = Image("ConnorAvatar")
+            .resizable()
+            .scaledToFit()
+        return icon
+            .opacity(0.62)
+            .overlay {
+                if let lightProgress {
+                    GeometryReader { geometry in
+                        let highlightWidth = max(24, geometry.size.width * 0.34)
+                        LinearGradient(
+                            colors: [
+                                .clear,
+                                Color.white.opacity(0.18),
+                                Color.white.opacity(0.92),
+                                ConnorCraftPalette.accent.opacity(0.28),
+                                .clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: highlightWidth)
+                        .offset(
+                            x: -highlightWidth
+                                + CGFloat(lightProgress) * (geometry.size.width + highlightWidth)
+                        )
+                    }
+                    .mask(icon)
+                }
+            }
+            .frame(width: 72, height: 72)
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("正在加载会话数据")
+    }
+}
+
+enum AgentChatLoadingLightEffect {
+    static let cycleDuration: TimeInterval = 3.6
+
+    static func progress(elapsed: TimeInterval) -> Double {
+        max(0, elapsed).truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
     }
 }
 

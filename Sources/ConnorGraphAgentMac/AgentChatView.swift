@@ -942,13 +942,16 @@ private struct AgentChatConversationView: View {
                             )
                         }
                     ) { chatItem in
-                        if let item = chatItem.timelineItem {
-                            chatTimelineRow(item, latestProcessID: latestProcessID)
-                        } else if let unreadMarker = chatItem.unreadMarker {
-                            AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
-                        } else if let dateSeparator = chatItem.dateSeparator {
-                            AgentChatDateSeparatorRow(title: dateSeparator.title)
+                        Group {
+                            if let item = chatItem.timelineItem {
+                                chatTimelineRow(item, latestProcessID: latestProcessID)
+                            } else if let unreadMarker = chatItem.unreadMarker {
+                                AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
+                            } else if let dateSeparator = chatItem.dateSeparator {
+                                AgentChatDateSeparatorRow(title: dateSeparator.title)
+                            }
                         }
+                        .padding(.top, spacingAdjustment(for: chatItem.spacingBefore))
                     }
                 }
             }
@@ -1033,6 +1036,17 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
+    }
+
+    private func spacingAdjustment(for spacing: CommercialChatItemSpacing) -> CGFloat {
+        switch spacing {
+        case .standard:
+            return 0
+        case .assistantContinuation:
+            return AgentChatLayout.assistantGroupSpacing - AgentChatLayout.chatViewportSpacing
+        case .conversationBoundary:
+            return AgentChatLayout.conversationTurnSpacing - AgentChatLayout.chatViewportSpacing
+        }
     }
 }
 

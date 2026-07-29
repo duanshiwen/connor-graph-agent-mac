@@ -149,6 +149,8 @@ enum AgentChatLayout {
 
     static let chatContentMaxWidth: CGFloat = 740
     static let chatViewportSpacing: CGFloat = 16
+    static let assistantGroupSpacing: CGFloat = 8
+    static let conversationTurnSpacing: CGFloat = 20
     static let chatViewportVerticalInset: CGFloat = 20
     static let chatViewportHorizontalInset: CGFloat = 0
     static let chatBottomPinnedThreshold: CGFloat = 8
