@@ -179,6 +179,7 @@ struct AgentChatMessageRow: View {
     @State private var isMessageExpanded = false
     @State private var isNoteEditorPresented = false
     @State private var noteEditorDraft = ""
+    @State private var isHoveringAssistantMessage = false
 
     @AppStorage(AgentChatFontPreferences.messageBodyPointSizeKey)
     private var preferredMessageBodyPointSize = AgentChatFontPreferences.defaultMessageBodyPointSize
@@ -190,6 +191,15 @@ struct AgentChatMessageRow: View {
     }
     private var messageBodyFont: Font {
         AgentChatTypography.messageBody(pointSize: messageBodyPointSize)
+    }
+    private var messageContainerHorizontalPadding: CGFloat {
+        isUser || isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding : 0
+    }
+    private var messageContainerVerticalPadding: CGFloat {
+        isUser || isNoteBody ? AgentChatLayout.messageBubbleVerticalPadding : 0
+    }
+    private var assistantActionsLeadingPadding: CGFloat {
+        isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding + 1 : 0
     }
     private var assistantActionsPresentation: AgentAssistantMessageActionsPresentation {
         AgentAssistantMessageActionsPresentation(message: row.message)
@@ -242,13 +252,10 @@ struct AgentChatMessageRow: View {
                             onShare: onShareAttachment
                         )
                     }
-                    if isUser, assistantExpansionPresentation.isAvailable {
-                        messageExpansionControl
-                    }
                 }
                 .foregroundStyle(Color.primary)
-                .padding(.horizontal, AgentChatLayout.messageBubbleHorizontalPadding)
-                .padding(.vertical, AgentChatLayout.messageBubbleVerticalPadding)
+                .padding(.horizontal, messageContainerHorizontalPadding)
+                .padding(.vertical, messageContainerVerticalPadding)
                 .frame(maxWidth: usesTrailingUserLayout ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
                 .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
                 .overlay(
@@ -256,17 +263,32 @@ struct AgentChatMessageRow: View {
                         .stroke(messageBorder, lineWidth: 1)
                 )
 
-                if assistantActionsPresentation.showsActions {
-                    AgentAssistantMessageActionsView(
-                        presentation: assistantActionsPresentation,
-                        expansionPresentation: assistantExpansionPresentation,
-                        onToggleExpansion: toggleMessageExpansion,
-                        onCopy: { onCopyAssistantMessage(row) },
-                        onExport: { onExportAssistantMessage(row) }
-                    )
-                    .padding(.leading, AgentChatLayout.messageBubbleHorizontalPadding + 1)
+                if isNoteBody, assistantActionsPresentation.showsActions {
+                    assistantActions
+                        .padding(.leading, assistantActionsLeadingPadding)
+                }
+                if isUser, assistantExpansionPresentation.isAvailable {
+                    assistantActions
+                        .frame(maxWidth: AgentChatLayout.userMessageMaxWidth, alignment: .trailing)
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                if !isNoteBody, assistantActionsPresentation.showsActions {
+                    assistantActions
+                        .opacity(isHoveringAssistantMessage ? 1 : 0)
+                        .allowsHitTesting(isHoveringAssistantMessage)
+                        .accessibilityHidden(!isHoveringAssistantMessage)
+                        .offset(y: AgentChatLayout.chatViewportSpacing - 2)
+                        .transition(.opacity)
+                }
+            }
+            .onHover { isHovering in
+                guard !isNoteBody, !isUser else { return }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHoveringAssistantMessage = isHovering
+                }
+            }
+            .zIndex(isHoveringAssistantMessage ? 1 : 0)
         }
         .frame(maxWidth: .infinity, alignment: usesTrailingUserLayout ? .trailing : .leading)
         .sheet(isPresented: $isNoteEditorPresented) {
@@ -281,6 +303,16 @@ struct AgentChatMessageRow: View {
                 onSaved: { isNoteEditorPresented = false }
             )
         }
+    }
+
+    private var assistantActions: some View {
+        AgentAssistantMessageActionsView(
+            presentation: assistantActionsPresentation,
+            expansionPresentation: assistantExpansionPresentation,
+            onToggleExpansion: toggleMessageExpansion,
+            onCopy: { onCopyAssistantMessage(row) },
+            onExport: { onExportAssistantMessage(row) }
+        )
     }
 
     private var noteBodyHeader: some View {
@@ -371,43 +403,15 @@ struct AgentChatMessageRow: View {
         }
     }
 
-    private var messageExpansionControl: some View {
-        Button(action: toggleMessageExpansion) {
-            HStack(spacing: 7) {
-                Image(systemName: assistantExpansionPresentation.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                Text(assistantExpansionPresentation.title)
-                    .font(AgentChatTypography.metaEmphasis)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 10)
-            .frame(minHeight: 32)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.09))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.accentColor.opacity(0.20), lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(assistantExpansionPresentation.accessibilityLabel)
-        .help(assistantExpansionPresentation.help)
-    }
-
     private var messageBackground: Color {
         if isNoteBody { return Color(nsColor: .textBackgroundColor).opacity(0.72) }
         if isUser { return ConnorCraftPalette.userBubble }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+        return .clear
     }
 
     private var messageBorder: Color {
         if isNoteBody { return ConnorCraftPalette.accent.opacity(0.20) }
-        return isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity)
+        return .clear
     }
 }
 
