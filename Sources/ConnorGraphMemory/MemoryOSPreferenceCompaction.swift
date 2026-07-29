@@ -197,10 +197,9 @@ public struct MemoryOSPreferenceCompactionValidator: Sendable {
             throw MemoryOSPreferenceCompactionValidationError.duplicateItemKey(duplicate)
         }
         for item in output.items {
-            let isRetainedPreviousItem = draft.previousProfile.items.contains { $0.key == item.key }
             guard !item.key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !item.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  isRetainedPreviousItem || !(item.supportingRecordIDs + item.supersededRecordIDs).isEmpty
+                  !(item.supportingRecordIDs + item.supersededRecordIDs).isEmpty
             else { throw MemoryOSPreferenceCompactionValidationError.emptyItem(item.key) }
         }
 
@@ -217,20 +216,12 @@ public struct MemoryOSPreferenceCompactionValidator: Sendable {
             throw MemoryOSPreferenceCompactionValidationError.unknownSourceRecord(unknown)
         }
 
-        let previousIDs = Set(draft.previousProfile.items.flatMap { $0.supportingRecordIDs + $0.supersededRecordIDs })
-        let knownIDs = newIDs.union(previousIDs)
-        for id in output.items.flatMap({ $0.supportingRecordIDs + $0.supersededRecordIDs }) where !knownIDs.contains(id) {
+        for id in output.items.flatMap({ $0.supportingRecordIDs + $0.supersededRecordIDs }) where !newIDs.contains(id) {
             throw MemoryOSPreferenceCompactionValidationError.unknownSourceRecord(id)
         }
 
-        let previousKeys = Set(draft.previousProfile.items.map(\.key))
-        let retainedKeys = Set(outputKeys)
-        let retiredKeys = Set(output.retiredItemKeys)
-        for key in retiredKeys where !previousKeys.contains(key) {
+        if let key = output.retiredItemKeys.first {
             throw MemoryOSPreferenceCompactionValidationError.unknownRetiredItem(key)
-        }
-        for key in previousKeys where !retainedKeys.contains(key) && !retiredKeys.contains(key) {
-            throw MemoryOSPreferenceCompactionValidationError.missingPreviousItemDisposition(key)
         }
     }
 
@@ -273,20 +264,9 @@ public struct MemoryOSPreferenceCompactionWorker<Executor: MemoryOSBackgroundMod
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
-        let promptProfile = MemoryOSPreferenceCompactionOutput(
-            items: draft.previousProfile.items.map { item in
-                var compactItem = item
-                compactItem.supportingRecordIDs = []
-                compactItem.supersededRecordIDs = []
-                return compactItem
-            },
-            sourceDispositions: [],
-            retiredItemKeys: []
-        )
-        let previous = String(decoding: try encoder.encode(promptProfile), as: UTF8.self)
         let records = String(decoding: try encoder.encode(draft.records), as: UTF8.self)
         return """
-        Compact the current user's preference memory into one canonical structured profile.
+        Compact this independent batch of the current user's preference records into canonical structured items.
 
         Requirements:
         - Preserve every operationally meaningful preference, constraint, scope, exception, exact number, date, name, path, URL, language choice, and explicit negation.
@@ -294,9 +274,10 @@ public struct MemoryOSPreferenceCompactionWorker<Executor: MemoryOSBackgroundMod
         - A newer record supersedes an older preference only when it explicitly denies, replaces, or is incompatible in the same scope. Different scopes may coexist.
         - Explicit user statements outrank behavioral inferences. Do not invent preferences.
         - Keep statements concise without changing their meaning.
+        - Choose stable semantic keys that can be reused by independently processed batches. The runtime merges items with identical keys.
         - Every new source record must appear exactly once in sourceDispositions.
-        - Every previous item key must either remain in items or appear in retiredItemKeys.
-        - New or changed items must cite real IDs from the new records. Unchanged previous items may keep both source ID arrays empty; the runtime restores their historical provenance after validation.
+        - Every item must cite real IDs from this batch. Do not cite or infer records outside this batch.
+        - Always return an empty retiredItemKeys array. The runtime owns previously published items and merges this batch without sending them to the model.
         - Return only one JSON object. Do not use Markdown fences and do not add commentary.
 
         Output schema:
@@ -320,10 +301,7 @@ public struct MemoryOSPreferenceCompactionWorker<Executor: MemoryOSBackgroundMod
           "retiredItemKeys": []
         }
 
-        Previous canonical profile:
-        \(previous)
-
-        New immutable preference records, in chronological order:
+        Immutable preference records for this batch, in chronological order:
         \(records)
         """
     }

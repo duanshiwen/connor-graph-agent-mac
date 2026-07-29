@@ -89,12 +89,106 @@ import ConnorGraphAppSupport
     }
 }
 
+@Test func preferenceCompactionPromptDoesNotIncludePreviousCanonicalProfile() throws {
+    let previousMarker = "PREVIOUS_PROFILE_MUST_NOT_REENTER_THE_PROMPT"
+    let record = MemoryOSPreferenceCompactionSourceRecord(
+        id: "source-new",
+        statement: "Use direct replies",
+        predicate: "PREFERS",
+        confidence: 0.9,
+        committedAt: Date(timeIntervalSince1970: 600_000)
+    )
+    let draft = MemoryOSPreferenceCompactionJobDraft(
+        baseSnapshotID: "snapshot-previous",
+        previousProfile: .init(
+            items: [.init(key: "previous.item", statement: previousMarker, supportingRecordIDs: ["source-old"])],
+            sourceDispositions: []
+        ),
+        previousSourceRecordCount: 1,
+        records: [record],
+        targetWatermark: .init(committedAt: record.committedAt, statementID: record.id)
+    )
+    let executor = CapturingPreferenceCompactionExecutor()
+
+    _ = try MemoryOSPreferenceCompactionWorker(executor: executor).run(draft)
+
+    let prompt = try #require(executor.lastRequest?.prompt)
+    #expect(prompt.contains(record.statement))
+    #expect(!prompt.contains(previousMarker))
+    #expect(!prompt.contains("Previous canonical profile"))
+}
+
+@Test func preferenceCompactionRuntimeMergesIndependentBatchWithPublishedProfile() throws {
+    let (store, facade) = try preferenceTestRuntime()
+    let start = Date(timeIntervalSince1970: 700_000)
+    try insertPreference(index: 0, at: start, store: store)
+    try insertPreference(index: 1, at: start.addingTimeInterval(1), store: store)
+    let records = try MemoryOSPreferenceCompactionStore(store: store).preferenceRecords()
+    let first = try #require(records.first)
+    let second = try #require(records.last)
+    let firstDraft = MemoryOSPreferenceCompactionJobDraft(
+        records: [first],
+        targetWatermark: .init(committedAt: first.committedAt, statementID: first.id)
+    )
+    let firstOutput = MemoryOSPreferenceCompactionOutput(
+        items: [
+            .init(key: "communication.style", statement: "Prefer concise replies.", supportingRecordIDs: [first.id]),
+            .init(key: "visual.style", statement: "Prefer bright visuals.", supportingRecordIDs: [first.id])
+        ],
+        sourceDispositions: [.init(recordID: first.id, action: .active, itemKey: "communication.style")]
+    )
+    let firstSnapshot = try facade.publishPreferenceCompaction(
+        draft: firstDraft,
+        rawOutput: encoded(firstOutput),
+        modelID: "test-model",
+        now: start.addingTimeInterval(2)
+    )
+    let secondDraft = MemoryOSPreferenceCompactionJobDraft(
+        baseSnapshotID: firstSnapshot.id,
+        previousProfile: firstSnapshot.profile,
+        previousSourceRecordCount: firstSnapshot.sourceRecordCount,
+        records: [second],
+        targetWatermark: .init(committedAt: second.committedAt, statementID: second.id)
+    )
+    let secondOutput = MemoryOSPreferenceCompactionOutput(
+        items: [.init(key: "communication.style", statement: "Prefer direct, concise replies.", supportingRecordIDs: [second.id])],
+        sourceDispositions: [.init(recordID: second.id, action: .merged, itemKey: "communication.style")]
+    )
+
+    let merged = try facade.publishPreferenceCompaction(
+        draft: secondDraft,
+        rawOutput: encoded(secondOutput),
+        modelID: "test-model",
+        now: start.addingTimeInterval(3)
+    )
+
+    #expect(merged.profile.items.map(\.key).sorted() == ["communication.style", "visual.style"])
+    let communication = try #require(merged.profile.items.first { $0.key == "communication.style" })
+    #expect(communication.statement == "Prefer direct, concise replies.")
+    #expect(Set(communication.supportingRecordIDs) == Set([first.id, second.id]))
+    #expect(merged.sourceRecordCount == 2)
+}
+
 private final class PreferenceCompactionTestExecutor: MemoryOSBackgroundModelExecutor, @unchecked Sendable {
     func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
         let sourceIDs = request.sourceRecordIDs
         let output = MemoryOSPreferenceCompactionOutput(
             items: [.init(key: "test.preference", statement: "The user has recorded test preferences.", supportingRecordIDs: sourceIDs)],
             sourceDispositions: sourceIDs.map { .init(recordID: $0, action: .merged, itemKey: "test.preference") }
+        )
+        return MemoryOSBackgroundModelResponse(rawArtifactJSON: encoded(output), metadata: ["model_id": "test-model"])
+    }
+}
+
+private final class CapturingPreferenceCompactionExecutor: MemoryOSBackgroundModelExecutor, @unchecked Sendable {
+    var lastRequest: MemoryOSBackgroundModelRequest?
+
+    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
+        lastRequest = request
+        let sourceIDs = request.sourceRecordIDs
+        let output = MemoryOSPreferenceCompactionOutput(
+            items: [.init(key: "communication.directness", statement: "Use direct replies.", supportingRecordIDs: sourceIDs)],
+            sourceDispositions: sourceIDs.map { .init(recordID: $0, action: .active, itemKey: "communication.directness") }
         )
         return MemoryOSBackgroundModelResponse(rawArtifactJSON: encoded(output), metadata: ["model_id": "test-model"])
     }
