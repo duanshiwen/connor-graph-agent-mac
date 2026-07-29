@@ -507,10 +507,10 @@ public struct NativeWebSearchTool: AgentTool {
 
 public struct NativeImageSearchTool: AgentTool {
     public let name = "image_search"
-    public let description = "Search Openverse and Wikimedia Commons for existing, source-attributed images. Write englishQuery as concise English search terms, translating the user's visual intent while preserving proper names. Returns candidates, per-provider availability reasons, explicit retry guidance, and a text-only fallback when image services cannot be reached. Images remain optional and must not block an otherwise complete answer."
+    public let description = "Search Openverse and Wikimedia Commons for existing, source-attributed images. Submit exactly one concise English search phrase per call, translating the user's visual intent while preserving proper names. Choose the single best query; never pack alternative queries into englishQuery; never issue multiple image_search calls in parallel. Returns candidates, per-provider availability reasons, explicit retry guidance, and a text-only fallback when image services cannot be reached. Images remain optional and must not block an otherwise complete answer."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "englishQuery": .string(description: "Required concise English image-search keywords. Translate non-English requests before calling; preserve proper names and add an established English entity name when useful."),
+        "englishQuery": .string(description: "Exactly one concise English image-search phrase. Translate non-English requests, preserve proper names, and add an established English entity name when useful. Do not provide a list or alternatives separated by commas, semicolons, slashes, newlines, or OR."),
         "maxResults": .integer(description: "Maximum number of candidates, 1-10. Defaults to 5."),
         "licenseFilter": .stringEnumeration(values: ["all", "commercial", "modification"], description: "Optional reuse filter. Defaults to all.")
     ], required: ["englishQuery"])

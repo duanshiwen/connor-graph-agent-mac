@@ -234,16 +234,16 @@ struct AgentMarkdownPreviewText: View {
                 Text(statusText)
                     .font(secondaryFont)
                     .foregroundStyle(.secondary)
-                if showsExpansionControl {
-                    Spacer(minLength: 4)
-                    Button(action: expandFullContent) {
-                        Label("展开完整内容", systemImage: "chevron.down")
-                    }
-                    .buttonStyle(.borderless)
-                    .font(secondaryFont.weight(.medium))
-                    .help("加载并显示完整 Markdown 内容")
-                    .accessibilityLabel("展开并显示完整文件内容")
-                }
+            }
+            if showsExpansionControl {
+                AgentMessageExpansionButton(
+                    title: "展开完整内容",
+                    systemImage: "chevron.down",
+                    accessibilityLabel: "展开并显示完整文件内容",
+                    help: "加载并显示完整 Markdown 内容",
+                    action: expandFullContent
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
