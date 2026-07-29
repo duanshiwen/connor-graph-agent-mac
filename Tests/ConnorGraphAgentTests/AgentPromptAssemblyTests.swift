@@ -698,6 +698,12 @@ import ConnorGraphAgent
     #expect(prompt.contains("strongly prefer one bounded image search"))
     #expect(prompt.contains("not a quota or completion requirement"))
     #expect(prompt.contains("never delay, weaken, or block an otherwise complete answer"))
+    #expect(prompt.contains("concise English keywords in `englishQuery`"))
+    #expect(prompt.contains("Follow the returned `retryAdvice` exactly"))
+    #expect(prompt.contains("never repeat the call during the current run for `retry_later` or `do_not_retry`"))
+    #expect(prompt.contains("Openverse and Wikimedia Commons may both be unreachable"))
+    #expect(prompt.contains("`fallbackAction: continue_without_image`"))
+    #expect(prompt.contains("continue the user's task with a complete text response"))
     #expect(prompt.contains("prefer existing source-grounded images"))
     #expect(prompt.contains("pass its exact `imageURL` to `present_image` in the same run"))
     #expect(prompt.contains("continue without an image rather than forcing one"))
@@ -708,6 +714,15 @@ import ConnorGraphAgent
     #expect(prompt.contains("distribute them beside their relevant sections"))
     #expect(prompt.contains("Skip images for routine coding changes"))
     #expect(prompt.contains("Never invent an image path"))
+}
+
+@Test func defaultSystemPromptClassifiesUnavailableToolRetries() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("read and preserve the concrete failure reason"))
+    #expect(prompt.contains("`retry_later` means do not call the tool again in the current run"))
+    #expect(prompt.contains("`do_not_retry` means another call cannot help"))
+    #expect(prompt.contains("An unavailable or unregistered tool cannot be retried in the current run"))
 }
 
 @Test func defaultSystemPromptRecommendsNaturalConversationalProgressUpdates() {

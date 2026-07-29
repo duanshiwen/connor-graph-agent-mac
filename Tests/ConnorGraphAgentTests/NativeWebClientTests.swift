@@ -177,7 +177,7 @@ struct NativeWebClientTests {
 
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
-                "query": .string("Golden Gate Bridge"),
+                "englishQuery": .string("Golden Gate Bridge"),
                 "maxResults": .int(3),
                 "licenseFilter": .string("commercial")
             ]),
@@ -189,11 +189,86 @@ struct NativeWebClientTests {
         let data = try #require(result.contentJSON?.data(using: String.Encoding.utf8))
         let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(payload["provider"] as? String == "openverse")
+        #expect(payload["queryLanguage"] as? String == "en")
+        #expect(payload["retryAdvice"] as? String == "not_needed")
+        #expect(payload["fallbackAction"] as? String == "use_candidates_if_relevant")
         #expect(payload["licenseFilter"] as? String == "commercial")
+        let providers = try #require(payload["providers"] as? [[String: Any]])
+        #expect(providers.count == 2)
+        #expect(providers[0]["provider"] as? String == "openverse")
+        #expect(providers[1]["provider"] as? String == "wikimedia_commons")
         let candidates = try #require(payload["results"] as? [[String: Any]])
         #expect(candidates.count == 1)
         #expect(candidates[0]["imageURL"] as? String == "https://images.example.com/golden-gate.jpg")
         #expect(candidates[0]["sourcePageURL"] as? String == "https://source.example.com/golden-gate")
+    }
+
+    @Test func imageSearchToolAdvertisesEnglishQueryAndNormalizesLegacyArguments() async throws {
+        let tool = NativeImageSearchTool(client: NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON))))
+        let schema = tool.inputSchema.jsonObject
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let required = try #require(schema["required"] as? [String])
+
+        #expect(properties["englishQuery"] != nil)
+        #expect(properties["query"] == nil)
+        #expect(required == ["englishQuery"])
+
+        let normalized = tool.normalizeLegacyArguments(AgentToolArguments(values: [
+            "query": .string("West Lake Hangzhou"),
+            "max_results": .int(4),
+            "license_filter": .string("commercial")
+        ]))
+        #expect(normalized.string("englishQuery") == "West Lake Hangzhou")
+        #expect(normalized.int("maxResults") == 4)
+        #expect(normalized.string("licenseFilter") == "commercial")
+        #expect(normalized.values["query"] == nil)
+
+        var registry = AgentToolRegistry()
+        registry.register(tool)
+        let legacyResult = try await registry.execute(
+            AgentToolCall(name: "image_search", argumentsJSON: #"{"query":"West Lake Hangzhou","max_results":4}"#),
+            context: AgentToolExecutionContext(
+                runID: "run-image-legacy",
+                sessionID: "session-image-legacy",
+                groupID: "default",
+                userPrompt: "Find an image",
+                toolCallID: "call-image-legacy",
+                policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+            )
+        )
+        #expect(legacyResult.contentJSON?.contains("West Lake Hangzhou") == true)
+    }
+
+    @Test func imageSearchToolReturnsTextOnlyFallbackWhenProvidersAreInaccessible() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(errorsByHost: [
+            "api.openverse.org": URLError(.cannotConnectToHost),
+            "commons.wikimedia.org": URLError(.timedOut)
+        ]))
+        let tool = NativeImageSearchTool(client: client)
+        let context = AgentToolExecutionContext(
+            runID: "run-image-fallback",
+            sessionID: "session-image-fallback",
+            groupID: "default",
+            userPrompt: "Find an image",
+            toolCallID: "call-image-fallback",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: ["englishQuery": .string("West Lake Hangzhou")]),
+            context: context
+        )
+
+        #expect(result.error != nil)
+        #expect(result.contentText.contains("currently unreachable or temporarily unavailable"))
+        #expect(result.contentText.contains("Do not retry image_search again in this run"))
+        #expect(result.contentText.contains("Continue the user's task without image search or an inserted image"))
+        let data = try #require(result.contentJSON?.data(using: .utf8))
+        let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(payload["retryAdvice"] as? String == "retry_later")
+        #expect(payload["fallbackAction"] as? String == "continue_without_image")
+        let providers = try #require(payload["providers"] as? [[String: Any]])
+        #expect(providers.allSatisfy { ($0["reason"] as? String)?.contains("Network request failed") == true })
     }
 }
 

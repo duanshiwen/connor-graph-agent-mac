@@ -507,13 +507,13 @@ public struct NativeWebSearchTool: AgentTool {
 
 public struct NativeImageSearchTool: AgentTool {
     public let name = "image_search"
-    public let description = "Search the public internet for existing, source-attributed images through Openverse. Returns direct image URLs plus original source pages, creators, and license details. For a visually grounded task where seeing the real subject would materially improve the answer, strongly prefer one bounded search and call present_image when a clearly relevant candidate is found. This remains optional and must not block an otherwise complete answer."
+    public let description = "Search Openverse and Wikimedia Commons for existing, source-attributed images. Write englishQuery as concise English search terms, translating the user's visual intent while preserving proper names. Returns candidates, per-provider availability reasons, explicit retry guidance, and a text-only fallback when image services cannot be reached. Images remain optional and must not block an otherwise complete answer."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.closedObject(properties: [
-        "query": .string(description: "Focused image search keywords describing the real subject or visual evidence needed. Preserve proper names; concise English keywords often improve recall for globally catalogued subjects."),
+        "englishQuery": .string(description: "Required concise English image-search keywords. Translate non-English requests before calling; preserve proper names and add an established English entity name when useful."),
         "maxResults": .integer(description: "Maximum number of candidates, 1-10. Defaults to 5."),
         "licenseFilter": .stringEnumeration(values: ["all", "commercial", "modification"], description: "Optional reuse filter. Defaults to all.")
-    ], required: ["query"])
+    ], required: ["englishQuery"])
 
     private let client: NativeImageSearchClient
 
@@ -521,24 +521,44 @@ public struct NativeImageSearchTool: AgentTool {
         self.client = client
     }
 
+    public func normalizeLegacyArguments(_ arguments: AgentToolArguments) -> AgentToolArguments {
+        arguments.normalizingAliases([
+            "englishQuery": ["query", "q", "keywords", "searchQuery"],
+            "maxResults": ["max_results", "limit"],
+            "licenseFilter": ["license_filter"]
+        ])
+    }
+
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let query = arguments.string("query"), !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AgentToolError.invalidArguments("image_search requires query")
+        guard let englishQuery = arguments.string("englishQuery"), !englishQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("image_search requires englishQuery with concise English search terms")
         }
-        let maxResults = min(max(arguments.int("maxResults") ?? arguments.int("max_results") ?? 5, 1), 10)
-        let rawFilter = arguments.string("licenseFilter") ?? arguments.string("license_filter") ?? NativeImageSearchLicenseFilter.all.rawValue
+        let maxResults = min(max(arguments.int("maxResults") ?? 5, 1), 10)
+        let rawFilter = arguments.string("licenseFilter") ?? NativeImageSearchLicenseFilter.all.rawValue
         guard let licenseFilter = NativeImageSearchLicenseFilter(rawValue: rawFilter.lowercased()) else {
             throw AgentToolError.invalidArguments("image_search licenseFilter must be all, commercial, or modification")
         }
 
-        let result = try await client.search(query: query, maxResults: maxResults, licenseFilter: licenseFilter)
+        let result = try await client.search(englishQuery: englishQuery, maxResults: maxResults, licenseFilter: licenseFilter)
+        let resultText = modelGuidance(for: result)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: result.markdown.isEmpty ? "No suitable image candidates were found." : result.markdown,
+            contentText: result.markdown.isEmpty ? resultText : result.markdown,
             contentJSON: BrowserFetchTool.encodeJSONObject([
                 "query": result.query,
+                "queryLanguage": "en",
                 "provider": result.provider,
+                "providers": result.diagnostics.map { diagnostic in
+                    [
+                        "provider": diagnostic.provider,
+                        "status": diagnostic.status.rawValue,
+                        "reason": diagnostic.reason,
+                        "retryAdvice": diagnostic.retryAdvice.rawValue
+                    ]
+                },
+                "retryAdvice": result.retryAdvice.rawValue,
+                "fallbackAction": fallbackAction(for: result),
                 "licenseFilter": result.licenseFilter.rawValue,
                 "results": result.results.map { item in
                     [
@@ -555,10 +575,31 @@ public struct NativeImageSearchTool: AgentTool {
                         "height": item.height.map { $0 as Any } ?? NSNull()
                     ] as [String: Any]
                 },
-                "text": result.markdown
+                "text": result.markdown.isEmpty ? resultText : result.markdown
             ]),
-            citations: result.results.map(\.sourcePageURL)
+            citations: result.results.map(\.sourcePageURL),
+            error: result.results.isEmpty ? resultText : nil
         )
+    }
+
+    private func modelGuidance(for result: NativeImageSearchResult) -> String {
+        let reasons = result.diagnostics.map { "\($0.provider): \($0.reason)" }.joined(separator: " ")
+        switch result.retryAdvice {
+        case .notNeeded:
+            return result.markdown
+        case .retryWithEnglishQuery:
+            return "Image search did not run because englishQuery was not written as English search terms. Translate and retry once immediately with a concise English query."
+        case .retryOnceWithBroaderEnglishQuery:
+            return "No suitable image candidates were found. You may retry once immediately with broader English terms; otherwise continue without an image."
+        case .retryLater:
+            return "Image search services are currently unreachable or temporarily unavailable. \(reasons) Do not retry image_search again in this run. Continue the user's task without image search or an inserted image; a later run may retry."
+        case .doNotRetry:
+            return "Image search cannot be used in this run. \(reasons) Do not retry this tool unless its configuration, permission, or provider compatibility changes. Continue without an image when visual evidence is not essential."
+        }
+    }
+
+    private func fallbackAction(for result: NativeImageSearchResult) -> String {
+        result.results.isEmpty ? "continue_without_image" : "use_candidates_if_relevant"
     }
 }
 
