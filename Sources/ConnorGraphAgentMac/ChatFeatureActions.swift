@@ -10,6 +10,7 @@ import ConnorGraphCore
     func loadMoreChatSessionsIfNeeded(currentSessionID: String)
     func loadChatSessionPickerPage(cursor: String?) async -> AppChatSessionPage?
     func newChatSession()
+    func newNoteSession()
     func selectChatSession(_ sessionID: String)
     func renameChatSession(_ sessionID: String, title: String)
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool)
@@ -152,6 +153,7 @@ final class ClosureChatSessionPort: ChatSessionCommanding {
     let loadMoreAction: (String) -> Void
     let loadPickerPageAction: (String?) async -> AppChatSessionPage?
     let newAction: () -> Void
+    let newNoteAction: () -> Void
     let selectAction: (String) -> Void
     let renameAction: (String, String) -> Void
     let filterAction: (AgentSessionListFilter, Bool) -> Void
@@ -164,14 +166,15 @@ final class ClosureChatSessionPort: ChatSessionCommanding {
     func loadMoreChatSessionsIfNeeded(currentSessionID: String) { loadMoreAction(currentSessionID) }
     func loadChatSessionPickerPage(cursor: String?) async -> AppChatSessionPage? { await loadPickerPageAction(cursor) }
     func newChatSession() { newAction() }
+    func newNoteSession() { newNoteAction() }
     func selectChatSession(_ sessionID: String) { selectAction(sessionID) }
     func renameChatSession(_ sessionID: String, title: String) { renameAction(sessionID, title) }
     func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool) { filterAction(filter, restoreWorkspaceMode) }
     func setSelectedSessionStatus(_ status: AgentSessionStatus) { statusAction(status) }
     func toggleSelectedSessionFlag() { flagAction() }
     func toggleSelectedSessionLabel(_ labelID: String) { labelAction(labelID) }
-    init(isLoading: @escaping () -> Bool, reloadIfNeeded: @escaping (Bool) -> Void, reload: @escaping (Bool) -> Void, loadMore: @escaping (String) -> Void, loadPickerPage: @escaping (String?) async -> AppChatSessionPage?, new: @escaping () -> Void, select: @escaping (String) -> Void, rename: @escaping (String, String) -> Void, filter: @escaping (AgentSessionListFilter, Bool) -> Void, status: @escaping (AgentSessionStatus) -> Void, flag: @escaping () -> Void, label: @escaping (String) -> Void) {
-        self.isLoading = isLoading; reloadIfNeededAction = reloadIfNeeded; reloadAction = reload; loadMoreAction = loadMore; loadPickerPageAction = loadPickerPage; newAction = new; selectAction = select; renameAction = rename; filterAction = filter; statusAction = status; flagAction = flag; labelAction = label
+    init(isLoading: @escaping () -> Bool, reloadIfNeeded: @escaping (Bool) -> Void, reload: @escaping (Bool) -> Void, loadMore: @escaping (String) -> Void, loadPickerPage: @escaping (String?) async -> AppChatSessionPage?, new: @escaping () -> Void, newNote: @escaping () -> Void, select: @escaping (String) -> Void, rename: @escaping (String, String) -> Void, filter: @escaping (AgentSessionListFilter, Bool) -> Void, status: @escaping (AgentSessionStatus) -> Void, flag: @escaping () -> Void, label: @escaping (String) -> Void) {
+        self.isLoading = isLoading; reloadIfNeededAction = reloadIfNeeded; reloadAction = reload; loadMoreAction = loadMore; loadPickerPageAction = loadPickerPage; newAction = new; newNoteAction = newNote; selectAction = select; renameAction = rename; filterAction = filter; statusAction = status; flagAction = flag; labelAction = label
     }
 }
 
