@@ -1028,7 +1028,7 @@ struct AIConnectionSetupView: View {
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
     @State private var shouldFetchModelsList = true
-    @State private var contextWindowTokens = 1_000_000
+    @State private var contextWindowTokens = 200_000
     @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var providerUsageMode: AIConnectionUsageMode = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
@@ -1716,7 +1716,7 @@ struct AIConnectionSetupView: View {
                         }
                     }
 
-                    aiConnectionSettingsRow(title: "上下文窗口", help: "填写服务商为当前模型提供的真实上下文 token 上限。默认按 100 万配置，可按模型说明调整。") {
+                    aiConnectionSettingsRow(title: "上下文窗口", help: "默认按当前模型目录填写；如果网关或套餐提供不同上限，请填写该端点的真实 token 上限。") {
                         aiConnectionInputContainer {
                             TextField("1000000", value: $contextWindowTokens, format: .number.grouping(.never))
                                 .textFieldStyle(.plain)
@@ -2127,6 +2127,7 @@ struct AIConnectionSetupView: View {
         )
         model = option.model
         selectedModel = option.selectedModel
+        contextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: option.selectedModel)
         selectedModelIDs = Set(option.modelOptionsFallback)
         if selectedModelIDs.isEmpty, !selectedModel.isEmpty { selectedModelIDs = [selectedModel] }
         if option.id == "other-provider" {
@@ -2159,12 +2160,14 @@ struct AIConnectionSetupView: View {
             setSuggestedConnectionName(endpoint: preset.endpoint, fallback: preset.title, protocolName: preset.protocolKind.connectionNameComponent)
             model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
+            contextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: preset.defaultModel)
             selectedModelIDs = Set(preset.availableModels)
         } else {
             providerUsageMode = .payAsYouGo
             baseURLString = ""
             model = ""
             selectedModel = ""
+            contextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: nil)
             selectedModelIDs = []
             customProtocol = .openAICompatible
             shouldFetchModelsList = true
@@ -2195,6 +2198,7 @@ struct AIConnectionSetupView: View {
         customProtocol = .openAICompatible
         model = availableModels.joined(separator: ",")
         selectedModel = defaultModel
+        contextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: defaultModel)
         selectedModelIDs = Set(availableModels)
         setSuggestedConnectionName(
             endpoint: endpoint,
@@ -2217,6 +2221,7 @@ struct AIConnectionSetupView: View {
             }
         }
         syncModelListFromSelection(fallbackModels: availableModels)
+        contextWindowTokens = SessionContextBudget.inferContextWindowSize(modelID: selectedModel)
     }
 
     private func enabledModels(in availableModels: [String]) -> [String] {
