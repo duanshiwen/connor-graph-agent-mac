@@ -204,11 +204,7 @@ struct AgentChatTurnProcessRow: View {
             statusIcon(summary.state)
                 .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
 
-            Text(activityHeaderText(summary))
-                .font(AgentChatTypography.micro.weight(.medium))
-                .foregroundStyle(activityHeaderForegroundColor)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            activityHeaderTitle(summary)
 
             Spacer(minLength: 0)
 
@@ -219,11 +215,6 @@ struct AgentChatTurnProcessRow: View {
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, AgentChatLayout.spaceXS)
         .frame(minHeight: AgentChatLayout.activityRowMinHeight)
-        .background {
-            if summary.state == .running {
-                AgentRunningActivityShimmer()
-            }
-        }
         .overlay(alignment: .leading) {
             if isAssistantContinuation {
                 Capsule(style: .continuous)
@@ -244,6 +235,20 @@ struct AgentChatTurnProcessRow: View {
 
     private var activityHeaderControlColor: Color {
         Color.primary.opacity(emphasizesActivityHeader ? 0.56 : 0.24)
+    }
+
+    @ViewBuilder
+    private func activityHeaderTitle(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
+        let title = activityHeaderText(summary)
+        if summary.state == .running {
+            AgentRunningActivityShimmerText(text: title, baseColor: activityHeaderForegroundColor)
+        } else {
+            Text(title)
+                .font(AgentChatTypography.micro.weight(.medium))
+                .foregroundStyle(activityHeaderForegroundColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 
     private func continuationAccentColor(for state: AgentTurnActivitySummaryState) -> Color {
@@ -290,41 +295,49 @@ struct AgentChatTurnProcessRow: View {
     }
 }
 
-private struct AgentRunningActivityShimmer: View {
+private struct AgentRunningActivityShimmerText: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var text: String
+    var baseColor: Color
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                    .fill(ConnorCraftPalette.accent.opacity(0.035))
-
+        Text(text)
+            .font(AgentChatTypography.micro.weight(.medium))
+            .foregroundStyle(baseColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .overlay {
                 if !reduceMotion {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                        let duration = 1.8
-                        let progress = context.date.timeIntervalSinceReferenceDate
-                            .truncatingRemainder(dividingBy: duration) / duration
-                        let highlightWidth = max(80, geometry.size.width * 0.28)
-                        LinearGradient(
-                            colors: [
-                                .clear,
-                                ConnorCraftPalette.accent.opacity(0.03),
-                                Color.white.opacity(0.18),
-                                ConnorCraftPalette.accent.opacity(0.08),
-                                .clear
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: highlightWidth)
-                        .offset(x: -highlightWidth + progress * (geometry.size.width + highlightWidth))
+                    GeometryReader { geometry in
+                        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                            let duration = 1.8
+                            let progress = context.date.timeIntervalSinceReferenceDate
+                                .truncatingRemainder(dividingBy: duration) / duration
+                            let highlightWidth = max(36, geometry.size.width * 0.24)
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    ConnorCraftPalette.accent.opacity(0.28),
+                                    Color.primary.opacity(0.72),
+                                    ConnorCraftPalette.accent.opacity(0.34),
+                                    .clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: highlightWidth)
+                            .offset(x: -highlightWidth + progress * (geometry.size.width + highlightWidth))
+                        }
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+            .mask {
+                Text(text)
+                    .font(AgentChatTypography.micro.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .allowsHitTesting(false)
     }
 }
 
