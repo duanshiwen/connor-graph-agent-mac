@@ -114,7 +114,7 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(preview.contains("persistentCacheContext.store.loadBlocks"))
     }
 
-    @Test func longAssistantReplyExpansionKeepsPreviewUntilTheFullDocumentLoads() throws {
+    @Test func longMessageExpansionKeepsPreviewUntilTheFullDocumentLoads() throws {
         let testFile = URL(fileURLWithPath: #filePath)
         let root = testFile
             .deletingLastPathComponent()
@@ -134,13 +134,11 @@ struct AgentMarkdownPreviewStrategyTests {
         #expect(messageRows.components(separatedBy: "allowsDeferredPreview: !isMessageExpanded").count == 3)
         #expect(messageRows.contains("transaction.disablesAnimations = true"))
         #expect(messageRows.contains("if isUser, assistantExpansionPresentation.isAvailable"))
-        #expect(messageRows.contains("private var messageExpansionControl: some View"))
+        #expect(messageRows.contains("maxWidth: isNoteBody ? .infinity : AgentChatLayout.userMessageMaxWidth"))
+        #expect(messageRows.contains("isNoteBody ? AgentChatLayout.messageBubbleHorizontalPadding : 0"))
         #expect(messageRows.contains("expansionPresentation: assistantExpansionPresentation"))
         #expect(messageRows.contains("private var expansionButton: some View"))
-        #expect(messageRows.contains(".frame(width: 24, height: 24)"))
-        #expect(messageRows.contains(".stroke(Color.accentColor.opacity(0.72), lineWidth: 1)"))
         #expect(messageRows.contains(".foregroundStyle(Color.accentColor)"))
-        #expect(messageRows.contains(".frame(minHeight: 32)"))
         #expect(!messageRows.contains("allowsDeferredPreview: false"))
         #expect(!messageRows.contains("content.trimmingCharacters"))
     }
