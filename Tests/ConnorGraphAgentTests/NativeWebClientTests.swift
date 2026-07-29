@@ -92,20 +92,75 @@ struct NativeWebClientTests {
         }
     }
 
-    @Test func openverseImageSearchReturnsSourceAndLicenseMetadata() async throws {
-        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(response: .json(openverseImageResponseJSON)))
+    @Test func federatedImageSearchMergesSourceAndLicenseMetadata() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(responsesByHost: [
+            "api.openverse.org": .json(openverseImageResponseJSON),
+            "commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php")
+        ]))
 
-        let result = try await client.search(query: "Golden Gate Bridge", maxResults: 5, licenseFilter: .commercial)
+        let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 5, licenseFilter: .commercial)
 
-        #expect(result.provider == "openverse")
+        #expect(result.provider == "openverse+wikimedia_commons")
         #expect(result.licenseFilter == .commercial)
-        #expect(result.results.count == 1)
-        #expect(result.results[0].imageURL == "https://images.example.com/golden-gate.jpg")
-        #expect(result.results[0].sourcePageURL == "https://source.example.com/golden-gate")
-        #expect(result.results[0].license == "by 4.0")
-        #expect(result.results[0].width == 2400)
+        #expect(result.results.count == 2)
+        let openverse = try #require(result.results.first)
+        let commons = try #require(result.results.dropFirst().first)
+        #expect(openverse.imageURL == "https://images.example.com/golden-gate.jpg")
+        #expect(commons.imageURL == "https://upload.wikimedia.org/golden-gate-1200.jpg")
+        #expect(openverse.sourcePageURL == "https://source.example.com/golden-gate")
+        #expect(openverse.license == "by 4.0")
+        #expect(commons.license == "CC BY-SA 4.0")
+        #expect(openverse.width == 2400)
         #expect(result.markdown.contains("Source page: https://source.example.com/golden-gate"))
         #expect(result.markdown.contains("Attribution: Golden Gate Bridge by Example Photographer, CC BY 4.0"))
+        #expect(result.retryAdvice == .notNeeded)
+        #expect(result.diagnostics.map(\.status) == [.succeeded, .succeeded])
+    }
+
+    @Test func imageSearchUsesAvailableProviderWhenTheOtherProviderFails() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(
+            responsesByHost: ["commons.wikimedia.org": .json(wikimediaCommonsImageResponseJSON, url: "https://commons.wikimedia.org/w/api.php")],
+            errorsByHost: ["api.openverse.org": URLError(.cannotConnectToHost)]
+        ))
+
+        let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 3, licenseFilter: .all)
+
+        #expect(result.provider == "wikimedia_commons")
+        #expect(result.results.count == 1)
+        #expect(result.retryAdvice == .notNeeded)
+        #expect(result.diagnostics.first?.status == .failed)
+        #expect(result.diagnostics.first?.retryAdvice == .retryLater)
+        #expect(result.diagnostics.last?.status == .succeeded)
+    }
+
+    @Test func imageSearchExplainsWhenBothProvidersAreNetworkInaccessible() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient(errorsByHost: [
+            "api.openverse.org": URLError(.cannotConnectToHost),
+            "commons.wikimedia.org": URLError(.timedOut)
+        ]))
+
+        let result = try await client.search(englishQuery: "Golden Gate Bridge", maxResults: 3, licenseFilter: .all)
+
+        #expect(result.provider == "none")
+        #expect(result.results.isEmpty)
+        #expect(result.retryAdvice == .retryLater)
+        #expect(result.diagnostics.allSatisfy { $0.status == .failed })
+        #expect(result.diagnostics.allSatisfy { $0.reason.contains("Network request failed") })
+    }
+
+    @Test func imageSearchRejectsNonEnglishQueryWithoutNetworkRequests() async throws {
+        let client = NativeImageSearchClient(httpClient: FakeNativeWebHTTPClient())
+
+        let result = try await client.search(englishQuery: "金门大桥", maxResults: 3, licenseFilter: .all)
+
+        #expect(result.results.isEmpty)
+        #expect(result.retryAdvice == .retryWithEnglishQuery)
+        #expect(result.diagnostics == [NativeImageSearchProviderDiagnostic(
+            provider: "input",
+            status: .invalidQuery,
+            reason: "englishQuery does not contain English search terms.",
+            retryAdvice: .retryWithEnglishQuery
+        )])
     }
 
     @Test func imageSearchToolReturnsStructuredCandidatesAndSourceCitations() async throws {
@@ -168,11 +223,55 @@ private let openverseImageResponseJSON = """
 }
 """
 
+private let wikimediaCommonsImageResponseJSON = """
+{
+  "query": {
+    "pages": [
+      {
+        "title": "File:Golden Gate Bridge at sunset.jpg",
+        "index": 1,
+        "imageinfo": [
+          {
+            "thumburl": "https://upload.wikimedia.org/golden-gate-1200.jpg",
+            "thumbwidth": 1200,
+            "thumbheight": 800,
+            "url": "https://upload.wikimedia.org/golden-gate-original.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Golden_Gate_Bridge_at_sunset.jpg",
+            "extmetadata": {
+              "Artist": {"value": "<a href=\\\"https://commons.wikimedia.org/wiki/User:Example\\\">Example Artist</a>"},
+              "LicenseShortName": {"value": "CC BY-SA 4.0"},
+              "LicenseUrl": {"value": "https://creativecommons.org/licenses/by-sa/4.0/"},
+              "Attribution": {"value": "Example Artist, CC BY-SA 4.0"}
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+"""
+
 private struct FakeNativeWebHTTPClient: NativeWebHTTPClient {
-    var response: NativeWebHTTPResponse
+    var response: NativeWebHTTPResponse?
+    var responsesByHost: [String: NativeWebHTTPResponse]
+    var errorsByHost: [String: URLError]
+
+    init(
+        response: NativeWebHTTPResponse? = nil,
+        responsesByHost: [String: NativeWebHTTPResponse] = [:],
+        errorsByHost: [String: URLError] = [:]
+    ) {
+        self.response = response
+        self.responsesByHost = responsesByHost
+        self.errorsByHost = errorsByHost
+    }
 
     func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
-        response
+        let host = request.url?.host ?? ""
+        if let error = errorsByHost[host] { throw error }
+        if let routed = responsesByHost[host] { return routed }
+        if let response { return response }
+        throw URLError(.unsupportedURL)
     }
 }
 
@@ -187,12 +286,12 @@ private extension NativeWebHTTPResponse {
         )
     }
 
-    static func json(_ json: String) -> NativeWebHTTPResponse {
+    static func json(_ json: String, url: String = "https://api.openverse.org/v1/images/") -> NativeWebHTTPResponse {
         NativeWebHTTPResponse(
             data: Data(json.utf8),
             statusCode: 200,
             mimeType: "application/json",
-            finalURL: URL(string: "https://api.openverse.org/v1/images/"),
+            finalURL: URL(string: url),
             textEncodingName: "utf-8"
         )
     }
