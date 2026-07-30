@@ -82,23 +82,66 @@ struct GlobalSearchPreviewCoordinatorTests {
     }
 
     @Test func previewResultsCancellationStopsOutstandingSearches() async throws {
-        let backend = DelayedNativeSourceSearchBackend(delays: [
-            .mail: 20_000_000,
-            .rss: 400_000_000,
-            .calendar: 400_000_000,
-            .browserHistory: 400_000_000
-        ])
+        let backend = CancellationTrackingNativeSourceSearchBackend()
         let coordinator = GlobalSearchPreviewCoordinator(backend: backend, timeoutMilliseconds: 1_000)
-        var iterator: AsyncStream<GlobalSearchNativePreviewSectionResult>.Iterator? = coordinator
-            .previewResults(query: "phoenix", limitsBySource: [.mail: 3, .rss: 3, .calendar: 3, .browserHistory: 3])
-            .makeAsyncIterator()
-
-        _ = await iterator?.next()
-        iterator = nil
-        try await Task.sleep(nanoseconds: 80_000_000)
+        do {
+            let stream = coordinator.previewResults(
+                query: "phoenix",
+                limitsBySource: [.mail: 3, .rss: 3, .calendar: 3, .browserHistory: 3]
+            )
+            let (started, startedContinuation) = AsyncStream<Void>.makeStream()
+            let consumer = Task {
+                for await _ in stream {
+                    startedContinuation.yield()
+                }
+            }
+            var startedIterator = started.makeAsyncIterator()
+            _ = await startedIterator.next()
+            consumer.cancel()
+            await consumer.value
+        }
 
         let cancelledKinds = await backend.cancelledKinds()
         #expect(!cancelledKinds.isEmpty)
+    }
+}
+
+private actor CancellationTrackingNativeSourceSearchBackend: NativeSourceSearchBackend {
+    private var started: Set<NativeSearchSourceKind> = []
+    private var cancelled: Set<NativeSearchSourceKind> = []
+    private var allStartedWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func cancelledKinds() -> Set<NativeSearchSourceKind> { cancelled }
+    func upsert(_ documents: [NativeSearchDocument]) async throws {}
+    func delete(documentIDs: [String]) async throws {}
+    func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String?) async throws {}
+    func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws {}
+
+    func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] {
+        let kind = query.sourceKinds?.first ?? .mail
+        started.insert(kind)
+        if started.count == NativeSearchSourceKind.allCases.count {
+            let waiters = allStartedWaiters
+            allStartedWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+        if kind == .mail {
+            if started.count < NativeSearchSourceKind.allCases.count {
+                await withCheckedContinuation { allStartedWaiters.append($0) }
+            }
+            return [DelayedNativeSourceSearchBackend.result(kind: kind)]
+        }
+        do {
+            try await Task.sleep(for: .seconds(3_600))
+        } catch is CancellationError {
+            cancelled.insert(kind)
+            throw CancellationError()
+        }
+        return []
+    }
+
+    func health() async -> NativeSourceSearchHealthSnapshot {
+        NativeSourceSearchHealthSnapshot()
     }
 }
 
@@ -143,7 +186,7 @@ private actor DelayedNativeSourceSearchBackend: NativeSourceSearchBackend {
         NativeSourceSearchHealthSnapshot()
     }
 
-    private static func result(kind: NativeSearchSourceKind) -> NativeSearchResult {
+    fileprivate static func result(kind: NativeSearchSourceKind) -> NativeSearchResult {
         NativeSearchResult(
             id: "\(kind.rawValue)-result",
             sourceKind: kind,

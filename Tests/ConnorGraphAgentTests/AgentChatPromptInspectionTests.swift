@@ -86,7 +86,7 @@ import ConnorGraphAgent
 }
 
 @Test func agentChatPromptInspectionIncludesPromptBudgetStatus() {
-    let context = AgentChatPromptContext(userPrompt: String(repeating: "a", count: 460_000))
+    let context = AgentChatPromptContext(userPrompt: String(repeating: "我", count: 1_500_000))
 
     let inspection = context.inspection
 

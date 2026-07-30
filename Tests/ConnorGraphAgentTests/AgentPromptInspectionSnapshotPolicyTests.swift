@@ -89,7 +89,7 @@ import ConnorGraphAgent
         includesSummary: false,
         recentMessageCount: 1,
         currentRequest: "What next?",
-        renderedPrompt: String(repeating: "a", count: 610_000)
+        renderedPrompt: String(repeating: "我", count: 1_810_000)
     )
     let policy = AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: false)
 

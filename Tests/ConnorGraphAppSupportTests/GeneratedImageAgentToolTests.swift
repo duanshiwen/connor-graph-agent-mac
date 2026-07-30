@@ -86,7 +86,15 @@ struct GeneratedImageAgentToolTests {
         )
 
         let requests = await recorder.requests
-        #expect(requests == [AgentGeneratedMediaRequest(kind: .image, prompt: "A quiet lake")])
+        let request = try #require(requests.first)
+        #expect(requests.count == 1)
+        #expect(request.kind == .image)
+        #expect(request.prompt == "A quiet lake")
+        #expect(request.auditContext.sessionID == "image-session")
+        #expect(request.auditContext.runID == "run-1")
+        #expect(request.auditContext.correlationID == "call-1")
+        #expect(request.auditContext.operation == "GeneratedImageAgentTool.execute")
+        #expect(request.auditContext.metadata["tool_name"] == "generate_image")
         #expect(result.toolName == "generate_image")
         #expect(result.runID == "run-1")
         #expect(result.sessionID == "image-session")

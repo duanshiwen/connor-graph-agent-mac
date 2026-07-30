@@ -10,8 +10,8 @@ struct PersonProfileEditorViewTests {
         let presentation = PersonProfileEditorPresentation(draft: draft)
 
         #expect(presentation.isEditing == false)
-        #expect(presentation.title == "新建人物")
-        #expect(presentation.subtitle.contains("Person Registry"))
+        #expect(presentation.title == "新建人物档案")
+        #expect(presentation.subtitle.contains("人物相关记忆归因"))
         #expect(presentation.canSave == true)
         #expect(presentation.footerHint == "按 ⏎ 保存，按 Esc 取消。")
         #expect(presentation.closeAccessibilityLabel == "关闭新建人物表单")
@@ -29,7 +29,7 @@ struct PersonProfileEditorViewTests {
         let presentation = PersonProfileEditorPresentation(draft: draft)
 
         #expect(presentation.isEditing == true)
-        #expect(presentation.title == "编辑人物")
+        #expect(presentation.title == "编辑人物档案")
         #expect(presentation.closeAccessibilityLabel == "关闭编辑人物表单")
         #expect(presentation.cancelAccessibilityLabel == "取消编辑人物")
         #expect(presentation.saveAccessibilityLabel == "保存人物修改")

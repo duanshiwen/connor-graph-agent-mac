@@ -184,10 +184,10 @@ private func makeRuntime(
 }
 
 @MainActor
-@Test func runtimeUsesDisabledToolErrorFuseByDefault() throws {
+@Test func runtimeUsesBoundedToolErrorFuseByDefault() throws {
     let runtime = try makeRuntime()
 
-    #expect(runtime.effectiveLoopConfiguration.maxConsecutiveToolResultErrors == 0)
+    #expect(runtime.effectiveLoopConfiguration.maxConsecutiveToolResultErrors == 3)
 }
 
 @MainActor

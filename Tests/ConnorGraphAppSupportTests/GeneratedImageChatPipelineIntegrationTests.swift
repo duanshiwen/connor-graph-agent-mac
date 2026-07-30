@@ -19,7 +19,28 @@ private actor GeneratedImageChatScriptedProvider: AgentModelProvider {
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
         requests.append(request)
-        if requests.count == 1 {
+        switch request.promptCacheContext?.phase {
+        case .strategyResearch:
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(
+                    id: "generated-image-strategy",
+                    name: AgentPhaseToolContract.commitStrategyName,
+                    argumentsJSON: #"{"provisionalApproach":"generate the requested image","recommendedApproach":"generate the requested image","taskMode":"creative","memoryDecision":{"action":"query"},"memoryQueries":["image style preferences"],"memoryPageSize":20}"#
+                )],
+                finishReason: .toolCalls
+            )
+        case .memoryPreparation:
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(
+                    id: "generated-image-memory",
+                    name: AgentPhaseToolContract.memoryQueryName,
+                    argumentsJSON: #"{"query":"image style preferences","pageSize":20}"#
+                )],
+                finishReason: .toolCalls
+            )
+        case .taskExecution where !request.messages.contains(where: { $0.role == .tool && $0.name == "generate_image" }):
             return AgentModelResponse(
                 text: nil,
                 toolCalls: [AgentToolCall(
@@ -30,11 +51,22 @@ private actor GeneratedImageChatScriptedProvider: AgentModelProvider {
                 usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
                 finishReason: .toolCalls
             )
+        case .taskExecution:
+            return AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(
+                    id: "generated-image-final-preparation",
+                    name: AgentPhaseToolContract.prepareFinalOutputName,
+                    argumentsJSON: #"{"reason":"image generated"}"#
+                )],
+                finishReason: .toolCalls
+            )
+        default:
+            return AgentModelResponse(
+                text: "图片已生成。",
+                usage: AgentModelUsage(promptTokens: 20, completionTokens: 4)
+            )
         }
-        return AgentModelResponse(
-            text: "图片已生成。",
-            usage: AgentModelUsage(promptTokens: 20, completionTokens: 4)
-        )
     }
 
     func recordedRequests() -> [AgentModelRequest] { requests }
@@ -113,10 +145,17 @@ private actor GeneratedImageChatMediaRecorder {
     let response = try await manager.submit("请生成一张黄昏湖边的图片", sessionSummary: Optional<AgentSessionSummary>.none)
 
     let mediaRequests = await mediaRecorder.recordedRequests()
-    #expect(mediaRequests == [AgentGeneratedMediaRequest(kind: .image, prompt: "A lantern beside a quiet lake at dusk")])
+    let mediaRequest = try #require(mediaRequests.first)
+    #expect(mediaRequests.count == 1)
+    #expect(mediaRequest.kind == .image)
+    #expect(mediaRequest.prompt == "A lantern beside a quiet lake at dusk")
+    #expect(mediaRequest.auditContext.sessionID == session.id)
+    #expect(mediaRequest.auditContext.operation == "GeneratedImageAgentTool.execute")
     let modelRequests = await scriptedProvider.recordedRequests()
-    #expect(modelRequests.count == 2)
-    #expect(modelRequests[1].messages.contains { $0.role == .tool && $0.name == "generate_image" })
+    #expect(modelRequests.count == 5)
+    #expect(modelRequests.contains { request in
+        request.messages.contains { $0.role == .tool && $0.name == "generate_image" }
+    })
     #expect(response.events.contains { if case .toolFinished(let result) = $0 { return result.toolName == "generate_image" }; return false })
 
     let assistant = try #require(response.assistantMessage)
