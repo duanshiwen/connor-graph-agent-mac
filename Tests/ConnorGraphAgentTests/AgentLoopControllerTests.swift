@@ -1649,6 +1649,48 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(!projected.contains("Remove note details."))
 }
 
+@Test func instructionCapabilityProjectorRoutesRetrievalRulesByAvailableTools() {
+    let projector = AgentInstructionCapabilityProjector()
+    let instruction = AgentInstructionSection.defaultConnorInstruction
+    let localOnly = projector.project(instruction, availableToolNames: ["Read"])
+
+    #expect(localOnly.contains("## Core Startup and Final Preference Checkpoint"))
+    #expect(localOnly.contains("## Retrieval Completion Rules"))
+    #expect(localOnly.contains("## Programming and Precision Work"))
+    #expect(!localOnly.contains("## Current Time Retrieval Rules"))
+    #expect(!localOnly.contains("## Memory Retrieval Rules"))
+    #expect(!localOnly.contains("## Calendar Retrieval Rules"))
+    #expect(!localOnly.contains("## Mail Retrieval Rules"))
+    #expect(!localOnly.contains("## Skill Discovery Rules"))
+    #expect(!localOnly.contains("## Note Retrieval Rules"))
+    #expect(!localOnly.contains("## Cloud Knowledge Retrieval Rules"))
+    #expect(!localOnly.contains("## Web Research Rules"))
+    #expect(!localOnly.contains("## Native Personal Source Tools"))
+    #expect(!localOnly.contains("## Native Source Evidence Rules"))
+
+    let calendar = projector.project(
+        instruction,
+        availableToolNames: [AgentCurrentTimePreflightPolicy.requiredToolName, "calendar_search_events"]
+    )
+    #expect(calendar.contains("## Current Time Retrieval Rules"))
+    #expect(calendar.contains("## Calendar Retrieval Rules"))
+    #expect(calendar.contains("## Native Personal Source Tools"))
+    #expect(calendar.contains("## Calendar Tool Workflow"))
+    #expect(!calendar.contains("## Mail Retrieval Rules"))
+    #expect(!calendar.contains("## Mail Tool Workflow"))
+    #expect(!calendar.contains("## RSS Tool Workflow"))
+    #expect(!calendar.contains("## Browser History Tool Workflow"))
+    #expect(!calendar.contains("## Web Research Rules"))
+
+    let browserHistory = projector.project(
+        instruction,
+        availableToolNames: ["browser_history_search", "browser_history_get"]
+    )
+    #expect(browserHistory.contains("## Browser History Tool Workflow"))
+    #expect(browserHistory.contains("## Native Source Evidence Rules"))
+    #expect(!browserHistory.contains("## Web Research Rules"))
+}
+
 @Test func agentLoopAttemptsCurrentTimeFirstAndContinuesAfterFailure() async throws {
     let names = AgentContinuityPreflightPolicy.requiredToolNames
     let continuityCalls = names.enumerated().map {
