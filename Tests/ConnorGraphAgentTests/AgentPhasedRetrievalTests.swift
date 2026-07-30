@@ -355,7 +355,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all)
+        configuration: .init(toolExposureMode: .all)
     )
     var finalText: String?
     for try await event in loop.run(.init(sessionID: "phased", userMessage: "Implement the change")) {
@@ -371,6 +371,32 @@ private struct PhasedConcurrentReadTool: AgentTool {
     #expect(requests[0].messages[0].content.contains("Current Time:") == false)
     #expect(requests[0].messages[1].content.contains("Current Time:") == true)
     #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
+    #expect(requests[2].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName) == false)
+}
+
+@Test func phasedLoopRejectsMemorySkipWhenUserExplicitlyRequiresMemory() async throws {
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "invalid-skip", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"skip","reason":"userExplicitlyDisabled"}}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "valid-strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"query"},"memoryQueries":["沟通偏好"],"memoryPageSize":20}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "memory", name: AgentPhaseToolContract.memoryQueryName, argumentsJSON: #"{"query":"沟通偏好"}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(PhasedLoopMemoryTool(name: "memory_os_recent_context"))
+    registry.register(PhasedLoopMemoryTool(name: "memory_os_knowledge_context"))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(.init(sessionID: "memory-required", userMessage: "必须先查询相关 Memory 再回答")) {}
+
+    let requests = await provider.capturedRequests()
+    #expect(requests.map { $0.promptCacheContext?.phase } == [
+        .strategyResearch, .strategyResearch, .memoryPreparation, .taskExecution, .finalSynthesis
+    ])
+    #expect(requests[3].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName) == false)
+    #expect(requests[1].messages.contains {
+        $0.role == .system && $0.content.contains("user explicitly requires Memory")
+    })
 }
 
 @Test func phasedLoopUsesRegisteredExternalSourceAndCompressesOlderResearch() async throws {
@@ -385,13 +411,15 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: AgentToolRegistry(),
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all),
+        configuration: .init(toolExposureMode: .all),
         externalKnowledgeSources: [source]
     )
     for try await _ in loop.run(.init(sessionID: "external-source", userMessage: "Implement cache support")) {}
 
     let requests = await provider.capturedRequests()
     #expect(requests[0].messages[1].content.contains("enterprise [enterpriseKnowledge]"))
+    #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalSearchBatchName))
+    #expect(requests[0].tools.map(\.name).contains(AgentPhaseToolContract.externalReadBatchName))
     let commitRequest = requests[2]
     #expect(commitRequest.messages.contains { $0.role == .tool && $0.toolCallID == "search" && $0.content.contains("Compressed research evidence") })
     #expect(commitRequest.messages.contains {
@@ -409,7 +437,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all)
+        configuration: .init(toolExposureMode: .all)
     )
     for try await _ in loop.run(.init(sessionID: "cursor", userMessage: "Give a personalized answer")) {}
 
@@ -429,7 +457,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all)
+        configuration: .init(toolExposureMode: .all)
     )
     for try await _ in loop.run(.init(sessionID: "recovery", userMessage: "Implement it")) {}
 
@@ -458,7 +486,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all)
+        configuration: .init(toolExposureMode: .all)
     )
     for try await _ in loop.run(.init(sessionID: "parallel", userMessage: "Read both")) {}
     let maximumActive = await probe.maximumActive
@@ -481,7 +509,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all)
+        configuration: .init(toolExposureMode: .all)
     )
 
     for try await _ in loop.run(.init(sessionID: "profile-pages", userMessage: "Give me a personalized answer")) {}
@@ -508,7 +536,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: AgentToolRegistry(),
-        configuration: .init(executionMode: .phasedRetrieval, toolExposureMode: .all),
+        configuration: .init(toolExposureMode: .all),
         externalKnowledgeSources: [source]
     )
 

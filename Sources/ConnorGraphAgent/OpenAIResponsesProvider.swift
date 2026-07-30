@@ -296,7 +296,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         }
         if !tools.isEmpty {
             body["tools"] = tools
-            body["tool_choice"] = "auto"
+            body["tool_choice"] = request.toolChoice.rawValue
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return AgentHTTPRequest(url: endpoint, method: "POST", headers: requestHeaders(), body: data, timeoutInterval: config.requestTimeout)

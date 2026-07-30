@@ -10,7 +10,8 @@ private actor NativeSessionMemoryOSProvider: AgentModelProvider {
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        AgentModelResponse(text: "Native Memory OS assistant response", usage: AgentModelUsage(promptTokens: 4, completionTokens: 3))
+        let final = AgentModelResponse(text: "Native Memory OS assistant response", usage: AgentModelUsage(promptTokens: 4, completionTokens: 3))
+        return appSupportAutomaticPhaseResponse(for: request, nextResponse: final) ?? final
     }
 }
 

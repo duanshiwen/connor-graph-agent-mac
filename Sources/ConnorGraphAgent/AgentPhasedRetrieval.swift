@@ -1,10 +1,5 @@
 import Foundation
 
-public enum AgentLoopExecutionMode: String, Codable, Sendable, Equatable {
-    case legacy
-    case phasedRetrieval
-}
-
 public enum AgentLoopPhase: String, Codable, CaseIterable, Sendable, Equatable {
     case strategyResearch
     case memoryPreparation

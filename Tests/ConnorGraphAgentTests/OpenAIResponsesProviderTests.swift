@@ -118,6 +118,26 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(response.usage?.uncachedInputTokens == 86)
 }
 
+@Test func openAIResponsesProviderRequiresToolCallsWhenRequested() async throws {
+    let responseBody = #"{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: responseBody)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "key", model: "gpt-test"),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(name: "phase_gate", description: "Advance phase", inputSchema: .object(properties: [:], required: []))
+
+    _ = try await provider.complete(.init(
+        messages: [.init(role: .user, content: "advance")],
+        tools: [tool],
+        toolChoice: .required
+    ))
+
+    let body = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(object["tool_choice"] as? String == "required")
+}
+
 @Test func openAIResponsesPromptCacheKeyUsesStablePhaseIdentityInsteadOfDynamicSystemText() async throws {
     let responseBody = #"{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#.data(using: .utf8)!
     let firstClient = ResponsesCapturingHTTPClient(responseBody: responseBody)
