@@ -2,10 +2,22 @@ import AppKit
 import SwiftUI
 import ConnorGraphAppSupport
 
+struct WorkspaceFilePreviewActionsPresentation: Equatable {
+    var showsShare: Bool
+    var showsCopyFullText: Bool
+
+    init(renderer: WorkspaceFilePreviewRenderer) {
+        showsShare = true
+        showsCopyFullText = [.markdown, .monospacedText, .plainText].contains(renderer)
+    }
+}
+
 struct WorkspaceFilePreviewOverlay: View {
     var model: WorkspaceFilePreviewModel?
     var isLoading: Bool
     var onLoadMore: () -> Void
+    var onCopyFullText: (URL) -> Void
+    var onShare: (URL) -> Void
     var onClose: () -> Void
 
     var body: some View {
@@ -64,7 +76,8 @@ struct WorkspaceFilePreviewOverlay: View {
     }
 
     private func preview(_ model: WorkspaceFilePreviewModel) -> some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+        let actions = WorkspaceFilePreviewActionsPresentation(renderer: model.renderer)
+        return VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
             HStack(spacing: AgentChatLayout.spaceM) {
                 Image(systemName: iconName(for: model.renderer))
                     .font(.system(size: 26, weight: .semibold))
@@ -85,6 +98,26 @@ struct WorkspaceFilePreviewOverlay: View {
                     }
                 }
                 Spacer()
+                if actions.showsCopyFullText {
+                    Button {
+                        onCopyFullText(model.node.url)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("复制这个文件的全部文字")
+                    .help("复制完整文件文字，不受当前预览范围影响")
+                }
+                if actions.showsShare {
+                    Button {
+                        onShare(model.node.url)
+                    } label: {
+                        Label("分享", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("分享这个文件")
+                    .help("使用 macOS 系统分享这个文件")
+                }
                 if model.isTruncated {
                     Button(action: onLoadMore) {
                         Label("继续加载", systemImage: "arrow.down.doc")

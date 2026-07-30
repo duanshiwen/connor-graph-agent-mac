@@ -94,11 +94,13 @@ public struct AgentNoteSearchPreflightPolicy: Sendable, Equatable {
     }
 }
 
-/// Enforces inclusion of every available continuity source and complete sequential
-/// pagination of the current-user profile source.
+/// Enforces startup continuity retrieval and the late compressed-profile checkpoint.
 public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
-    public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools
     public static let currentUserProfileToolName = "memory_os_get_current_user_profile"
+    public static let finalResponsePurpose = "final_response"
+    public static let requiredToolNames = AgentEvidenceValidationPolicy.memoryEvidenceTools.filter {
+        $0 != currentUserProfileToolName
+    }
 
     public init() {}
 
@@ -116,12 +118,15 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
         guard !missingToolNames.isEmpty else { return nil }
         let names = missingToolNames.map { "`\($0)`" }.joined(separator: ", ")
         return """
-        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Start `memory_os_get_current_user_profile` at page 1 with the largest `pageSize` allowed by its input Schema (currently 500), then follow every exact non-null `nextPage` with that same pageSize until it returns null. For the other continuity tools, repeat calls when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory.
+        Mandatory continuity preflight is incomplete. Before task-specific tool use or a final answer, call every still-missing available continuity tool: \(names). These are independent paginated sources. Do not substitute one for another. Repeat calls only when pagination metadata or the task's evidence needs justify them. A successful empty result still counts as a real call. A failed attempt supplies no evidence; preserve its real error and never fabricate memory. The current-user profile is intentionally excluded from startup continuity and is loaded separately near finalization.
         """
     }
 
-    public func initialRequiredCurrentUserProfilePage(availableTools: [AgentToolDefinition]) -> Int? {
-        availableTools.contains { $0.name == Self.currentUserProfileToolName } ? 1 : nil
+    public func requiresFinalResponseProfile(
+        availableTools: [AgentToolDefinition],
+        isComplete: Bool
+    ) -> Bool {
+        !isComplete && availableTools.contains { $0.name == Self.currentUserProfileToolName }
     }
 
     public func call(_ call: AgentToolCall, matchesRequiredCurrentUserProfilePage requiredPage: Int) -> Bool {
@@ -129,7 +134,11 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
               let arguments = try? AgentToolArguments(json: call.argumentsJSON) else {
             return false
         }
-        return (arguments.int("page") ?? 1) == requiredPage
+        let view = arguments.string("view") ?? "compressed"
+        let purpose = arguments.string("purpose") ?? "task_context"
+        return purpose == Self.finalResponsePurpose
+            && view == "compressed"
+            && (arguments.int("page") ?? 1) == requiredPage
     }
 
     public func nextRequiredCurrentUserProfilePage(after result: AgentToolResult) -> Int? {
@@ -146,7 +155,7 @@ public struct AgentContinuityPreflightPolicy: Sendable, Equatable {
 
     public func currentUserProfileCorrectionInstruction(requiredPage: Int) -> String {
         """
-        Mandatory current-user profile pagination is incomplete. Before any task-specific tool call or final answer, call `memory_os_get_current_user_profile` with `page` set to the exact JSON integer \(requiredPage). Use the largest `pageSize` allowed by its input Schema (currently 500) for an initial page and preserve the pageSize already used when continuing a chain. Continue following each returned exact non-null `nextPage` until `nextPage` is null. Do not skip, guess, repeat, or stop early.
+        The final-response preference checkpoint is incomplete. Before sending the complete final answer, call `memory_os_get_current_user_profile` with `purpose: final_response`, `view: compressed`, and `page` set to the exact JSON integer \(requiredPage). Use `pageSize: 500` on the initial page and preserve purpose, pageSize, and view while following exact non-null `nextPage` values through `nextPage: null`. After the profile is loaded, reassess whether the task has enough information. You may and should call any other needed tools before answering; doing so does not invalidate the loaded profile or require another profile read. Never use raw, guess pages, or stop the profile chain early.
         """
     }
 }

@@ -233,12 +233,17 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 } else {
                     environmentSnapshot = nil
                 }
-                let promptAssembly = await buildPromptAssembly(for: request, environmentSnapshot: environmentSnapshot)
+                let availableToolDefinitions = toolRegistry.definitions
+                let promptAssembly = await buildPromptAssembly(
+                    for: request,
+                    environmentSnapshot: environmentSnapshot,
+                    availableToolDefinitions: availableToolDefinitions
+                )
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
                 let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
                     maxResultCharacters: configuration.maxToolResultBytes
                 ))
-                var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
+                var modelRequest = promptProjector.project(promptAssembly, tools: availableToolDefinitions)
                 var messages = modelRequest.messages
                 let evidencePolicy = AgentEvidenceValidationPolicy()
                 var memoryCitations: [String] = []
@@ -254,9 +259,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var invokedContinuityToolNames = Set<String>()
                 let noteSearchPreflightPolicy = AgentNoteSearchPreflightPolicy()
                 var didAttemptNoteSearch = false
-                var requiredCurrentUserProfilePage = continuityPreflightPolicy.initialRequiredCurrentUserProfilePage(
-                    availableTools: toolRegistry.definitions
-                )
+                let hasCurrentUserProfileTool = toolRegistry.definitions.contains {
+                    $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
+                }
+                var requiredCurrentUserProfilePage: Int?
+                var isFinalResponseProfileComplete = !hasCurrentUserProfileTool
                 if let diagnostics = modelRequest.promptDiagnostics {
                     yield(.promptAssembled(promptAssembledEvent(
                         runID: run.id,
@@ -293,14 +300,17 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         try Task.checkCancellation()
                         modelRequest.messages = messages
-                        let profileStartupIsComplete = requiredCurrentUserProfilePage == nil
-                            && invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
-                        modelRequest.tools = toolRegistry.definitions.filter { definition in
+                        modelRequest.auditContext = AgentLLMRequestAuditContext(
+                            requestKind: .conversationTurn,
+                            sessionID: run.sessionID,
+                            runID: run.id,
+                            correlationID: request.runID,
+                            iteration: iterationCount,
+                            operation: "AgentLoopController.completeModelRequest",
+                            initiator: .foreground
+                        )
+                        modelRequest.tools = availableToolDefinitions.filter { definition in
                             if definition.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
-                                return false
-                            }
-                            if definition.name == AgentContinuityPreflightPolicy.currentUserProfileToolName,
-                               profileStartupIsComplete {
                                 return false
                             }
                             return true
@@ -315,11 +325,38 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             reservedOutputTokens: configuration.reservedOutputTokens,
                             isAfterToolExecution: iterationCount > 1
                         )
-                        var modelResponse = try await completeModelRequest(
-                            modelRequest,
-                            run: run,
-                            continuation: continuation
-                        )
+                        var modelResponse: AgentModelResponse
+                        do {
+                            modelResponse = try await completeModelRequest(
+                                modelRequest,
+                                run: run,
+                                publishesTextDeltas: isFinalResponseProfileComplete,
+                                continuation: continuation
+                            )
+                        } catch {
+                            guard Self.isProviderContextOverflow(error) else { throw error }
+                            let originalEstimate = AgentModelContextGuard().estimatedInputTokens(modelRequest)
+                            let recoveryTarget = max(1, originalEstimate / 2)
+                            var recoveredRequest = try await contextRecoveredModelRequest(
+                                modelRequest,
+                                promptAssembly: promptAssembly,
+                                iterationCount: iterationCount,
+                                maximumEstimatedTokens: recoveryTarget
+                            )
+                            guard AgentModelContextGuard().estimatedInputTokens(recoveredRequest) < originalEstimate else {
+                                throw error
+                            }
+                            recoveredRequest.auditContext = modelRequest.auditContext
+                            recoveredRequest.auditContext.metadata["context_recovery"] = "true"
+                            modelRequest = recoveredRequest
+                            messages = recoveredRequest.messages
+                            modelResponse = try await completeModelRequest(
+                                recoveredRequest,
+                                run: run,
+                                publishesTextDeltas: isFinalResponseProfileComplete,
+                                continuation: continuation
+                            )
+                        }
                         try Task.checkCancellation()
 
                         // Propagate degradation warnings to the user
@@ -366,16 +403,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(role: .system, content: correction))
                                 continue
                             }
-                            if let requiredCurrentUserProfilePage {
-                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                messages.append(AgentModelMessage(
-                                    role: .system,
-                                    content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
-                                        requiredPage: requiredCurrentUserProfilePage
-                                    )
-                                ))
-                                continue
-                            }
                             if noteSearchPreflightPolicy.requiresAttempt(
                                 availableTools: toolRegistry.definitions,
                                 didAttempt: didAttemptNoteSearch
@@ -404,6 +431,19 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 didRequestClaimCorrection = true
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 messages.append(AgentModelMessage(role: .system, content: "Memory claim-evidence check (\(claimValidation.status.rawValue)): \(correction) Correct once, then answer conservatively."))
+                                continue
+                            }
+                            if continuityPreflightPolicy.requiresFinalResponseProfile(
+                                availableTools: toolRegistry.definitions,
+                                isComplete: isFinalResponseProfileComplete
+                            ) {
+                                messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
+                                messages.append(AgentModelMessage(
+                                    role: .system,
+                                    content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
+                                        requiredPage: requiredCurrentUserProfilePage ?? 1
+                                    )
+                                ))
                                 continue
                             }
                             let finalText = modelResponse.text
@@ -466,17 +506,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             availableTools: toolRegistry.definitions,
                             didAttempt: didAttemptNoteSearch
                         )
-                        if !isCurrentTimePreflightBatch
-                            && (!missingContinuityTools.isEmpty || requiredCurrentUserProfilePage != nil) {
+                        if !isCurrentTimePreflightBatch && !missingContinuityTools.isEmpty {
                             let continuityCalls = calls.filter {
                                 AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
                             }
                             if continuityCalls.isEmpty {
                                 messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
                                 let correction = continuityPreflightPolicy.correctionInstruction(for: missingContinuityTools)
-                                    ?? requiredCurrentUserProfilePage.map {
-                                        continuityPreflightPolicy.currentUserProfileCorrectionInstruction(requiredPage: $0)
-                                    }
                                 if let correction {
                                     messages.append(AgentModelMessage(role: .system, content: correction))
                                 }
@@ -486,53 +522,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 AgentContinuityPreflightPolicy.requiredToolNames.contains($0.name)
                                     || (requiresNoteSearchAttempt && $0.name == AgentNoteSearchPreflightPolicy.requiredToolName)
                             }
-                            if let requiredPage = requiredCurrentUserProfilePage {
-                                let matchingProfileCalls = continuityCalls.filter {
-                                    continuityPreflightPolicy.call(
-                                        $0,
-                                        matchesRequiredCurrentUserProfilePage: requiredPage
-                                    )
-                                }
-                                let profileChainAlreadyStarted = requiredPage != 1
-                                    || invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
-                                let proposedWrongProfilePage = continuityCalls.contains {
-                                    $0.name == AgentContinuityPreflightPolicy.currentUserProfileToolName
-                                } && matchingProfileCalls.isEmpty
-                                if (profileChainAlreadyStarted || proposedWrongProfilePage)
-                                    && matchingProfileCalls.isEmpty {
-                                    messages.append(AgentModelMessage(role: .assistant, content: modelResponse.text ?? ""))
-                                    messages.append(AgentModelMessage(
-                                        role: .system,
-                                        content: continuityPreflightPolicy.currentUserProfileCorrectionInstruction(
-                                            requiredPage: requiredPage
-                                        )
-                                    ))
-                                    continue
-                                }
-                                var didSelectRequiredProfileCall = false
-                                calls = startupCalls.filter { call in
-                                    guard call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName else {
-                                        return true
-                                    }
-                                    guard !didSelectRequiredProfileCall,
-                                          continuityPreflightPolicy.call(
-                                            call,
-                                            matchesRequiredCurrentUserProfilePage: requiredPage
-                                          ) else {
-                                        return false
-                                    }
-                                    didSelectRequiredProfileCall = true
-                                    return true
-                                }
-                            } else {
-                                calls = startupCalls
-                            }
+                            calls = startupCalls
                             // Let the model observe continuity results before it chooses or
-                            // repeats task-specific calls that may depend on personal context.
+                            // repeats task-specific calls that may depend on memory context.
                         }
                         if !isCurrentTimePreflightBatch,
                            missingContinuityTools.isEmpty,
-                           requiredCurrentUserProfilePage == nil,
                            requiresNoteSearchAttempt {
                             guard let noteSearchCall = calls.first(where: {
                                 $0.name == AgentNoteSearchPreflightPolicy.requiredToolName
@@ -544,14 +539,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             calls = [noteSearchCall]
                         }
                         if !isCurrentTimePreflightBatch {
-                            let profileStartupIsComplete = requiredCurrentUserProfilePage == nil
-                                && invokedContinuityToolNames.contains(AgentContinuityPreflightPolicy.currentUserProfileToolName)
                             let incrementalCalls = calls.filter { call in
                                 if call.name == AgentCurrentTimePreflightPolicy.requiredToolName, didAttemptCurrentTime {
-                                    return false
-                                }
-                                if call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName,
-                                   profileStartupIsComplete {
                                     return false
                                 }
                                 return true
@@ -565,7 +554,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 ))
                                 messages.append(AgentModelMessage(
                                     role: .system,
-                                    content: "The current-time attempt and complete current-user profile are already satisfied for this user run. Do not call them again during incremental retrieval. Continue by querying only the specific recent-context, durable-knowledge, or Note source that needs more evidence, or proceed with the task."
+                                    content: "The current-time attempt is already satisfied for this user run. Do not call it again. Continue with the specific tools needed for the task, or proceed toward the final-response preference checkpoint."
                                 ))
                                 continue
                             }
@@ -632,10 +621,49 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             continuation: continuation
                         )
 
-                        for batchResult in batchResults {
+                        let contextGuard = AgentModelContextGuard()
+                        let contextWindowTokens = configuration.modelContextWindowTokens
+                            ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+                        let maximumInputTokens = contextGuard.maximumInputTokens(
+                            contextWindowTokens: contextWindowTokens,
+                            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+                            reservedOutputTokens: configuration.reservedOutputTokens
+                        )
+                        let contextSafetyMarginTokens = min(512, max(32, maximumInputTokens / 100))
+                        let gatedBatchContents = batchResults.map { toolResultGate.gatedContent(for: $0.result) }
+                        let gatedBatchTokenDemands = gatedBatchContents.map {
+                            contextGuard.estimator.estimate($0).estimatedTokenCount
+                        }
+                        let modelContentPartTokenDemands = batchResults.map { batchResult -> Int in
+                            guard let parts = batchResult.result.modelContentParts, !parts.isEmpty else { return 0 }
+                            var partRequest = modelRequest
+                            partRequest.messages = [AgentModelMessage(
+                                role: .user,
+                                content: "Requested attachment context loaded for this run.",
+                                contentParts: [.text("Requested attachment context loaded for this run.")] + parts
+                            )]
+                            partRequest.tools = []
+                            return contextGuard.estimatedInputTokens(partRequest)
+                        }
+                        var remainingToolContentDemand = gatedBatchTokenDemands.reduce(0, +)
+                        var remainingModelContentPartDemand = modelContentPartTokenDemands.reduce(0, +)
+
+                        for (batchIndex, batchResult) in batchResults.enumerated() {
+                            if batchResult.call.name == "memory_os_update_current_user_profile",
+                               batchResult.result.error == nil {
+                                requiredCurrentUserProfilePage = nil
+                                isFinalResponseProfileComplete = false
+                            }
                             if batchResult.call.name == AgentContinuityPreflightPolicy.currentUserProfileToolName {
-                                requiredCurrentUserProfilePage = continuityPreflightPolicy
-                                    .nextRequiredCurrentUserProfilePage(after: batchResult.result)
+                                let expectedPage = requiredCurrentUserProfilePage ?? 1
+                                if continuityPreflightPolicy.call(
+                                    batchResult.call,
+                                    matchesRequiredCurrentUserProfilePage: expectedPage
+                                ) {
+                                    requiredCurrentUserProfilePage = continuityPreflightPolicy
+                                        .nextRequiredCurrentUserProfilePage(after: batchResult.result)
+                                    isFinalResponseProfileComplete = requiredCurrentUserProfilePage == nil
+                                }
                             }
                             if let promotion = trustedSkillPromotion(from: batchResult.result),
                                promotedSkillIdentifiers.insert(promotion.identifier).inserted {
@@ -659,9 +687,37 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             } else if batchResult.call.name != AgentCurrentTimePreflightPolicy.requiredToolName {
                                 consecutiveToolResultErrors += 1
                             }
+                            var requestBeforeToolResult = modelRequest
+                            requestBeforeToolResult.messages = messages
+                            let tokensBeforeToolResult = contextGuard.estimatedInputTokens(requestBeforeToolResult)
+                            let availableToolContentTokens = max(
+                                0,
+                                maximumInputTokens
+                                    - contextSafetyMarginTokens
+                                    - tokensBeforeToolResult
+                                    - remainingModelContentPartDemand
+                            )
+                            let currentDemand = gatedBatchTokenDemands[batchIndex]
+                            let allocatedTokens: Int
+                            if remainingToolContentDemand > availableToolContentTokens,
+                               remainingToolContentDemand > 0 {
+                                allocatedTokens = Int(
+                                    Double(availableToolContentTokens)
+                                        * Double(currentDemand)
+                                        / Double(remainingToolContentDemand)
+                                )
+                            } else {
+                                allocatedTokens = currentDemand
+                            }
+                            let modelVisibleToolContent = toolResultGate.gatedContent(
+                                for: batchResult.result,
+                                maximumEstimatedTokens: allocatedTokens,
+                                estimator: contextGuard.estimator
+                            )
+                            remainingToolContentDemand = max(0, remainingToolContentDemand - currentDemand)
                             messages.append(AgentModelMessage(
                                 role: .tool,
-                                content: toolResultGate.gatedContent(for: batchResult.result),
+                                content: modelVisibleToolContent,
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
@@ -677,6 +733,10 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     contentParts: [.text("Requested attachment context loaded for this run.")] + parts
                                 ))
                             }
+                            remainingModelContentPartDemand = max(
+                                0,
+                                remainingModelContentPartDemand - modelContentPartTokenDemands[batchIndex]
+                            )
                         }
 
                         if !didPublishUserFacingMessage,
@@ -718,7 +778,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             && consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors
                         let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded
                             && budgetExceeded
-                            && requiredCurrentUserProfilePage == nil
+                            && isFinalResponseProfileComplete
                         yield(.turnCompleted(AgentTurnCompletedEvent(
                             runID: run.id,
                             sessionID: run.sessionID,
@@ -783,6 +843,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     private func completeModelRequest(
         _ request: AgentModelRequest,
         run: AgentRun,
+        publishesTextDeltas: Bool,
         continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async throws -> AgentModelResponse {
         guard modelProvider.capabilities.supportsStreaming,
@@ -794,7 +855,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             try Task.checkCancellation()
             switch event {
             case .textDelta(let text):
-                guard !text.isEmpty else { continue }
+                guard publishesTextDeltas, !text.isEmpty else { continue }
                 yield(.textDelta(AgentTextDeltaEvent(runID: run.id, sessionID: run.sessionID, text: text)), to: continuation, recorder: eventRecorder)
             case .thinkingDelta, .toolInputDelta, .rawProviderEvent:
                 continue
@@ -806,6 +867,81 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             return try await modelProvider.complete(request)
         }
         return completedResponse
+    }
+
+    private func contextRecoveredModelRequest(
+        _ request: AgentModelRequest,
+        promptAssembly: AgentPromptAssembly,
+        iterationCount: Int,
+        maximumEstimatedTokens: Int
+    ) async throws -> AgentModelRequest {
+        let contextGuard = AgentModelContextGuard()
+        if iterationCount == 1 {
+            let toolTokens = contextGuard.estimatedInputTokens(
+                AgentModelRequest(messages: [], tools: request.tools)
+            )
+            let transformer = AgentPromptBudgetTransformer(
+                maxEstimatedTokens: max(1, maximumEstimatedTokens - toolTokens)
+            )
+            let recoveredAssembly = try await transformer.transform(
+                promptAssembly,
+                projectionMode: configuration.promptProjectionMode
+            )
+            var recovered = AgentTranscriptProjector(
+                projectionMode: configuration.promptProjectionMode
+            ).project(recoveredAssembly, tools: request.tools)
+            recovered.temperature = request.temperature
+            return recovered
+        }
+
+        var recovered = request
+        let toolMessageIndices = recovered.messages.indices.filter {
+            recovered.messages[$0].role == .tool
+        }
+        guard !toolMessageIndices.isEmpty else { return request }
+
+        var requestWithoutToolBodies = recovered
+        for index in toolMessageIndices {
+            requestWithoutToolBodies.messages[index].content = ""
+        }
+        let fixedTokens = contextGuard.estimatedInputTokens(requestWithoutToolBodies)
+        let availableToolTokens = max(0, maximumEstimatedTokens - fixedTokens)
+        let demands = toolMessageIndices.map {
+            contextGuard.estimator.estimate(recovered.messages[$0].content).estimatedTokenCount
+        }
+        let totalDemand = max(1, demands.reduce(0, +))
+        let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
+            maxResultCharacters: configuration.maxToolResultBytes
+        ))
+        for (offset, messageIndex) in toolMessageIndices.enumerated() {
+            let message = recovered.messages[messageIndex]
+            let allocatedTokens = Int(
+                Double(availableToolTokens) * Double(demands[offset]) / Double(totalDemand)
+            )
+            let syntheticResult = AgentToolResult(
+                toolCallID: message.toolCallID ?? "context-recovery",
+                toolName: message.name ?? "tool",
+                contentText: message.content
+            )
+            recovered.messages[messageIndex].content = gate.gatedContent(
+                for: syntheticResult,
+                maximumEstimatedTokens: allocatedTokens,
+                estimator: contextGuard.estimator
+            )
+        }
+        return recovered
+    }
+
+    private static func isProviderContextOverflow(_ error: Error) -> Bool {
+        let description = String(describing: error).lowercased()
+        return [
+            "exceeds the context window",
+            "context window exceeded",
+            "context length exceeded",
+            "maximum context length",
+            "model_context_window_exceeded",
+            "too many input tokens"
+        ].contains { description.contains($0) }
     }
 
     private func trustedSkillPromotion(from result: AgentToolResult) -> AgentToolInstructionPromotion? {
@@ -1066,7 +1202,14 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 ],
                 tools: [],
                 temperature: 0.2,
-                instructionPlacement: instructionPlacement
+                instructionPlacement: instructionPlacement,
+                auditContext: AgentLLMRequestAuditContext(
+                    requestKind: .conversationProgressUpdate,
+                    sessionID: run.sessionID,
+                    runID: run.id,
+                    operation: "AgentLoopController.automaticProgressUpdate",
+                    initiator: .system
+                )
             ))
             try Task.checkCancellation()
             guard let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1101,9 +1244,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func buildPromptAssembly(
         for request: AgentChatRequest,
-        environmentSnapshot: AgentEnvironmentSnapshot?
+        environmentSnapshot: AgentEnvironmentSnapshot?,
+        availableToolDefinitions: [AgentToolDefinition]
     ) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+        let progressUpdateToolIsAvailable = availableToolDefinitions.contains {
+            $0.name == ShareProgressUpdateTool.toolName
+        }
+        if progressUpdateToolIsAvailable {
+            assembly.instruction.text = [
+                assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                AgentInstructionSection.conversationalProgressUpdateInstruction
+            ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        }
         let appendix = configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines)
         if !appendix.isEmpty {
             assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), appendix]
@@ -1134,7 +1289,23 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         }
-        let transformers: [any AgentContextTransformer] = [AgentPromptDiagnosticsTransformer()]
+        let contextWindowTokens = configuration.modelContextWindowTokens
+            ?? SessionContextBudget.inferContextWindowSize(modelID: modelProvider.modelID)
+        let contextGuard = AgentModelContextGuard()
+        let maximumInputTokens = contextGuard.maximumInputTokens(
+            contextWindowTokens: contextWindowTokens,
+            configuredPromptLimit: configuration.promptMaxEstimatedTokens,
+            reservedOutputTokens: configuration.reservedOutputTokens
+        )
+        let toolDefinitionTokens = contextGuard.estimatedInputTokens(
+            AgentModelRequest(messages: [], tools: availableToolDefinitions)
+        )
+        let safetyMarginTokens = min(4_096, max(256, maximumInputTokens / 100))
+        let promptContentBudget = max(1, maximumInputTokens - toolDefinitionTokens - safetyMarginTokens)
+        let transformers: [any AgentContextTransformer] = [
+            AgentPromptBudgetTransformer(maxEstimatedTokens: promptContentBudget),
+            AgentPromptDiagnosticsTransformer()
+        ]
         for transformer in transformers {
             do {
                 assembly = try await transformer.transform(assembly, projectionMode: configuration.promptProjectionMode)

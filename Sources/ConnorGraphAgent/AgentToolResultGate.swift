@@ -57,6 +57,46 @@ public struct AgentToolResultGate: Sendable, Equatable {
         return prefix + kept + "\n...[truncated tool result: tool=\(result.toolName), kept=\(payloadLimit) chars, original=\(payload.count) chars]"
     }
 
+    public func gatedContent(
+        for result: AgentToolResult,
+        maximumEstimatedTokens: Int,
+        estimator: AgentPromptBudgetEstimator = AgentPromptBudgetEstimator()
+    ) -> String {
+        let content = gatedContent(for: result)
+        let tokenLimit = max(0, maximumEstimatedTokens)
+        let originalTokens = estimator.estimate(content).estimatedTokenCount
+        guard originalTokens > tokenLimit else { return content }
+        guard tokenLimit > 0 else { return "" }
+
+        let marker = "\n...[truncated tool result to fit context: tool=\(result.toolName), original~\(originalTokens) tokens]"
+        let markerTokens = estimator.estimate(marker).estimatedTokenCount
+        guard markerTokens < tokenLimit else {
+            return prefix(of: marker, fitting: tokenLimit, estimator: estimator)
+        }
+        let kept = prefix(of: content, fitting: tokenLimit - markerTokens, estimator: estimator)
+        return kept + marker
+    }
+
+    private func prefix(
+        of text: String,
+        fitting tokenLimit: Int,
+        estimator: AgentPromptBudgetEstimator
+    ) -> String {
+        guard tokenLimit > 0, !text.isEmpty else { return "" }
+        var lowerBound = 0
+        var upperBound = text.count
+        while lowerBound < upperBound {
+            let candidateCount = lowerBound + (upperBound - lowerBound + 1) / 2
+            let candidate = String(text.prefix(candidateCount))
+            if estimator.estimate(candidate).estimatedTokenCount <= tokenLimit {
+                lowerBound = candidateCount
+            } else {
+                upperBound = candidateCount - 1
+            }
+        }
+        return String(text.prefix(lowerBound))
+    }
+
     private func modelVisibleContent(for result: AgentToolResult) -> String {
         guard let json = result.contentJSON?.trimmingCharacters(in: .whitespacesAndNewlines), !json.isEmpty else {
             return result.contentText

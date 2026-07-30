@@ -39,10 +39,11 @@ final class AIConnectionsFeatureModel {
 
     init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
-        setupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil
+        setupServiceFactory: (@MainActor (AppLLMSettingsRepository) -> AppLLMConnectionSetupService)? = nil,
+        auditRecorder: (any LLMUsageAuditRecording)? = nil
     ) {
         self.settingsRepository = settingsRepository
-        self.healthChecker = AppLLMProviderHealthChecker(settingsRepository: settingsRepository)
+        self.healthChecker = AppLLMProviderHealthChecker(settingsRepository: settingsRepository, auditRecorder: auditRecorder)
         let evidenceRepository = AppProviderCapabilityEvidenceRepository(
             settingsStore: settingsRepository.settingsStore,
             credentialStore: settingsRepository.credentialStore
@@ -53,7 +54,8 @@ final class AIConnectionsFeatureModel {
                 settingsRepository: repository,
                 capabilityDiscoveryService: AppProviderCapabilityDiscoveryService(
                     settingsRepository: repository,
-                    evidenceRepository: evidenceRepository
+                    evidenceRepository: evidenceRepository,
+                    auditRecorder: auditRecorder
                 )
             )
         }

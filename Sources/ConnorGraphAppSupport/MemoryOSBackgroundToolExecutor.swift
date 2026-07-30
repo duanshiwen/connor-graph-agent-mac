@@ -286,6 +286,7 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
                 statementIDs.append(contentsOf: try facade.l2StatementIDs(sourceArtifactID: summary.artifactID))
                 acceptanceModes.append(summary.acceptanceMode)
             }
+            _ = try AppMemoryOSPipelineTriggerCoordinator(facade: facade).evaluateAfterPreferenceWrite(now: now)
             let payload: [String: Any] = ["accepted": true, "statementCount": statementIDs.count, "artifactCount": artifactIDs.count, "acceptanceModes": acceptanceModes]
             let resultData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             let resultJSON = String(data: resultData, encoding: .utf8) ?? "{}"
