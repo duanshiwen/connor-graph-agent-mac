@@ -12,6 +12,32 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
         let final = AgentModelResponse(text: "Memory OS assistant answer", usage: AgentModelUsage(promptTokens: 10, completionTokens: 5))
+        if request.auditContext.operation == "AgentLoopController.completeModelRequest" {
+            switch request.promptCacheContext?.phase {
+            case .strategyResearch:
+                return AgentModelResponse(
+                    text: nil,
+                    toolCalls: [AgentToolCall(
+                        id: "memory-os-test-strategy",
+                        name: AgentPhaseToolContract.commitStrategyName,
+                        argumentsJSON: #"{"provisionalApproach":"persist the requested memory","recommendedApproach":"persist the requested memory","taskMode":"general","memoryDecision":{"action":"query"},"memoryQueries":["relevant user memory"],"memoryPageSize":20}"#
+                    )],
+                    finishReason: .toolCalls
+                )
+            case .memoryPreparation:
+                return AgentModelResponse(
+                    text: nil,
+                    toolCalls: [AgentToolCall(
+                        id: "memory-os-test-query",
+                        name: AgentPhaseToolContract.memoryQueryName,
+                        argumentsJSON: #"{"query":"relevant user memory","pageSize":20}"#
+                    )],
+                    finishReason: .toolCalls
+                )
+            default:
+                break
+            }
+        }
         return appSupportAutomaticPhaseResponse(for: request, nextResponse: final) ?? final
     }
 }
