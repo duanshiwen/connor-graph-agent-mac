@@ -21,9 +21,11 @@ private struct PhasedTestKnowledgeSource: AgentExternalKnowledgeSource {
 
 private actor PhasedTestMemoryProvider: AgentMemoryQueryProvider {
     private(set) var partitions: [AgentMemoryPartition] = []
+    private(set) var pageSizes: [Int] = []
 
     func query(_ request: AgentMemoryQueryRequest, partition: AgentMemoryPartition) async throws -> AgentMemoryPartitionPage {
         partitions.append(partition)
+        pageSizes.append(request.pageSize)
         switch partition {
         case .recent:
             return .init(items: [
@@ -39,6 +41,34 @@ private actor PhasedTestMemoryProvider: AgentMemoryQueryProvider {
     }
 
     func observedPartitions() -> [AgentMemoryPartition] { partitions }
+    func observedPageSizes() -> [Int] { pageSizes }
+}
+
+private struct PhasedMemoryBackendFailure: Error, CustomStringConvertible {
+    let description = "long-term Memory dependency unavailable"
+}
+
+private actor PartiallyFailingMemoryProvider: AgentMemoryQueryProvider {
+    func query(_ request: AgentMemoryQueryRequest, partition: AgentMemoryPartition) async throws -> AgentMemoryPartitionPage {
+        if partition == .longTerm { throw PhasedMemoryBackendFailure() }
+        return .init(items: [.init(id: "recent-ok", text: "available recent result", eventTime: Date(timeIntervalSince1970: 1))])
+    }
+}
+
+private actor BufferedMemoryProvider: AgentMemoryQueryProvider {
+    private var callCount = 0
+
+    func query(_ request: AgentMemoryQueryRequest, partition: AgentMemoryPartition) async throws -> AgentMemoryPartitionPage {
+        callCount += 1
+        let prefix = partition == .recent ? "r" : "l"
+        let base: TimeInterval = partition == .recent ? 40 : 20
+        return .init(items: [
+            .init(id: "\(prefix)1", text: "one", eventTime: Date(timeIntervalSince1970: base)),
+            .init(id: "\(prefix)2", text: "two", eventTime: Date(timeIntervalSince1970: base - 1))
+        ])
+    }
+
+    func observedCallCount() -> Int { callCount }
 }
 
 private actor PhasedLoopModelProvider: AgentModelProvider {
@@ -106,34 +136,27 @@ private struct PagedPhasedProfileTool: AgentTool {
     }
 }
 
-private actor PhasedMemoryCallRecorder {
-    private var calls: [(String, Int)] = []
-    func record(name: String, page: Int) { calls.append((name, page)) }
-    func snapshot() -> [(String, Int)] { calls }
-}
+private actor PagedPhasedMemoryProvider: AgentMemoryQueryProvider {
+    private var calls: [(AgentMemoryPartition, String?)] = []
 
-private struct PagedPhasedMemoryTool: AgentTool {
-    let name: String
-    let recorder: PhasedMemoryCallRecorder
-    let permission: AgentPermissionCapability = .readGraph
-    let description = "paged test memory"
-    let inputSchema = AgentToolInputSchema.object(properties: [
-        "query": .string(description: ""), "page": .integer(description: ""), "pageSize": .integer(description: ""), "depth": .integer(description: "")
-    ], required: [])
-
-    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let page = arguments.int("page") ?? 1
-        await recorder.record(name: name, page: page)
-        let json: String
-        if name == "memory_os_recent_context", page == 1 {
-            json = #"{"success":true,"records":[{"recordID":"r1","occurredAt":"2026-07-30T10:00:00Z"}],"nextPage":2}"#
-        } else if name == "memory_os_recent_context" {
-            json = #"{"success":true,"records":[{"recordID":"r2","occurredAt":"2026-07-29T10:00:00Z"}],"nextPage":null}"#
-        } else {
-            json = #"{"success":true,"records":[{"recordID":"l1","occurredAt":"2026-07-28T10:00:00Z"}],"nextPage":null}"#
+    func query(_ request: AgentMemoryQueryRequest, partition: AgentMemoryPartition) async throws -> AgentMemoryPartitionPage {
+        calls.append((partition, request.cursor))
+        switch (partition, request.cursor) {
+        case (.recent, nil):
+            return .init(
+                items: [.init(id: "r1", text: "recent page one", eventTime: Date(timeIntervalSince1970: 30), provenance: "recent")],
+                nextCursor: "r2"
+            )
+        case (.recent, "r2"):
+            return .init(items: [.init(id: "r2", text: "recent page two", eventTime: Date(timeIntervalSince1970: 20), provenance: "recent")])
+        case (.longTerm, nil):
+            return .init(items: [.init(id: "l1", text: "long term", eventTime: Date(timeIntervalSince1970: 10), provenance: "longTerm")])
+        default:
+            return .init(items: [])
         }
-        return AgentToolResult(runID: context.runID, sessionID: context.sessionID, toolCallID: context.toolCallID, toolName: name, contentText: json, contentJSON: json)
     }
+
+    func snapshot() -> [(AgentMemoryPartition, String?)] { calls }
 }
 
 private actor CursorFollowingPhasedProvider: AgentModelProvider {
@@ -270,7 +293,7 @@ private struct PhasedConcurrentReadTool: AgentTool {
         provisionalApproach: "p",
         recommendedApproach: "r",
         taskMode: .general,
-        memoryDecision: .skip(.capabilityUnavailable)
+        memoryDecision: .skip(.memoryCapabilityUnavailable)
     )
     #expect(throws: AgentStrategyPlanValidationError.memoryCapabilityUnavailable) {
         try AgentStrategyPlanValidator().validate(invalid, memoryCapabilityAvailable: true)
@@ -284,6 +307,14 @@ private struct PhasedConcurrentReadTool: AgentTool {
     #expect(throws: AgentStrategyPlanValidationError.invalidMemorySkipReasonForTaskMode) {
         try AgentStrategyPlanValidator().validate(mismatchedMode, memoryCapabilityAvailable: true)
     }
+}
+
+@Test func legacyMemoryCapabilityUnavailableReasonDecodesToExplicitMemoryReason() throws {
+    let data = #"{"action":"skip","reason":"capabilityUnavailable"}"#.data(using: .utf8)!
+    let decision = try JSONDecoder().decode(AgentStrategyMemoryDecision.self, from: data)
+    #expect(decision == .skip(.memoryCapabilityUnavailable))
+    let encoded = try JSONEncoder().encode(decision)
+    #expect(String(decoding: encoded, as: UTF8.self).contains("memoryCapabilityUnavailable"))
 }
 
 @Test func externalResearchBatchesMixSourcesPreserveInputOrderAndBlockDuplicates() async {
@@ -315,9 +346,31 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let page = await coordinator.query("project", pageSize: 20)
 
     #expect(Set(await provider.observedPartitions()) == [.recent, .longTerm])
+    #expect(Set(await provider.observedPageSizes()) == [20])
     #expect(page.items.map(\.id) == ["shared", "recent", "old"])
     #expect(page.items.allSatisfy { $0.provenance == nil })
     #expect(page.nextPage != nil)
+}
+
+@Test func memoryQueryPreservesOverflowAcrossOpaquePagesWithoutRefetching() async throws {
+    let provider = BufferedMemoryProvider()
+    let coordinator = AgentMemoryQueryCoordinator(provider: provider)
+    let first = await coordinator.query("project", pageSize: 2)
+    let nextPage = try #require(first.nextPage)
+    let second = await coordinator.query("project", pageSize: 2, page: nextPage)
+
+    #expect(first.items.map(\.id) == ["r1", "r2"])
+    #expect(second.items.map(\.id) == ["l1", "l2"])
+    #expect(second.nextPage == nil)
+    #expect(await provider.observedCallCount() == 2)
+}
+
+@Test func memoryQueryReturnsAvailablePartitionAndStructuredDependencyError() async {
+    let coordinator = AgentMemoryQueryCoordinator(provider: PartiallyFailingMemoryProvider())
+    let page = await coordinator.query("project")
+
+    #expect(page.items.map(\.id) == ["recent-ok"])
+    #expect(page.errors == ["long-term Memory dependency unavailable"])
 }
 
 @Test func evidenceAndRecoveryStatePreservePhaseModulesAndCompressedResearch() throws {
@@ -355,7 +408,8 @@ private struct PhasedConcurrentReadTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: .init(toolExposureMode: .all)
+        configuration: .init(toolExposureMode: .all),
+        memoryQueryProvider: PhasedTestMemoryProvider()
     )
     var finalText: String?
     for try await event in loop.run(.init(sessionID: "phased", userMessage: "Implement the change")) {
@@ -382,10 +436,11 @@ private struct PhasedConcurrentReadTool: AgentTool {
         .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
         .init(text: "done")
     ])
-    var registry = AgentToolRegistry()
-    registry.register(PhasedLoopMemoryTool(name: "memory_os_recent_context"))
-    registry.register(PhasedLoopMemoryTool(name: "memory_os_knowledge_context"))
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        memoryQueryProvider: PhasedTestMemoryProvider()
+    )
 
     for try await _ in loop.run(.init(sessionID: "memory-required", userMessage: "必须先查询相关 Memory 再回答")) {}
 
@@ -397,6 +452,23 @@ private struct PhasedConcurrentReadTool: AgentTool {
     #expect(requests[1].messages.contains {
         $0.role == .system && $0.content.contains("user explicitly requires Memory")
     })
+}
+
+@Test func phasedLoopKeepsUnifiedMemoryToolAvailableWithoutConfiguredBackend() async throws {
+    let provider = PhasedLoopModelProvider(responses: [
+        .init(text: nil, toolCalls: [.init(id: "strategy", name: AgentPhaseToolContract.commitStrategyName, argumentsJSON: #"{"provisionalApproach":"p","recommendedApproach":"r","taskMode":"general","memoryDecision":{"action":"query"},"memoryQueries":["preference"]}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "memory", name: AgentPhaseToolContract.memoryQueryName, argumentsJSON: #"{"query":"preference"}"#)], finishReason: .toolCalls),
+        .init(text: nil, toolCalls: [.init(id: "prepare", name: AgentPhaseToolContract.prepareFinalOutputName, argumentsJSON: #"{"reason":"answer"}"#)], finishReason: .toolCalls),
+        .init(text: "done")
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+    for try await _ in loop.run(.init(sessionID: "missing-memory-backend", userMessage: "Give me a personalized answer")) {}
+
+    let requests = await provider.capturedRequests()
+    #expect(requests[1].tools.map(\.name).contains(AgentPhaseToolContract.memoryQueryName))
+    let memoryResult = try #require(requests[2].messages.last { $0.toolCallID == "memory" })
+    #expect(memoryResult.content.contains("Memory backend dependency is not configured"))
+    #expect(requests[2].promptCacheContext?.phase == .taskExecution)
 }
 
 @Test func phasedLoopUsesRegisteredExternalSourceAndCompressesOlderResearch() async throws {
@@ -429,25 +501,23 @@ private struct PhasedConcurrentReadTool: AgentTool {
 }
 
 @Test func phasedMemoryOpaqueCursorContinuesOnlyUnfinishedPartition() async throws {
-    let recorder = PhasedMemoryCallRecorder()
-    var registry = AgentToolRegistry()
-    registry.register(PagedPhasedMemoryTool(name: "memory_os_recent_context", recorder: recorder))
-    registry.register(PagedPhasedMemoryTool(name: "memory_os_knowledge_context", recorder: recorder))
+    let memoryProvider = PagedPhasedMemoryProvider()
     let provider = CursorFollowingPhasedProvider()
     let loop = AgentLoopController(
         modelProvider: provider,
-        toolRegistry: registry,
-        configuration: .init(toolExposureMode: .all)
+        toolRegistry: AgentToolRegistry(),
+        configuration: .init(toolExposureMode: .all),
+        memoryQueryProvider: memoryProvider
     )
     for try await _ in loop.run(.init(sessionID: "cursor", userMessage: "Give a personalized answer")) {}
 
-    let calls = await recorder.snapshot()
-    #expect(calls.filter { $0.0 == "memory_os_recent_context" }.map(\.1) == [1, 2])
-    #expect(calls.filter { $0.0 == "memory_os_knowledge_context" }.map(\.1) == [1])
+    let calls = await memoryProvider.snapshot()
+    #expect(calls.filter { $0.0 == .recent }.map(\.1) == [nil, "r2"])
+    #expect(calls.filter { $0.0 == .longTerm }.map(\.1) == [nil])
     let requests = await provider.requests
     let firstMemory = try #require(requests[2].messages.last { $0.toolCallID == "memory-1" })
-    #expect(!firstMemory.content.contains("recent"))
-    #expect(!firstMemory.content.contains("longTerm"))
+    #expect(!firstMemory.content.contains("\"provenance\""))
+    #expect(!firstMemory.content.contains("\"partition\""))
 }
 
 @Test func phasedContextRecoveryRetainsPhaseModulesEvidenceAndDynamicRuntime() async throws {
