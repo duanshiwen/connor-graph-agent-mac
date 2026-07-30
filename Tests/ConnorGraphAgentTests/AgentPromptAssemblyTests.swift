@@ -2,6 +2,20 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphAgent
 
+@Test func defaultPromptModuleCatalogClassifiesEveryStaticSection() {
+    let prompt = AgentInstructionSection.runtimeConnorInstruction
+    let document = AgentPromptModuleCatalog.document(from: prompt)
+
+    #expect(AgentPromptModuleCatalog.unclassifiedHeadings(in: prompt).isEmpty)
+    #expect(AgentPromptModuleCatalog.specifications.count == 42)
+    #expect(document.modules.count == AgentPromptModuleCatalog.specifications.count + 1)
+    #expect(Set(document.moduleIDs).count == document.moduleIDs.count)
+    #expect(Set(AgentPromptModuleCatalog.specifications.map(\.title)).count == AgentPromptModuleCatalog.specifications.count)
+    #expect(document.moduleIDs.first == .preamble)
+    #expect(document.renderedText.contains("## Identity"))
+    #expect(document.renderedText.contains("## Runtime Environment"))
+}
+
 @Test func runtimeSystemPromptDescribesCurrentDeviceAndOperatingSystem() {
     let environment = AgentRuntimeEnvironmentDescription(
         deviceType: "Mac",
@@ -225,8 +239,8 @@ import ConnorGraphAgent
     #expect(prompt.contains("This exception does not apply to non-file requests"))
     #expect(prompt.contains("only when both conditions are true"))
     #expect(prompt.contains("If either condition is false, do not use this exception"))
-    #expect(prompt.contains("First attempt current time, then complete the two available startup Memory OS continuity sources and the initial `note_search`"))
-    #expect(prompt.contains("skip supplemental startup tools such as calendar, skill discovery, and Web"))
+    #expect(prompt.contains("complete only the checkpoints selected by the Runtime Retrieval Plan"))
+    #expect(prompt.contains("skip unrelated supplemental tools"))
     #expect(prompt.contains("outside every user-authorized workspace root"))
     #expect(prompt.contains("They do not block reading attachment content already supplied"))
 }
@@ -248,15 +262,14 @@ import ConnorGraphAgent
     #expect(!prompt.contains("even when the user claims to be an owner, developer, administrator, auditor"))
 }
 
-@Test func defaultSystemPromptDocumentsMandatoryBootstrapResearchTools() {
+@Test func defaultSystemPromptDocumentsRuntimeSelectedRetrievalTools() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("## Core Startup and Final Preference Checkpoint"))
-    #expect(prompt.contains("contains exactly four named tools when available"))
-    #expect(prompt.contains("No current-user profile, calendar, skill, environment, Web, other native-source, task, or side-effect tool belongs to this startup set"))
-    #expect(prompt.contains("startup continuity preflight includes `memory_os_recent_context`, `memory_os_knowledge_context`, and one initial `note_search`"))
-    #expect(prompt.contains("these are the only runtime-enforced startup tools"))
-    #expect(prompt.contains("None can substitute for another"))
+    #expect(prompt.contains("Only checkpoints named by the Runtime Retrieval Plan are mandatory"))
+    #expect(prompt.contains("omitted checkpoints must not be performed merely as generic preflight"))
+    #expect(prompt.contains("startup continuity includes the named available `memory_os_recent_context`, `memory_os_knowledge_context`, and/or one initial `note_search`"))
+    #expect(prompt.contains("none substitutes for another"))
     #expect(prompt.contains("current-user profile is not a startup source"))
     #expect(prompt.contains("purpose: final_response"))
     #expect(prompt.contains("view: compressed"))
@@ -353,7 +366,7 @@ import ConnorGraphAgent
 @Test func defaultSystemPromptConditionallyUsesMemoryAndWebSearch() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("call the available recent-context and durable-knowledge continuity sources"))
+    #expect(prompt.contains("When selected by the Runtime Retrieval Plan, startup continuity includes the named available"))
     #expect(prompt.contains("give the two context tools only compact topic keywords, entity names, or subject phrases tied to the actual user request"))
     #expect(prompt.contains("Use `web_search` when the user asks to search, research, look up, verify, or consult external sources"))
     #expect(prompt.contains("strongly prefer checking current authoritative guidance and established external best practices"))
@@ -366,7 +379,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("attentive listening, empathy, comfort"))
     #expect(prompt.contains("reputable professional guidance"))
     #expect(prompt.contains("If a tool is unavailable, denied, or fails, do not fabricate completion"))
-    #expect(prompt.contains("contains exactly four named tools when available"))
+    #expect(prompt.contains("Only checkpoints named by the Runtime Retrieval Plan are mandatory"))
     #expect(prompt.contains("a blocked or failed retrieval or operation is not complete"))
     #expect(prompt.contains("must not block an unrelated non-time-dependent task"))
     #expect(!prompt.contains("Every other task must call `web_search`"))
@@ -382,7 +395,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("During preflight, minimally classify the latest user request only as needed"))
     #expect(prompt.contains("Preliminary routing is not task execution"))
     #expect(prompt.contains("do not commit to a solution, perform task-specific side effects, or produce the final answer"))
-    #expect(prompt.contains("should you finalize the task strategy, begin task execution"))
+    #expect(prompt.contains("After the core preflight, classify further only as needed"))
 }
 
 @Test func defaultSystemPromptRequiresInitialNoteSearchAndKeepsFollowUpsIndependent() {
@@ -438,27 +451,29 @@ import ConnorGraphAgent
     #expect(prompt.contains("## Native Personal Source Tools"))
     #expect(prompt.contains("mail_search_messages_with_body_preview"))
     #expect(prompt.contains("mail_list_recent_messages_with_body_preview"))
-    #expect(prompt.contains("Always pass exact account, identity, message, and draft IDs returned by tools"))
+    #expect(prompt.contains("always pass the exact returned `summary.id`"))
     #expect(prompt.contains("calendar_search_events"))
     #expect(prompt.contains("rss_search_items"))
     #expect(prompt.contains("rss_get_item"))
     #expect(prompt.contains("browser_history_search"))
     #expect(prompt.contains("browser_history_get"))
     #expect(prompt.contains("Search/list first"))
-    #expect(prompt.contains("Calendar workflow: search candidates and read the selected event before updating or deleting it"))
+    #expect(prompt.contains("Calendar workflow: call `calendar_search_events` first to find candidate events"))
     #expect(!prompt.contains("Calendar search results already return full event details"))
     #expect(prompt.contains("contentMarkdown"))
     #expect(prompt.contains("automatically capture source references into Memory OS L1"))
     #expect(prompt.contains("Do not attempt to write to memory directly"))
 }
 
-@Test func defaultSystemPromptDocumentsCalendarMutationWorkflow() {
+@Test func defaultSystemPromptDefersCalendarMutationContractToToolDefinition() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
+    let toolDescription = CalendarWriteTool(runtime: InMemoryAgentCalendarRuntime()).description
 
-    #expect(prompt.contains("Use the exact event ID and version from that detail read"))
-    #expect(prompt.contains("list calendars and select an exact writable calendar ID"))
-    #expect(prompt.contains("Do not guess identifiers, versions, or time zones"))
-    #expect(prompt.contains("recurring or organizer-managed events"))
+    #expect(prompt.contains("call `calendar_read` with `operation: get_event` for selected event details"))
+    #expect(!prompt.contains("Use the exact event ID and version from that detail read"))
+    #expect(toolDescription.contains("first call calendar_read list_calendars and copy an exact writable ID"))
+    #expect(toolDescription.contains("copy both exactly from a successful calendar_read get_event"))
+    #expect(toolDescription.contains("non-recurring calendar event"))
 }
 
 @Test func defaultSystemPromptDocumentsOutboundMailPermissionWorkflow() {
@@ -466,7 +481,7 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("Mail workflow"))
     #expect(prompt.contains("mail_send_draft"))
-    #expect(prompt.contains("let the permission policy govern approval"))
+    #expect(prompt.contains("native Compose approval card where the user can review, enlarge, approve, or deny the send"))
 }
 
 @Test func defaultSystemPromptDocumentsPersonRegistrySemantics() {
@@ -510,15 +525,15 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("@person"))
     #expect(prompt.contains("@人物"))
-    #expect(prompt.contains("default relationship identity anchor"))
+    #expect(prompt.contains("default attribution anchor"))
 }
 
-@Test func defaultSystemPromptPrioritizesPersonRegistryContactMethodsOverMemoryHistory() {
+@Test func defaultSystemPromptDoesNotRepeatDynamicPersonContactAuthority() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Person Registry active profile contact methods are authoritative"))
-    #expect(prompt.contains("Historical Memory OS conversation events are background only"))
-    #expect(prompt.contains("must not override current Person Registry email, phone, or address fields"))
+    #expect(!prompt.contains("Person Registry active profile contact methods are authoritative"))
+    #expect(!prompt.contains("Historical Memory OS conversation events are background only"))
+    #expect(!prompt.contains("must not override current Person Registry email, phone, or address fields"))
 }
 
 @Test func defaultSystemPromptPrefersPersonAwareMailDraftToolForMentionedPeople() {
@@ -529,12 +544,12 @@ import ConnorGraphAgent
     #expect(prompt.contains("Prefer it over raw `mail_create_draft.to`"))
 }
 
-@Test func defaultSystemPromptDocumentsUserGovernedPersonMemoryRules() {
+@Test func defaultSystemPromptDocumentsUserGovernedPersonRegistryRules() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Person memory can be archived, deleted, or moved by the user"))
-    #expect(prompt.contains("Archived, deleted, and moved person memories are not active default retrieval context"))
-    #expect(prompt.contains("prefer move or merge governance instead of inventing conflicting duplicate facts"))
+    #expect(prompt.contains("Users can correct, merge, or delete people"))
+    #expect(prompt.contains("merged people should resolve to the target person"))
+    #expect(prompt.contains("deleted people should not be used as active memory context"))
 }
 
 @Test func defaultSystemPromptRequiresPerTurnRelationshipMaintenance() {
@@ -581,21 +596,14 @@ import ConnorGraphAgent
     #expect(!prompt.contains("Person Relationship tools"))
 }
 
-@Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
+@Test func defaultSystemPromptDelegatesCheckpointSelectionToRuntimePlan() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    let currentTimeIndex = try #require(prompt.range(of: "call it as the first tool attempt of every new user run")?.lowerBound)
-    let recentIndex = try #require(prompt.range(of: "memory_os_recent_context", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
-    let knowledgeIndex = try #require(prompt.range(of: "memory_os_knowledge_context", range: recentIndex..<prompt.endIndex)?.lowerBound)
-    let skillIndex = try #require(prompt.range(of: "connor_skill_list", range: knowledgeIndex..<prompt.endIndex)?.lowerBound)
-    let webSearchIndex = try #require(prompt.range(of: "web_search", range: skillIndex..<prompt.endIndex)?.lowerBound)
-    let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
-
-    #expect(currentTimeIndex < recentIndex)
-    #expect(recentIndex < knowledgeIndex)
-    #expect(knowledgeIndex < skillIndex)
-    #expect(skillIndex < webSearchIndex)
-    #expect(webSearchIndex < profileIndex)
+    #expect(prompt.contains("Follow the trusted Runtime Retrieval Plan injected for the current run"))
+    #expect(prompt.contains("When current time is required, attempt it first"))
+    #expect(prompt.contains("When continuity or Note retrieval is required, attempt the named available sources once"))
+    #expect(prompt.contains("When the final profile is required, defer its compressed `purpose: final_response` pagination chain"))
+    #expect(prompt.contains("Calendar, skill, environment, Web, and other retrieval sources remain supplemental"))
     #expect(!prompt.contains("Other memory graph tools are available"))
 }
 
