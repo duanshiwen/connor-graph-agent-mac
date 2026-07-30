@@ -127,15 +127,19 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     }
 }
 
-@Test func agentLoopConfigurationDefaultsAllowDeeperSingleRunWork() {
+@Test func agentLoopConfigurationDefaultsBoundTokenUsage() {
     let configuration = AgentLoopConfiguration()
 
-    #expect(configuration.maxToolIterations == 2_048)
+    #expect(configuration.maxToolIterations == 24)
     #expect(configuration.maxToolCallsPerIteration == 4)
+    #expect(configuration.maxConsecutiveToolResultErrors == 3)
+    #expect(configuration.stopAfterTurnWhenBudgetExceeded)
+    #expect(configuration.preflightMode == .contextual)
+    #expect(configuration.toolExposureMode == .contextual)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 1_000_000)
-    #expect(configuration.maxToolResultBytes == 1_000_000)
-    #expect(configuration.budget.maxTotalTokens == 10_000_000)
+    #expect(configuration.promptMaxEstimatedTokens == 200_000)
+    #expect(configuration.maxToolResultBytes == 32 * 1_024)
+    #expect(configuration.budget.maxTotalTokens == 300_000)
 }
 
 @Test func agentLoopConfigurationDecodesMissingToolIterationLimitWithCurrentDefault() throws {
@@ -144,7 +148,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
         from: Data(#"{}"#.utf8)
     )
 
-    #expect(configuration.maxToolIterations == 2_048)
+    #expect(configuration.maxToolIterations == 24)
 }
 
 @Test func agentLoopConfigurationDecodesLegacyJSONWithPromptDefaults() throws {
@@ -164,10 +168,10 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 
     #expect(configuration.maxToolIterations == 32)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
-    #expect(configuration.promptMaxEstimatedTokens == 1_000_000)
+    #expect(configuration.promptMaxEstimatedTokens == 200_000)
     #expect(configuration.maxToolResultBytes == 4096)
     #expect(configuration.budget.maxTotalTokens == 10_000)
-    #expect(configuration.maxConsecutiveToolResultErrors == 0)
+    #expect(configuration.maxConsecutiveToolResultErrors == 3)
 }
 
 @Test func progressPromptAndToolStayAlignedForNonGPTModels() async throws {
@@ -1274,7 +1278,11 @@ private struct InstructionPromotionTool: AgentTool {
     var registry = AgentToolRegistry()
     for name in names { registry.register(RetrievalEvidenceTool(name: name)) }
     registry.register(RetrievalEvidenceTool(name: "task_tool"))
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(preflightMode: .always, toolExposureMode: .all)
+    )
 
     var completed: AgentTextCompleteEvent?
     var finishedToolNames: [String] = []
@@ -1360,7 +1368,11 @@ private struct InstructionPromotionTool: AgentTool {
     var registry = AgentToolRegistry()
     registry.register(RetrievalEvidenceTool(name: AgentNoteSearchPreflightPolicy.requiredToolName))
     registry.register(RetrievalEvidenceTool(name: "task_tool"))
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(preflightMode: .always, toolExposureMode: .all)
+    )
 
     var requestedToolNames: [String] = []
     var completed: AgentTextCompleteEvent?
@@ -1419,7 +1431,11 @@ private struct InstructionPromotionTool: AgentTool {
     registry.register(RetrievalEvidenceTool(name: names[1]))
     registry.register(PaginatedCurrentUserProfileTool())
     registry.register(RetrievalEvidenceTool(name: "task_tool"))
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(preflightMode: .always, toolExposureMode: .all)
+    )
 
     var requestedToolNames: [String] = []
     var completed: AgentTextCompleteEvent?
@@ -1471,7 +1487,11 @@ private struct InstructionPromotionTool: AgentTool {
     registry.register(RetrievalEvidenceTool(name: names[0]))
     registry.register(RetrievalEvidenceTool(name: names[1]))
     registry.register(PaginatedCurrentUserProfileTool())
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(preflightMode: .always, toolExposureMode: .all)
+    )
 
     var finishedToolNames: [String] = []
     var completed: AgentTextCompleteEvent?
@@ -1522,7 +1542,11 @@ private struct InstructionPromotionTool: AgentTool {
     registry.register(RetrievalEvidenceTool(name: names[1]))
     registry.register(RetrievalEvidenceTool(name: names[2]))
     registry.register(RetrievalEvidenceTool(name: "memory_os_update_current_user_profile"))
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(preflightMode: .always, toolExposureMode: .all)
+    )
 
     var requestedToolNames: [String] = []
     var completed: AgentTextCompleteEvent?
@@ -1555,6 +1579,76 @@ private struct InstructionPromotionTool: AgentTool {
     #expect(policy.correctionInstruction().contains("do not retry automatically"))
 }
 
+@Test func contextualRunTokenPolicySkipsUnrelatedRetrievalAndSelectsRelevantCheckpoints() {
+    let policy = AgentRunTokenPolicy()
+    let ordinary = policy.retrievalPlan(
+        for: AgentChatRequest(sessionID: "ordinary", userMessage: "请把这段话改得更简洁"),
+        mode: .contextual
+    )
+    #expect(!ordinary.requiresCurrentTime)
+    #expect(!ordinary.requiresContinuity)
+    #expect(!ordinary.requiresNoteSearch)
+    #expect(!ordinary.requiresFinalProfile)
+
+    let personalizedMemory = policy.retrievalPlan(
+        for: AgentChatRequest(sessionID: "memory", userMessage: "请回忆我们之前讨论的偏好，并按我的风格推荐"),
+        mode: .contextual
+    )
+    #expect(personalizedMemory.requiresContinuity)
+    #expect(personalizedMemory.requiresFinalProfile)
+    #expect(!personalizedMemory.requiresNoteSearch)
+
+    let datedNote = policy.retrievalPlan(
+        for: AgentChatRequest(sessionID: "note", userMessage: "查看今天的笔记"),
+        mode: .contextual
+    )
+    #expect(datedNote.requiresCurrentTime)
+    #expect(datedNote.requiresNoteSearch)
+}
+
+@Test func contextualRunTokenPolicyRoutesNativeToolFamiliesAndPreservesExternalTools() {
+    let definitions = ["Read", "mail_search_messages", "web_search", "memory_os_recent_context", "external_mcp_action"].map {
+        AgentToolDefinition(name: $0, description: $0, inputSchema: .object(properties: [:], required: []))
+    }
+    let request = AgentChatRequest(sessionID: "routing", userMessage: "请读取项目中的配置文件")
+    let policy = AgentRunTokenPolicy()
+    let plan = policy.retrievalPlan(for: request, mode: .contextual)
+    let names = Set(policy.exposedTools(
+        from: definitions,
+        request: request,
+        retrievalPlan: plan,
+        mode: .contextual
+    ).map(\.name))
+
+    #expect(names.contains("Read"))
+    #expect(names.contains("external_mcp_action"))
+    #expect(!names.contains("mail_search_messages"))
+    #expect(!names.contains("web_search"))
+    #expect(!names.contains("memory_os_recent_context"))
+}
+
+@Test func instructionCapabilityProjectorRemovesUnavailableCapabilitySections() {
+    let instruction = """
+    ## Identity
+    Keep this.
+    ## Memory OS Architecture
+    Remove memory details.
+    ## Note Reference Materials
+    Remove note details.
+    ## Response Style
+    Keep style.
+    """
+    let projected = AgentInstructionCapabilityProjector().project(
+        instruction,
+        availableToolNames: []
+    )
+
+    #expect(projected.contains("Keep this."))
+    #expect(projected.contains("Keep style."))
+    #expect(!projected.contains("Remove memory details."))
+    #expect(!projected.contains("Remove note details."))
+}
+
 @Test func agentLoopAttemptsCurrentTimeFirstAndContinuesAfterFailure() async throws {
     let names = AgentContinuityPreflightPolicy.requiredToolNames
     let continuityCalls = names.enumerated().map {
@@ -1582,7 +1676,11 @@ private struct InstructionPromotionTool: AgentTool {
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: registry,
-        configuration: AgentLoopConfiguration(maxConsecutiveToolResultErrors: 1)
+        configuration: AgentLoopConfiguration(
+            maxConsecutiveToolResultErrors: 1,
+            preflightMode: .always,
+            toolExposureMode: .all
+        )
     )
 
     var requestedToolNames: [String] = []
@@ -1641,7 +1739,11 @@ private struct InstructionPromotionTool: AgentTool {
     for name in AgentContinuityPreflightPolicy.requiredToolNames {
         registry.register(RetrievalEvidenceTool(name: name))
     }
-    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(preflightMode: .always, toolExposureMode: .all)
+    )
 
     var completed: AgentTextCompleteEvent?
     for try await event in loop.run(AgentChatRequest(sessionID: "research-synthesis", userMessage: "请搜寻杭州的 AI 产品经理岗位")) {
@@ -1676,11 +1778,15 @@ private struct InstructionPromotionTool: AgentTool {
     for name in names + ["web_search"] {
         registry.register(RetrievalEvidenceTool(name: name))
     }
-    let configuration = AgentLoopConfiguration(instructionAppendix: """
-    <connor-session-workspace selected="false">
-    No user-selected working directory is active.
-    </connor-session-workspace>
-    """)
+    let configuration = AgentLoopConfiguration(
+        preflightMode: .always,
+        toolExposureMode: .all,
+        instructionAppendix: """
+        <connor-session-workspace selected="false">
+        No user-selected working directory is active.
+        </connor-session-workspace>
+        """
+    )
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry, configuration: configuration)
 
     var completed: AgentTextCompleteEvent?
@@ -1756,7 +1862,7 @@ private struct InstructionPromotionTool: AgentTool {
     let followUpMessages = try #require(await provider.requests.last?.messages)
     let assistantToolMessages = followUpMessages.filter { $0.role == .assistant && $0.toolCalls?.isEmpty == false }
     #expect(assistantToolMessages.count == 1)
-    #expect(assistantToolMessages.first?.content == "I will inspect two values.")
+    #expect(assistantToolMessages.first?.content.isEmpty == true)
     #expect(assistantToolMessages.first?.toolCalls?.map(\.id) == ["call-batch-1", "call-batch-2"])
     let toolMessages = followUpMessages.filter { $0.role == .tool }
     #expect(toolMessages.map(\.toolCallID) == ["call-batch-1", "call-batch-2"])

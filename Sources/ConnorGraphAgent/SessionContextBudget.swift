@@ -5,11 +5,11 @@ import Foundation
 public enum SessionTokenBudgetStatus: Int, Comparable, Sendable, CaseIterable {
     /// Cumulative tokens well below warning threshold.
     case normal = 0
-    /// Approaching compression zone (50% of context window).
+    /// Approaching compression zone (25% of context window).
     case warning = 1
-    /// Compression should be triggered (70% of context window).
+    /// Compression should be triggered (35% of context window).
     case shouldCompress = 2
-    /// Emergency — force compression immediately (85% of context window).
+    /// Emergency — force compression immediately (60% of context window).
     case safetyNet = 3
 
     public static func < (lhs: Self, rhs: Self) -> Bool {
@@ -44,13 +44,13 @@ public struct SessionContextBudget: Sendable, Equatable {
     public let contextWindowSize: Int
 
     /// Fraction of the context window that triggers a warning.
-    public static let warningRatio: Double = 0.50
+    public static let warningRatio: Double = 0.25
 
     /// Fraction of the context window that triggers compression.
-    public static let compressionRatio: Double = 0.70
+    public static let compressionRatio: Double = 0.35
 
     /// Fraction of the context window that forces emergency compression.
-    public static let safetyNetRatio: Double = 0.85
+    public static let safetyNetRatio: Double = 0.60
 
     public init(contextWindowSize: Int) {
         self.contextWindowSize = contextWindowSize

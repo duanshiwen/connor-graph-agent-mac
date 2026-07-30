@@ -451,7 +451,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID),
             environmentProvider: environmentProvider,
             environmentStore: environmentStore,
-            automaticallySynthesizesProgressUpdates: true
+            automaticallySynthesizesProgressUpdates: false
         )
     }
 
